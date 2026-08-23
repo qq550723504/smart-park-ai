@@ -41,10 +41,10 @@ class AlertDiagnosisAgentTest {
                           "alertId":"ALT-ENERGY-001",
                           "deviceId":"DEV-ENERGY-001",
                           "riskLevel":"HIGH",
-                          "rootCause":"非工作时段存在异常负载",
-                          "summary":"楼宇能耗高于基线。",
-                          "evidence":["电表：当前能耗高于基线"],
-                          "recommendedAction":"检查非工作时段暖通运行计划。",
+                          "rootCause":"Unexpected after-hours load",
+                          "summary":"The building consumed more energy than its baseline.",
+                          "evidence":["meter: current consumption is above baseline"],
+                          "recommendedAction":"Inspect after-hours HVAC schedules.",
                           "confidence":0.9,
                           "diagnosedAt":"2026-08-23T01:45:00Z"
                         }
@@ -93,9 +93,9 @@ class AlertDiagnosisAgentTest {
         assertThat(result.rootCause()).contains("filter");
         assertThat(result.confidence()).isEqualTo(0.88);
         assertThat(model.lastPrompt().getUserMessage().getText())
-                .contains("暖通空调送风机组")
-                .contains("历史暖通温度预警")
-                .contains("暖通系统过热处置手册");
+                .contains("HVAC Supply Unit")
+                .contains("Prior HVAC temperature warning")
+                .contains("HVAC overheating playbook");
     }
 
     @Test
@@ -106,10 +106,10 @@ class AlertDiagnosisAgentTest {
                   "alertId":"ALT-TEMP-001",
                   "deviceId":"DEV-HVAC-001",
                   "riskLevel":"LOW",
-                  "rootCause":"证据不足，无法确定根因",
-                  "summary":"没有可用于可靠诊断的知识文档。",
-                  "evidence":["INSUFFICIENT_EVIDENCE：没有匹配本次请求的知识文档"],
-                  "recommendedAction":"补充遥测数据，并在采取措施前咨询技术人员。",
+                  "rootCause":"Insufficient evidence to determine the root cause",
+                  "summary":"No supporting knowledge documents were available for a confident diagnosis.",
+                  "evidence":["INSUFFICIENT_EVIDENCE: no knowledge documents matched the request"],
+                  "recommendedAction":"Collect additional telemetry and consult a technician before acting.",
                   "confidence":0.31,
                   "diagnosedAt":"2026-08-23T01:35:00Z"
                 }
@@ -124,7 +124,7 @@ class AlertDiagnosisAgentTest {
 
         Diagnosis result = agent.diagnose(sampleAlert(), sampleContext(), List.of());
 
-        assertThat(result.evidence()).containsExactly("INSUFFICIENT_EVIDENCE：没有匹配本次请求的知识文档");
+        assertThat(result.evidence()).containsExactly("INSUFFICIENT_EVIDENCE: no knowledge documents matched the request");
         assertThat(model.lastPrompt().getUserMessage().getText()).contains("INSUFFICIENT_EVIDENCE");
     }
 
@@ -294,9 +294,9 @@ class AlertDiagnosisAgentTest {
                 "DEV-HVAC-001",
                 AlertClassification.TEMPERATURE,
                 RiskLevel.LOW,
-                "暖通机房温度持续升高",
+                "Temperature rising in HVAC room",
                 Instant.parse("2026-08-23T00:15:00Z"),
-                List.of("传感器：温度探头-01", "趋势：持续上升"));
+                List.of("sensor:temp-01", "trend:upward"));
     }
 
     private static ParkContext sampleContext() {
@@ -312,9 +312,9 @@ class AlertDiagnosisAgentTest {
     private static List<KnowledgeDocument> sampleKnowledge() {
         return List.of(new KnowledgeDocument(
                 "KD-OVERHEAT-001",
-                "暖通系统过热处置手册",
-                "暖通送风温度升高时，应先检查滤网、风量和压缩机负载，再决定是否升级处置。",
-                List.of("过热", "暖通", "温度", "hvac", "temperature"),
+                "HVAC overheating playbook",
+                "When HVAC supply temperatures rise, check filters, airflow, and compressor load before escalating.",
+                List.of("overheating", "hvac", "temperature"),
                 Instant.parse("2026-08-20T00:00:00Z")));
     }
 }
