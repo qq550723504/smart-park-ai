@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -208,7 +209,7 @@ public class MockParkSystem implements DevicePort, AlertPort, WorkOrderPort, Kno
                 summary,
                 alert.riskHint(),
                 WorkflowStatus.WAITING_APPROVAL,
-                null,
+                Optional.empty(),
                 alert.evidence(),
                 createdAt,
                 createdAt);

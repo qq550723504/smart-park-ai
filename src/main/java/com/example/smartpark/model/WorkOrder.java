@@ -2,6 +2,7 @@ package com.example.smartpark.model;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.Objects;
 
 public record WorkOrder(
@@ -14,7 +15,7 @@ public record WorkOrder(
         String summary,
         RiskLevel riskLevel,
         WorkflowStatus status,
-        ApprovalDecision approvalDecision,
+        Optional<ApprovalDecision> approvalDecision,
         List<String> evidence,
         Instant createdAt,
         Instant updatedAt) {
@@ -29,6 +30,7 @@ public record WorkOrder(
         summary = Objects.requireNonNull(summary, "summary");
         riskLevel = Objects.requireNonNull(riskLevel, "riskLevel");
         status = Objects.requireNonNull(status, "status");
+        approvalDecision = Objects.requireNonNull(approvalDecision, "approvalDecision");
         evidence = List.copyOf(Objects.requireNonNull(evidence, "evidence"));
         createdAt = Objects.requireNonNull(createdAt, "createdAt");
         updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
