@@ -284,8 +284,11 @@ public final class AlertWorkflow {
                 WorkflowEvent.EventType.FAILED,
                 failure.node(),
                 failure.code().name());
+        WorkflowStatus failedStatus = failure.code() == WorkflowFailure.Code.WORK_ORDER_FAILED
+                ? WorkflowStatus.WORK_ORDER_FAILED
+                : WorkflowStatus.FAILED;
         updateGraphState(execution, Map.of(
-                AlertWorkflowState.STATUS, WorkflowStatus.FAILED.name(),
+                AlertWorkflowState.STATUS, failedStatus.name(),
                 AlertWorkflowState.ERRORS, List.of(failure.publicError()),
                 AlertWorkflowState.EVENT_SEQUENCE, sequence));
         WorkflowSnapshot failed = execution.snapshot();

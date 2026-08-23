@@ -13,7 +13,8 @@ public record WorkflowEvent(
         String redactedSummary) {
 
     private static final Pattern SENSITIVE_ASSIGNMENT = Pattern.compile(
-            "(?i)\\b(?:api[-_]?key|authorization|token|prompt)\\b\\s*[:=]\\s*(?:Bearer\\s+)?[^\\s,;]+");
+            "(?i)\\b(?:api[-_]?key|authorization|token|prompt|provider[-_]?(?:response|payload))"
+                    + "\\b\\s*[:=]\\s*(?:Bearer\\s+)?[^\\s,;]+");
     private static final Pattern BEARER_TOKEN = Pattern.compile("(?i)\\bBearer\\s+[^\\s,;]+");
     private static final Pattern OPENAI_STYLE_KEY = Pattern.compile("\\bsk-[A-Za-z0-9_-]+");
 

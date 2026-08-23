@@ -15,12 +15,12 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(NoSuchElementException.class)
     ResponseEntity<WebDtos.ApiError> notFound(NoSuchElementException exception) {
-        return error(HttpStatus.NOT_FOUND, exception.getMessage());
+        return error(HttpStatus.NOT_FOUND, "Requested resource was not found");
     }
 
     @ExceptionHandler({IllegalStateException.class, IllegalArgumentException.class})
     ResponseEntity<WebDtos.ApiError> conflict(RuntimeException exception) {
-        return error(HttpStatus.CONFLICT, exception.getMessage());
+        return error(HttpStatus.CONFLICT, "Request conflicts with current resource state");
     }
 
     @ExceptionHandler({MethodArgumentNotValidException.class, HttpMessageNotReadableException.class})
