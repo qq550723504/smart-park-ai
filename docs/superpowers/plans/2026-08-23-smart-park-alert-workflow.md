@@ -268,6 +268,7 @@ git commit -m "feat: add smart park domain and mock ports"
 - Create: `src/main/java/com/example/smartpark/agent/AlertTriageAgent.java`
 - Create: `src/main/java/com/example/smartpark/agent/AlertDiagnosisAgent.java`
 - Create: `src/main/java/com/example/smartpark/agent/PromptCatalog.java`
+- Create: `src/test/java/com/example/smartpark/agent/TestChatModel.java`
 - Create: `src/test/java/com/example/smartpark/agent/AlertTriageAgentTest.java`
 - Create: `src/test/java/com/example/smartpark/agent/AlertDiagnosisAgentTest.java`
 
@@ -345,7 +346,6 @@ git commit -m "feat: add park tools and alert agents"
 - Create: `src/main/java/com/example/smartpark/workflow/WorkflowEventPublisher.java`
 - Create: `src/test/java/com/example/smartpark/workflow/AlertWorkflowTest.java`
 - Create: `src/test/java/com/example/smartpark/workflow/RiskGateTest.java`
-- Create: `src/test/java/com/example/smartpark/workflow/TestChatModel.java`
 
 **Interfaces:**
 
