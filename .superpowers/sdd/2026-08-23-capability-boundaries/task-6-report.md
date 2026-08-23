@@ -17,7 +17,7 @@
 - `.\mvnw.cmd test-compile`：通过。
 - `.\mvnw.cmd test`：112 tests run，0 failures，0 errors，1 skipped（既有 `DashScopeSmokeTest`，未显式提供 Key 与 smoke 参数）。
 - `.\mvnw.cmd package -DskipTests`：通过，生成 `target/smart-park-alert-workflow-0.0.1-SNAPSHOT.jar`。
-- 后续提交 `858eb52` 收紧了 `MockParkFixture`/`MockParkDataStore` 的 Fixture/Store 暴露面，并补充边界测试；随后全量验证为 115 tests clean。
+- 后续提交 `2f21ada` 收紧了 `MockParkFixture`/`MockParkDataStore` 的 Fixture/Store 暴露面，并补充边界测试；随后全量验证为 115 tests clean。
 - `git diff --check`：通过。
 
 ## Scope
