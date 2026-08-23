@@ -16,6 +16,7 @@ import com.example.smartpark.workflow.WorkflowEventPublisher;
 import com.example.smartpark.workflow.WorkflowSnapshot;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -24,6 +25,10 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import reactor.core.publisher.Flux;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.Charset;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -228,9 +233,7 @@ class SensitiveDataTest {
         List<Pattern> forbidden = forbiddenSecretPatterns();
 
         for (Path relative : trackedFiles(repository)) {
-            if (!isExcluded(relative)) {
-                scan(repository.resolve(relative), relative, forbidden, findings);
-            }
+            scan(repository.resolve(relative), relative, forbidden, findings);
         }
 
         assertThat(findings).as("secret-like findings in tracked text files").isEmpty();
@@ -247,6 +250,43 @@ class SensitiveDataTest {
         assertThat(matchesAny(keyName + ": <user-provided-key>", patterns)).isFalse();
     }
 
+    @Test
+    void scannerDetectsCredentialAssignmentsInUtf8AndUtf16WithAndWithoutBom(@TempDir Path directory)
+            throws Exception {
+        String keyName = "AI_" + "DASHSCOPE_API_KEY";
+        String assignment = keyName + "=private-value-123";
+        List<EncodedText> fixtures = List.of(
+                new EncodedText("utf8-no-bom.txt", assignment.getBytes(StandardCharsets.UTF_8)),
+                new EncodedText(
+                        "utf8-bom.txt",
+                        withBom(new byte[] {(byte) 0xEF, (byte) 0xBB, (byte) 0xBF},
+                                assignment.getBytes(StandardCharsets.UTF_8))),
+                new EncodedText("utf16-bom.txt", assignment.getBytes(StandardCharsets.UTF_16)),
+                new EncodedText("utf16le-no-bom.txt", assignment.getBytes(StandardCharsets.UTF_16LE)),
+                new EncodedText("utf16be-no-bom.txt", assignment.getBytes(StandardCharsets.UTF_16BE)),
+                new EncodedText(
+                        "utf16le-bom.txt",
+                        withBom(new byte[] {(byte) 0xFF, (byte) 0xFE},
+                                assignment.getBytes(StandardCharsets.UTF_16LE))));
+        List<Pattern> patterns = forbiddenSecretPatterns();
+
+        for (EncodedText fixture : fixtures) {
+            Path path = directory.resolve(fixture.name());
+            Files.write(path, fixture.bytes());
+            List<String> findings = new ArrayList<>();
+
+            scan(path, Path.of(fixture.name()), patterns, findings);
+
+            assertThat(findings)
+                    .as("findings for %s", fixture.name())
+                    .anyMatch(finding -> finding.startsWith(fixture.name() + " matched "));
+        }
+    }
+
+    private static byte[] withBom(byte[] bom, byte[] content) {
+        return ByteBuffer.allocate(bom.length + content.length).put(bom).put(content).array();
+    }
+
     private static void scan(
             Path path,
             Path relative,
@@ -254,12 +294,12 @@ class SensitiveDataTest {
             List<String> findings) {
         try {
             byte[] bytes = Files.readAllBytes(path);
-            if (!isText(bytes)) {
+            Optional<String> content = decodeText(bytes);
+            if (content.isEmpty()) {
                 return;
             }
-            String content = new String(bytes, StandardCharsets.UTF_8);
             forbidden.stream()
-                    .filter(pattern -> pattern.matcher(content).find())
+                    .filter(pattern -> pattern.matcher(content.orElseThrow()).find())
                     .map(pattern -> relative + " matched " + pattern.pattern())
                     .forEach(findings::add);
         }
@@ -283,21 +323,82 @@ class SensitiveDataTest {
                 .toList();
     }
 
-    private static boolean isExcluded(Path relative) {
-        String path = relative.toString().replace('\\', '/');
-        return path.equals(".git")
-                || path.startsWith(".git/")
-                || path.equals("target")
-                || path.startsWith("target/")
-                || path.contains("/target/")
-                || path.equals("fixtures")
-                || path.startsWith("fixtures/")
-                || path.contains("/fixtures/");
+    private static Optional<String> decodeText(byte[] bytes) {
+        if (startsWith(bytes, 0xEF, 0xBB, 0xBF)) {
+            return decode(bytes, 3, StandardCharsets.UTF_8).filter(SensitiveDataTest::isLikelyText);
+        }
+        if (startsWith(bytes, 0xFF, 0xFE)) {
+            return decode(bytes, 2, StandardCharsets.UTF_16LE).filter(SensitiveDataTest::isLikelyText);
+        }
+        if (startsWith(bytes, 0xFE, 0xFF)) {
+            return decode(bytes, 2, StandardCharsets.UTF_16BE).filter(SensitiveDataTest::isLikelyText);
+        }
+
+        Optional<Charset> utf16 = utf16CharsetWithoutBom(bytes);
+        if (utf16.isPresent()) {
+            return decode(bytes, 0, utf16.orElseThrow()).filter(SensitiveDataTest::isLikelyText);
+        }
+        return decode(bytes, 0, StandardCharsets.UTF_8).filter(SensitiveDataTest::isLikelyText);
     }
 
-    private static boolean isText(byte[] bytes) {
-        for (byte value : bytes) {
-            if (value == 0) {
+    private static Optional<Charset> utf16CharsetWithoutBom(byte[] bytes) {
+        if (bytes.length < 4 || bytes.length % 2 != 0) {
+            return Optional.empty();
+        }
+        int evenZeros = 0;
+        int oddZeros = 0;
+        for (int index = 0; index < bytes.length; index += 2) {
+            if (bytes[index] == 0) {
+                evenZeros++;
+            }
+            if (bytes[index + 1] == 0) {
+                oddZeros++;
+            }
+        }
+        int pairs = bytes.length / 2;
+        if (oddZeros * 2 >= pairs && evenZeros * 10 <= pairs) {
+            return Optional.of(StandardCharsets.UTF_16LE);
+        }
+        if (evenZeros * 2 >= pairs && oddZeros * 10 <= pairs) {
+            return Optional.of(StandardCharsets.UTF_16BE);
+        }
+        return Optional.empty();
+    }
+
+    private static Optional<String> decode(byte[] bytes, int offset, Charset charset) {
+        try {
+            return Optional.of(charset.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes, offset, bytes.length - offset))
+                    .toString());
+        }
+        catch (CharacterCodingException exception) {
+            return Optional.empty();
+        }
+    }
+
+    private static boolean isLikelyText(String content) {
+        long codePoints = content.codePoints().count();
+        if (codePoints == 0) {
+            return true;
+        }
+        long suspiciousControls = content.codePoints()
+                .filter(codePoint -> Character.isISOControl(codePoint)
+                        && codePoint != '\n'
+                        && codePoint != '\r'
+                        && codePoint != '\t'
+                        && codePoint != '\f')
+                .count();
+        return suspiciousControls * 20 <= codePoints;
+    }
+
+    private static boolean startsWith(byte[] bytes, int... prefix) {
+        if (bytes.length < prefix.length) {
+            return false;
+        }
+        for (int index = 0; index < prefix.length; index++) {
+            if (Byte.toUnsignedInt(bytes[index]) != prefix[index]) {
                 return false;
             }
         }
@@ -319,6 +420,8 @@ class SensitiveDataTest {
     private static boolean matchesAny(String content, List<Pattern> patterns) {
         return patterns.stream().anyMatch(pattern -> pattern.matcher(content).find());
     }
+
+    private record EncodedText(String name, byte[] bytes) {}
 
     private static WorkflowSnapshot snapshot(String workflowId) {
         return new WorkflowSnapshot(
