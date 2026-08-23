@@ -35,6 +35,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -283,6 +284,57 @@ class SensitiveDataTest {
         }
     }
 
+    @Test
+    void scannerDetectsCredentialAfterLongChinesePrefixInBomlessUtf16LittleEndian(@TempDir Path directory)
+            throws Exception {
+        String keyName = "AI_" + "DASHSCOPE_API_KEY";
+        String content = "园区告警上下文用于验证无 BOM 文本解码。".repeat(16)
+                + System.lineSeparator()
+                + keyName + "=private-value-123";
+        EncodedText fixture = new EncodedText(
+                "utf16le-chinese-prefix-no-bom.txt",
+                content.getBytes(StandardCharsets.UTF_16LE));
+
+        assertScannerFindsCredential(directory, fixture);
+    }
+
+    @Test
+    void scannerDetectsCredentialAfterLongChinesePrefixInBomlessUtf16BigEndian(@TempDir Path directory)
+            throws Exception {
+        String keyName = "AI_" + "DASHSCOPE_API_KEY";
+        String content = "园区告警上下文用于验证无 BOM 文本解码。".repeat(16)
+                + System.lineSeparator()
+                + keyName + "=private-value-123";
+        EncodedText fixture = new EncodedText(
+                "utf16be-chinese-prefix-no-bom.txt",
+                content.getBytes(StandardCharsets.UTF_16BE));
+
+        assertScannerFindsCredential(directory, fixture);
+    }
+
+    @Test
+    void scannerDetectsCredentialInValidTextContainingAnEmbeddedNul(@TempDir Path directory)
+            throws Exception {
+        String credential = "s" + "k-" + "123456789012";
+        EncodedText fixture = new EncodedText(
+                "utf8-embedded-nul.txt",
+                ("a\u0000" + credential).getBytes(StandardCharsets.UTF_8));
+
+        assertScannerFindsCredential(directory, fixture);
+    }
+
+    private static void assertScannerFindsCredential(Path directory, EncodedText fixture) throws IOException {
+        Path path = directory.resolve(fixture.name());
+        Files.write(path, fixture.bytes());
+        List<String> findings = new ArrayList<>();
+
+        scan(path, Path.of(fixture.name()), forbiddenSecretPatterns(), findings);
+
+        assertThat(findings)
+                .as("findings for %s", fixture.name())
+                .anyMatch(finding -> finding.startsWith(fixture.name() + " matched "));
+    }
+
     private static byte[] withBom(byte[] bom, byte[] content) {
         return ByteBuffer.allocate(bom.length + content.length).put(bom).put(content).array();
     }
@@ -325,72 +377,37 @@ class SensitiveDataTest {
 
     private static Optional<String> decodeText(byte[] bytes) {
         if (startsWith(bytes, 0xEF, 0xBB, 0xBF)) {
-            return decode(bytes, 3, StandardCharsets.UTF_8).filter(SensitiveDataTest::isLikelyText);
+            return decodeCandidate(bytes, 3, StandardCharsets.UTF_8).map(TextCandidate::content);
         }
         if (startsWith(bytes, 0xFF, 0xFE)) {
-            return decode(bytes, 2, StandardCharsets.UTF_16LE).filter(SensitiveDataTest::isLikelyText);
+            return decodeCandidate(bytes, 2, StandardCharsets.UTF_16LE).map(TextCandidate::content);
         }
         if (startsWith(bytes, 0xFE, 0xFF)) {
-            return decode(bytes, 2, StandardCharsets.UTF_16BE).filter(SensitiveDataTest::isLikelyText);
+            return decodeCandidate(bytes, 2, StandardCharsets.UTF_16BE).map(TextCandidate::content);
         }
 
-        Optional<Charset> utf16 = utf16CharsetWithoutBom(bytes);
-        if (utf16.isPresent()) {
-            return decode(bytes, 0, utf16.orElseThrow()).filter(SensitiveDataTest::isLikelyText);
-        }
-        return decode(bytes, 0, StandardCharsets.UTF_8).filter(SensitiveDataTest::isLikelyText);
+        return List.of(StandardCharsets.UTF_8, StandardCharsets.UTF_16LE, StandardCharsets.UTF_16BE)
+                .stream()
+                .map(charset -> decodeCandidate(bytes, 0, charset))
+                .flatMap(Optional::stream)
+                .max(Comparator.comparingDouble(TextCandidate::score)
+                        .thenComparingInt(TextCandidate::charsetPreference))
+                .map(TextCandidate::content);
     }
 
-    private static Optional<Charset> utf16CharsetWithoutBom(byte[] bytes) {
-        if (bytes.length < 4 || bytes.length % 2 != 0) {
-            return Optional.empty();
-        }
-        int evenZeros = 0;
-        int oddZeros = 0;
-        for (int index = 0; index < bytes.length; index += 2) {
-            if (bytes[index] == 0) {
-                evenZeros++;
-            }
-            if (bytes[index + 1] == 0) {
-                oddZeros++;
-            }
-        }
-        int pairs = bytes.length / 2;
-        if (oddZeros * 2 >= pairs && evenZeros * 10 <= pairs) {
-            return Optional.of(StandardCharsets.UTF_16LE);
-        }
-        if (evenZeros * 2 >= pairs && oddZeros * 10 <= pairs) {
-            return Optional.of(StandardCharsets.UTF_16BE);
-        }
-        return Optional.empty();
-    }
-
-    private static Optional<String> decode(byte[] bytes, int offset, Charset charset) {
+    private static Optional<TextCandidate> decodeCandidate(byte[] bytes, int offset, Charset charset) {
         try {
-            return Optional.of(charset.newDecoder()
+            String content = charset.newDecoder()
                     .onMalformedInput(CodingErrorAction.REPORT)
                     .onUnmappableCharacter(CodingErrorAction.REPORT)
                     .decode(ByteBuffer.wrap(bytes, offset, bytes.length - offset))
-                    .toString());
+                    .toString();
+            TextCandidate candidate = TextCandidate.from(charset, content);
+            return candidate.isLikelyText() ? Optional.of(candidate) : Optional.empty();
         }
         catch (CharacterCodingException exception) {
             return Optional.empty();
         }
-    }
-
-    private static boolean isLikelyText(String content) {
-        long codePoints = content.codePoints().count();
-        if (codePoints == 0) {
-            return true;
-        }
-        long suspiciousControls = content.codePoints()
-                .filter(codePoint -> Character.isISOControl(codePoint)
-                        && codePoint != '\n'
-                        && codePoint != '\r'
-                        && codePoint != '\t'
-                        && codePoint != '\f')
-                .count();
-        return suspiciousControls * 20 <= codePoints;
     }
 
     private static boolean startsWith(byte[] bytes, int... prefix) {
@@ -422,6 +439,76 @@ class SensitiveDataTest {
     }
 
     private record EncodedText(String name, byte[] bytes) {}
+
+    private record TextCandidate(
+            Charset charset,
+            String content,
+            long codePoints,
+            long printableCodePoints,
+            long controlCodePoints,
+            long suspiciousCodePoints,
+            long asciiPrintableCodePoints) {
+
+        private static TextCandidate from(Charset charset, String content) {
+            long codePoints = 0;
+            long printable = 0;
+            long controls = 0;
+            long suspicious = 0;
+            long asciiPrintable = 0;
+            for (int offset = 0; offset < content.length();) {
+                int codePoint = content.codePointAt(offset);
+                offset += Character.charCount(codePoint);
+                codePoints++;
+                if (codePoint == '\n' || codePoint == '\r' || codePoint == '\t' || codePoint == '\f') {
+                    printable++;
+                }
+                else if (Character.isISOControl(codePoint)) {
+                    controls++;
+                }
+                else if (!Character.isDefined(codePoint)
+                        || Character.getType(codePoint) == Character.PRIVATE_USE
+                        || Character.getType(codePoint) == Character.SURROGATE) {
+                    suspicious++;
+                }
+                else {
+                    printable++;
+                    if (codePoint >= 0x20 && codePoint <= 0x7E) {
+                        asciiPrintable++;
+                    }
+                }
+            }
+            return new TextCandidate(
+                    charset,
+                    content,
+                    codePoints,
+                    printable,
+                    controls,
+                    suspicious,
+                    asciiPrintable);
+        }
+
+        private boolean isLikelyText() {
+            return codePoints == 0 || printableCodePoints > controlCodePoints + suspiciousCodePoints;
+        }
+
+        private double score() {
+            if (codePoints == 0) {
+                return 0;
+            }
+            return ratio(printableCodePoints)
+                    - 2 * ratio(controlCodePoints)
+                    - 2 * ratio(suspiciousCodePoints)
+                    + 0.25 * ratio(asciiPrintableCodePoints);
+        }
+
+        private double ratio(long count) {
+            return (double) count / codePoints;
+        }
+
+        private int charsetPreference() {
+            return charset.equals(StandardCharsets.UTF_8) ? 1 : 0;
+        }
+    }
 
     private static WorkflowSnapshot snapshot(String workflowId) {
         return new WorkflowSnapshot(
