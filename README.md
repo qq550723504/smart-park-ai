@@ -1,8 +1,8 @@
-# 智慧园区告警处置工作流
+# 智慧园区告警与能耗学习项目
 
-这是一个面向学习的 Spring AI Alibaba 智慧园区项目：接收园区告警，采集 Mock 园区上下文，生成结构化诊断，执行风险门禁，在需要时暂停等待人工审批，创建内存中的 Mock 工单，并通过 SSE 推送工作流事件。
+这是一个面向学习的 Spring AI Alibaba 智慧园区项目，当前提供告警处置和能耗查询两个能力：接收园区告警，采集 Mock 园区上下文，生成结构化诊断，执行风险门禁，在需要时暂停等待人工审批，创建内存中的 Mock 工单，并通过 SSE 推送工作流事件。能耗能力通过只读端口向告警诊断提供当前值、基线和峰值功率。
 
-> 安全边界：本项目中的所有园区适配器都是 `MockParkSystem` 适配器，只读取种子数据，并把工单写入内存。它不会检查、切换、重启、隔离或控制任何真实设备。不要把本示例当作生产控制系统使用。
+> 安全边界：当前 Mock 适配器只读取种子数据，并把工单写入内存；它不会检查、切换、重启、隔离或控制任何真实设备。安防能力目前只有编译期边界，没有 Spring Bean、Mock 数据、HTTP 端点或工作流分支。`SecurityEvent.evidenceSummary` 只能保存脱敏摘要，不得保存原始视频、图片、人脸特征或身份证等人员原始记录。不要把本示例当作生产控制系统使用。
 
 ## 环境要求
 
@@ -11,7 +11,13 @@
 - 不要求系统安装 Maven，使用仓库中的 Maven Wrapper 即可
 
 默认配置从进程环境变量 `AI_DASHSCOPE_API_KEY` 读取密钥。不要把密钥写入源码、本文档、`.env` 文件、命令行参数或 Shell 历史记录。
-DashScope 自动配置默认开启，也可以通过 `SPRING_AI_DASHSCOPE_ENABLED=false` 显式关闭。
+DashScope 自动配置默认开启，也可以通过 `SPRING_AI_DASHSCOPE_ENABLED=false` 显式关闭。默认 URL 是 `https://dashscope.aliyuncs.com`，由 `SPRING_AI_DASHSCOPE_BASE_URL` 覆盖；该 URL 只用于模型客户端，不会启用安防接口，也不会改变 Mock 数据源。需要使用兼容网关时，只修改当前进程的 URL 环境变量，例如：
+
+```powershell
+$env:SPRING_AI_DASHSCOPE_BASE_URL = 'https://your-compatible-gateway.example.com'
+```
+
+项目配置文件中的 DashScope URL 占位符为 `${SPRING_AI_DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com}`，不要把访问密钥或内部网关地址提交到仓库。
 
 ## 构建与测试
 
@@ -78,9 +84,9 @@ Remove-Variable secureDashScopeKey
 
 验证内容只检查模型返回非空，不会输出 API Key 或完整模型响应。没有 Key 时，该测试会安全跳过。
 
-## Mock 告警数据
+## 当前能力与 Mock 数据
 
-应用每次启动时都会重置 `MockParkSystem` 的内存数据，并提供以下三个工作流入口：
+应用每次启动时都会重置共享 Mock 内存数据，并提供以下三个告警工作流入口：
 
 | 告警 ID | 设备 | 种子风险提示 | 练习内容 |
 | --- | --- | --- | --- |
@@ -89,6 +95,14 @@ Remove-Variable secureDashScopeKey
 | `ALT-ENERGY-001` | `DEV-ENERGY-001` | `HIGH` | 建筑能耗高于基线的异常诊断。Agent 可以通过只读能耗工具查询当前值、基线和峰值功率；由于当前种子风险为 `HIGH`，执行到风险门禁后必须等待审批。 |
 
 工作流状态、事件、审批和工单都保存在内存中，应用重启后会丢失。
+
+当前能力边界如下：
+
+- **告警（alert）：** `AlertPort`、告警查询工具和通用告警工作流负责告警读取、诊断、风险门禁、人工审批与 Mock 工单。
+- **能耗（energy）：** `EnergyPort`、`EnergyReading` 和 `EnergyQueryTool` 负责只读能耗查询；它不直接控制设备。
+- **安防（security）：** `SecurityEvent` 和 `SecurityPort` 位于独立的 `model/security`、`port/security` 包中，目前只约束事件查询接口和脱敏摘要格式，不接入任何数据源。
+
+后续安防接入点是实现一个经过认证、授权和脱敏处理的 `SecurityPort` 适配器，再按权限提供安防查询工具；在此之前不要把摄像头、门禁或人员原始数据接入通用告警模型。
 
 ## REST 与 SSE 示例
 
@@ -150,14 +164,15 @@ curl -N -H "Accept: text/event-stream" "http://localhost:8080/api/workflows/repl
 | Graph 与状态 | `com.example.smartpark.workflow.AlertWorkflow`、`AlertWorkflowNodes`、`AlertWorkflowState` | 将 Spring AI Alibaba `StateGraph` 编译为有序、条件化的节点，并使用明确的状态键和 reducer。 |
 | 中断与恢复 | `AlertWorkflowNodes.HumanApprovalAction`、`AlertWorkflow.approve` | 高风险或不确定流程产生中断元数据，保存内存执行状态，接收操作人反馈，并恢复同一个 Graph 线程。 |
 | 风险门禁 | `AlertWorkflowNodes.RiskGate` | 高风险、置信度低于阈值或缺少知识证据时进入人工审批，否则可以直接创建 Mock 工单。 |
-| 幂等性 | `ApprovalDecision`、`AlertWorkflow`、`WorkflowExecutionStore`、`MockParkSystem` | 审批重试由 `idempotencyKey` 标识；工作流启动和 Mock 工单写入也在内存中保持工作流级别的身份。 |
+| 幂等性 | `ApprovalDecision`、`AlertWorkflow`、`WorkflowExecutionStore`、Mock 适配器 | 审批重试由 `idempotencyKey` 标识；工作流启动和 Mock 工单写入也在内存中保持工作流级别的身份。 |
 | SSE | `WorkflowEventPublisher`、`WorkflowEventController`、`WebDtos.WorkflowEventDto` | 使用 Reactor `Flux` 将可重放的工作流事件转换为脱敏的 Spring `ServerSentEvent`，并在终态事件后关闭。 |
 
 ## 暂后练习
 
 这是第一个可运行的垂直切片，尚未达到生产级别。以下内容是后续练习，并非当前已经提供的功能：
 
-- **Embedding/RAG：** `MockParkSystem.search` 只是内存中的确定性关键词匹配。当前没有 Embedding 模型、向量数据库、数据导入流程或 RAG 链路。
+- **Embedding/RAG：** Mock 知识适配器只是内存中的确定性关键词匹配。当前没有 Embedding 模型、向量数据库、数据导入流程或 RAG 链路。
 - **PostgreSQL checkpoint：** Graph 执行、事件、审批、幂等记录和工单都保存在进程内存中。当前没有 PostgreSQL checkpoint 或重启恢复能力。
 - **认证与授权：** 四个 HTTP 端点没有身份、角色、租户或审批策略校验。
-- **真实适配器：** `AlertPort`、`DevicePort`、`EnergyPort`、`KnowledgePort` 和 `WorkOrderPort` 是扩展边界，但当前只接入了 `MockParkSystem`。真实园区 API、智能电表、持久化工单和设备控制适配器尚未实现。
+- **真实适配器：** `AlertPort`、`DevicePort`、`EnergyPort`、`KnowledgePort` 和 `WorkOrderPort` 是扩展边界，当前接入的是按端口拆分的 Mock 适配器。真实园区 API、智能电表、持久化工单和设备控制适配器尚未实现。
+- **安防接入：** `SecurityPort.getEvent(String eventId)` 是下一步接入点；尚未实现摄像头、门禁、人员系统、认证授权、脱敏服务或安防工作流。
