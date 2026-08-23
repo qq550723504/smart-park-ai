@@ -1,0 +1,168 @@
+package com.example.smartpark.agent;
+
+import com.example.smartpark.model.Alert;
+import com.example.smartpark.model.KnowledgeDocument;
+import com.example.smartpark.model.ParkContext;
+import com.example.smartpark.model.WorkOrder;
+
+import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
+
+final class PromptCatalog {
+
+    private PromptCatalog() {
+    }
+
+    static String triageSystemPrompt() {
+        return """
+                You are the smart-park alert triage agent.
+                Return JSON only and make it match these fields exactly:
+                {
+                  "category": "one of AlertClassification enum values",
+                  "priority": "LOW | MEDIUM | HIGH",
+                  "riskLevel": "one of RiskLevel enum values",
+                  "confidence": "number from 0 to 1"
+                }
+                Use the supplied alert only.
+                Do not guess missing facts.
+                If the evidence is insufficient, choose the most conservative valid classification and lower confidence instead of inventing data.
+                """;
+    }
+
+    static String triageUserPrompt(Alert alert) {
+        Objects.requireNonNull(alert, "alert");
+        return """
+                Alert to triage:
+                - id: %s
+                - parkId: %s
+                - buildingId: %s
+                - deviceId: %s
+                - currentCategory: %s
+                - riskHint: %s
+                - summary: %s
+                - occurredAt: %s
+                - evidence: %s
+                """.formatted(
+                alert.id(),
+                alert.parkId(),
+                alert.buildingId(),
+                alert.deviceId(),
+                alert.classification(),
+                alert.riskHint(),
+                alert.summary(),
+                alert.occurredAt(),
+                alert.evidence());
+    }
+
+    static String diagnosisSystemPrompt(List<String> availableToolNames) {
+        List<String> toolNames = List.copyOf(Objects.requireNonNull(availableToolNames, "availableToolNames"));
+        return """
+                You are the smart-park diagnosis agent.
+                Return JSON only and make it match these fields exactly:
+                {
+                  "id": "non-empty diagnosis id",
+                  "alertId": "non-empty alert id",
+                  "deviceId": "non-empty device id",
+                  "riskLevel": "one of RiskLevel enum values",
+                  "rootCause": "non-empty root-cause hypothesis",
+                  "summary": "non-empty diagnosis summary",
+                  "evidence": ["one or more evidence statements"],
+                  "recommendedAction": "non-empty recommended action",
+                  "diagnosedAt": "ISO-8601 instant"
+                }
+                Every conclusion must be backed by evidence.
+                Missing tool data or missing knowledge is evidence insufficiency, not permission to guess.
+                Available read-only tools: %s
+                You are not allowed to create or mutate work orders in this step.
+                """.formatted(toolNames);
+    }
+
+    static String diagnosisUserPrompt(Alert alert, ParkContext context, List<KnowledgeDocument> documents) {
+        Objects.requireNonNull(alert, "alert");
+        Objects.requireNonNull(context, "context");
+        List<KnowledgeDocument> safeDocuments = List.copyOf(Objects.requireNonNull(documents, "documents"));
+        return """
+                Alert under diagnosis:
+                %s
+
+                Park context:
+                - parkId: %s
+                - buildingId: %s
+                - device: %s
+                - alertHistory:
+                %s
+                - workOrders:
+                %s
+
+                Knowledge documents:
+                %s
+                """.formatted(
+                triageUserPrompt(alert),
+                context.parkId(),
+                context.buildingId(),
+                renderDevice(context),
+                renderAlertHistory(context),
+                renderWorkOrders(context.workOrders()),
+                renderKnowledgeDocuments(safeDocuments));
+    }
+
+    private static String renderDevice(ParkContext context) {
+        return """
+                {
+                  "id": "%s",
+                  "name": "%s",
+                  "category": "%s",
+                  "status": "%s",
+                  "installedAt": "%s"
+                }
+                """.formatted(
+                context.device().id(),
+                context.device().name(),
+                context.device().category(),
+                context.device().status(),
+                context.device().installedAt());
+    }
+
+    private static String renderAlertHistory(ParkContext context) {
+        if (context.alertHistory().isEmpty()) {
+            return "  - none";
+        }
+        return context.alertHistory().stream()
+                .map(alert -> "  - %s | %s | %s".formatted(alert.id(), alert.occurredAt(), alert.summary()))
+                .collect(Collectors.joining(System.lineSeparator()));
+    }
+
+    private static String renderWorkOrders(List<WorkOrder> workOrders) {
+        if (workOrders.isEmpty()) {
+            return "  - none";
+        }
+        return workOrders.stream()
+                .map(workOrder -> "  - %s | %s | %s | approval=%s".formatted(
+                        workOrder.id(),
+                        workOrder.workflowId(),
+                        workOrder.status(),
+                        workOrder.approvalDecision()))
+                .collect(Collectors.joining(System.lineSeparator()));
+    }
+
+    private static String renderKnowledgeDocuments(List<KnowledgeDocument> documents) {
+        if (documents.isEmpty()) {
+            return "INSUFFICIENT_EVIDENCE: no knowledge documents matched the request";
+        }
+        return documents.stream()
+                .map(document -> """
+                        - id: %s
+                          title: %s
+                          tags: %s
+                          updatedAt: %s
+                          content: %s
+                        """.formatted(
+                        document.id(),
+                        document.title(),
+                        document.tags(),
+                        document.updatedAt(),
+                        document.content()))
+                .collect(Collectors.joining(System.lineSeparator()));
+    }
+}
