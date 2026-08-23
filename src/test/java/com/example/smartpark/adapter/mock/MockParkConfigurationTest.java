@@ -12,7 +12,6 @@ import org.springframework.context.ApplicationContext;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -40,21 +39,15 @@ class MockParkConfigurationTest {
         assertThat(applicationContext.getBeansOfType(MockWorkOrderAdapter.class)).hasSize(1);
 
         MockParkDataStore dataStore = applicationContext.getBean(MockParkDataStore.class);
-        assertThat(dataStoreFields(applicationContext.getBeansOfType(MockAlertAdapter.class))).containsOnly(dataStore);
-        assertThat(dataStoreFields(applicationContext.getBeansOfType(MockDeviceAdapter.class))).containsOnly(dataStore);
-        assertThat(dataStoreFields(applicationContext.getBeansOfType(MockEnergyAdapter.class))).containsOnly(dataStore);
-        assertThat(dataStoreFields(applicationContext.getBeansOfType(MockKnowledgeAdapter.class))).containsOnly(dataStore);
-        assertThat(dataStoreFields(applicationContext.getBeansOfType(MockWorkOrderAdapter.class))).containsOnly(dataStore);
+        assertThat(readDataStoreField(applicationContext.getBean(MockAlertAdapter.class))).isSameAs(dataStore);
+        assertThat(readDataStoreField(applicationContext.getBean(MockDeviceAdapter.class))).isSameAs(dataStore);
+        assertThat(readDataStoreField(applicationContext.getBean(MockEnergyAdapter.class))).isSameAs(dataStore);
+        assertThat(readDataStoreField(applicationContext.getBean(MockKnowledgeAdapter.class))).isSameAs(dataStore);
+        assertThat(readDataStoreField(applicationContext.getBean(MockWorkOrderAdapter.class))).isSameAs(dataStore);
 
         assertThat(applicationContext.getBeansOfType(Object.class).entrySet())
                 .noneMatch(entry -> entry.getKey().equals("mockParkSystem")
                         || entry.getValue().getClass().getSimpleName().equals("MockParkSystem"));
-    }
-
-    private static Object[] dataStoreFields(Map<String, ?> beans) {
-        return beans.values().stream()
-                .map(MockParkConfigurationTest::readDataStoreField)
-                .toArray();
     }
 
     private static Object readDataStoreField(Object adapter) {

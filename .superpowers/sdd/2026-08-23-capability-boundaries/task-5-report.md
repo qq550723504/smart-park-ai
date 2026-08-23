@@ -7,10 +7,10 @@
 
 ## Verification
 
-- `mvnw.cmd -q clean`（先执行；exit 0，清理后重新编译）
-- `mvnw.cmd -Dtest=MockParkConfigurationTest,MockParkFixtureTest,MockParkDataStoreTest,MockAdapterBoundaryTest test`（11 tests run, 0 failures, 0 errors, 0 skipped；BUILD SUCCESS）
-- `mvnw.cmd test-compile`（BUILD SUCCESS）
-- `mvnw.cmd test`（103 tests run, 0 failures, 0 errors, 1 skipped；BUILD SUCCESS）
+- `mvnw.cmd -q clean`（先执行；exit 0；仅清理 `target`，不负责重新编译）
+- `mvnw.cmd -Dtest=MockParkConfigurationTest,MockParkFixtureTest,MockParkDataStoreTest,MockAdapterBoundaryTest test`（定向测试负责重新编译并验证；11 tests run, 0 failures, 0 errors, 0 skipped；BUILD SUCCESS）
+- `mvnw.cmd test-compile`（负责重新编译并验证；BUILD SUCCESS）
+- `mvnw.cmd test`（负责重新编译并进行全量测试验证；103 tests run, 0 failures, 0 errors, 1 skipped；BUILD SUCCESS）
 - `git diff --check`（通过）
 
 ## Concerns
