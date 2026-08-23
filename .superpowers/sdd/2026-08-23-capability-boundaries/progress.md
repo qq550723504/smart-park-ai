@@ -40,7 +40,7 @@ Task 4: complete (commits 509d73b..509d73b, review clean)
 Task 5: complete (commits c7c3ac5..3fb165f, review clean; follow-up fixes de17b8a and 3fb165f)
 Task 6: complete (commits 89f15e0..832747a, review clean; unrelated f579d8d isolated by b201de2; boundary tightening in 2f21ada)
 
-Task 7: final verification complete at HEAD `ea67566`:
+Task 7: final verification complete at HEAD `1dbc229`:
 - `.\mvnw.cmd clean test`: PASS, 117 tests run, 0 failures, 0 errors, 1 skipped (the existing `DashScopeSmokeTest`).
 - `.\mvnw.cmd package -DskipTests`: PASS, produced `target/smart-park-alert-workflow-0.0.1-SNAPSHOT.jar`.
 - `git diff --check`: PASS.
