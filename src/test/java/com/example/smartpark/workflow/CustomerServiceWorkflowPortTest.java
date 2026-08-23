@@ -32,9 +32,11 @@ class CustomerServiceWorkflowPortTest {
                 () -> "cs-port-001");
 
         CustomerServiceResult created = workflow.handle("A1 洗手间漏水，需要报修");
+        workflow.tickets();
         workflow.updateTicket(created.ticket().id(), "ASSIGNED");
 
         assertThat(tickets.created).isTrue();
+        assertThat(tickets.listed).isTrue();
         assertThat(tickets.updated).isTrue();
         assertThat(sessions.created).isTrue();
         assertThat(sessions.updated).isTrue();
@@ -84,20 +86,14 @@ class CustomerServiceWorkflowPortTest {
         }
 
         @Override
-        public void rememberIdempotency(String key, String question, CustomerServiceResult result, Instant createdAt) {
-            idempotency.put(key, new IdempotencyRecord(question, result, createdAt));
+        public void rememberIdempotency(String key, IdempotencyScope scope, String question,
+                                        CustomerServiceResult result, Instant createdAt) {
+            idempotency.put(key, new IdempotencyRecord(scope, question, result, createdAt));
         }
 
         @Override
-        public void updateIdempotencyResults(String sessionId, CustomerServiceResult result) {
-            idempotency.replaceAll((key, record) -> record.result().sessionId().equals(sessionId)
-                    ? new IdempotencyRecord(record.question(), result, record.createdAt())
-                    : record);
-        }
-
-        @Override
-        public List<SessionSnapshot> withTickets(Instant now) {
-            return sessions.values().stream().filter(snapshot -> snapshot.result().ticket() != null).toList();
+        public List<String> evict(Instant now) {
+            return List.of();
         }
 
         @Override
@@ -110,6 +106,7 @@ class CustomerServiceWorkflowPortTest {
         private final Map<String, CustomerTicket> tickets = new HashMap<>();
         private final List<String> events;
         private boolean created;
+        private boolean listed;
         private boolean updated;
 
         private RecordingTicketPort(List<String> events) {
@@ -128,6 +125,8 @@ class CustomerServiceWorkflowPortTest {
 
         @Override
         public List<CustomerTicket> list() {
+            listed = true;
+            events.add("ticket.list");
             return List.copyOf(tickets.values());
         }
 
@@ -138,6 +137,11 @@ class CustomerServiceWorkflowPortTest {
             CustomerTicket updatedTicket = tickets.get(ticketId).transitionTo(nextStatus);
             tickets.put(ticketId, updatedTicket);
             return updatedTicket;
+        }
+
+        @Override
+        public void deleteBySessionId(String sessionId) {
+            tickets.entrySet().removeIf(entry -> entry.getValue().sessionId().equals(sessionId));
         }
     }
 }

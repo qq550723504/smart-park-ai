@@ -42,4 +42,9 @@ public final class InMemoryCustomerTicketAdapter implements CustomerTicketPort {
             return current.transitionTo(nextStatus);
         });
     }
+
+    @Override
+    public void deleteBySessionId(String sessionId) {
+        tickets.entrySet().removeIf(entry -> entry.getValue().sessionId().equals(sessionId));
+    }
 }

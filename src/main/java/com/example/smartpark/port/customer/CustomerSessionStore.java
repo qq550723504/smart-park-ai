@@ -20,11 +20,10 @@ public interface CustomerSessionStore {
 
     SessionSnapshot update(SessionSnapshot snapshot);
 
-    void rememberIdempotency(String key, String question, CustomerServiceResult result, Instant createdAt);
+    void rememberIdempotency(String key, IdempotencyScope scope, String question,
+                             CustomerServiceResult result, Instant createdAt);
 
-    void updateIdempotencyResults(String sessionId, CustomerServiceResult result);
-
-    List<SessionSnapshot> withTickets(Instant now);
+    List<String> evict(Instant now);
 
     int count(Instant now);
 
@@ -43,8 +42,34 @@ public interface CustomerSessionStore {
         }
     }
 
-    record IdempotencyRecord(String question, CustomerServiceResult result, Instant createdAt) {
+    enum IdempotencyOperation {
+        HANDLE,
+        REPLY
+    }
+
+    record IdempotencyScope(IdempotencyOperation operation, String targetSessionId) {
+        public IdempotencyScope {
+            operation = Objects.requireNonNull(operation, "operation");
+            if (operation == IdempotencyOperation.HANDLE && targetSessionId != null) {
+                throw new IllegalArgumentException("handle idempotency cannot target a session");
+            }
+            if (operation == IdempotencyOperation.REPLY) {
+                targetSessionId = requireText(targetSessionId, "targetSessionId");
+            }
+        }
+
+        private static String requireText(String value, String fieldName) {
+            if (value == null || value.isBlank()) {
+                throw new IllegalArgumentException(fieldName + " must not be blank");
+            }
+            return value.trim();
+        }
+    }
+
+    record IdempotencyRecord(IdempotencyScope scope, String question,
+                             CustomerServiceResult result, Instant createdAt) {
         public IdempotencyRecord {
+            scope = Objects.requireNonNull(scope, "scope");
             question = Objects.requireNonNull(question, "question");
             result = Objects.requireNonNull(result, "result");
             createdAt = Objects.requireNonNull(createdAt, "createdAt");

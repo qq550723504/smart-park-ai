@@ -12,4 +12,6 @@ public interface CustomerTicketPort {
     List<CustomerTicket> list();
 
     CustomerTicket update(String ticketId, CustomerTicketStatus nextStatus);
+
+    void deleteBySessionId(String sessionId);
 }

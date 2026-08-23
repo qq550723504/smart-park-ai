@@ -71,4 +71,23 @@ class CustomerServiceControllerTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.message").value("Idempotency-Key 已用于其他问题，请生成新的请求键"));
     }
+
+    @Test
+    void repairFollowUpCreatesWaitingAgentTicket() throws Exception {
+        String first = mockMvc.perform(post("/api/customer-service/sessions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"访客停车怎么收费？\"}"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String sessionId = new ObjectMapper().readTree(first).get("sessionId").asText();
+
+        mockMvc.perform(post("/api/customer-service/sessions/" + sessionId + "/messages")
+                        .header("Idempotency-Key", "repair-follow-up-http")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"A1 洗手间漏水，需要报修\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.intent").value("REPAIR"))
+                .andExpect(jsonPath("$.needsHuman").value(true))
+                .andExpect(jsonPath("$.ticket.status").value("WAITING_AGENT"));
+    }
 }

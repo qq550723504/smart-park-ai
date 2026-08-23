@@ -7,11 +7,13 @@ import com.example.smartpark.workflow.CustomerConversation;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -26,6 +28,7 @@ public final class InMemoryCustomerSessionStore implements CustomerSessionStore 
     private final ConcurrentMap<String, StoredSession> sessions = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, IdempotencyRecord> idempotencyRecords = new ConcurrentHashMap<>();
     private final AtomicLong insertionSequence = new AtomicLong();
+    private final Set<String> evictedSessionIds = new LinkedHashSet<>();
 
     public InMemoryCustomerSessionStore() {
         this(Clock.systemUTC(), DEFAULT_MAX_SESSIONS, DEFAULT_SESSION_TTL);
@@ -71,34 +74,27 @@ public final class InMemoryCustomerSessionStore implements CustomerSessionStore 
     public synchronized SessionSnapshot update(SessionSnapshot snapshot) {
         evictExpiredAndOverCapacity(clock.instant());
         StoredSession previous = sessions.get(snapshot.sessionId());
-        long sequence = previous == null ? insertionSequence.incrementAndGet() : previous.sequence();
-        sessions.put(snapshot.sessionId(), new StoredSession(snapshot, sequence));
+        if (previous == null) {
+            throw new NoSuchElementException("Unknown customer session: " + snapshot.sessionId());
+        }
+        sessions.put(snapshot.sessionId(), new StoredSession(snapshot, previous.sequence()));
         evictExpiredAndOverCapacity(clock.instant());
         return snapshot;
     }
 
     @Override
-    public synchronized void rememberIdempotency(String key, String question, CustomerServiceResult result, Instant createdAt) {
+    public synchronized void rememberIdempotency(String key, IdempotencyScope scope, String question,
+                                                 CustomerServiceResult result, Instant createdAt) {
         evictExpiredAndOverCapacity(clock.instant());
-        idempotencyRecords.put(key, new IdempotencyRecord(question, result, createdAt));
+        idempotencyRecords.put(key, new IdempotencyRecord(scope, question, result, createdAt));
     }
 
     @Override
-    public synchronized void updateIdempotencyResults(String sessionId, CustomerServiceResult result) {
-        evictExpiredAndOverCapacity(clock.instant());
-        idempotencyRecords.replaceAll((key, record) -> record.result().sessionId().equals(sessionId)
-                ? new IdempotencyRecord(record.question(), result, record.createdAt())
-                : record);
-    }
-
-    @Override
-    public synchronized List<SessionSnapshot> withTickets(Instant now) {
+    public synchronized List<String> evict(Instant now) {
         evictExpiredAndOverCapacity(Objects.requireNonNull(now, "now"));
-        return sessions.values().stream()
-                .map(StoredSession::snapshot)
-                .filter(snapshot -> snapshot.result().ticket() != null)
-                .sorted(Comparator.comparing(SessionSnapshot::createdAt).thenComparing(SessionSnapshot::sessionId))
-                .toList();
+        List<String> evicted = List.copyOf(evictedSessionIds);
+        evictedSessionIds.clear();
+        return evicted;
     }
 
     @Override
@@ -108,17 +104,30 @@ public final class InMemoryCustomerSessionStore implements CustomerSessionStore 
     }
 
     private void evictExpiredAndOverCapacity(Instant now) {
-        sessions.entrySet().removeIf(entry -> isExpired(entry.getValue().snapshot().createdAt(), now));
+        List<String> expiredSessionIds = sessions.entrySet().stream()
+                .filter(entry -> isExpired(entry.getValue().snapshot().createdAt(), now))
+                .map(Map.Entry::getKey)
+                .toList();
+        expiredSessionIds.forEach(this::removeSession);
         idempotencyRecords.entrySet().removeIf(entry -> isExpired(entry.getValue().createdAt(), now));
         while (sessions.size() > maxSessions) {
             Map.Entry<String, StoredSession> oldest = sessions.entrySet().stream()
-                    .min(Map.Entry.comparingByValue(Comparator.comparingLong(StoredSession::sequence)))
+                    .min(Map.Entry.comparingByValue(java.util.Comparator.comparingLong(StoredSession::sequence)))
                     .orElse(null);
-            if (oldest == null || !sessions.remove(oldest.getKey(), oldest.getValue())) {
+            if (oldest == null) {
                 return;
             }
-            idempotencyRecords.entrySet().removeIf(entry -> entry.getValue().result().sessionId().equals(oldest.getKey()));
+            removeSession(oldest.getKey());
         }
+    }
+
+    private void removeSession(String sessionId) {
+        if (sessions.remove(sessionId) == null) {
+            return;
+        }
+        evictedSessionIds.add(sessionId);
+        idempotencyRecords.entrySet().removeIf(
+                entry -> entry.getValue().result().sessionId().equals(sessionId));
     }
 
     private boolean isExpired(Instant createdAt, Instant now) {

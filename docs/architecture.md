@@ -105,8 +105,8 @@ Mock 适配器当前用于替代真实园区系统。替换为生产系统时，
 - `KnowledgePort`：按关键词检索知识文档
 - `WorkOrderPort`：按工作流查询工单并创建工单
 - `SecurityPort`：安全事件能力边界，当前主要用于架构和边界验证
-- `CustomerSessionStore`（`port.customer`）：创建、读取和更新客服会话及幂等记录
-- `CustomerTicketPort`（`port.customer`）：创建、查询和推进客服人工工单
+- `CustomerSessionStore`（`port.customer`）：创建、读取和更新客服会话，保存按操作与目标会话隔离的幂等记录，并报告 TTL/容量淘汰
+- `CustomerTicketPort`（`port.customer`）：作为客服工单的唯一来源，创建、查询、推进工单，并按已淘汰会话删除工单
 
 工作流和工具依赖端口，而不直接依赖适配器。该设计允许把 Mock 数据替换为数据库、园区平台 API、消息系统或其他外部服务。
 
@@ -291,9 +291,9 @@ riskGate
 
 ### 5.3 运行时存储
 
-当前 `WorkflowExecutionStore` 使用内存实现，Graph checkpoint 使用 `MemorySaver`。客服支持同一 `sessionId` 下的多轮消息和会话历史。每轮保存用户/助手消息及安全检索轨迹；检索轨迹只保留查询意图、知识文档 ID 和时间，不保留用户原始问题。会话进入人工处理后，自动客服拒绝继续回复。客服工作流通过 `CustomerSessionStore` 和 `CustomerTicketPort` 访问这些数据，默认 Bean 分别是 `InMemoryCustomerSessionStore` 和 `InMemoryCustomerTicketAdapter`。
+当前 `WorkflowExecutionStore` 使用内存实现，Graph checkpoint 使用 `MemorySaver`。客服支持同一 `sessionId` 下的多轮消息和会话历史。每轮保存用户/助手消息及安全检索轨迹；检索轨迹只保留查询意图、知识文档 ID 和时间，不保留用户原始问题。会话进入人工处理后，自动客服拒绝新的自动回复，但同一幂等请求仍返回请求当时的稳定结果。客服工作流通过 `CustomerSessionStore` 和 `CustomerTicketPort` 访问这些数据，默认 Bean 分别是 `InMemoryCustomerSessionStore` 和 `InMemoryCustomerTicketAdapter`。
 
-客服工作流当前使用有界 TTL 内存会话存储，默认最多 10,000 条、TTL 24 小时；客服请求通过 `Idempotency-Key` 防止进程内重试重复建单。此次重构建立了 `CustomerSessionStore` 与 `CustomerTicketPort` 的替换边界，但没有提供持久化实现，也没有提供真实 Agent 系统；默认 Mock 分类和关键词检索仍是确定性的本地实现。当前实现适合本地学习、演示和测试，不适合直接作为多实例生产部署方案。
+客服工作流当前使用有界 TTL 内存会话存储，默认最多 10,000 条、TTL 24 小时；客服请求通过 `Idempotency-Key` 防止进程内重试重复建单，幂等作用域包含 `handle/reply` 操作和 reply 的目标会话。历史请求结果保持不变，当前工单状态通过会话或以 `CustomerTicketPort` 为唯一来源的工单查询获得。会话过期或容量淘汰时，工作流会协调删除对应工单，避免不可达的内存工单。此次重构建立了 `CustomerSessionStore` 与 `CustomerTicketPort` 的替换边界，但没有提供持久化实现，也没有提供真实 Agent 系统；默认 Mock 分类和关键词检索仍是确定性的本地实现。当前实现适合本地学习、演示和测试，不适合直接作为多实例生产部署方案。
 
 生产化时应替换：
 
@@ -316,17 +316,19 @@ riskGate
 | `GET` | `/api/workflows/{workflowId}/events` | 订阅工作流 SSE 事件 |
 | `POST` | `/api/customer-service/sessions` | 提交客服问题，支持 `Idempotency-Key` 请求头 |
 | `GET` | `/api/customer-service/sessions/{sessionId}` | 查询客服会话结果 |
+| `POST` | `/api/customer-service/sessions/{sessionId}/messages` | 在目标客服会话中继续提问，支持 `Idempotency-Key` 请求头 |
+| `GET` | `/api/customer-service/sessions/{sessionId}/conversation` | 查询客服消息历史和安全检索轨迹 |
 | `GET` | `/api/customer-service/tickets` | 客服坐席查询人工工单队列 |
 | `PATCH` | `/api/customer-service/tickets/{ticketId}` | 按状态机推进客服工单 |
 | `GET` | `/api/workflows/{workflowId}/observability` | 查看安全事件、工具调用和失败节点汇总 |
 | `POST` | `/api/demo/faults` | 管理员注入一次性演示故障 |
-
 | `GET` | `/api/knowledge` | 管理员查看知识文档元数据 |
 | `POST` | `/api/knowledge` | 管理员新增知识文档 |
 | `PATCH` | `/api/knowledge/{documentId}/active` | 管理员启用或停用知识文档 |
 | `POST` | `/api/feedback` | 坐席、审批人或管理员提交枚举化反馈 |
 | `GET` | `/api/feedback` | 管理员查看反馈记录 |
 | `GET` | `/api/operations/metrics` | 查看工作流、客服、知识、反馈和审计聚合数量 |
+| `GET` | `/api/audit` | 管理员查看脱敏审计记录 |
 
 ### 6.2 演示角色、观测与故障
 

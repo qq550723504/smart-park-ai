@@ -59,14 +59,14 @@ public final class CustomerServiceWorkflow {
     public synchronized CustomerServiceResult handle(String question, String idempotencyKey) {
         String normalizedQuestion = requireQuestion(question);
         String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
+        CustomerSessionStore.IdempotencyScope scope = new CustomerSessionStore.IdempotencyScope(
+                CustomerSessionStore.IdempotencyOperation.HANDLE, null);
         Instant now = Instant.now(clock);
+        retireEvictedSessions(now);
         if (normalizedKey != null) {
             CustomerSessionStore.IdempotencyRecord existing = sessionStore.findIdempotency(normalizedKey, now).orElse(null);
             if (existing != null) {
-                if (!existing.question().equals(normalizedQuestion)) {
-                    throw new IllegalStateException("Idempotency key was already used for another question");
-                }
-                return existing.result();
+                return replay(existing, scope, normalizedQuestion);
             }
         }
 
@@ -88,33 +88,34 @@ public final class CustomerServiceWorkflow {
                         new CustomerConversation.Message("ASSISTANT", result.answer(), now)),
                 List.of(new CustomerConversation.RetrievalTrace(
                         intent.query, documents.stream().map(KnowledgeDocument::id).toList(), now)), now);
+        retireEvictedSessions(now);
 
         if (normalizedKey != null) {
-            sessionStore.rememberIdempotency(normalizedKey, normalizedQuestion, result, now);
+            sessionStore.rememberIdempotency(normalizedKey, scope, normalizedQuestion, result, now);
         }
         return result;
     }
 
     public synchronized CustomerServiceResult reply(String sessionId, String question, String idempotencyKey) {
         Instant now = Instant.now(clock);
+        retireEvictedSessions(now);
         CustomerSessionStore.SessionSnapshot current = requiredSnapshot(sessionId, now);
-        if (current.result().needsHuman()) {
-            throw new IllegalStateException("Customer service session is handled by a human agent");
-        }
         String normalizedQuestion = requireQuestion(question);
         String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
+        CustomerSessionStore.IdempotencyScope scope = new CustomerSessionStore.IdempotencyScope(
+                CustomerSessionStore.IdempotencyOperation.REPLY, sessionId);
         CustomerSessionStore.IdempotencyRecord existing = normalizedKey == null
                 ? null : sessionStore.findIdempotency(normalizedKey, now).orElse(null);
         if (existing != null) {
-            if (!existing.question().equals(normalizedQuestion)) {
-                throw new IllegalStateException("Idempotency key was already used for another question");
-            }
-            return existing.result();
+            return replay(existing, scope, normalizedQuestion);
+        }
+        if (current.result().needsHuman()) {
+            throw new IllegalStateException("Customer service session is handled by a human agent");
         }
         Intent classified = classify(normalizedQuestion);
         Intent intent = classified == Intent.GENERAL ? Intent.valueOf(current.result().intent()) : classified;
         List<KnowledgeDocument> documents = knowledgePort.search(intent.query);
-        boolean needsHuman = documents.isEmpty();
+        boolean needsHuman = intent == Intent.REPAIR || documents.isEmpty();
         CustomerTicket ticket = needsHuman ? createTicket(sessionId, intent) : null;
         CustomerServiceResult result = new CustomerServiceResult(
                 sessionId, intent.name(), answer(intent, documents, needsHuman, ticket),
@@ -127,42 +128,64 @@ public final class CustomerServiceWorkflow {
                 intent.query, documents.stream().map(KnowledgeDocument::id).toList(), now));
         sessionStore.update(new CustomerSessionStore.SessionSnapshot(
                 sessionId, result, current.createdAt(), messages, retrievals));
-        if (normalizedKey != null) sessionStore.rememberIdempotency(normalizedKey, normalizedQuestion, result, now);
+        if (normalizedKey != null) {
+            sessionStore.rememberIdempotency(normalizedKey, scope, normalizedQuestion, result, now);
+        }
         return result;
     }
 
     public CustomerConversation conversation(String sessionId) {
-        CustomerSessionStore.SessionSnapshot entry = requiredSnapshot(sessionId, Instant.now(clock));
+        Instant now = Instant.now(clock);
+        retireEvictedSessions(now);
+        CustomerSessionStore.SessionSnapshot entry = requiredSnapshot(sessionId, now);
         return new CustomerConversation(sessionId, entry.messages(), entry.retrievals(), entry.result().needsHuman());
     }
 
     public int sessionCount() {
-        return sessionStore.count(Instant.now(clock));
+        Instant now = Instant.now(clock);
+        retireEvictedSessions(now);
+        return sessionStore.count(now);
     }
 
     public synchronized List<CustomerServiceResult> tickets() {
-        return sessionStore.withTickets(Instant.now(clock)).stream()
-                .map(CustomerSessionStore.SessionSnapshot::result)
-                .toList();
+        Instant now = Instant.now(clock);
+        retireEvictedSessions(now);
+        List<CustomerServiceResult> results = new java.util.ArrayList<>();
+        for (CustomerTicket ticket : ticketPort.list()) {
+            CustomerSessionStore.SessionSnapshot snapshot = sessionStore.find(ticket.sessionId(), now).orElse(null);
+            if (snapshot == null) {
+                ticketPort.deleteBySessionId(ticket.sessionId());
+                continue;
+            }
+            results.add(withTicket(snapshot.result(), ticket));
+        }
+        return List.copyOf(results);
     }
 
     public synchronized CustomerServiceResult updateTicket(String ticketId, String status) {
+        Instant now = Instant.now(clock);
+        retireEvictedSessions(now);
         CustomerTicketStatus nextStatus = CustomerTicketStatus.valueOf(status);
-        CustomerSessionStore.SessionSnapshot match = sessionStore.withTickets(Instant.now(clock)).stream()
-                .filter(snapshot -> snapshot.result().ticket().id().equals(ticketId))
+        CustomerTicket currentTicket = ticketPort.list().stream()
+                .filter(ticket -> ticket.id().equals(ticketId))
                 .findFirst()
                 .orElseThrow(() -> new NoSuchElementException("Unknown customer service ticket: " + ticketId));
+        CustomerSessionStore.SessionSnapshot match = sessionStore.find(currentTicket.sessionId(), now).orElse(null);
+        if (match == null) {
+            ticketPort.deleteBySessionId(currentTicket.sessionId());
+            throw new NoSuchElementException("Unknown customer service ticket: " + ticketId);
+        }
+        currentTicket.transitionTo(nextStatus);
         CustomerTicket updatedTicket = ticketPort.update(ticketId, nextStatus);
-        CustomerServiceResult current = match.result();
-        CustomerServiceResult updated = new CustomerServiceResult(
-                current.sessionId(), current.intent(), current.answer(), current.knowledgeSources(), true, updatedTicket);
+        CustomerServiceResult updated = withTicket(match.result(), updatedTicket);
         sessionStore.update(new CustomerSessionStore.SessionSnapshot(
                 match.sessionId(), updated, match.createdAt(), match.messages(), match.retrievals()));
-        sessionStore.updateIdempotencyResults(match.sessionId(), updated);
         return updated;
     }
     public CustomerServiceResult get(String sessionId) {
-        return requiredSnapshot(sessionId, Instant.now(clock)).result();
+        Instant now = Instant.now(clock);
+        retireEvictedSessions(now);
+        return requiredSnapshot(sessionId, now).result();
     }
 
     private CustomerSessionStore.SessionSnapshot requiredSnapshot(String sessionId, Instant now) {
@@ -172,6 +195,27 @@ public final class CustomerServiceWorkflow {
 
     private CustomerTicket createTicket(String sessionId, Intent intent) {
         return ticketPort.create(sessionId, intent.name(), intent.safeTicketSummary, Instant.now(clock));
+    }
+
+    private void retireEvictedSessions(Instant now) {
+        sessionStore.evict(now).forEach(ticketPort::deleteBySessionId);
+    }
+
+    private static CustomerServiceResult withTicket(CustomerServiceResult current, CustomerTicket ticket) {
+        return new CustomerServiceResult(
+                current.sessionId(), current.intent(), current.answer(), current.knowledgeSources(), true, ticket);
+    }
+
+    private static CustomerServiceResult replay(CustomerSessionStore.IdempotencyRecord existing,
+                                                CustomerSessionStore.IdempotencyScope expectedScope,
+                                                String normalizedQuestion) {
+        if (!existing.question().equals(normalizedQuestion)) {
+            throw new IllegalStateException("Idempotency key was already used for another question");
+        }
+        if (!existing.scope().equals(expectedScope)) {
+            throw new IllegalStateException("Idempotency key was already used for another operation or session");
+        }
+        return existing.result();
     }
 
     private static Intent classify(String question) {
