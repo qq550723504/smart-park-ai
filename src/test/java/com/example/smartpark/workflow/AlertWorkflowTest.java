@@ -4,13 +4,13 @@ import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.example.smartpark.agent.AlertDiagnosisAgent;
 import com.example.smartpark.agent.AlertTriageAgent;
 import com.example.smartpark.agent.TestChatModel;
-import com.example.smartpark.model.ApprovalDecision;
-import com.example.smartpark.model.Diagnosis;
-import com.example.smartpark.model.WorkOrder;
-import com.example.smartpark.model.WorkflowStatus;
-import com.example.smartpark.park.AlertPort;
-import com.example.smartpark.park.KnowledgePort;
-import com.example.smartpark.park.WorkOrderPort;
+import com.example.smartpark.model.common.ApprovalDecision;
+import com.example.smartpark.model.common.Diagnosis;
+import com.example.smartpark.model.common.WorkOrder;
+import com.example.smartpark.model.common.WorkflowStatus;
+import com.example.smartpark.port.alert.AlertPort;
+import com.example.smartpark.port.knowledge.KnowledgePort;
+import com.example.smartpark.port.workorder.WorkOrderPort;
 import com.example.smartpark.park.mock.MockParkSystem;
 import com.example.smartpark.tool.AlertQueryTool;
 import com.example.smartpark.tool.DeviceQueryTool;
@@ -467,7 +467,7 @@ class AlertWorkflowTest {
                 "diag-" + alertId,
                 alertId,
                 deviceId,
-                com.example.smartpark.model.RiskLevel.valueOf(riskLevel),
+                com.example.smartpark.model.common.RiskLevel.valueOf(riskLevel),
                 "fixture root cause",
                 "fixture diagnosis summary",
                 List.of(evidence),

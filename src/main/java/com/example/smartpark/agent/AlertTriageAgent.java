@@ -1,8 +1,8 @@
 package com.example.smartpark.agent;
 
-import com.example.smartpark.model.Alert;
-import com.example.smartpark.model.AlertClassification;
-import com.example.smartpark.model.RiskLevel;
+import com.example.smartpark.model.alert.Alert;
+import com.example.smartpark.model.alert.AlertClassification;
+import com.example.smartpark.model.common.RiskLevel;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;

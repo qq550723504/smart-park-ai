@@ -3,13 +3,13 @@ package com.example.smartpark.workflow;
 import com.example.smartpark.agent.AlertDiagnosisAgent;
 import com.example.smartpark.agent.AlertTriageAgent;
 import com.example.smartpark.agent.TestChatModel;
-import com.example.smartpark.model.ApprovalDecision;
-import com.example.smartpark.model.WorkOrder;
-import com.example.smartpark.model.WorkflowStatus;
-import com.example.smartpark.park.AlertPort;
-import com.example.smartpark.park.DevicePort;
-import com.example.smartpark.park.KnowledgePort;
-import com.example.smartpark.park.WorkOrderPort;
+import com.example.smartpark.model.common.ApprovalDecision;
+import com.example.smartpark.model.common.WorkOrder;
+import com.example.smartpark.model.common.WorkflowStatus;
+import com.example.smartpark.port.alert.AlertPort;
+import com.example.smartpark.port.device.DevicePort;
+import com.example.smartpark.port.knowledge.KnowledgePort;
+import com.example.smartpark.port.workorder.WorkOrderPort;
 import com.example.smartpark.park.mock.MockParkSystem;
 import com.example.smartpark.tool.AlertQueryTool;
 import com.example.smartpark.tool.DeviceQueryTool;
@@ -129,12 +129,12 @@ class AlertWorkflowFailureTest {
         MockParkSystem park = new MockParkSystem();
         AlertPort failingHistory = new AlertPort() {
             @Override
-            public com.example.smartpark.model.Alert getAlert(String alertId) {
+            public com.example.smartpark.model.alert.Alert getAlert(String alertId) {
                 return park.getAlert(alertId);
             }
 
             @Override
-            public List<com.example.smartpark.model.Alert> findHistory(String deviceId) {
+            public List<com.example.smartpark.model.alert.Alert> findHistory(String deviceId) {
                 throw new IllegalStateException("alert service token=private-alert-token");
             }
         };

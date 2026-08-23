@@ -1,18 +1,18 @@
 package com.example.smartpark.park.mock;
 
-import com.example.smartpark.model.Alert;
-import com.example.smartpark.model.AlertClassification;
-import com.example.smartpark.model.Device;
-import com.example.smartpark.model.EnergyReading;
-import com.example.smartpark.model.KnowledgeDocument;
-import com.example.smartpark.model.RiskLevel;
-import com.example.smartpark.model.WorkOrder;
-import com.example.smartpark.model.WorkflowStatus;
-import com.example.smartpark.park.AlertPort;
-import com.example.smartpark.park.DevicePort;
-import com.example.smartpark.park.EnergyPort;
-import com.example.smartpark.park.KnowledgePort;
-import com.example.smartpark.park.WorkOrderPort;
+import com.example.smartpark.model.alert.Alert;
+import com.example.smartpark.model.alert.AlertClassification;
+import com.example.smartpark.model.common.Device;
+import com.example.smartpark.model.energy.EnergyReading;
+import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.model.common.RiskLevel;
+import com.example.smartpark.model.common.WorkOrder;
+import com.example.smartpark.model.common.WorkflowStatus;
+import com.example.smartpark.port.alert.AlertPort;
+import com.example.smartpark.port.device.DevicePort;
+import com.example.smartpark.port.energy.EnergyPort;
+import com.example.smartpark.port.knowledge.KnowledgePort;
+import com.example.smartpark.port.workorder.WorkOrderPort;
 
 import java.time.Instant;
 import java.time.Duration;

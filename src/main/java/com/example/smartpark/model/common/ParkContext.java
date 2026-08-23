@@ -1,4 +1,6 @@
-package com.example.smartpark.model;
+package com.example.smartpark.model.common;
+
+import com.example.smartpark.model.alert.Alert;
 
 import java.util.List;
 import java.util.Objects;

@@ -13,12 +13,12 @@ import com.alibaba.cloud.ai.graph.serializer.StateSerializer;
 import com.alibaba.cloud.ai.graph.serializer.plain_text.jackson.SpringAIJacksonStateSerializer;
 import com.example.smartpark.agent.AlertDiagnosisAgent;
 import com.example.smartpark.agent.AlertTriageAgent;
-import com.example.smartpark.model.ApprovalDecision;
-import com.example.smartpark.model.WorkflowStatus;
-import com.example.smartpark.park.AlertPort;
-import com.example.smartpark.park.DevicePort;
-import com.example.smartpark.park.KnowledgePort;
-import com.example.smartpark.park.WorkOrderPort;
+import com.example.smartpark.model.common.ApprovalDecision;
+import com.example.smartpark.model.common.WorkflowStatus;
+import com.example.smartpark.port.alert.AlertPort;
+import com.example.smartpark.port.device.DevicePort;
+import com.example.smartpark.port.knowledge.KnowledgePort;
+import com.example.smartpark.port.workorder.WorkOrderPort;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.Clock;

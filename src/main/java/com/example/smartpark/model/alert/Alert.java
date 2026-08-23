@@ -1,4 +1,6 @@
-package com.example.smartpark.model;
+package com.example.smartpark.model.alert;
+
+import com.example.smartpark.model.common.RiskLevel;
 
 import java.time.Instant;
 import java.util.List;

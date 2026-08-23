@@ -1,11 +1,11 @@
 package com.example.smartpark.web;
 
-import com.example.smartpark.model.Alert;
-import com.example.smartpark.model.AlertClassification;
-import com.example.smartpark.model.ApprovalDecision;
-import com.example.smartpark.model.RiskLevel;
-import com.example.smartpark.model.WorkflowStatus;
-import com.example.smartpark.park.AlertPort;
+import com.example.smartpark.model.alert.Alert;
+import com.example.smartpark.model.alert.AlertClassification;
+import com.example.smartpark.model.common.ApprovalDecision;
+import com.example.smartpark.model.common.RiskLevel;
+import com.example.smartpark.model.common.WorkflowStatus;
+import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.workflow.AlertWorkflow;
 import com.example.smartpark.workflow.WorkflowEventPublisher;
 import com.example.smartpark.workflow.WorkflowSnapshot;

@@ -1,7 +1,7 @@
 package com.example.smartpark.tool;
 
-import com.example.smartpark.model.Alert;
-import com.example.smartpark.park.AlertPort;
+import com.example.smartpark.model.alert.Alert;
+import com.example.smartpark.port.alert.AlertPort;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;

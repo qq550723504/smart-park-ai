@@ -1,5 +1,7 @@
 package com.example.smartpark.model;
 
+import com.example.smartpark.model.common.Diagnosis;
+import com.example.smartpark.model.common.RiskLevel;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 

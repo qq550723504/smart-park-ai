@@ -1,9 +1,9 @@
 package com.example.smartpark.workflow;
 
-import com.example.smartpark.model.ApprovalDecision;
-import com.example.smartpark.model.Diagnosis;
-import com.example.smartpark.model.WorkOrder;
-import com.example.smartpark.model.WorkflowStatus;
+import com.example.smartpark.model.common.ApprovalDecision;
+import com.example.smartpark.model.common.Diagnosis;
+import com.example.smartpark.model.common.WorkOrder;
+import com.example.smartpark.model.common.WorkflowStatus;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;

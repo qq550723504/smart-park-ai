@@ -1,6 +1,6 @@
-package com.example.smartpark.park;
+package com.example.smartpark.port.alert;
 
-import com.example.smartpark.model.Alert;
+import com.example.smartpark.model.alert.Alert;
 
 import java.util.List;
 

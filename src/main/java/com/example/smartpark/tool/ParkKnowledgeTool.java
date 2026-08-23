@@ -1,7 +1,7 @@
 package com.example.smartpark.tool;
 
-import com.example.smartpark.model.KnowledgeDocument;
-import com.example.smartpark.park.KnowledgePort;
+import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.port.knowledge.KnowledgePort;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;

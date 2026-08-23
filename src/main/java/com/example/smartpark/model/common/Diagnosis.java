@@ -1,4 +1,4 @@
-package com.example.smartpark.model;
+package com.example.smartpark.model.common;
 
 import java.time.Instant;
 import java.util.List;

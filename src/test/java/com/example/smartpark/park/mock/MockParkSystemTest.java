@@ -1,8 +1,8 @@
 package com.example.smartpark.park.mock;
 
-import com.example.smartpark.model.Alert;
-import com.example.smartpark.model.RiskLevel;
-import com.example.smartpark.model.WorkOrder;
+import com.example.smartpark.model.alert.Alert;
+import com.example.smartpark.model.common.RiskLevel;
+import com.example.smartpark.model.common.WorkOrder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -48,7 +48,7 @@ class MockParkSystemTest {
     void energyAlertHasLatestConsumptionAboveItsBaseline() {
         Alert alert = mockParkSystem.getAlert("ALT-ENERGY-001");
 
-        assertThat(alert.classification()).isEqualTo(com.example.smartpark.model.AlertClassification.ENERGY);
+        assertThat(alert.classification()).isEqualTo(com.example.smartpark.model.alert.AlertClassification.ENERGY);
         assertThat(mockParkSystem.getLatestEnergyReading("DEV-ENERGY-001").varianceRatio())
                 .isEqualTo(0.38);
     }

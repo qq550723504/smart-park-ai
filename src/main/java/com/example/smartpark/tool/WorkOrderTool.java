@@ -1,7 +1,7 @@
 package com.example.smartpark.tool;
 
-import com.example.smartpark.model.WorkOrder;
-import com.example.smartpark.park.WorkOrderPort;
+import com.example.smartpark.model.common.WorkOrder;
+import com.example.smartpark.port.workorder.WorkOrderPort;
 import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.annotation.Tool;

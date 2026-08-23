@@ -3,7 +3,7 @@ package com.example.smartpark.workflow;
 import com.example.smartpark.agent.AlertDiagnosisAgent;
 import com.example.smartpark.agent.AlertTriageAgent;
 import com.example.smartpark.agent.TestChatModel;
-import com.example.smartpark.model.WorkflowStatus;
+import com.example.smartpark.model.common.WorkflowStatus;
 import com.example.smartpark.park.mock.MockParkSystem;
 import com.example.smartpark.tool.AlertQueryTool;
 import com.example.smartpark.tool.DeviceQueryTool;

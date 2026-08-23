@@ -1,6 +1,6 @@
 package com.example.smartpark.web;
 
-import com.example.smartpark.model.WorkflowStatus;
+import com.example.smartpark.model.common.WorkflowStatus;
 import com.example.smartpark.workflow.AlertWorkflow;
 import com.example.smartpark.workflow.WorkflowEvent;
 import com.example.smartpark.workflow.WorkflowEventPublisher;

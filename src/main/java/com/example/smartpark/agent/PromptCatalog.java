@@ -1,9 +1,9 @@
 package com.example.smartpark.agent;
 
-import com.example.smartpark.model.Alert;
-import com.example.smartpark.model.KnowledgeDocument;
-import com.example.smartpark.model.ParkContext;
-import com.example.smartpark.model.WorkOrder;
+import com.example.smartpark.model.alert.Alert;
+import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.model.common.ParkContext;
+import com.example.smartpark.model.common.WorkOrder;
 
 import java.util.List;
 import java.util.Objects;

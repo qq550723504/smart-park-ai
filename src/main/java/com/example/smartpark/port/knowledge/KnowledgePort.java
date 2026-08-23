@@ -1,6 +1,6 @@
-package com.example.smartpark.park;
+package com.example.smartpark.port.knowledge;
 
-import com.example.smartpark.model.KnowledgeDocument;
+import com.example.smartpark.model.common.KnowledgeDocument;
 
 import java.util.List;
 

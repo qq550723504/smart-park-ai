@@ -1,11 +1,11 @@
 package com.example.smartpark;
 
-import com.example.smartpark.model.ApprovalDecision;
-import com.example.smartpark.model.Diagnosis;
-import com.example.smartpark.model.RiskLevel;
-import com.example.smartpark.model.WorkOrder;
-import com.example.smartpark.model.WorkflowStatus;
-import com.example.smartpark.park.AlertPort;
+import com.example.smartpark.model.common.ApprovalDecision;
+import com.example.smartpark.model.common.Diagnosis;
+import com.example.smartpark.model.common.RiskLevel;
+import com.example.smartpark.model.common.WorkOrder;
+import com.example.smartpark.model.common.WorkflowStatus;
+import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.web.AlertWorkflowController;
 import com.example.smartpark.web.ApiExceptionHandler;
 import com.example.smartpark.web.WebDtos;

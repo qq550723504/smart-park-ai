@@ -1,7 +1,7 @@
 package com.example.smartpark.tool;
 
-import com.example.smartpark.model.Device;
-import com.example.smartpark.park.DevicePort;
+import com.example.smartpark.model.common.Device;
+import com.example.smartpark.port.device.DevicePort;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;

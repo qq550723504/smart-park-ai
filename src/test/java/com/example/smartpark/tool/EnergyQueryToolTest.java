@@ -1,6 +1,6 @@
 package com.example.smartpark.tool;
 
-import com.example.smartpark.model.EnergyReading;
+import com.example.smartpark.model.energy.EnergyReading;
 import com.example.smartpark.park.mock.MockParkSystem;
 import org.junit.jupiter.api.Test;
 

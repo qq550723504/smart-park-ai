@@ -1,10 +1,10 @@
 package com.example.smartpark.agent;
 
-import com.example.smartpark.model.Alert;
-import com.example.smartpark.model.Diagnosis;
-import com.example.smartpark.model.KnowledgeDocument;
-import com.example.smartpark.model.ParkContext;
-import com.example.smartpark.model.RiskLevel;
+import com.example.smartpark.model.alert.Alert;
+import com.example.smartpark.model.common.Diagnosis;
+import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.model.common.ParkContext;
+import com.example.smartpark.model.common.RiskLevel;
 import com.example.smartpark.tool.AlertQueryTool;
 import com.example.smartpark.tool.DeviceQueryTool;
 import com.example.smartpark.tool.EnergyQueryTool;

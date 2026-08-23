@@ -2,7 +2,7 @@ package com.example.smartpark.web;
 
 import com.example.smartpark.agent.AlertDiagnosisAgent;
 import com.example.smartpark.agent.AlertTriageAgent;
-import com.example.smartpark.park.AlertPort;
+import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.park.mock.MockParkSystem;
 import com.example.smartpark.workflow.AlertWorkflow;
 import com.example.smartpark.workflow.WorkflowEventPublisher;

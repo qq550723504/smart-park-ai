@@ -1,6 +1,6 @@
-package com.example.smartpark.park;
+package com.example.smartpark.port.workorder;
 
-import com.example.smartpark.model.WorkOrder;
+import com.example.smartpark.model.common.WorkOrder;
 
 import java.util.List;
 

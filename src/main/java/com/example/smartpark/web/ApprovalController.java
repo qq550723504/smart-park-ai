@@ -1,6 +1,6 @@
 package com.example.smartpark.web;
 
-import com.example.smartpark.model.ApprovalDecision;
+import com.example.smartpark.model.common.ApprovalDecision;
 import com.example.smartpark.workflow.AlertWorkflow;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;

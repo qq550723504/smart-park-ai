@@ -1,0 +1,26 @@
+package com.example.smartpark.architecture;
+
+import com.example.smartpark.model.alert.Alert;
+import com.example.smartpark.model.energy.EnergyReading;
+import com.example.smartpark.port.energy.EnergyPort;
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class CapabilityPackageTest {
+
+    @Test
+    void placesAlertInAlertModelPackage() {
+        assertThat(Alert.class.getPackageName()).isEqualTo("com.example.smartpark.model.alert");
+    }
+
+    @Test
+    void placesEnergyReadingInEnergyModelPackage() {
+        assertThat(EnergyReading.class.getPackageName()).isEqualTo("com.example.smartpark.model.energy");
+    }
+
+    @Test
+    void placesEnergyPortInEnergyPortPackage() {
+        assertThat(EnergyPort.class.getPackageName()).isEqualTo("com.example.smartpark.port.energy");
+    }
+}

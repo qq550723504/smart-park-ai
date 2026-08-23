@@ -1,5 +1,6 @@
 package com.example.smartpark.model;
 
+import com.example.smartpark.model.energy.EnergyReading;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;

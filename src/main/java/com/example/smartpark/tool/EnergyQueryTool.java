@@ -1,7 +1,7 @@
 package com.example.smartpark.tool;
 
-import com.example.smartpark.model.EnergyReading;
-import com.example.smartpark.park.EnergyPort;
+import com.example.smartpark.model.energy.EnergyReading;
+import com.example.smartpark.port.energy.EnergyPort;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;

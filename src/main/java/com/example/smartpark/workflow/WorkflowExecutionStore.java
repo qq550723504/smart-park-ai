@@ -3,7 +3,7 @@ package com.example.smartpark.workflow;
 import com.alibaba.cloud.ai.graph.CompiledGraph;
 import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.alibaba.cloud.ai.graph.action.InterruptionMetadata;
-import com.example.smartpark.model.WorkflowStatus;
+import com.example.smartpark.model.common.WorkflowStatus;
 
 import java.util.Map;
 import java.util.Objects;

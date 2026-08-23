@@ -1,11 +1,11 @@
 package com.example.smartpark.workflow;
 
 import com.example.smartpark.agent.AlertTriageAgent;
-import com.example.smartpark.model.Alert;
-import com.example.smartpark.model.AlertClassification;
-import com.example.smartpark.model.Diagnosis;
-import com.example.smartpark.model.KnowledgeDocument;
-import com.example.smartpark.model.RiskLevel;
+import com.example.smartpark.model.alert.Alert;
+import com.example.smartpark.model.alert.AlertClassification;
+import com.example.smartpark.model.common.Diagnosis;
+import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.model.common.RiskLevel;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
