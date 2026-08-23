@@ -84,8 +84,15 @@ class CustomerServiceWorkflowPortTest {
         }
 
         @Override
-        public void rememberIdempotency(String key, String question, String sessionId, Instant createdAt) {
-            idempotency.put(key, new IdempotencyRecord(question, sessionId, createdAt));
+        public void rememberIdempotency(String key, String question, CustomerServiceResult result, Instant createdAt) {
+            idempotency.put(key, new IdempotencyRecord(question, result, createdAt));
+        }
+
+        @Override
+        public void updateIdempotencyResults(String sessionId, CustomerServiceResult result) {
+            idempotency.replaceAll((key, record) -> record.result().sessionId().equals(sessionId)
+                    ? new IdempotencyRecord(record.question(), result, record.createdAt())
+                    : record);
         }
 
         @Override

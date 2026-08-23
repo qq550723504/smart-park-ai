@@ -78,9 +78,17 @@ public final class InMemoryCustomerSessionStore implements CustomerSessionStore 
     }
 
     @Override
-    public synchronized void rememberIdempotency(String key, String question, String sessionId, Instant createdAt) {
+    public synchronized void rememberIdempotency(String key, String question, CustomerServiceResult result, Instant createdAt) {
         evictExpiredAndOverCapacity(clock.instant());
-        idempotencyRecords.put(key, new IdempotencyRecord(question, sessionId, createdAt));
+        idempotencyRecords.put(key, new IdempotencyRecord(question, result, createdAt));
+    }
+
+    @Override
+    public synchronized void updateIdempotencyResults(String sessionId, CustomerServiceResult result) {
+        evictExpiredAndOverCapacity(clock.instant());
+        idempotencyRecords.replaceAll((key, record) -> record.result().sessionId().equals(sessionId)
+                ? new IdempotencyRecord(record.question(), result, record.createdAt())
+                : record);
     }
 
     @Override
@@ -109,7 +117,7 @@ public final class InMemoryCustomerSessionStore implements CustomerSessionStore 
             if (oldest == null || !sessions.remove(oldest.getKey(), oldest.getValue())) {
                 return;
             }
-            idempotencyRecords.entrySet().removeIf(entry -> entry.getValue().sessionId().equals(oldest.getKey()));
+            idempotencyRecords.entrySet().removeIf(entry -> entry.getValue().result().sessionId().equals(oldest.getKey()));
         }
     }
 

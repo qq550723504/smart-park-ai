@@ -54,7 +54,7 @@ class InMemoryCustomerSessionStoreTest {
         InMemoryCustomerSessionStore store =
                 new InMemoryCustomerSessionStore(clock, 10, Duration.ofMinutes(5));
         store.create("cs-1", result("cs-1"), List.of(), List.of(), clock.instant());
-        store.rememberIdempotency("request-1", "same question", "cs-1", clock.instant());
+        store.rememberIdempotency("request-1", "same question", result("cs-1"), clock.instant());
 
         clock.advance(Duration.ofMinutes(6));
 
@@ -67,7 +67,7 @@ class InMemoryCustomerSessionStoreTest {
         MutableClock clock = new MutableClock(Instant.parse("2026-08-23T02:00:00Z"));
         InMemoryCustomerSessionStore store = new InMemoryCustomerSessionStore(clock, 2, Duration.ofHours(1));
         store.create("cs-1", result("cs-1"), List.of(), List.of(), clock.instant());
-        store.rememberIdempotency("request-1", "first", "cs-1", clock.instant());
+        store.rememberIdempotency("request-1", "first", result("cs-1"), clock.instant());
         store.create("cs-2", result("cs-2"), List.of(), List.of(), clock.instant());
         store.create("cs-3", result("cs-3"), List.of(), List.of(), clock.instant());
 
@@ -81,10 +81,10 @@ class InMemoryCustomerSessionStoreTest {
     void reusesTheRememberedIdempotencyRecord() {
         MutableClock clock = new MutableClock(Instant.parse("2026-08-23T02:00:00Z"));
         InMemoryCustomerSessionStore store = new InMemoryCustomerSessionStore(clock, 10, Duration.ofHours(1));
-        store.rememberIdempotency("request-1", "same question", "cs-1", clock.instant());
+        store.rememberIdempotency("request-1", "same question", result("cs-1"), clock.instant());
 
         assertThat(store.findIdempotency("request-1", clock.instant()))
-                .contains(new CustomerSessionStore.IdempotencyRecord("same question", "cs-1", clock.instant()));
+                .contains(new CustomerSessionStore.IdempotencyRecord("same question", result("cs-1"), clock.instant()));
     }
 
     private static CustomerServiceResult result(String sessionId) {

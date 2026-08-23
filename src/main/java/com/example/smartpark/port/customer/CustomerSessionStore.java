@@ -20,7 +20,9 @@ public interface CustomerSessionStore {
 
     SessionSnapshot update(SessionSnapshot snapshot);
 
-    void rememberIdempotency(String key, String question, String sessionId, Instant createdAt);
+    void rememberIdempotency(String key, String question, CustomerServiceResult result, Instant createdAt);
+
+    void updateIdempotencyResults(String sessionId, CustomerServiceResult result);
 
     List<SessionSnapshot> withTickets(Instant now);
 
@@ -41,10 +43,10 @@ public interface CustomerSessionStore {
         }
     }
 
-    record IdempotencyRecord(String question, String sessionId, Instant createdAt) {
+    record IdempotencyRecord(String question, CustomerServiceResult result, Instant createdAt) {
         public IdempotencyRecord {
             question = Objects.requireNonNull(question, "question");
-            sessionId = Objects.requireNonNull(sessionId, "sessionId");
+            result = Objects.requireNonNull(result, "result");
             createdAt = Objects.requireNonNull(createdAt, "createdAt");
         }
     }

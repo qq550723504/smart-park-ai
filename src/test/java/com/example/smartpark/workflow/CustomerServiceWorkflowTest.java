@@ -60,6 +60,17 @@ class CustomerServiceWorkflowTest {
     }
 
     @Test
+    void idempotentHandleRetryReturnsItsOriginalResultAfterALaterReply() {
+        CustomerServiceResult first = workflow.handle("访客停车怎么收费？", "parking-request");
+        CustomerServiceResult reply = workflow.reply(first.sessionId(), "访客如何预约进入园区？", "visitor-request");
+
+        CustomerServiceResult retry = workflow.handle("访客停车怎么收费？", "parking-request");
+
+        assertThat(reply.intent()).isEqualTo("VISITOR");
+        assertThat(retry).isEqualTo(first);
+    }
+
+    @Test
     void agentCanMoveTicketThroughTheSupportedLifecycle() {
         CustomerServiceResult created = workflow.handle("A1 洗手间漏水，需要报修");
 
@@ -121,6 +132,25 @@ class CustomerServiceWorkflowTest {
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> expiring.get("cs-expiring"))
                 .isInstanceOf(java.util.NoSuchElementException.class);
+    }
+
+    @Test
+    void expiredSessionPreventsTicketTransitionFromPersisting() {
+        MutableClock mutableClock = new MutableClock(Instant.parse("2026-08-23T02:00:00Z"));
+        InMemoryCustomerTicketAdapter tickets = new InMemoryCustomerTicketAdapter();
+        CustomerServiceWorkflow expiring = new CustomerServiceWorkflow(
+                new MockParkFixture().knowledge(),
+                new InMemoryCustomerSessionStore(mutableClock, 10, Duration.ofMinutes(5)),
+                tickets, mutableClock, () -> "cs-expiring-ticket");
+        CustomerServiceResult created = expiring.handle("A1 洗手间漏水，需要报修");
+        mutableClock.instant = Instant.parse("2026-08-23T02:06:00Z");
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> expiring.updateTicket(created.ticket().id(), "ASSIGNED"))
+                .isInstanceOf(java.util.NoSuchElementException.class)
+                .hasMessage("Unknown customer service ticket: " + created.ticket().id());
+
+        assertThat(tickets.list()).containsExactly(created.ticket());
     }
 
     @Test

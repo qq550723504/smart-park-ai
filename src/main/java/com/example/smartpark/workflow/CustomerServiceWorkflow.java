@@ -66,7 +66,7 @@ public final class CustomerServiceWorkflow {
                 if (!existing.question().equals(normalizedQuestion)) {
                     throw new IllegalStateException("Idempotency key was already used for another question");
                 }
-                return requiredSnapshot(existing.sessionId(), now).result();
+                return existing.result();
             }
         }
 
@@ -90,7 +90,7 @@ public final class CustomerServiceWorkflow {
                         intent.query, documents.stream().map(KnowledgeDocument::id).toList(), now)), now);
 
         if (normalizedKey != null) {
-            sessionStore.rememberIdempotency(normalizedKey, normalizedQuestion, sessionId, now);
+            sessionStore.rememberIdempotency(normalizedKey, normalizedQuestion, result, now);
         }
         return result;
     }
@@ -109,7 +109,7 @@ public final class CustomerServiceWorkflow {
             if (!existing.question().equals(normalizedQuestion)) {
                 throw new IllegalStateException("Idempotency key was already used for another question");
             }
-            return requiredSnapshot(existing.sessionId(), now).result();
+            return existing.result();
         }
         Intent classified = classify(normalizedQuestion);
         Intent intent = classified == Intent.GENERAL ? Intent.valueOf(current.result().intent()) : classified;
@@ -127,7 +127,7 @@ public final class CustomerServiceWorkflow {
                 intent.query, documents.stream().map(KnowledgeDocument::id).toList(), now));
         sessionStore.update(new CustomerSessionStore.SessionSnapshot(
                 sessionId, result, current.createdAt(), messages, retrievals));
-        if (normalizedKey != null) sessionStore.rememberIdempotency(normalizedKey, normalizedQuestion, sessionId, now);
+        if (normalizedKey != null) sessionStore.rememberIdempotency(normalizedKey, normalizedQuestion, result, now);
         return result;
     }
 
@@ -148,16 +148,17 @@ public final class CustomerServiceWorkflow {
 
     public synchronized CustomerServiceResult updateTicket(String ticketId, String status) {
         CustomerTicketStatus nextStatus = CustomerTicketStatus.valueOf(status);
-        CustomerTicket updatedTicket = ticketPort.update(ticketId, nextStatus);
         CustomerSessionStore.SessionSnapshot match = sessionStore.withTickets(Instant.now(clock)).stream()
                 .filter(snapshot -> snapshot.result().ticket().id().equals(ticketId))
                 .findFirst()
                 .orElseThrow(() -> new NoSuchElementException("Unknown customer service ticket: " + ticketId));
+        CustomerTicket updatedTicket = ticketPort.update(ticketId, nextStatus);
         CustomerServiceResult current = match.result();
         CustomerServiceResult updated = new CustomerServiceResult(
                 current.sessionId(), current.intent(), current.answer(), current.knowledgeSources(), true, updatedTicket);
         sessionStore.update(new CustomerSessionStore.SessionSnapshot(
                 match.sessionId(), updated, match.createdAt(), match.messages(), match.retrievals()));
+        sessionStore.updateIdempotencyResults(match.sessionId(), updated);
         return updated;
     }
     public CustomerServiceResult get(String sessionId) {
