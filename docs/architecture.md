@@ -20,7 +20,8 @@
 ┌─────────────────────────────────────────────────────────────┐
 │                         Web API 层                          │
 │ AlertWorkflowController / ApprovalController                │
-│ WorkflowEventController / ApiExceptionHandler               │
+│ WorkflowEventController / CustomerServiceController          │
+│ ApiExceptionHandler                                          │
 └───────────────┬───────────────────────────────┬─────────────┘
                 │ REST 状态、审批                │ SSE 事件
                 ▼                               ▼
@@ -65,11 +66,11 @@
 
 应用入口是 `SmartParkApplication`。Spring Boot 扫描组件并装配以下核心 Bean：
 
-- `MockParkConfiguration`：在 `spring.ai.dashscope.enabled=true` 或未配置时提供 Mock 园区适配器
+- `MockParkConfiguration`：提供 Mock 园区适配器，与 DashScope 模型开关解耦
 - Agent：`AlertTriageAgent`、`AlertDiagnosisAgent`
 - 工具：告警、设备、能耗、知识库和工单查询工具
 - `AlertWorkflow`：构建并编译状态图
-- Web Controller：暴露工作流启动、状态查询、审批和 SSE 事件接口
+- Web Controller：暴露工作流启动、状态查询、审批、SSE 事件和客服会话接口
 
 Mock 适配器当前用于替代真实园区系统。替换为生产系统时，应实现对应 `Port`，而不是修改工作流节点和领域模型。
 
@@ -87,7 +88,7 @@ Mock 适配器当前用于替代真实园区系统。替换为生产系统时，
 | `model.common` | `WorkOrder`、`ApprovalDecision` | 工单和人工审批决定 |
 | `model.common` | `RiskLevel`、`WorkflowStatus` | 风险和工作流状态 |
 | `model.energy` | `EnergyReading` | 电能表读数、基线及偏差 |
-| `model.security` | `SecurityEvent` | 安全事件领域对象 |
+| `model.customer` | `CustomerServiceResult`、`CustomerTicket` | 客服答复、知识来源和转人工工单结果 |
 
 领域模型负责基本的不变量校验，例如必填字段、枚举值和置信度范围。它不依赖 Spring Web、具体数据库或 Mock 实现。
 
@@ -285,7 +286,9 @@ riskGate
 
 ### 5.3 运行时存储
 
-当前 `WorkflowExecutionStore` 使用内存实现，Graph checkpoint 使用 `MemorySaver`。因此当前实现适合本地学习、演示和测试，不适合直接作为多实例生产部署方案。
+当前 `WorkflowExecutionStore` 使用内存实现，Graph checkpoint 使用 `MemorySaver`。客服支持同一 `sessionId` 下的多轮消息和会话历史。每轮保存用户/助手消息及安全检索轨迹；检索轨迹只保留查询意图、知识文档 ID 和时间，不保留用户原始问题。会话进入人工处理后，自动客服拒绝继续回复。
+
+客服工作流使用有界 TTL 内存会话存储，默认最多 10,000 条、TTL 24 小时；客服请求通过 `Idempotency-Key` 防止进程内重试重复建单。当前实现适合本地学习、演示和测试，不适合直接作为多实例生产部署方案。生产环境应替换为持久化的工作流存储、checkpoint、`CustomerSessionStore` 和 `CustomerTicketPort`。
 
 生产化时应替换：
 
@@ -304,10 +307,29 @@ riskGate
 | `GET` | `/api/workflows/{workflowId}` | 查询工作流快照 |
 | `POST` | `/api/workflows/{workflowId}/approval` | 提交人工审批 |
 | `GET` | `/api/workflows/{workflowId}/events` | 订阅工作流 SSE 事件 |
+| `POST` | `/api/customer-service/sessions` | 提交客服问题，支持 `Idempotency-Key` 请求头 |
+| `GET` | `/api/customer-service/sessions/{sessionId}` | 查询客服会话结果 |
+| `GET` | `/api/customer-service/tickets` | 客服坐席查询人工工单队列 |
+| `PATCH` | `/api/customer-service/tickets/{ticketId}` | 按状态机推进客服工单 |
+| `GET` | `/api/workflows/{workflowId}/observability` | 查看安全事件、工具调用和失败节点汇总 |
+| `POST` | `/api/demo/faults` | 管理员注入一次性演示故障 |
 
-Controller 只负责请求校验、调用工作流服务和 DTO 转换，不直接访问 Mock 数据存储。
+| `GET` | `/api/knowledge` | 管理员查看知识文档元数据 |
+| `POST` | `/api/knowledge` | 管理员新增知识文档 |
+| `PATCH` | `/api/knowledge/{documentId}/active` | 管理员启用或停用知识文档 |
+| `POST` | `/api/feedback` | 坐席、审批人或管理员提交枚举化反馈 |
+| `GET` | `/api/feedback` | 管理员查看反馈记录 |
+| `GET` | `/api/operations/metrics` | 查看工作流、客服、知识、反馈和审计聚合数量 |
 
-### 6.2 SSE 事件
+### 6.2 演示角色、观测与故障
+
+前端通过 `X-Demo-Role` 展示 `VIEWER`、`OPERATOR`、`APPROVER`、`CUSTOMER_AGENT` 和 `ADMIN` 的操作边界。客服工单操作要求坐席或管理员角色，显式携带角色的审批请求要求审批人或管理员角色，故障注入只允许管理员。该请求头只是本地演示机制，不构成身份认证或生产授权。
+
+风险门禁把触发审批的具体原因写入公开 DTO，例如高风险、置信度低于阈值或知识证据为空。观测接口只聚合已经脱敏的工作流事件，展示事件数量、工具调用和失败节点。故障注入当前支持让下一次 Mock 知识检索失败，用于演示工作流错误包装和失败事件。
+
+知识管理能力通过独立的 `KnowledgeAdminPort` 扩展普通 `KnowledgePort`。工作流仍只依赖只读检索端口；管理员接口可查看元数据、新增文档和启停文档。元数据响应不包含知识正文，停用状态会直接影响检索结果。反馈服务只接受目标类型、资源 ID、角色和评价枚举，不接受自由文本；运营统计汇总知识启用数量、反馈总数和正向反馈数。
+
+### 6.3 SSE 事件
 
 `WorkflowEventPublisher` 为每个工作流维护一个 Reactor `Sinks.Many`，事件流使用 replay-all，因此订阅者可以收到已经发布的历史事件。
 
@@ -324,7 +346,8 @@ Controller 只负责请求校验、调用工作流服务和 DTO 转换，不直�
 
 事件包含工作流编号、序号、事件类型、节点、时间戳和安全摘要。事件摘要经过 `WorkflowEvent.redact` 处理。
 
-## 7. 安全与数据边界
+审计记录与工作流事件分离：工作流事件描述系统执行节点和工具，审计记录描述角色对资源执行的动作。客服会话、客服工单、审批和故障注入会记录安全元数据；审计不会记录用户问题、审批评论或诊断正文。
+
 
 ### 7.1 Agent 工具边界
 
@@ -396,6 +419,7 @@ Controller 只负责请求校验、调用工作流服务和 DTO 转换，不直�
 - `agent`：使用 `TestChatModel` 验证提示词、工具列表和结构化输出校验
 - `tool`：验证空参数、未知资源和结构化错误结果
 - `workflow`：验证正常路径、风险闸门、人工审批、幂等、失败恢复和能耗流程
+- `customer service`：验证意图分类、未知问题转人工、会话 TTL/容量、并发幂等和客服 HTTP 状态码
 - `web`：验证 REST DTO、状态码、SSE 格式和响应脱敏
 - `architecture`：验证能力包依赖和安全边界
 - `integration`：可选验证真实 DashScope 连通性
@@ -422,3 +446,5 @@ Windows PowerShell：
 4. **状态和事件分离。** 状态用于查询当前结果，事件用于展示流程进度和审计轨迹。
 5. **输出默认脱敏。** 外部 API 保留流程跟踪所需字段，隐藏诊断、审批和工单业务内容。
 6. **当前实现优先可测试性。** 内存存储和固定 Mock 数据降低学习和测试成本，生产化时通过端口和存储接口替换。
+7. **客服默认保守转人工。** 无法识别意图或知识不足时不返回泛化答复；报修和未知问题创建人工客服工单。
+8. **客服请求具备有限生命周期和幂等约束。** 演示环境使用有界 TTL 内存存储，生产环境必须替换为跨实例持久化实现。

@@ -23,6 +23,7 @@ import com.example.smartpark.port.workorder.WorkOrderPort;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -249,12 +250,15 @@ public final class AlertWorkflowNodes {
         // 高风险、低置信度或证据不足的诊断必须进入人工审批。
         return observed(RISK_GATE, state -> {
             AlertWorkflowState workflowState = AlertWorkflowState.from(state);
-            Route route = riskGate.route(
+            RiskAssessment assessment = riskGate.assess(
                     workflowState.alert(),
                     workflowState.classification(),
                     workflowState.diagnosis().orElseThrow(),
                     workflowState.retrievedDocuments());
-            return Map.of(AlertWorkflowState.ROUTE, AlertWorkflowState.serializable(route));
+            return Map.of(
+                    AlertWorkflowState.ROUTE, AlertWorkflowState.serializable(assessment.route()),
+                    AlertWorkflowState.RISK_REASONS, AlertWorkflowState.serializable(assessment.reasons()));
+
         });
     }
 
@@ -467,19 +471,24 @@ public final class AlertWorkflowNodes {
                 AlertTriageAgent.AlertClassificationResult classification,
                 Diagnosis diagnosis,
                 List<KnowledgeDocument> documents) {
-            Objects.requireNonNull(alert, "alert");
-            Objects.requireNonNull(classification, "classification");
-            Objects.requireNonNull(diagnosis, "diagnosis");
-            List<KnowledgeDocument> evidence = List.copyOf(Objects.requireNonNull(documents, "documents"));
-            if (alert.riskHint().isHighRisk()
-                    || classification.riskLevel().isHighRisk()
-                    || diagnosis.riskLevel().isHighRisk()
-                    || !(classification.confidence() >= confidenceThreshold)
-                    || !(diagnosis.confidence() >= confidenceThreshold)
-                    || evidence.isEmpty()) {
-                return Route.WAIT_FOR_APPROVAL;
-            }
-            return Route.CREATE_WORK_ORDER;
+            return assess(alert, classification, diagnosis, documents).route();
         }
+
+        public RiskAssessment assess(
+                Alert alert,
+                AlertTriageAgent.AlertClassificationResult classification,
+                Diagnosis diagnosis,
+                List<KnowledgeDocument> documents) {
+            List<String> reasons = new ArrayList<>();
+            if (alert.riskHint().isHighRisk()) reasons.add("原始告警风险为 HIGH");
+            if (classification.riskLevel().isHighRisk()) reasons.add("分诊风险为 HIGH");
+            if (diagnosis.riskLevel().isHighRisk()) reasons.add("诊断风险为 HIGH");
+            if (!(classification.confidence() >= confidenceThreshold)) reasons.add("分诊置信度低于 " + confidenceThreshold);
+            if (!(diagnosis.confidence() >= confidenceThreshold)) reasons.add("诊断置信度低于 " + confidenceThreshold);
+            if (documents.isEmpty()) reasons.add("没有检索到知识证据");
+            Route route = reasons.isEmpty() ? Route.CREATE_WORK_ORDER : Route.WAIT_FOR_APPROVAL;
+            return new RiskAssessment(route, reasons, confidenceThreshold);
+        }
+
     }
 }

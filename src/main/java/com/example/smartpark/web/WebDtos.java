@@ -4,10 +4,13 @@ import com.example.smartpark.model.common.ApprovalDecision;
 import com.example.smartpark.model.common.Diagnosis;
 import com.example.smartpark.model.common.WorkOrder;
 import com.example.smartpark.model.common.WorkflowStatus;
+import com.example.smartpark.workflow.AlertWorkflowState;
+import com.example.smartpark.workflow.CustomerConversation;
 import com.example.smartpark.workflow.WorkflowEvent;
 import com.example.smartpark.workflow.WorkflowSnapshot;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 import java.time.Instant;
 import java.util.List;
@@ -17,6 +20,57 @@ import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 
 public final class WebDtos {
+
+    public record CustomerServiceRequest(@NotBlank @Size(max = 500) String question) { }
+
+    public record CustomerTicketUpdateRequest(
+            @NotBlank
+            @jakarta.validation.constraints.Pattern(regexp = "ASSIGNED|IN_PROGRESS|WAITING_CUSTOMER|RESOLVED|CLOSED|CANCELLED")
+            String status) { }
+
+    public record CustomerConversationResponse(
+            String sessionId,
+            List<CustomerMessageResponse> messages,
+            List<RetrievalTraceResponse> retrievals,
+            boolean humanHandoff) { }
+
+    public record CustomerMessageResponse(String role, String text, Instant createdAt) { }
+    public record RetrievalTraceResponse(String query, List<String> documentIds, Instant createdAt) { }
+
+    static CustomerConversationResponse from(CustomerConversation conversation) {
+        return new CustomerConversationResponse(
+                conversation.sessionId(),
+                conversation.messages().stream()
+                        .map(message -> new CustomerMessageResponse(message.role(), message.text(), message.createdAt()))
+                        .toList(),
+                conversation.retrievals().stream()
+                        .map(trace -> new RetrievalTraceResponse(trace.query(), trace.documentIds(), trace.createdAt()))
+                        .toList(),
+                conversation.humanHandoff());
+    }
+    public record CustomerTicketResponse(
+            String id,
+            String sessionId,
+            String intent,
+            String status,
+            String safeSummary,
+            Instant createdAt) { }
+
+    public record CustomerServiceResponse(
+            String sessionId,
+            String intent,
+            String answer,
+            List<String> knowledgeSources,
+            boolean needsHuman,
+            CustomerTicketResponse ticket) { }
+
+    static CustomerServiceResponse from(com.example.smartpark.model.customer.CustomerServiceResult result) {
+        var ticket = result.ticket();
+        return new CustomerServiceResponse(
+                result.sessionId(), result.intent(), result.answer(), result.knowledgeSources(), result.needsHuman(),
+                ticket == null ? null : new CustomerTicketResponse(
+                        ticket.id(), ticket.sessionId(), ticket.intent(), ticket.status(), ticket.safeSummary(), ticket.createdAt()));
+    }
 
     private static final String REDACTED = "[REDACTED]";
     private static final Pattern WORKFLOW_ID = Pattern.compile(
@@ -41,13 +95,15 @@ public final class WebDtos {
             ApprovalResponse approval,
             WorkOrderResponse workOrder,
             List<String> errors,
-            long eventSequence) {
+            long eventSequence,
+            List<String> riskReasons) {
 
         public WorkflowResponse {
             workflowId = safeIdentifier(workflowId, WORKFLOW_ID);
             alertId = safeIdentifier(alertId, ALERT_ID);
             status = Objects.requireNonNull(status, "status");
             errors = stableItems(errors, "Workflow error recorded");
+            riskReasons = List.copyOf(Objects.requireNonNull(riskReasons, "riskReasons"));
         }
     }
 
@@ -154,6 +210,13 @@ public final class WebDtos {
         }
     }
 
+    public record WorkflowObservabilityResponse(
+            String workflowId,
+            long totalEvents,
+            long toolCalls,
+            List<String> tools,
+            List<String> failedNodes) { }
+
     public record WorkflowEventDto(
             String eventId,
             String type,
@@ -190,7 +253,14 @@ public final class WebDtos {
                 snapshot.approval().map(WebDtos::approval).orElse(null),
                 workOrder(snapshot.workOrder()),
                 snapshot.errors(),
-                snapshot.eventSequence());
+                snapshot.eventSequence(),
+                riskReasons(snapshot));
+    }
+
+    private static List<String> riskReasons(WorkflowSnapshot snapshot) {
+        Object value = snapshot.statePayload().get(AlertWorkflowState.RISK_REASONS);
+        if (!(value instanceof List<?> values)) return List.of();
+        return values.stream().map(String::valueOf).toList();
     }
 
     static WorkflowEventDto from(WorkflowEvent event) {

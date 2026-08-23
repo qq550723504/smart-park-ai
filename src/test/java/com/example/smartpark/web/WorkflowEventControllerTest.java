@@ -28,6 +28,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -87,6 +88,23 @@ class WorkflowEventControllerTest {
                 .andExpect(content().string(not(containsString("statePayload"))));
     }
 
+    @Test
+    void observabilityAggregatesOnlySafeWorkflowEvents() throws Exception {
+        String workflowId = "wf-events";
+        when(workflow.status(workflowId)).thenReturn(snapshot(workflowId));
+        when(eventPublisher.history(workflowId)).thenReturn(List.of(
+                new WorkflowEvent(workflowId, 1, WorkflowEvent.EventType.TOOL_CALLED, "retrieveKnowledge",
+                        Instant.parse("2026-08-23T01:45:00Z"), "KnowledgePort.search"),
+                new WorkflowEvent(workflowId, 2, WorkflowEvent.EventType.FAILED, "retrieveKnowledge",
+                        Instant.parse("2026-08-23T01:46:00Z"), "KNOWLEDGE_RETRIEVAL_FAILED")));
+
+        mockMvc.perform(get("/api/workflows/{workflowId}/observability", workflowId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalEvents").value(2))
+                .andExpect(jsonPath("$.toolCalls").value(1))
+                .andExpect(jsonPath("$.tools[0]").value("KnowledgePort.search"))
+                .andExpect(jsonPath("$.failedNodes[0]").value("retrieveKnowledge"));
+    }
     @Test
     void eventsForUnknownWorkflowReturnNotFoundWithoutOpeningAStream() throws Exception {
         when(workflow.status("wf-missing"))

@@ -4,6 +4,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -17,6 +18,8 @@ public interface WorkflowEventPublisher {
             String summary);
 
     Flux<WorkflowEvent> events(String workflowId);
+
+    List<WorkflowEvent> history(String workflowId);
 
     default void complete(String workflowId) {
     }
@@ -46,6 +49,11 @@ final class InMemoryWorkflowEventPublisher implements WorkflowEventPublisher {
     }
 
     @Override
+    public List<WorkflowEvent> history(String workflowId) {
+        return stream(workflowId).history();
+    }
+
+    @Override
     public void complete(String workflowId) {
         stream(workflowId).complete();
     }
@@ -56,6 +64,7 @@ final class InMemoryWorkflowEventPublisher implements WorkflowEventPublisher {
 
     private static final class EventStream {
         private final Sinks.Many<WorkflowEvent> sink = Sinks.many().replay().all();
+        private final List<WorkflowEvent> history = new java.util.ArrayList<>();
         private long sequence;
 
         private synchronized WorkflowEvent publish(
@@ -71,11 +80,16 @@ final class InMemoryWorkflowEventPublisher implements WorkflowEventPublisher {
                     node,
                     timestamp,
                     summary);
+            history.add(event);
             Sinks.EmitResult result = sink.tryEmitNext(event);
             if (result.isFailure()) {
                 throw new IllegalStateException("Unable to publish workflow event: " + result);
             }
             return event;
+        }
+
+        private synchronized List<WorkflowEvent> history() {
+            return List.copyOf(history);
         }
 
         private Flux<WorkflowEvent> events() {

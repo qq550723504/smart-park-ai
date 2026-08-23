@@ -3,12 +3,17 @@ import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import AlertSelector from './components/AlertSelector.vue'
 import WorkflowGraph from './components/WorkflowGraph.vue'
+import DemoConsole from './components/DemoConsole.vue'
 import EventTimeline from './components/EventTimeline.vue'
-import { demoAlerts } from './types/workflow'
+import CustomerServiceConsole from './components/CustomerServiceConsole.vue'
+import { demoAlerts, type DemoRole } from './types/workflow'
 import { useWorkflow } from './composables/useWorkflow'
+import { submitFeedback } from './services/workflowApi'
 import './styles.css'
 
 const selectedAlertId = ref(demoAlerts[0].id)
+const activeView = ref<'workflow' | 'customer'>('workflow')
+const role = ref<DemoRole>('ADMIN')
 const reviewer = ref('')
 const comment = ref('')
 const { workflow, events, loading, approving, error, isTerminal, start, approve } = useWorkflow()
@@ -29,9 +34,17 @@ async function decide(decision: 'APPROVE' | 'REJECT') {
     ElMessage.warning('请填写审批人和审批意见')
     return
   }
-  await approve({ decision, reviewer: reviewer.value, comment: comment.value })
+  await approve({ decision, reviewer: reviewer.value, comment: comment.value, role: role.value })
   reviewer.value = ''
   comment.value = ''
+}
+
+async function rateWorkflow(rating: 'CORRECT' | 'INCORRECT') {
+  if (!workflow.value) return
+  try {
+    await submitFeedback('ALERT_WORKFLOW', workflow.value.workflowId, rating, role.value)
+    ElMessage.success('诊断反馈已记录')
+  } catch (cause) { ElMessage.error(cause instanceof Error ? cause.message : '反馈提交失败') }
 }
 
 function statusLabel(status?: string) {
@@ -52,10 +65,19 @@ function confidence(value?: number) {
         <div class="brand-mark"><span></span><span></span><span></span></div>
         <div><span class="brand-kicker">SMART PARK · AI OPERATIONS</span><h1>告警处置中心</h1></div>
       </div>
-      <div class="system-status"><span class="status-pulse"></span><span>Mock 园区系统</span><span class="divider"></span><span class="muted">DashScope Agent</span></div>
+      <div class="topbar-actions">
+        <el-select v-model="role" class="role-select" aria-label="演示角色"><el-option label="查看者" value="VIEWER" /><el-option label="操作员" value="OPERATOR" /><el-option label="审批人" value="APPROVER" /><el-option label="客服坐席" value="CUSTOMER_AGENT" /><el-option label="管理员" value="ADMIN" /></el-select>
+        <nav class="view-switch"><button :class="{ active: activeView === 'workflow' }" @click="activeView = 'workflow'">运营工作流</button><button :class="{ active: activeView === 'customer' }" @click="activeView = 'customer'">园区客服</button></nav>
+        <div class="system-status"><span class="status-pulse"></span><span>Mock 园区系统</span><span class="divider"></span><span class="muted">DashScope Agent</span></div>
+      </div>
     </header>
 
-    <main class="main-content">
+    <main v-if="activeView === 'customer'" class="main-content customer-main">
+      <section class="hero-row customer-hero"><div><span class="eyebrow">CUSTOMER EXPERIENCE / 02</span><h2>园区服务问题<br /><em>快速响应与有序转人工</em></h2><p class="hero-copy">基于 Mock 园区知识回答常见咨询，报修或知识不足时自动生成客服工单。</p></div></section>
+      <CustomerServiceConsole :role="role" />
+    </main>
+
+    <main v-else class="main-content">
       <section class="hero-row">
         <div>
           <span class="eyebrow">WORKFLOW CONSOLE / 01</span>
@@ -89,12 +111,14 @@ function confidence(value?: number) {
         <EventTimeline :events="events" />
       </section>
 
+      <DemoConsole :workflow="workflow" :role="role" />
+
       <section v-if="needsApproval" class="approval-panel panel">
-        <div class="approval-accent"></div><div class="approval-copy"><span class="eyebrow">HUMAN IN THE LOOP</span><h2>需要人工审批</h2><p>风险闸门已暂停工作流。确认现场情况后，决定是否创建处置工单。</p><div class="approval-facts"><span>风险等级 <strong>{{ workflow?.diagnosis?.riskLevel }}</strong></span><span>诊断置信度 <strong>{{ confidence(workflow?.diagnosis?.confidence) }}</strong></span><span>证据文档 <strong>{{ workflow?.diagnosis ? '已完成检索' : '分析中' }}</strong></span></div></div>
+        <div class="approval-accent"></div><div class="approval-copy"><span class="eyebrow">HUMAN IN THE LOOP</span><h2>需要人工审批</h2><p>风险闸门已暂停工作流。确认现场情况后，决定是否创建处置工单。</p><div class="approval-facts"><span v-for="reason in (workflow?.riskReasons ?? [])" :key="reason" class="risk-reason">{{ reason }}</span></div></div>
         <div class="approval-form"><el-input v-model="reviewer" placeholder="审批人姓名" /><el-input v-model="comment" type="textarea" :rows="2" placeholder="审批意见" /><div class="approval-actions"><el-button :loading="approving" @click="decide('REJECT')">拒绝处置</el-button><el-button type="primary" :loading="approving" @click="decide('APPROVE')">批准并创建工单</el-button></div></div>
       </section>
 
-      <section v-if="isTerminal && workflow" class="result-strip panel"><div class="result-check">✓</div><div><span class="eyebrow">WORKFLOW RESULT</span><h2>{{ workflow.status === 'COMPLETED' ? '处置流程已完成' : workflow.status === 'REJECTED' ? '处置流程已拒绝' : '处置流程未完成' }}</h2></div><div v-if="workflow.workOrder" class="result-order"><span>工单编号</span><strong>{{ workflow.workOrder.id }}</strong></div><div class="result-note">业务内容已按后端安全策略脱敏展示</div></section>
+      <section v-if="isTerminal && workflow" class="result-strip panel"><div class="result-check">✓</div><div><span class="eyebrow">WORKFLOW RESULT</span><h2>{{ workflow.status === 'COMPLETED' ? '处置流程已完成' : workflow.status === 'REJECTED' ? '处置流程已拒绝' : '处置流程未完成' }}</h2></div><div v-if="workflow.workOrder" class="result-order"><span>工单编号</span><strong>{{ workflow.workOrder.id }}</strong></div><div v-if="['APPROVER', 'ADMIN'].includes(role)" class="result-feedback"><el-button size="small" @click="rateWorkflow('CORRECT')">诊断正确</el-button><el-button size="small" @click="rateWorkflow('INCORRECT')">诊断不正确</el-button></div><div class="result-note">业务内容已按后端安全策略脱敏展示</div></section>
     </main>
     <footer><span>SMART PARK OPERATIONS</span><span>工作流状态由后端 Graph 实时驱动</span></footer>
   </div>

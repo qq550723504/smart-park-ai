@@ -1,3 +1,69 @@
+export type DemoRole = 'VIEWER' | 'OPERATOR' | 'APPROVER' | 'CUSTOMER_AGENT' | 'ADMIN'
+
+export interface OperationsMetrics {
+  workflowCount: number
+  completedWorkflowCount: number
+  customerSessionCount: number
+  humanTicketCount: number
+  auditEntryCount: number
+  feedbackCount: number
+  positiveFeedbackCount: number
+  knowledgeDocumentCount: number
+  activeKnowledgeDocumentCount: number
+}
+
+export interface KnowledgeMetadata {
+  id: string
+  title: string
+  tags: string[]
+  updatedAt: string
+  active: boolean
+}
+
+export type FeedbackRating = 'HELPFUL' | 'NOT_HELPFUL' | 'CORRECT' | 'INCORRECT'
+
+
+export interface AuditEntry {
+  actorRole: string
+  action: string
+  resourceId: string
+  outcome: string
+  timestamp: string
+}
+
+export interface WorkflowObservability {
+  workflowId: string
+  totalEvents: number
+  toolCalls: number
+  tools: string[]
+  failedNodes: string[]
+}
+
+export interface CustomerTicketResponse {
+  id: string
+  sessionId: string
+  intent: string
+  status: string
+  safeSummary: string
+  createdAt: string
+}
+
+export interface CustomerConversationResponse {
+  sessionId: string
+  messages: Array<{ role: 'USER' | 'ASSISTANT'; text: string; createdAt: string }>
+  retrievals: Array<{ query: string; documentIds: string[]; createdAt: string }>
+  humanHandoff: boolean
+}
+
+export interface CustomerServiceResponse {
+  sessionId: string
+  intent: string
+  answer: string
+  knowledgeSources: string[]
+  needsHuman: boolean
+  ticket: CustomerTicketResponse | null
+}
+
 export type WorkflowStatus = 'RUNNING' | 'WAITING_APPROVAL' | 'COMPLETED' | 'REJECTED' | 'FAILED'
 
 export interface DiagnosisResponse {
@@ -45,6 +111,7 @@ export interface WorkflowResponse {
   workOrder: WorkOrderResponse | null
   errors: string[]
   eventSequence: number
+  riskReasons: string[]
 }
 
 export interface WorkflowEvent {

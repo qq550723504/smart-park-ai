@@ -1,6 +1,6 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { getWorkflow, startWorkflow, submitApproval, subscribeToWorkflow } from '../services/workflowApi'
-import type { WorkflowEvent, WorkflowResponse } from '../types/workflow'
+import type { DemoRole, WorkflowEvent, WorkflowResponse } from '../types/workflow'
 
 export function useWorkflow() {
   const workflow = ref<WorkflowResponse | null>(null)
@@ -62,16 +62,17 @@ export function useWorkflow() {
     }
   }
 
-  async function approve(payload: { decision: 'APPROVE' | 'REJECT'; reviewer: string; comment: string }) {
+  async function approve(payload: { decision: 'APPROVE' | 'REJECT'; reviewer: string; comment: string; role: DemoRole }) {
     if (!workflow.value) return
     approving.value = true
     error.value = ''
     try {
       approvalKey ??= crypto.randomUUID()
+      const { role, ...decision } = payload
       mergeWorkflow(await submitApproval(workflow.value.workflowId, {
-        ...payload,
+        ...decision,
         idempotencyKey: approvalKey,
-      }))
+      }, role))
       approvalKey = null
       await refresh()
     } catch (cause) {

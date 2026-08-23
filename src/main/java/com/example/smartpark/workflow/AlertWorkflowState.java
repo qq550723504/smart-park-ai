@@ -40,6 +40,7 @@ public final class AlertWorkflowState {
     public static final String ROUTE = "route";
     public static final String RESULT_SUMMARY = "resultSummary";
     public static final String SCENARIO_ANALYSIS = "scenarioAnalysis";
+    public static final String RISK_REASONS = "riskReasons";
 
     private static final List<String> REQUIRED_KEYS = List.of(
             WORKFLOW_ID,
@@ -84,6 +85,7 @@ public final class AlertWorkflowState {
         strategies.put(ROUTE, new ReplaceStrategy());
         strategies.put(RESULT_SUMMARY, new ReplaceStrategy());
         strategies.put(SCENARIO_ANALYSIS, new ReplaceStrategy());
+        strategies.put(RISK_REASONS, new ReplaceStrategy());
         return strategies;
     }
 
@@ -128,6 +130,9 @@ public final class AlertWorkflowState {
         }
         if (data.containsKey(SCENARIO_ANALYSIS)) {
             payload.put(SCENARIO_ANALYSIS, data.get(SCENARIO_ANALYSIS));
+        }
+        if (data.containsKey(RISK_REASONS)) {
+            payload.put(RISK_REASONS, data.get(RISK_REASONS));
         }
         return payload;
     }

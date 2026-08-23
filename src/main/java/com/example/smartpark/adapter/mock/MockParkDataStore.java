@@ -37,6 +37,7 @@ public class MockParkDataStore {
     private final Map<String, Alert> alerts = new ConcurrentHashMap<>();
     private final Map<String, List<Alert>> historyByDevice = new ConcurrentHashMap<>();
     private final Map<String, KnowledgeDocument> knowledgeDocuments = new ConcurrentHashMap<>();
+    private final Map<String, Boolean> knowledgeActive = new ConcurrentHashMap<>();
     private final Map<String, WorkOrder> workOrdersByWorkflowId = new ConcurrentHashMap<>();
     private final AtomicInteger workOrderSequence = new AtomicInteger();
 
@@ -45,7 +46,7 @@ public class MockParkDataStore {
     final void reset() {
         // 重置动态数据后重新装载基础设备、告警、历史记录和知识库。
         devices.clear(); energyReadings.clear(); securityEvents.clear(); alerts.clear(); historyByDevice.clear();
-        knowledgeDocuments.clear(); workOrdersByWorkflowId.clear(); workOrderSequence.set(0);
+        knowledgeDocuments.clear(); knowledgeActive.clear(); workOrdersByWorkflowId.clear(); workOrderSequence.set(0);
         seedDevices(); seedSecurityEvents(); seedAlerts(); seedHistory(); seedKnowledge();
     }
 
@@ -71,9 +72,29 @@ public class MockParkDataStore {
         // 统一规范化查询文本，兼容中文内容和英文标签。
         String normalizedQuery = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
         return knowledgeDocuments.values().stream()
+                .filter(document -> knowledgeActive.getOrDefault(document.id(), false))
                 .filter(document -> normalizedQuery.isEmpty() || matches(document, normalizedQuery))
                 .sorted((left, right) -> left.id().compareTo(right.id()))
                 .collect(Collectors.toUnmodifiableList());
+    }
+
+    List<com.example.smartpark.port.knowledge.KnowledgeAdminPort.ManagedDocument> listKnowledge() {
+        return knowledgeDocuments.values().stream()
+                .sorted(java.util.Comparator.comparing(KnowledgeDocument::id))
+                .map(document -> new com.example.smartpark.port.knowledge.KnowledgeAdminPort.ManagedDocument(
+                        document, knowledgeActive.getOrDefault(document.id(), false)))
+                .toList();
+    }
+
+    KnowledgeDocument saveKnowledge(KnowledgeDocument document) {
+        putKnowledge(document);
+        return document;
+    }
+
+    com.example.smartpark.port.knowledge.KnowledgeAdminPort.ManagedDocument setKnowledgeActive(String id, boolean active) {
+        KnowledgeDocument document = require(knowledgeDocuments, id, "knowledge document");
+        knowledgeActive.put(id, active);
+        return new com.example.smartpark.port.knowledge.KnowledgeAdminPort.ManagedDocument(document, active);
     }
 
     private void seedDevices() {
@@ -126,6 +147,10 @@ public class MockParkDataStore {
         putKnowledge(new KnowledgeDocument("KD-POWER-001", "Power emergency runbook", "Stabilize the electrical load, notify facilities, and inspect breaker and UPS conditions immediately.", List.of("power", "emergency", "breaker"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(2))));
         putKnowledge(new KnowledgeDocument("KD-ENERGY-001", "Energy anomaly response playbook", "For consumption above baseline, compare operating schedules, inspect HVAC and lighting runtime, and verify the meter before creating corrective work.", List.of("energy", "consumption", "baseline", "efficiency"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(3))));
         putKnowledge(new KnowledgeDocument("KD-ACCESS-001", "Access anomaly response playbook", "For repeated denied access, preserve only approved audit summaries, notify authorized security staff, verify controller health, and require human review before dispatch. Do not expose identity or raw media.", List.of("access", "security", "denied", "entrance"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(4))));
+        putKnowledge(new KnowledgeDocument("KD-PARKING-001", "Visitor parking guide", "Visitor vehicles should complete entrance registration before using the visitor parking area. Opening hours and fees follow the current park notice.", List.of("parking", "visitor", "vehicle", "停车"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(5))));
+        putKnowledge(new KnowledgeDocument("KD-VISITOR-001", "Visitor access guide", "Park contacts should create a visitor appointment before arrival. Gate staff verify the appointment without retaining identity documents in customer-service chat.", List.of("visitor", "appointment", "access", "访客"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(6))));
+        putKnowledge(new KnowledgeDocument("KD-CUSTOMER-ENERGY-001", "Tenant energy service guide", "Customer service can explain public-area energy trends and efficiency guidance. Tenant billing details and equipment controls require authorized staff verification.", List.of("energy", "customer service", "billing", "能耗"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(7))));
+        putKnowledge(new KnowledgeDocument("KD-REPAIR-001", "Facility repair intake guide", "Facility faults should be transferred to a service agent who confirms location and equipment details before dispatching maintenance.", List.of("repair", "maintenance", "facility", "报修"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(8))));
     }
 
     private Device device(String id, String buildingId, String name, String category, String status, int dayOffset) {
@@ -149,7 +174,10 @@ public class MockParkDataStore {
     private void putDevice(Device device) { devices.put(device.id(), device); }
     private void putEnergyReading(EnergyReading reading) { energyReadings.put(reading.meterId(), reading); }
     private void putAlert(Alert alert) { alerts.put(alert.id(), alert); }
-    private void putKnowledge(KnowledgeDocument document) { knowledgeDocuments.put(document.id(), document); }
+    private void putKnowledge(KnowledgeDocument document) {
+        knowledgeDocuments.put(document.id(), document);
+        knowledgeActive.put(document.id(), true);
+    }
     private boolean matches(KnowledgeDocument document, String query) { return contains(document.title(), query) || contains(document.content(), query) || document.tags().stream().anyMatch(tag -> contains(tag, query)); }
     private boolean contains(String text, String query) { return text.toLowerCase(Locale.ROOT).contains(query); }
 

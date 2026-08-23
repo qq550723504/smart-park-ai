@@ -1,5 +1,7 @@
 package com.example.smartpark.web;
 
+import com.example.smartpark.workflow.CustomerServiceValidationException;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -13,9 +15,19 @@ import java.util.NoSuchElementException;
 @RestControllerAdvice
 public class ApiExceptionHandler {
 
+    @ExceptionHandler(ForbiddenOperationException.class)
+    ResponseEntity<WebDtos.ApiError> forbidden(ForbiddenOperationException exception) {
+        return error(HttpStatus.FORBIDDEN, "Operation is not allowed for the current demo role");
+    }
+
     @ExceptionHandler(NoSuchElementException.class)
     ResponseEntity<WebDtos.ApiError> notFound(NoSuchElementException exception) {
         return error(HttpStatus.NOT_FOUND, "Requested resource was not found");
+    }
+
+    @ExceptionHandler(CustomerServiceValidationException.class)
+    ResponseEntity<WebDtos.ApiError> customerValidation(CustomerServiceValidationException exception) {
+        return error(HttpStatus.BAD_REQUEST, "Invalid customer service request");
     }
 
     @ExceptionHandler({IllegalStateException.class, IllegalArgumentException.class})
@@ -25,15 +37,12 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler({MethodArgumentNotValidException.class, HttpMessageNotReadableException.class})
     ResponseEntity<WebDtos.ApiError> badRequest(Exception exception) {
-        return error(HttpStatus.BAD_REQUEST, "Malformed or incomplete approval request");
+        return error(HttpStatus.BAD_REQUEST, "Malformed or incomplete request");
     }
 
     private static ResponseEntity<WebDtos.ApiError> error(HttpStatus status, String message) {
         String safeMessage = message == null || message.isBlank() ? status.getReasonPhrase() : message;
         return ResponseEntity.status(status).body(new WebDtos.ApiError(
-                status.value(),
-                status.getReasonPhrase(),
-                safeMessage,
-                Instant.now()));
+                status.value(), status.getReasonPhrase(), safeMessage, Instant.now()));
     }
 }

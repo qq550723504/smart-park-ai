@@ -1,12 +1,16 @@
 package com.example.smartpark.adapter.mock;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import com.example.smartpark.web.DemoFaultInjector;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration(proxyBeanMethods = false)
-@ConditionalOnProperty(name = "spring.ai.dashscope.enabled", havingValue = "true", matchIfMissing = true)
 public class MockParkConfiguration {
+
+    @Bean
+    DemoFaultInjector demoFaultInjector() {
+        return new DemoFaultInjector();
+    }
 
     @Bean
     MockParkDataStore mockParkDataStore() {
@@ -34,8 +38,8 @@ public class MockParkConfiguration {
     }
 
     @Bean
-    MockKnowledgeAdapter mockKnowledgeAdapter(MockParkDataStore dataStore) {
-        return new MockKnowledgeAdapter(dataStore);
+    MockKnowledgeAdapter mockKnowledgeAdapter(MockParkDataStore dataStore, DemoFaultInjector faultInjector) {
+        return new MockKnowledgeAdapter(dataStore, faultInjector);
     }
 
     @Bean

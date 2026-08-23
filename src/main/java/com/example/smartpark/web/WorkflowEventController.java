@@ -29,6 +29,27 @@ public class WorkflowEventController {
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher");
     }
 
+    @GetMapping("/{workflowId}/observability")
+    public WebDtos.WorkflowObservabilityResponse observability(@PathVariable String workflowId) {
+        workflow.status(workflowId);
+        var history = eventPublisher.history(workflowId);
+        var tools = history.stream()
+                .filter(event -> event.eventType() == WorkflowEvent.EventType.TOOL_CALLED)
+                .map(WorkflowEvent::redactedSummary)
+                .distinct()
+                .toList();
+        var failedNodes = history.stream()
+                .filter(event -> event.eventType() == WorkflowEvent.EventType.FAILED)
+                .map(WorkflowEvent::node)
+                .distinct()
+                .toList();
+        long toolCalls = history.stream()
+                .filter(event -> event.eventType() == WorkflowEvent.EventType.TOOL_CALLED)
+                .count();
+        return new WebDtos.WorkflowObservabilityResponse(
+                workflowId, history.size(), toolCalls, tools, failedNodes);
+    }
+
     @GetMapping(path = "/{workflowId}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<WebDtos.WorkflowEventDto>> events(@PathVariable String workflowId) {
         workflow.status(workflowId);
