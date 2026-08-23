@@ -11,7 +11,7 @@ export function useWorkflow() {
   let eventSource: EventSource | null = null
   let approvalKey: string | null = null
 
-  const isTerminal = computed(() => ['COMPLETED', 'REJECTED', 'FAILED'].includes(workflow.value?.status ?? ''))
+  const isTerminal = computed(() => ['COMPLETED', 'REJECTED', 'FAILED', 'WORK_ORDER_FAILED'].includes(workflow.value?.status ?? ''))
 
   function closeStream() {
     eventSource?.close()

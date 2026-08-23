@@ -3,6 +3,7 @@ import { onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { askCustomerService, getCustomerConversation, listCustomerTickets, replyCustomerSession, submitFeedback, updateCustomerTicket } from '../services/workflowApi'
 import type { CustomerConversationResponse, CustomerServiceResponse, CustomerTicketResponse, DemoRole } from '../types/workflow'
+import { customerIntentLabel, customerTicketStatusLabel } from '../utils/labels'
 
 const props = defineProps<{ role: DemoRole }>()
 const question = ref('')
@@ -68,22 +69,22 @@ onMounted(loadTickets)
 <template>
   <section class="customer-console">
     <aside class="panel customer-sidebar">
-      <div class="section-heading"><div><span class="eyebrow">SERVICE DESK</span><h2>园区客服</h2></div><span class="live-indicator"><i></i>在线</span></div>
-      <div class="service-metrics"><div><strong>4</strong><span>演示意图</span></div><div><strong>Mock</strong><span>知识数据</span></div></div>
+      <div class="section-heading"><div><span class="eyebrow">客服工作台</span><h2>园区客服</h2></div><span class="live-indicator"><i></i>在线</span></div>
+      <div class="service-metrics"><div><strong>4</strong><span>演示意图</span></div><div><strong>模拟</strong><span>知识数据</span></div></div>
       <h3>快捷咨询</h3>
       <button v-for="item in suggestions" :key="item" type="button" class="suggestion" @click="ask(item)">{{ item }}</button>
-      <div class="privacy-note"><strong>数据边界</strong><span>对话仅使用本地 Mock 知识。请勿输入身份证、手机号或其他个人敏感信息。</span></div>
+      <div class="privacy-note"><strong>数据边界</strong><span>对话仅使用本地模拟知识。请勿输入身份证、手机号或其他个人敏感信息。</span></div>
     </aside>
 
     <section class="panel chat-panel">
-      <div class="section-heading compact"><div><span class="eyebrow">CUSTOMER SESSION</span><h2>服务会话</h2></div><span class="count-badge">{{ messages.length }} 条消息</span></div>
+      <div class="section-heading compact"><div><span class="eyebrow">客服会话</span><h2>服务会话</h2></div><span class="count-badge">{{ messages.length }} 条消息</span></div>
       <div class="chat-stream">
         <div v-if="messages.length === 0" class="chat-empty"><strong>您好，这里是园区客服</strong><span>可以咨询停车、访客通行、公共区域能耗或提交设施报修。</span></div>
         <article v-for="(message, index) in messages" :key="index" :class="['chat-message', message.role]">
           <span class="message-role">{{ message.role === 'user' ? '访客' : '客服助手' }}</span>
           <p>{{ message.text }}</p>
           <div v-if="message.result" class="answer-meta">
-            <span>意图 {{ message.result.intent }}</span>
+            <span>意图 {{ customerIntentLabel(message.result.intent) }}</span>
             <span v-if="message.result.knowledgeSources.length">知识来源 {{ message.result.knowledgeSources.join(' / ') }}</span>
           </div>
           <div v-if="message.result && ['CUSTOMER_AGENT', 'ADMIN'].includes(role)" class="feedback-actions"><button type="button" @click="rate(message.result.sessionId, 'HELPFUL')">有帮助</button><button type="button" @click="rate(message.result.sessionId, 'NOT_HELPFUL')">无帮助</button></div>
@@ -107,11 +108,11 @@ onMounted(loadTickets)
     </section>
 
     <section v-if="['CUSTOMER_AGENT', 'ADMIN'].includes(role)" class="panel ticket-queue">
-      <div class="section-heading compact"><div><span class="eyebrow">AGENT QUEUE</span><h2>人工客服工单</h2></div><span class="count-badge">{{ tickets.length }} 条</span></div>
+      <div class="section-heading compact"><div><span class="eyebrow">客服队列</span><h2>人工客服工单</h2></div><span class="count-badge">{{ tickets.length }} 条</span></div>
       <div class="ticket-table">
         <article v-for="item in tickets" :key="item.ticket!.id">
           <div><strong>{{ item.ticket!.id }}</strong><span>{{ item.ticket!.safeSummary }}</span></div>
-          <el-tag size="small">{{ item.ticket!.status }}</el-tag>
+          <el-tag size="small">{{ customerTicketStatusLabel(item.ticket!.status) }}</el-tag>
           <el-button v-if="!['CLOSED', 'CANCELLED'].includes(item.ticket!.status)" size="small" @click="advance(item.ticket!)">推进状态</el-button>
         </article>
         <el-empty v-if="tickets.length === 0" description="暂无人工工单" :image-size="54" />

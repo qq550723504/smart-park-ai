@@ -2,8 +2,8 @@ import type { AuditEntry, CustomerConversationResponse, CustomerServiceResponse,
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
-    headers: { 'Content-Type': 'application/json', ...(options?.headers ?? {}) },
     ...options,
+    headers: { 'Content-Type': 'application/json', ...(options?.headers ?? {}) },
   })
   if (!response.ok) {
     let message = `请求失败（${response.status}）`

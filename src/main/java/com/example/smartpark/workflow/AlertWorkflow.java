@@ -134,7 +134,7 @@ public final class AlertWorkflow {
     public WorkflowSnapshot start(String alertId) {
         String requiredAlertId = requireIdentifier(alertId, "alertId");
         Optional<WorkflowSnapshot> existing = executionStore.findByAlertId(requiredAlertId);
-        if (existing.isPresent()) {
+        if (existing.filter(snapshot -> !isRetryable(snapshot.status())).isPresent()) {
             return existing.get();
         }
 
@@ -363,6 +363,10 @@ public final class AlertWorkflow {
             throw new IllegalArgumentException(name + " must not be blank");
         }
         return value;
+    }
+
+    private static boolean isRetryable(WorkflowStatus status) {
+        return status == WorkflowStatus.FAILED || status == WorkflowStatus.WORK_ORDER_FAILED;
     }
 
     private static Optional<WorkflowFailure> findFailure(Throwable throwable) {

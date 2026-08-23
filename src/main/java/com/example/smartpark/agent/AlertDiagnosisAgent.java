@@ -11,9 +11,7 @@ import com.example.smartpark.tool.energy.EnergyQueryTool;
 import com.example.smartpark.tool.security.SecurityQueryTool;
 import com.example.smartpark.tool.knowledge.ParkKnowledgeTool;
 import com.example.smartpark.tool.workorder.WorkOrderTool;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -44,7 +42,6 @@ import java.util.stream.Stream;
 @ConditionalOnProperty(name = "spring.ai.dashscope.enabled", havingValue = "true", matchIfMissing = true)
 public class AlertDiagnosisAgent {
 
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper().findAndRegisterModules();
     private static final Set<String> EXPECTED_FIELDS = Set.of(
             "id",
             "alertId",
@@ -127,11 +124,27 @@ public class AlertDiagnosisAgent {
         Prompt prompt = new Prompt(
                 new SystemMessage(PromptCatalog.diagnosisSystemPrompt(toolNames())),
                 new UserMessage(PromptCatalog.diagnosisUserPrompt(alert, context, safeDocuments)));
-        String text = extractText(chatClient.prompt(prompt)
-                .toolCallbacks(auditedToolCallbacks(requiredToolAuditor))
+        try {
+            return parseDiagnosis(callModel(prompt, requiredToolAuditor), alert, safeDocuments);
+        }
+        catch (ModelOutputException firstFailure) {
+            Prompt retry = new Prompt(
+                    new SystemMessage(PromptCatalog.diagnosisSystemPrompt(toolNames())
+                            + PromptCatalog.strictRetryInstruction()),
+                    new UserMessage(PromptCatalog.diagnosisUserPrompt(alert, context, safeDocuments)));
+            return parseDiagnosis(callModel(retry, requiredToolAuditor), alert, safeDocuments);
+        }
+    }
+
+    private String callModel(Prompt prompt, Consumer<String> toolAuditor) {
+        return extractText(chatClient.prompt(prompt)
+                .toolCallbacks(auditedToolCallbacks(toolAuditor))
                 .call()
                 .chatResponse(), "diagnosis");
-        JsonNode root = parseObject(text, "diagnosis");
+    }
+
+    private Diagnosis parseDiagnosis(String text, Alert alert, List<KnowledgeDocument> safeDocuments) {
+        JsonNode root = ModelJsonSupport.parseObject(text, "diagnosis");
         validateFields(root, EXPECTED_FIELDS, "diagnosis");
 
         Diagnosis diagnosis = new Diagnosis(
@@ -147,7 +160,7 @@ public class AlertDiagnosisAgent {
                 requireInstant(root, "diagnosedAt", "diagnosis"));
 
         if (safeDocuments.isEmpty() && diagnosis.evidence().stream().noneMatch(item -> item.contains("INSUFFICIENT_EVIDENCE"))) {
-            throw new IllegalStateException("diagnosis must acknowledge insufficient evidence when no knowledge documents are available");
+            throw new ModelOutputException("diagnosis must acknowledge insufficient evidence when no knowledge documents are available");
         }
 
         return diagnosis;
@@ -173,26 +186,13 @@ public class AlertDiagnosisAgent {
 
     private static String extractText(ChatResponse response, String context) {
         if (response == null || response.getResult() == null || response.getResult().getOutput() == null) {
-            throw new IllegalStateException(context + " response was empty");
+            throw new ModelOutputException(context + " response was empty");
         }
         String text = response.getResult().getOutput().getText();
         if (text == null || text.isBlank()) {
-            throw new IllegalStateException(context + " response text was blank");
+            throw new ModelOutputException(context + " response text was blank");
         }
         return text;
-    }
-
-    private static JsonNode parseObject(String text, String context) {
-        try {
-            JsonNode root = OBJECT_MAPPER.readTree(text);
-            if (root == null || !root.isObject()) {
-                throw new IllegalStateException(context + " response must be a JSON object");
-            }
-            return root;
-        }
-        catch (JsonProcessingException ex) {
-            throw new IllegalStateException(context + " response was not valid JSON", ex);
-        }
     }
 
     private static void validateFields(JsonNode root, Set<String> expectedFields, String context) {
@@ -200,14 +200,14 @@ public class AlertDiagnosisAgent {
         Iterator<String> fieldNames = root.fieldNames();
         fieldNames.forEachRemaining(actualFields::add);
         if (!actualFields.equals(expectedFields)) {
-            throw new IllegalStateException(context + " response fields did not match expected shape: " + actualFields);
+            throw new ModelOutputException(context + " response fields did not match expected shape: " + actualFields);
         }
     }
 
     private static String requireText(JsonNode root, String fieldName, String context) {
         JsonNode value = root.get(fieldName);
         if (value == null || !value.isTextual() || value.textValue().isBlank()) {
-            throw new IllegalStateException(context + " output field '" + fieldName + "' must be a non-empty string");
+            throw new ModelOutputException(context + " output field '" + fieldName + "' must be a non-empty string");
         }
         return value.textValue().trim();
     }
@@ -215,19 +215,19 @@ public class AlertDiagnosisAgent {
     private static String requireMatchingId(JsonNode root, String fieldName, String expectedValue, String context) {
         String actualValue = requireText(root, fieldName, context);
         if (!expectedValue.equals(actualValue)) {
-            throw new IllegalStateException(context + " output field '" + fieldName + "' must match " + expectedValue);
+            throw new ModelOutputException(context + " output field '" + fieldName + "' must match " + expectedValue);
         }
         return actualValue;
     }
 
     private static List<String> requireEvidence(JsonNode node, String context) {
         if (node == null || !node.isArray() || node.isEmpty()) {
-            throw new IllegalStateException(context + " output field 'evidence' must be a non-empty array");
+            throw new ModelOutputException(context + " output field 'evidence' must be a non-empty array");
         }
         List<String> evidence = new ArrayList<>();
         node.forEach(item -> {
             if (!item.isTextual() || item.textValue().isBlank()) {
-                throw new IllegalStateException(context + " evidence items must be non-empty strings");
+                throw new ModelOutputException(context + " evidence items must be non-empty strings");
             }
             evidence.add(item.textValue().trim());
         });
@@ -240,18 +240,18 @@ public class AlertDiagnosisAgent {
             return Instant.parse(value);
         }
         catch (DateTimeParseException ex) {
-            throw new IllegalStateException(context + " output field '" + fieldName + "' must be an ISO-8601 instant", ex);
+            throw new ModelOutputException(context + " output field '" + fieldName + "' must be an ISO-8601 instant", ex);
         }
     }
 
     private static double requireConfidence(JsonNode root, String context) {
         JsonNode value = root.get("confidence");
         if (value == null || !value.isNumber()) {
-            throw new IllegalStateException(context + " output field 'confidence' must be numeric");
+            throw new ModelOutputException(context + " output field 'confidence' must be numeric");
         }
         double confidence = value.doubleValue();
         if (!Double.isFinite(confidence) || confidence < 0.0 || confidence > 1.0) {
-            throw new IllegalStateException(context + " output field 'confidence' must be between 0 and 1");
+            throw new ModelOutputException(context + " output field 'confidence' must be between 0 and 1");
         }
         return confidence;
     }
@@ -261,7 +261,7 @@ public class AlertDiagnosisAgent {
             return Enum.valueOf(enumType, value);
         }
         catch (IllegalArgumentException ex) {
-            throw new IllegalStateException(context + " output field '" + fieldName + "' must be one of " + List.of(enumType.getEnumConstants()), ex);
+            throw new ModelOutputException(context + " output field '" + fieldName + "' must be one of " + List.of(enumType.getEnumConstants()), ex);
         }
     }
 

@@ -3,6 +3,7 @@ package com.example.smartpark.web;
 import com.example.smartpark.model.common.ApprovalDecision;
 import com.example.smartpark.model.common.Diagnosis;
 import com.example.smartpark.model.common.WorkOrder;
+import com.example.smartpark.model.common.WorkOrderStatus;
 import com.example.smartpark.model.common.WorkflowStatus;
 import com.example.smartpark.workflow.AlertWorkflowState;
 import com.example.smartpark.workflow.CustomerConversation;
@@ -170,7 +171,7 @@ public final class WebDtos {
             alertId = safeIdentifier(alertId, ALERT_ID);
             summary = "Work order content withheld";
             riskLevel = safeChoice(riskLevel, Set.of("LOW", "MEDIUM", "HIGH"));
-            status = safeChoice(status, java.util.Arrays.stream(WorkflowStatus.values())
+                status = safeChoice(status, java.util.Arrays.stream(WorkOrderStatus.values())
                     .map(Enum::name)
                     .collect(java.util.stream.Collectors.toUnmodifiableSet()));
             evidence = stableItems(evidence, "Work order content withheld");

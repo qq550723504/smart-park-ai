@@ -14,6 +14,7 @@ import java.util.Objects;
 public final class TestChatModel implements ChatModel {
 
     private final Deque<ChatResponse> responses;
+    private int calls;
     private Prompt lastPrompt;
 
     public TestChatModel(String... contents) {
@@ -27,9 +28,14 @@ public final class TestChatModel implements ChatModel {
         return lastPrompt;
     }
 
+    public int callCount() {
+        return calls;
+    }
+
     @Override
     public ChatResponse call(Prompt prompt) {
         lastPrompt = Objects.requireNonNull(prompt, "prompt");
+        calls++;
         ChatResponse response = responses.pollFirst();
         if (response == null) {
             throw new IllegalStateException("TestChatModel received more calls than configured");

@@ -64,7 +64,7 @@ export interface CustomerServiceResponse {
   ticket: CustomerTicketResponse | null
 }
 
-export type WorkflowStatus = 'RUNNING' | 'WAITING_APPROVAL' | 'COMPLETED' | 'REJECTED' | 'FAILED'
+export type WorkflowStatus = 'RUNNING' | 'WAITING_APPROVAL' | 'COMPLETED' | 'REJECTED' | 'FAILED' | 'WORK_ORDER_FAILED'
 
 export interface DiagnosisResponse {
   id: string
@@ -95,7 +95,7 @@ export interface WorkOrderResponse {
   alertId: string
   summary: string
   riskLevel: string
-  status: string
+  status: 'PENDING_EXECUTION' | 'IN_PROGRESS' | 'RESOLVED' | 'CANCELLED' | string
   approval: ApprovalResponse | null
   evidence: string[]
   createdAt: string

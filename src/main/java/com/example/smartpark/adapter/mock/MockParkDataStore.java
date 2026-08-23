@@ -6,6 +6,7 @@ import com.example.smartpark.model.common.Device;
 import com.example.smartpark.model.common.KnowledgeDocument;
 import com.example.smartpark.model.common.RiskLevel;
 import com.example.smartpark.model.common.WorkOrder;
+import com.example.smartpark.model.common.WorkOrderStatus;
 import com.example.smartpark.model.common.WorkflowStatus;
 import com.example.smartpark.model.energy.EnergyReading;
 import com.example.smartpark.model.security.SecurityEvent;
@@ -168,7 +169,7 @@ public class MockParkDataStore {
         int sequence = workOrderSequence.incrementAndGet();
         Instant createdAt = WORK_ORDER_BASE_TIME.plusSeconds(sequence);
         return new WorkOrder(String.format("WO-%04d", sequence), workflowId, alert.parkId(), alert.buildingId(), alert.deviceId(), alert.id(), summary,
-                alert.riskHint(), WorkflowStatus.WAITING_APPROVAL, Optional.empty(), alert.evidence(), createdAt, createdAt);
+                alert.riskHint(), WorkOrderStatus.PENDING_EXECUTION, Optional.empty(), alert.evidence(), createdAt, createdAt);
     }
 
     private void putDevice(Device device) { devices.put(device.id(), device); }

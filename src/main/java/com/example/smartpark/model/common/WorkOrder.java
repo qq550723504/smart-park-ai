@@ -14,7 +14,7 @@ public record WorkOrder(
         String alertId,
         String summary,
         RiskLevel riskLevel,
-        WorkflowStatus status,
+        WorkOrderStatus status,
         Optional<ApprovalDecision> approvalDecision,
         List<String> evidence,
         Instant createdAt,

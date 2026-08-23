@@ -32,7 +32,10 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler({IllegalStateException.class, IllegalArgumentException.class})
     ResponseEntity<WebDtos.ApiError> conflict(RuntimeException exception) {
-        return error(HttpStatus.CONFLICT, "Request conflicts with current resource state");
+        String message = "Idempotency key was already used for another question".equals(exception.getMessage())
+                ? "Idempotency-Key 已用于其他问题，请生成新的请求键"
+                : "Request conflicts with current resource state";
+        return error(HttpStatus.CONFLICT, message);
     }
 
     @ExceptionHandler({MethodArgumentNotValidException.class, HttpMessageNotReadableException.class})

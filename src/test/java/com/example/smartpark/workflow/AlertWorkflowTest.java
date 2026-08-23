@@ -8,6 +8,7 @@ import com.example.smartpark.adapter.mock.MockParkFixture;
 import com.example.smartpark.model.common.ApprovalDecision;
 import com.example.smartpark.model.common.Diagnosis;
 import com.example.smartpark.model.common.WorkOrder;
+import com.example.smartpark.model.common.WorkOrderStatus;
 import com.example.smartpark.model.common.WorkflowStatus;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.knowledge.KnowledgePort;
@@ -48,6 +49,7 @@ class AlertWorkflowTest {
 
         assertThat(result.status()).as("workflow errors: %s", result.errors()).isEqualTo(WorkflowStatus.COMPLETED);
         assertThat(result.workOrder()).isNotNull();
+        assertThat(result.workOrder().status()).isEqualTo(WorkOrderStatus.PENDING_EXECUTION);
         assertThat(fixture.parkSystem.workOrders().findByWorkflowId(result.workflowId())).hasSize(1);
         assertThat(result.statePayload()).containsKeys(
                 AlertWorkflowState.WORKFLOW_ID,
