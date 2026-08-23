@@ -120,3 +120,62 @@ Implementation commit: `3f070798d75d3b922d95dd43b6156da325d4cd4a` (`fix: address
 
 - The context test disables DashScope auto-configuration; an integration test with a real environment variable is still needed when provider connectivity is introduced.
 - `.gitignore` has an existing unstaged `.worktrees/` change and was intentionally not included in the fix commit.
+
+## Round 2 Fix Report
+
+### Fixed Files
+
+- `pom.xml`
+- `src/test/java/com/example/smartpark/SmartParkApplicationTest.java`
+
+Removed `spring-ai-alibaba-extensions-bom` and added the already-pinned `${spring-ai-alibaba.version}` directly to `spring-ai-alibaba-starter-dashscope`. This keeps the requested BOM boundary while preserving the required starter version.
+
+The context test now injects Spring `Environment` and asserts that `spring.ai.dashscope.api-key` equals `System.getenv().getOrDefault("AI_DASHSCOPE_API_KEY", "")`. DashScope auto-configuration remains disabled for the network-free context test, but the environment-to-property mapping is now explicitly covered.
+
+### Commands and Outputs
+
+Dependency resolution:
+
+```powershell
+.\mvnw.cmd -DskipTests dependency:resolve
+```
+
+Relevant output:
+
+```text
+[INFO]    com.alibaba.cloud.ai:spring-ai-alibaba-starter-dashscope:jar:1.1.2.2:compile
+[INFO]    com.alibaba.cloud.ai:spring-ai-alibaba-agent-framework:jar:1.1.2.2:compile
+[INFO]    com.alibaba.cloud.ai:spring-ai-alibaba-graph-core:jar:1.1.2.2:compile
+[INFO] BUILD SUCCESS
+```
+
+Covering tests:
+
+```powershell
+.\mvnw.cmd -Dtest=SmartParkApplicationTest test
+```
+
+Relevant output:
+
+```text
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+```
+
+Static checks:
+
+```powershell
+git diff --check
+rg -n 'spring-ai-alibaba-extensions-bom' pom.xml
+```
+
+`git diff --check` passed; the BOM search returned no match. The dependency declaration contains `<version>${spring-ai-alibaba.version}</version>`.
+
+### Commit
+
+Implementation commit: `7e1f3a14f5b2f0ef0b3e3120e06535f9b4097feb` (`fix: resolve Task 1 round 2 review findings`).
+
+### Concerns
+
+- The context test intentionally disables DashScope auto-configuration to remain network-free and credential-free; its explicit `Environment` assertion now verifies the production mapping.
+- `.gitignore` still has an existing unstaged `.worktrees/` change and was intentionally excluded from this fix.
