@@ -11,3 +11,5 @@ target/
 .DS_Store
 Thumbs.db
 out/
+.superpowers/
+.docs/superpowers/
