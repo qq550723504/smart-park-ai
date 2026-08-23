@@ -1,6 +1,6 @@
 package com.example.smartpark.adapter.mock;
 
-import com.example.smartpark.web.DemoFaultInjector;
+import com.example.smartpark.demo.DemoFaultInjector;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 

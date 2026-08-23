@@ -1,4 +1,4 @@
-package com.example.smartpark.web;
+package com.example.smartpark.demo;
 
 import java.util.concurrent.atomic.AtomicReference;
 

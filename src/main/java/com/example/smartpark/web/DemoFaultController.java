@@ -1,6 +1,7 @@
 package com.example.smartpark.web;
 
 import com.example.smartpark.audit.AuditTrail;
+import com.example.smartpark.demo.DemoFaultInjector;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
