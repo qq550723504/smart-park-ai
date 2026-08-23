@@ -1,15 +1,18 @@
 # Task 5 Report
 
-- 先添加 `MockParkConfigurationTest`，在独立配置类不存在时确认测试编译失败。
-- 新增 `MockParkConfiguration`，在原 DashScope 条件下注册一个共享 `MockParkDataStore` 和五个 capability adapter bean。
-- 从 `AlertWorkflowRuntimeConfiguration` 移除 Mock store/adapter bean；workflow 继续通过 `AlertPort`、`DevicePort`、`WorkOrderPort`、`KnowledgePort` 组装。
-- 保持 DashScope 关闭时 Mock 配置不加载，并验证上下文无 `mockParkSystem` bean 名称。
+- 强化 `MockParkConfigurationTest`，明确断言五个具体 adapter bean 各恰好一个。
+- 通过反射读取已有 adapter 的 private final `dataStore` 字段，验证五个 adapter 持有同一个 Spring 管理的 `MockParkDataStore` 实例。
+- 验证上下文中不存在 Bean 名称为 `mockParkSystem` 或类名为 `MockParkSystem` 的聚合 bean。
+- 未修改业务端口、workflow、DashScope、Maven 或 `MockParkConfiguration`。
 
 ## Verification
 
-- `mvnw -q -Dtest=MockParkConfigurationTest test`（红灯：配置类不存在）
-- `mvnw -q -Dtest=MockParkConfigurationTest test`（绿灯）
-- `mvnw -q -Dtest=MockParkConfigurationTest,SmartParkApplicationTest,AlertWorkflowControllerTest,WorkflowEventControllerTest,WorkflowRuntimeControllerTest test`（通过）
-- `mvnw -q test-compile`（通过）
-- `mvnw -q test`（通过）
-- `git diff --check`（通过；仅有 Git 的 LF/CRLF 提示）
+- `mvnw.cmd -q clean`（先执行；exit 0，清理后重新编译）
+- `mvnw.cmd -Dtest=MockParkConfigurationTest,MockParkFixtureTest,MockParkDataStoreTest,MockAdapterBoundaryTest test`（11 tests run, 0 failures, 0 errors, 0 skipped；BUILD SUCCESS）
+- `mvnw.cmd test-compile`（BUILD SUCCESS）
+- `mvnw.cmd test`（103 tests run, 0 failures, 0 errors, 1 skipped；BUILD SUCCESS）
+- `git diff --check`（通过）
+
+## Concerns
+
+- 仍有 1 个全量测试被跳过：`DashScopeSmokeTest`；这是现有环境条件跳过，不是本 Task 5 修复引入的失败。
