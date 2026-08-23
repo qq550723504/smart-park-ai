@@ -216,7 +216,7 @@ public class AlertDiagnosisAgent {
             throw new IllegalStateException(context + " output field 'confidence' must be numeric");
         }
         double confidence = value.doubleValue();
-        if (confidence < 0.0 || confidence > 1.0) {
+        if (!Double.isFinite(confidence) || confidence < 0.0 || confidence > 1.0) {
             throw new IllegalStateException(context + " output field 'confidence' must be between 0 and 1");
         }
         return confidence;

@@ -178,12 +178,14 @@ class AlertWorkflowTest {
     void duplicateApprovalWithTheSameIdempotencyKeyReturnsTheRecordedResultWithoutSideEffects() {
         Fixture fixture = fixture("ALT-POWER-001", 0.96, "HIGH", null, sequentialIds());
         WorkflowSnapshot waiting = fixture.workflow.start("ALT-POWER-001");
-        ApprovalDecision decision = approvedAt("approval-duplicate-1", "2026-08-23T02:00:00Z");
+        ApprovalDecision firstDecision = approvedAt("approval-duplicate-1", "2026-08-23T02:00:00Z");
+        ApprovalDecision retryDecision = approvedAt("approval-duplicate-1", "2026-08-23T02:02:00Z");
 
-        WorkflowSnapshot completed = fixture.workflow.approve(waiting.workflowId(), decision);
-        WorkflowSnapshot duplicate = fixture.workflow.approve(waiting.workflowId(), decision);
+        WorkflowSnapshot completed = fixture.workflow.approve(waiting.workflowId(), firstDecision);
+        WorkflowSnapshot duplicate = fixture.workflow.approve(waiting.workflowId(), retryDecision);
 
         assertThat(duplicate).isEqualTo(completed);
+        assertThat(duplicate.approval()).contains(firstDecision);
         assertThat(fixture.parkSystem.findByWorkflowId(waiting.workflowId())).hasSize(1);
     }
 

@@ -18,6 +18,14 @@ public record ApprovalDecision(
         decidedAt = Objects.requireNonNull(decidedAt, "decidedAt");
     }
 
+    public boolean hasSameRequestPayloadAs(ApprovalDecision other) {
+        return other != null
+                && decision == other.decision
+                && reviewer.equals(other.reviewer)
+                && comment.equals(other.comment)
+                && idempotencyKey.equals(other.idempotencyKey);
+    }
+
     private static String requireText(String value, String name) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(name + " must not be blank");

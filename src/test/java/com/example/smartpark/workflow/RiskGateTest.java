@@ -51,6 +51,17 @@ class RiskGateTest {
     }
 
     @Test
+    void lowClassificationConfidenceRoutesToHumanApprovalEvenWhenDiagnosisConfidenceIsHigh() {
+        Route route = riskGate.route(
+                alert(RiskLevel.LOW),
+                classification(RiskLevel.LOW, 0.74),
+                diagnosis(RiskLevel.LOW, 0.99),
+                List.of(document()));
+
+        assertThat(route).isEqualTo(Route.WAIT_FOR_APPROVAL);
+    }
+
+    @Test
     void missingKnowledgeEvidenceRoutesToHumanApproval() {
         Route route = riskGate.route(
                 alert(RiskLevel.LOW),

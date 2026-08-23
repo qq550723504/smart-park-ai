@@ -25,7 +25,7 @@ public record Diagnosis(
         summary = Objects.requireNonNull(summary, "summary");
         evidence = List.copyOf(Objects.requireNonNull(evidence, "evidence"));
         recommendedAction = Objects.requireNonNull(recommendedAction, "recommendedAction");
-        if (confidence < 0.0 || confidence > 1.0) {
+        if (!Double.isFinite(confidence) || confidence < 0.0 || confidence > 1.0) {
             throw new IllegalArgumentException("confidence must be between 0 and 1");
         }
         diagnosedAt = Objects.requireNonNull(diagnosedAt, "diagnosedAt");

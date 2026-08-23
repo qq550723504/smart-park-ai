@@ -155,7 +155,7 @@ public final class AlertWorkflow {
             if (current.approval().isPresent()) {
                 ApprovalDecision recorded = current.approval().orElseThrow();
                 if (recorded.idempotencyKey().equals(requiredDecision.idempotencyKey())) {
-                    if (recorded.equals(requiredDecision)) {
+                    if (recorded.hasSameRequestPayloadAs(requiredDecision)) {
                         return current;
                     }
                     throw new IllegalArgumentException(

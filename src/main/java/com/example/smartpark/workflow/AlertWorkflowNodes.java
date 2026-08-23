@@ -391,7 +391,8 @@ public final class AlertWorkflowNodes {
             if (alert.riskHint().isHighRisk()
                     || classification.riskLevel().isHighRisk()
                     || diagnosis.riskLevel().isHighRisk()
-                    || diagnosis.confidence() < confidenceThreshold
+                    || !(classification.confidence() >= confidenceThreshold)
+                    || !(diagnosis.confidence() >= confidenceThreshold)
                     || evidence.isEmpty()) {
                 return Route.WAIT_FOR_APPROVAL;
             }

@@ -11,14 +11,22 @@ import com.example.smartpark.tool.AlertQueryTool;
 import com.example.smartpark.tool.DeviceQueryTool;
 import com.example.smartpark.tool.ParkKnowledgeTool;
 import com.example.smartpark.tool.WorkOrderTool;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.time.Instant;
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AlertDiagnosisAgentTest {
 
@@ -208,6 +216,40 @@ class AlertDiagnosisAgentTest {
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> agent.diagnose(sampleAlert(), sampleContext(), sampleKnowledge()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("diagnosedAt");
+    }
+
+    @ParameterizedTest
+    @MethodSource("nonFiniteConfidences")
+    void nonFiniteConfidenceIsRejectedAtTheStructuredOutputBoundary(double confidence) {
+        JsonNode output = JsonNodeFactory.instance.objectNode().put("confidence", confidence);
+
+        assertThatThrownBy(() -> invokeRequireConfidence(output))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("confidence");
+    }
+
+    private static double invokeRequireConfidence(JsonNode output) {
+        try {
+            Method method = AlertDiagnosisAgent.class.getDeclaredMethod(
+                    "requireConfidence",
+                    JsonNode.class,
+                    String.class);
+            method.setAccessible(true);
+            return (double) method.invoke(null, output, "diagnosis");
+        }
+        catch (InvocationTargetException exception) {
+            if (exception.getCause() instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            throw new AssertionError(exception.getCause());
+        }
+        catch (ReflectiveOperationException exception) {
+            throw new AssertionError(exception);
+        }
+    }
+
+    private static Stream<Double> nonFiniteConfidences() {
+        return Stream.of(Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY);
     }
 
     private static Alert sampleAlert() {
