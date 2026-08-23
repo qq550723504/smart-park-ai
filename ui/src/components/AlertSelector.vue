@@ -9,7 +9,7 @@ const emit = defineEmits<{ select: [alertId: string]; start: [] }>()
   <section class="panel alert-panel">
     <div class="section-heading">
       <div>
-        <span class="eyebrow">ALERT INBOX</span>
+        <span class="eyebrow">告警收件箱</span>
         <h2>选择演示告警</h2>
       </div>
       <span class="count-badge">{{ alerts.length }} 条待处理</span>
@@ -39,6 +39,6 @@ const emit = defineEmits<{ select: [alertId: string]; start: [] }>()
     <el-button class="start-button" type="primary" size="large" :loading="loading" @click="emit('start')">
       启动 AI 诊断工作流
     </el-button>
-    <p class="helper">演示告警来自后端 Mock 数据，启动需要配置可用的 DashScope 模型。</p>
+    <p class="helper">演示告警来自后端模拟数据，启动需要配置可用的 DashScope 模型。</p>
   </section>
 </template>

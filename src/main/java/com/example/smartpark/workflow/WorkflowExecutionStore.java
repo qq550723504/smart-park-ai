@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Comparator;
 import java.util.concurrent.ConcurrentHashMap;
 
 public interface WorkflowExecutionStore {
@@ -120,6 +121,9 @@ final class InMemoryWorkflowExecutionStore implements WorkflowExecutionStore {
     public Optional<WorkflowSnapshot> findByAlertId(String alertId) {
         return executions.values().stream()
                 .filter(execution -> execution.alertId().equals(alertId))
+                // Prefer a reusable execution over an old failed attempt. This keeps
+                // retries idempotent once a new attempt is running or completed.
+                .sorted(Comparator.comparing(execution -> isRetryable(execution.snapshot().status())))
                 .findFirst()
                 .map(Execution::snapshot);
     }
@@ -137,7 +141,7 @@ final class InMemoryWorkflowExecutionStore implements WorkflowExecutionStore {
             CompiledGraph compiledGraph,
             AlertWorkflowState initialState) {
         Optional<WorkflowSnapshot> existingSnapshot = findByAlertId(alertId);
-        if (existingSnapshot.isPresent()) {
+        if (existingSnapshot.filter(snapshot -> !isRetryable(snapshot.status())).isPresent()) {
             Execution existing = executions.get(existingSnapshot.get().workflowId());
             if (existing == null) {
                 throw new IllegalStateException(
@@ -160,5 +164,9 @@ final class InMemoryWorkflowExecutionStore implements WorkflowExecutionStore {
 
     private static boolean isRunning(WorkflowStatus status) {
         return status == WorkflowStatus.RUNNING || status == WorkflowStatus.WAITING_APPROVAL;
+    }
+
+    private static boolean isRetryable(WorkflowStatus status) {
+        return status == WorkflowStatus.FAILED || status == WorkflowStatus.WORK_ORDER_FAILED;
     }
 }

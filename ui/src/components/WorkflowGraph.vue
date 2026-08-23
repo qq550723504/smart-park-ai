@@ -75,7 +75,7 @@ const edges = computed<Edge[]>(() => {
   <section class="panel graph-panel">
     <div class="section-heading compact">
       <div>
-        <span class="eyebrow">LIVE ORCHESTRATION</span>
+        <span class="eyebrow">实时编排</span>
         <h2>工作流执行图</h2>
       </div>
       <div class="graph-legend">

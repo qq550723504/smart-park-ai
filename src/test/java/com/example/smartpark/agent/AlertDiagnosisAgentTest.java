@@ -134,6 +134,30 @@ class AlertDiagnosisAgentTest {
     }
 
     @Test
+    void diagnosisRetriesOnceWhenTheFirstModelResponseViolatesTheJsonContract() {
+        TestChatModel model = new TestChatModel(
+                "not-json",
+                """
+                {"id":"diag-retry","alertId":"ALT-TEMP-001","deviceId":"DEV-HVAC-001","riskLevel":"LOW","rootCause":"Restricted airflow from a clogged filter","summary":"The HVAC unit likely needs filter inspection.","evidence":["history: repeated temperature warnings"],"recommendedAction":"Inspect and replace the HVAC filter.","confidence":0.88,"diagnosedAt":"2026-08-23T01:30:00Z"}
+                """);
+
+        AlertDiagnosisAgent agent = new AlertDiagnosisAgent(
+                model,
+                new DeviceQueryTool(new MockParkFixture().devices()),
+                new AlertQueryTool(new MockParkFixture().alerts()),
+                new WorkOrderTool(new MockParkFixture().workOrders()),
+                new ParkKnowledgeTool(new MockParkFixture().knowledge()));
+
+        Diagnosis result = agent.diagnose(sampleAlert(), sampleContext(), sampleKnowledge());
+
+        assertThat(result.id()).isEqualTo("diag-retry");
+        assertThat(model.callCount()).isEqualTo(2);
+        assertThat(model.lastPrompt().getSystemMessage().getText())
+                .contains("exactly one JSON object")
+                .contains("Markdown fences");
+    }
+
+    @Test
     void emptyKnowledgeProducesEvidenceInsufficiencyInsteadOfFabricatedEvidence() {
         TestChatModel model = new TestChatModel("""
                 {
@@ -231,7 +255,7 @@ class AlertDiagnosisAgentTest {
 
     @Test
     void invalidDiagnosisRiskLevelFailsClosed() {
-        TestChatModel model = new TestChatModel("""
+        String content = """
                 {
                   "id":"diag-5",
                   "alertId":"ALT-TEMP-001",
@@ -244,7 +268,8 @@ class AlertDiagnosisAgentTest {
                   "confidence":0.9,
                   "diagnosedAt":"2026-08-23T01:50:00Z"
                 }
-                """);
+                """;
+        TestChatModel model = new TestChatModel(content, content);
 
         AlertDiagnosisAgent agent = new AlertDiagnosisAgent(
                 model,
@@ -260,7 +285,7 @@ class AlertDiagnosisAgentTest {
 
     @Test
     void invalidDiagnosisTimestampFailsClosed() {
-        TestChatModel model = new TestChatModel("""
+        String content = """
                 {
                   "id":"diag-6",
                   "alertId":"ALT-TEMP-001",
@@ -273,7 +298,8 @@ class AlertDiagnosisAgentTest {
                   "confidence":0.9,
                   "diagnosedAt":"yesterday"
                 }
-                """);
+                """;
+        TestChatModel model = new TestChatModel(content, content);
 
         AlertDiagnosisAgent agent = new AlertDiagnosisAgent(
                 model,

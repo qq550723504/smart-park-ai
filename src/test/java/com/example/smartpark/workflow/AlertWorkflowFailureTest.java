@@ -269,21 +269,27 @@ class AlertWorkflowFailureTest {
     }
 
     @Test
-    void duplicateStartReturnsFailedAndRejectedTerminalExecutions() {
+    void failedStartCanBeRetriedButRejectedTerminalExecutionRemainsIdempotent() {
         MockParkFixture failedPark = new MockParkFixture();
-        AtomicInteger failedIds = new AtomicInteger();
+        AtomicInteger retryIds = new AtomicInteger();
         Fixture failedFixture = fixture(
-                validTriageModel("ALT-TEMP-001", "LOW"),
-                new FailingChatModel("providerResponse=terminal-failure"),
+                new TestChatModel(
+                        "not-json",
+                        "still-not-json",
+                        "{\"category\":\"TEMPERATURE\",\"priority\":\"MEDIUM\",\"riskLevel\":\"LOW\",\"confidence\":0.95}"),
+                validDiagnosisModel("ALT-TEMP-001", "LOW"),
                 failedPark.devices(),
                 failedPark.alerts(),
                 failedPark.workOrders(),
                 failedPark.knowledge(),
-                () -> "wf-failed-" + failedIds.incrementAndGet());
+                () -> "wf-retry-" + retryIds.incrementAndGet());
         WorkflowSnapshot failed = failedFixture.workflow().start("ALT-TEMP-001");
+        WorkflowSnapshot retried = failedFixture.workflow().start("ALT-TEMP-001");
 
-        assertThat(failedFixture.workflow().start("ALT-TEMP-001")).isEqualTo(failed);
-        assertThat(failedIds).hasValue(1);
+        assertThat(failed.status()).isEqualTo(WorkflowStatus.FAILED);
+        assertThat(retried.status()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThat(retried.workflowId()).isNotEqualTo(failed.workflowId());
+        assertThat(retryIds).hasValue(2);
 
         MockParkFixture rejectedPark = new MockParkFixture();
         AtomicInteger rejectedIds = new AtomicInteger();

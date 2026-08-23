@@ -1,8 +1,10 @@
 package com.example.smartpark.agent;
 
 import com.example.smartpark.model.alert.Alert;
+import com.example.smartpark.model.alert.AlertClassification;
 import com.example.smartpark.model.alert.ParkContext;
 import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.model.common.RiskLevel;
 import com.example.smartpark.model.common.WorkOrder;
 
 import java.util.List;
@@ -19,15 +21,15 @@ final class PromptCatalog {
                 You are the smart-park alert triage agent.
                 Return JSON only and make it match these fields exactly:
                 {
-                  "category": "one of AlertClassification enum values",
+                  "category": "%s",
                   "priority": "LOW | MEDIUM | HIGH",
-                  "riskLevel": "one of RiskLevel enum values",
+                  "riskLevel": "%s",
                   "confidence": "number from 0 to 1"
                 }
                 Use the supplied alert only.
                 Do not guess missing facts.
                 If the evidence is insufficient, choose the most conservative valid classification and lower confidence instead of inventing data.
-                """;
+                """.formatted(enumValues(AlertClassification.class), enumValues(RiskLevel.class));
     }
 
     static String triageUserPrompt(Alert alert) {
@@ -65,7 +67,7 @@ final class PromptCatalog {
                   "id": "non-empty diagnosis id",
                   "alertId": "non-empty alert id",
                   "deviceId": "non-empty device id",
-                  "riskLevel": "one of RiskLevel enum values",
+                  "riskLevel": "%s",
                   "rootCause": "non-empty root-cause hypothesis",
                   "summary": "non-empty diagnosis summary",
                   "evidence": ["one or more evidence statements"],
@@ -77,7 +79,7 @@ final class PromptCatalog {
                 Missing tool data or missing knowledge is evidence insufficiency, not permission to guess.
                 Available read-only tools: %s
                 You are not allowed to create or mutate work orders in this step.
-                """.formatted(toolNames);
+                """.formatted(enumValues(RiskLevel.class), toolNames);
     }
 
     static String diagnosisUserPrompt(Alert alert, ParkContext context, List<KnowledgeDocument> documents) {
@@ -107,6 +109,21 @@ final class PromptCatalog {
                 renderAlertHistory(context),
                 renderWorkOrders(context.workOrders()),
                 renderKnowledgeDocuments(safeDocuments));
+    }
+
+    static String strictRetryInstruction() {
+        return """
+
+                The previous response did not satisfy the output contract. Retry once.
+                Return exactly one JSON object with the required fields and valid enum values.
+                Do not include Markdown fences, explanations, comments, or extra fields.
+                """;
+    }
+
+    private static <E extends Enum<E>> String enumValues(Class<E> enumType) {
+        return java.util.Arrays.stream(enumType.getEnumConstants())
+                .map(Enum::name)
+                .collect(Collectors.joining(" | "));
     }
 
     private static String renderDevice(ParkContext context) {

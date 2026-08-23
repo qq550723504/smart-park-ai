@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getAuditEntries, getKnowledge, getOperationsMetrics, getWorkflowObservability, injectDemoFault, setKnowledgeActive } from '../services/workflowApi'
 import type { AuditEntry, DemoRole, KnowledgeMetadata, OperationsMetrics, WorkflowObservability, WorkflowResponse } from '../types/workflow'
+import { auditActionLabel, toolLabel } from '../utils/labels'
 
 const props = defineProps<{ workflow: WorkflowResponse | null; role: DemoRole }>()
 const observation = ref<WorkflowObservability | null>(null)
@@ -36,14 +37,14 @@ watch(() => [props.workflow?.eventSequence, props.role], refresh, { immediate: t
 
 <template>
   <section class="panel demo-console">
-    <div><span class="eyebrow">OPERATIONS</span><strong>{{ metrics?.workflowCount ?? 0 }} / {{ metrics?.customerSessionCount ?? 0 }}</strong><small>工作流 / 客服会话 · 人工工单 {{ metrics?.humanTicketCount ?? 0 }}</small></div>
-    <div><span class="eyebrow">KNOWLEDGE</span><strong>{{ metrics?.activeKnowledgeDocumentCount ?? 0 }} / {{ metrics?.knowledgeDocumentCount ?? 0 }}</strong><small>启用 / 全部文档</small></div>
-    <div><span class="eyebrow">FEEDBACK</span><strong>{{ metrics?.positiveFeedbackCount ?? 0 }} / {{ metrics?.feedbackCount ?? 0 }}</strong><small>正向 / 全部反馈</small></div>
-    <div><span class="eyebrow">AUDIT TRAIL</span><strong>{{ metrics?.auditEntryCount ?? 0 }}</strong><small>{{ audits.at(-1)?.action || (role === 'ADMIN' ? '暂无审计记录' : '管理员可查看明细') }}</small></div>
-    <div><span class="eyebrow">TOOL CALLS</span><strong>{{ observation?.toolCalls ?? 0 }}</strong><small>{{ observation?.tools.join(' · ') || '尚无调用' }}</small></div>
-    <div><span class="eyebrow">FAILURE DEMO</span><el-button size="small" :disabled="role !== 'ADMIN'" @click="inject">注入知识库故障</el-button><small>仅影响下一次检索</small></div>
+    <div><span class="eyebrow">运营概览</span><strong>{{ metrics?.workflowCount ?? 0 }} / {{ metrics?.customerSessionCount ?? 0 }}</strong><small>工作流 / 客服会话 · 人工工单 {{ metrics?.humanTicketCount ?? 0 }}</small></div>
+    <div><span class="eyebrow">知识库</span><strong>{{ metrics?.activeKnowledgeDocumentCount ?? 0 }} / {{ metrics?.knowledgeDocumentCount ?? 0 }}</strong><small>启用 / 全部文档</small></div>
+    <div><span class="eyebrow">用户反馈</span><strong>{{ metrics?.positiveFeedbackCount ?? 0 }} / {{ metrics?.feedbackCount ?? 0 }}</strong><small>正向 / 全部反馈</small></div>
+    <div><span class="eyebrow">审计记录</span><strong>{{ metrics?.auditEntryCount ?? 0 }}</strong><small>{{ audits.at(-1) ? auditActionLabel(audits.at(-1)!.action) : (role === 'ADMIN' ? '暂无审计记录' : '管理员可查看明细') }}</small></div>
+    <div><span class="eyebrow">工具调用</span><strong>{{ observation?.toolCalls ?? 0 }}</strong><small>{{ observation?.tools.map(toolLabel).join(' · ') || '尚无调用' }}</small></div>
+    <div><span class="eyebrow">故障演示</span><el-button size="small" :disabled="role !== 'ADMIN'" @click="inject">注入知识库故障</el-button><small>仅影响下一次检索</small></div>
     <div v-if="role === 'ADMIN'" class="knowledge-admin">
-      <span class="eyebrow">KNOWLEDGE STATUS</span>
+      <span class="eyebrow">知识状态</span>
       <button v-for="item in knowledge" :key="item.id" type="button" :class="{ inactive: !item.active }" @click="toggleKnowledge(item)"><i></i>{{ item.id }}</button>
     </div>
   </section>

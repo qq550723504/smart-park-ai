@@ -28,16 +28,47 @@ class AlertTriageAgentTest {
         assertThat(result.riskLevel()).isEqualTo(RiskLevel.LOW);
         assertThat(result.confidence()).isEqualTo(0.92);
         assertThat(model.lastPrompt().getSystemMessage().getText()).contains("JSON");
+        assertThat(model.lastPrompt().getSystemMessage().getText())
+                .contains("TEMPERATURE | POWER | ENERGY | ACCESS | PUMP | UNKNOWN")
+                .contains("LOW | HIGH");
         assertThat(model.lastPrompt().getUserMessage().getText()).contains("ALT-TEMP-001");
     }
 
     @Test
     void malformedModelOutputDoesNotBecomeAFalseDiagnosis() {
-        TestChatModel model = new TestChatModel("not-json");
+        TestChatModel model = new TestChatModel("not-json", "not-json");
 
         assertThatThrownBy(() -> new AlertTriageAgent(model).classify(sampleAlert()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("triage");
+    }
+
+    @Test
+    void retriesOnceWhenModelReturnsInvalidJsonThenAcceptsTheCorrectedResponse() {
+        TestChatModel model = new TestChatModel(
+                "not-json",
+                "{\"category\":\"TEMPERATURE\",\"priority\":\"MEDIUM\",\"riskLevel\":\"LOW\",\"confidence\":0.92}");
+
+        AlertTriageAgent.AlertClassificationResult result = new AlertTriageAgent(model).classify(sampleAlert());
+
+        assertThat(result.category()).isEqualTo(AlertClassification.TEMPERATURE);
+        assertThat(model.callCount()).isEqualTo(2);
+        assertThat(model.lastPrompt().getSystemMessage().getText())
+                .contains("exactly one JSON object")
+                .contains("Markdown fences");
+    }
+
+    @Test
+    void acceptsJsonWrappedInMarkdownWithoutRelaxingFieldValidation() {
+        TestChatModel model = new TestChatModel("""
+                ```json
+                {"category":"TEMPERATURE","priority":"MEDIUM","riskLevel":"LOW","confidence":0.92}
+                ```
+                """);
+
+        AlertTriageAgent.AlertClassificationResult result = new AlertTriageAgent(model).classify(sampleAlert());
+
+        assertThat(result.category()).isEqualTo(AlertClassification.TEMPERATURE);
     }
 
     @ParameterizedTest
@@ -47,7 +78,7 @@ class AlertTriageAgentTest {
             "{\"category\":\"TEMPERATURE\",\"priority\":\"MEDIUM\",\"riskLevel\":\"SEVERE\",\"confidence\":0.92}"
     })
     void invalidTriageEnumsFailClosed(String content) {
-        TestChatModel model = new TestChatModel(content);
+        TestChatModel model = new TestChatModel(content, content);
 
         assertThatThrownBy(() -> new AlertTriageAgent(model).classify(sampleAlert()))
                 .isInstanceOf(IllegalStateException.class);
@@ -55,9 +86,10 @@ class AlertTriageAgentTest {
 
     @Test
     void outOfRangeConfidenceFailsClosed() {
-        TestChatModel model = new TestChatModel("""
+        String content = """
                 {"category":"TEMPERATURE","priority":"MEDIUM","riskLevel":"LOW","confidence":1.5}
-                """);
+                """;
+        TestChatModel model = new TestChatModel(content, content);
 
         assertThatThrownBy(() -> new AlertTriageAgent(model).classify(sampleAlert()))
                 .isInstanceOf(IllegalStateException.class)

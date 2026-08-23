@@ -4,6 +4,7 @@ import com.example.smartpark.model.common.ApprovalDecision;
 import com.example.smartpark.model.common.Diagnosis;
 import com.example.smartpark.model.common.RiskLevel;
 import com.example.smartpark.model.common.WorkOrder;
+import com.example.smartpark.model.common.WorkOrderStatus;
 import com.example.smartpark.model.common.WorkflowStatus;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.web.AlertWorkflowController;
@@ -119,7 +120,7 @@ class SensitiveDataTest {
                 injected,
                 injected,
                 RiskLevel.LOW,
-                WorkflowStatus.COMPLETED,
+                WorkOrderStatus.PENDING_EXECUTION,
                 Optional.of(approval),
                 List.of(injected),
                 now,
