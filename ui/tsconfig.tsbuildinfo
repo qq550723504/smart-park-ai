@@ -1,1 +1,0 @@
-{"root":["./src/main.ts","./src/vite-env.d.ts","./src/composables/useworkflow.ts","./src/services/workflowapi.ts","./src/types/workflow.ts","./src/app.vue","./src/components/alertselector.vue","./src/components/eventtimeline.vue","./src/components/workflowgraph.vue","./vite.config.ts"],"version":"5.9.3"}
