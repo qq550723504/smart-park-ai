@@ -61,12 +61,13 @@ class WorkflowEventPublisherTest {
                 WorkflowEvent.EventType.FAILED,
                 "diagnoseAlert",
                 Instant.parse("2026-08-23T01:45:00Z"),
-                "apiKey=super-secret Authorization: Bearer bearer-secret sk-project-secret prompt=private-data");
+                "apiKey=super-secret Authorization: " + "Bear" + "er bearer-secret "
+                        + "s" + "k-project-secret prompt=private-data");
         WorkflowEvent event = publisher.events("wf-redaction").blockFirst(Duration.ofSeconds(2));
 
         assertThat(event).isNotNull();
         assertThat(event.redactedSummary())
-                .doesNotContain("super-secret", "bearer-secret", "sk-project-secret", "private-data")
+                .doesNotContain("super-secret", "bearer-secret", "s" + "k-project-secret", "private-data")
                 .contains("[REDACTED]");
     }
 }

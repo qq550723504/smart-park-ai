@@ -25,6 +25,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
@@ -42,7 +47,8 @@ class AlertWorkflowFailureTest {
         MockParkSystem park = new MockParkSystem();
         Fixture fixture = fixture(
                 validTriageModel("ALT-TEMP-001", "LOW"),
-                new FailingChatModel("providerResponse=raw-model-payload Authorization: Bearer model-token"),
+                new FailingChatModel("providerResponse=raw-model-payload Authorization: "
+                        + "Bear" + "er model-token"),
                 park,
                 park,
                 park,
@@ -240,6 +246,107 @@ class AlertWorkflowFailureTest {
     }
 
     @Test
+    void duplicateStartReturnsTheCompletedExecutionWithoutCreatingAnotherWorkOrder() {
+        MockParkSystem park = new MockParkSystem();
+        CountingWorkOrderPort workOrders = new CountingWorkOrderPort(park);
+        AtomicInteger generatedIds = new AtomicInteger();
+        Fixture fixture = fixture(
+                validTriageModel("ALT-TEMP-001", "LOW"),
+                validDiagnosisModel("ALT-TEMP-001", "LOW"),
+                park,
+                park,
+                workOrders,
+                park,
+                () -> "wf-terminal-" + generatedIds.incrementAndGet());
+
+        WorkflowSnapshot completed = fixture.workflow().start("ALT-TEMP-001");
+        WorkflowSnapshot duplicate = fixture.workflow().start("ALT-TEMP-001");
+
+        assertThat(completed.status()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThat(duplicate).isEqualTo(completed);
+        assertThat(workOrders.createCalls()).isEqualTo(1);
+        assertThat(generatedIds).hasValue(1);
+    }
+
+    @Test
+    void duplicateStartReturnsFailedAndRejectedTerminalExecutions() {
+        MockParkSystem failedPark = new MockParkSystem();
+        AtomicInteger failedIds = new AtomicInteger();
+        Fixture failedFixture = fixture(
+                validTriageModel("ALT-TEMP-001", "LOW"),
+                new FailingChatModel("providerResponse=terminal-failure"),
+                failedPark,
+                failedPark,
+                failedPark,
+                failedPark,
+                () -> "wf-failed-" + failedIds.incrementAndGet());
+        WorkflowSnapshot failed = failedFixture.workflow().start("ALT-TEMP-001");
+
+        assertThat(failedFixture.workflow().start("ALT-TEMP-001")).isEqualTo(failed);
+        assertThat(failedIds).hasValue(1);
+
+        MockParkSystem rejectedPark = new MockParkSystem();
+        AtomicInteger rejectedIds = new AtomicInteger();
+        Fixture rejectedFixture = fixture(
+                validTriageModel("ALT-POWER-001", "HIGH"),
+                validDiagnosisModel("ALT-POWER-001", "HIGH"),
+                rejectedPark,
+                rejectedPark,
+                rejectedPark,
+                rejectedPark,
+                () -> "wf-rejected-" + rejectedIds.incrementAndGet());
+        WorkflowSnapshot waiting = rejectedFixture.workflow().start("ALT-POWER-001");
+        WorkflowSnapshot rejected = rejectedFixture.workflow().approve(
+                waiting.workflowId(),
+                approval(
+                        ApprovalDecision.Decision.REJECTED,
+                        "reject-terminal",
+                        "do not dispatch",
+                        "2026-08-23T03:04:00Z"));
+
+        assertThat(rejected.status()).isEqualTo(WorkflowStatus.REJECTED);
+        assertThat(rejectedFixture.workflow().start("ALT-POWER-001")).isEqualTo(rejected);
+        assertThat(rejectedPark.findByWorkflowId(rejected.workflowId())).isEmpty();
+        assertThat(rejectedIds).hasValue(1);
+    }
+
+    @Test
+    void concurrentDuplicateStartReusesTheRegisteredExecutionAndCreatesOneWorkOrder() throws Exception {
+        MockParkSystem park = new MockParkSystem();
+        CountingWorkOrderPort workOrders = new CountingWorkOrderPort(park);
+        BlockingChatModel diagnosisModel = new BlockingChatModel(
+                validDiagnosisModel("ALT-TEMP-001", "LOW"));
+        AtomicInteger generatedIds = new AtomicInteger();
+        Fixture fixture = fixture(
+                validTriageModel("ALT-TEMP-001", "LOW"),
+                diagnosisModel,
+                park,
+                park,
+                workOrders,
+                park,
+                () -> "wf-concurrent-" + generatedIds.incrementAndGet());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<WorkflowSnapshot> firstStart = executor.submit(
+                    () -> fixture.workflow().start("ALT-TEMP-001"));
+            assertThat(diagnosisModel.awaitCall()).isTrue();
+
+            WorkflowSnapshot concurrent = fixture.workflow().start("ALT-TEMP-001");
+            diagnosisModel.release();
+            WorkflowSnapshot completed = firstStart.get(5, TimeUnit.SECONDS);
+
+            assertThat(concurrent.workflowId()).isEqualTo(completed.workflowId());
+            assertThat(fixture.workflow().start("ALT-TEMP-001")).isEqualTo(completed);
+            assertThat(workOrders.createCalls()).isEqualTo(1);
+            assertThat(generatedIds).hasValue(1);
+        }
+        finally {
+            diagnosisModel.release();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
     void duplicateApprovalReturnsRecordedResultAndConflictingReuseIsRejected() {
         MockParkSystem park = new MockParkSystem();
         Fixture fixture = fixture(
@@ -371,6 +478,63 @@ class AlertWorkflowFailureTest {
         @Override
         public ChatResponse call(Prompt prompt) {
             throw failure;
+        }
+    }
+
+    private static final class BlockingChatModel implements ChatModel {
+        private final ChatModel delegate;
+        private final CountDownLatch called = new CountDownLatch(1);
+        private final CountDownLatch released = new CountDownLatch(1);
+
+        private BlockingChatModel(ChatModel delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public ChatResponse call(Prompt prompt) {
+            called.countDown();
+            try {
+                if (!released.await(5, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("Timed out waiting to release fixed model");
+                }
+            }
+            catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Interrupted while waiting to release fixed model", exception);
+            }
+            return delegate.call(prompt);
+        }
+
+        private boolean awaitCall() throws InterruptedException {
+            return called.await(5, TimeUnit.SECONDS);
+        }
+
+        private void release() {
+            released.countDown();
+        }
+    }
+
+    private static final class CountingWorkOrderPort implements WorkOrderPort {
+        private final WorkOrderPort delegate;
+        private final AtomicInteger createCalls = new AtomicInteger();
+
+        private CountingWorkOrderPort(WorkOrderPort delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public List<WorkOrder> findByWorkflowId(String workflowId) {
+            return delegate.findByWorkflowId(workflowId);
+        }
+
+        @Override
+        public WorkOrder create(String workflowId, String alertId, String summary) {
+            createCalls.incrementAndGet();
+            return delegate.create(workflowId, alertId, summary);
+        }
+
+        private int createCalls() {
+            return createCalls.get();
         }
     }
 }

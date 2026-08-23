@@ -94,9 +94,9 @@ public final class AlertWorkflow {
 
     public WorkflowSnapshot start(String alertId) {
         String requiredAlertId = requireIdentifier(alertId, "alertId");
-        Optional<WorkflowSnapshot> running = executionStore.findRunningByAlertId(requiredAlertId);
-        if (running.isPresent()) {
-            return running.get();
+        Optional<WorkflowSnapshot> existing = executionStore.findByAlertId(requiredAlertId);
+        if (existing.isPresent()) {
+            return existing.get();
         }
 
         String workflowId = requireIdentifier(workflowIds.get(), "workflowId");

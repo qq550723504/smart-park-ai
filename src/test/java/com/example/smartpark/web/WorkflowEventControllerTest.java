@@ -81,7 +81,7 @@ class WorkflowEventControllerTest {
                 .andExpect(content().string(containsString("\"sequence\":1")))
                 .andExpect(content().string(containsString("\"timestamp\":\"2026-08-23T01:45:00Z\"")))
                 .andExpect(content().string(containsString(
-                        "\"redactedSummary\":\"[REDACTED] model started\"")))
+                        "\"redactedSummary\":\"[REDACTED]\"")))
                 .andExpect(content().string(not(containsString("secret-value"))))
                 .andExpect(content().string(not(containsString("workflowId"))))
                 .andExpect(content().string(not(containsString("statePayload"))));

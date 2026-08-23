@@ -16,6 +16,8 @@ public interface WorkflowExecutionStore {
 
     Optional<WorkflowSnapshot> findRunningByAlertId(String alertId);
 
+    Optional<WorkflowSnapshot> findByAlertId(String alertId);
+
     Execution register(
             String workflowId,
             String alertId,
@@ -107,11 +109,16 @@ final class InMemoryWorkflowExecutionStore implements WorkflowExecutionStore {
 
     @Override
     public Optional<WorkflowSnapshot> findRunningByAlertId(String alertId) {
+        return findByAlertId(alertId)
+                .filter(snapshot -> isRunning(snapshot.status()));
+    }
+
+    @Override
+    public Optional<WorkflowSnapshot> findByAlertId(String alertId) {
         return executions.values().stream()
-                .map(Execution::snapshot)
-                .filter(snapshot -> snapshot.alertId().equals(alertId))
-                .filter(snapshot -> isRunning(snapshot.status()))
-                .findFirst();
+                .filter(execution -> execution.alertId().equals(alertId))
+                .findFirst()
+                .map(Execution::snapshot);
     }
 
     @Override
@@ -121,12 +128,12 @@ final class InMemoryWorkflowExecutionStore implements WorkflowExecutionStore {
             String graphThreadId,
             CompiledGraph compiledGraph,
             AlertWorkflowState initialState) {
-        Optional<WorkflowSnapshot> running = findRunningByAlertId(alertId);
-        if (running.isPresent()) {
-            Execution existing = executions.get(running.get().workflowId());
+        Optional<WorkflowSnapshot> existingSnapshot = findByAlertId(alertId);
+        if (existingSnapshot.isPresent()) {
+            Execution existing = executions.get(existingSnapshot.get().workflowId());
             if (existing == null) {
                 throw new IllegalStateException(
-                        "Running snapshot has no Graph execution: " + running.get().workflowId());
+                        "Alert snapshot has no Graph execution: " + existingSnapshot.get().workflowId());
             }
             return existing;
         }

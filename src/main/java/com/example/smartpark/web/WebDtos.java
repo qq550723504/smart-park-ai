@@ -11,8 +11,24 @@ import jakarta.validation.constraints.NotNull;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.regex.Pattern;
+import java.util.stream.IntStream;
 
 public final class WebDtos {
+
+    private static final String REDACTED = "[REDACTED]";
+    private static final Pattern WORKFLOW_ID = Pattern.compile(
+            "(?:wf-[A-Za-z0-9._:-]{1,120}|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})");
+    private static final Pattern ALERT_ID = Pattern.compile("ALT-[A-Z0-9-]{1,120}");
+    private static final Pattern DIAGNOSIS_ID = Pattern.compile("diag-[A-Za-z0-9-]{1,120}");
+    private static final Pattern DEVICE_ID = Pattern.compile("DEV-[A-Z0-9-]{1,120}");
+    private static final Pattern WORK_ORDER_ID = Pattern.compile("(?:WO|MOCK-WO)-[A-Z0-9-]{1,120}");
+    private static final Pattern PARK_ID = Pattern.compile("PARK-[A-Z0-9-]{1,120}");
+    private static final Pattern BUILDING_ID = Pattern.compile("[A-Z][A-Z0-9-]{0,31}");
+    private static final Pattern EVENT_NODE = Pattern.compile(
+            "(?:workflow|classifyAlert|collectParkContext|retrieveKnowledge|diagnoseAlert|riskGate|humanApproval|createWorkOrder|summarizeResult)");
 
     private WebDtos() {
     }
@@ -26,6 +42,13 @@ public final class WebDtos {
             WorkOrderResponse workOrder,
             List<String> errors,
             long eventSequence) {
+
+        public WorkflowResponse {
+            workflowId = safeIdentifier(workflowId, WORKFLOW_ID);
+            alertId = safeIdentifier(alertId, ALERT_ID);
+            status = Objects.requireNonNull(status, "status");
+            errors = stableItems(errors, "Workflow error recorded");
+        }
     }
 
     public record DiagnosisResponse(
@@ -39,6 +62,18 @@ public final class WebDtos {
             String recommendedAction,
             double confidence,
             Instant diagnosedAt) {
+
+        public DiagnosisResponse {
+            id = safeIdentifier(id, DIAGNOSIS_ID);
+            alertId = safeIdentifier(alertId, ALERT_ID);
+            deviceId = safeIdentifier(deviceId, DEVICE_ID);
+            riskLevel = safeChoice(riskLevel, Set.of("LOW", "MEDIUM", "HIGH"));
+            rootCause = "Diagnosis content withheld";
+            summary = "Diagnosis content withheld";
+            evidence = stableItems(evidence, "Diagnosis content withheld");
+            recommendedAction = "Diagnosis content withheld";
+            diagnosedAt = Objects.requireNonNull(diagnosedAt, "diagnosedAt");
+        }
     }
 
     public record ApprovalResponse(
@@ -46,6 +81,13 @@ public final class WebDtos {
             String reviewer,
             String comment,
             Instant decidedAt) {
+
+        public ApprovalResponse {
+            decision = safeChoice(decision, Set.of("APPROVED", "REJECTED"));
+            reviewer = "Operator identity withheld";
+            comment = "Operator comment recorded";
+            decidedAt = Objects.requireNonNull(decidedAt, "decidedAt");
+        }
     }
 
     public record WorkOrderResponse(
@@ -62,6 +104,23 @@ public final class WebDtos {
             List<String> evidence,
             Instant createdAt,
             Instant updatedAt) {
+
+        public WorkOrderResponse {
+            id = safeIdentifier(id, WORK_ORDER_ID);
+            workflowId = safeIdentifier(workflowId, WORKFLOW_ID);
+            parkId = safeIdentifier(parkId, PARK_ID);
+            buildingId = safeIdentifier(buildingId, BUILDING_ID);
+            deviceId = safeIdentifier(deviceId, DEVICE_ID);
+            alertId = safeIdentifier(alertId, ALERT_ID);
+            summary = "Work order content withheld";
+            riskLevel = safeChoice(riskLevel, Set.of("LOW", "MEDIUM", "HIGH"));
+            status = safeChoice(status, java.util.Arrays.stream(WorkflowStatus.values())
+                    .map(Enum::name)
+                    .collect(java.util.stream.Collectors.toUnmodifiableSet()));
+            evidence = stableItems(evidence, "Work order content withheld");
+            createdAt = Objects.requireNonNull(createdAt, "createdAt");
+            updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
+        }
     }
 
     public record ApprovalRequest(
@@ -102,6 +161,17 @@ public final class WebDtos {
             long sequence,
             Instant timestamp,
             String redactedSummary) {
+
+        public WorkflowEventDto {
+            eventId = Long.toString(sequence);
+            type = safeChoice(type, java.util.Arrays.stream(WorkflowEvent.EventType.values())
+                    .map(Enum::name)
+                    .collect(java.util.stream.Collectors.toUnmodifiableSet()));
+            node = safeIdentifier(node, EVENT_NODE);
+            timestamp = Objects.requireNonNull(timestamp, "timestamp");
+            redactedSummary = WorkflowEvent.redact(
+                    Objects.requireNonNull(redactedSummary, "redactedSummary"));
+        }
     }
 
     public record ApiError(
@@ -176,5 +246,20 @@ public final class WebDtos {
                 workOrder.evidence(),
                 workOrder.createdAt(),
                 workOrder.updatedAt());
+    }
+
+    private static String safeIdentifier(String value, Pattern pattern) {
+        return value != null && pattern.matcher(value).matches() ? value : REDACTED;
+    }
+
+    private static String safeChoice(String value, Set<String> allowed) {
+        return value != null && allowed.contains(value) ? value : REDACTED;
+    }
+
+    private static List<String> stableItems(List<String> values, String summary) {
+        List<String> required = List.copyOf(Objects.requireNonNull(values, "values"));
+        return IntStream.range(0, required.size())
+                .mapToObj(ignored -> summary)
+                .toList();
     }
 }
