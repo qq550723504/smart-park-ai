@@ -601,7 +601,7 @@ $env:AI_DASHSCOPE_API_KEY = '<user-provided-key>'
 ./mvnw.cmd spring-boot:run
 Invoke-RestMethod -Method Post http://localhost:8080/api/alerts/ALT-TEMP-001/workflows
 Invoke-RestMethod -Method Post http://localhost:8080/api/alerts/ALT-POWER-001/workflows
-Invoke-RestMethod -Method Post http://localhost:8080/api/workflows/<workflow-id>/approval -ContentType 'application/json' -Body '{"decision":"APPROVE","reviewer":"operator-1","comment":"approved"}'
+Invoke-RestMethod -Method Post http://localhost:8080/api/workflows/<workflow-id>/approval -ContentType 'application/json' -Body '{"decision":"APPROVE","reviewer":"operator-1","comment":"approved","idempotencyKey":"approval-request-001"}'
 ```
 
 Never print the key, include it in command history documentation, or commit it. Unset the process environment variable after verification.
