@@ -1,6 +1,8 @@
 package com.example.smartpark.workflow;
 
 import com.example.smartpark.adapter.mock.MockParkFixture;
+import com.example.smartpark.adapter.mock.InMemoryCustomerSessionStore;
+import com.example.smartpark.adapter.mock.InMemoryCustomerTicketAdapter;
 import com.example.smartpark.model.customer.CustomerServiceResult;
 import org.junit.jupiter.api.Test;
 
@@ -111,7 +113,9 @@ class CustomerServiceWorkflowTest {
     void expiredSessionsAndIdempotencyEntriesAreRemoved() {
         java.time.Clock mutableClock = new MutableClock(Instant.parse("2026-08-23T02:00:00Z"));
         CustomerServiceWorkflow expiring = new CustomerServiceWorkflow(
-                new MockParkFixture().knowledge(), mutableClock, () -> "cs-expiring", 10, Duration.ofMinutes(5));
+                new MockParkFixture().knowledge(),
+                new InMemoryCustomerSessionStore(mutableClock, 10, Duration.ofMinutes(5)),
+                new InMemoryCustomerTicketAdapter(), mutableClock, () -> "cs-expiring");
         expiring.handle("访客停车怎么收费？", "expiring-request");
         ((MutableClock) mutableClock).instant = Instant.parse("2026-08-23T02:06:00Z");
 
@@ -122,10 +126,11 @@ class CustomerServiceWorkflowTest {
     @Test
     void sessionCapacityEvictsTheOldestSession() {
         java.util.concurrent.atomic.AtomicInteger ids = new java.util.concurrent.atomic.AtomicInteger();
+        Clock clock = Clock.fixed(Instant.parse("2026-08-23T02:00:00Z"), ZoneOffset.UTC);
         CustomerServiceWorkflow bounded = new CustomerServiceWorkflow(
                 new MockParkFixture().knowledge(),
-                Clock.fixed(Instant.parse("2026-08-23T02:00:00Z"), ZoneOffset.UTC),
-                () -> "cs-" + ids.incrementAndGet(), 2, Duration.ofHours(1));
+                new InMemoryCustomerSessionStore(clock, 2, Duration.ofHours(1)),
+                new InMemoryCustomerTicketAdapter(), clock, () -> "cs-" + ids.incrementAndGet());
 
         bounded.handle("停车怎么收费？");
         bounded.handle("访客怎么预约？");

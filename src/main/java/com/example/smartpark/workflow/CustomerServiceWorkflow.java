@@ -1,9 +1,13 @@
 package com.example.smartpark.workflow;
 
+import com.example.smartpark.adapter.mock.InMemoryCustomerSessionStore;
+import com.example.smartpark.adapter.mock.InMemoryCustomerTicketAdapter;
 import com.example.smartpark.model.common.KnowledgeDocument;
 import com.example.smartpark.model.customer.CustomerServiceResult;
 import com.example.smartpark.model.customer.CustomerTicket;
 import com.example.smartpark.model.customer.CustomerTicketStatus;
+import com.example.smartpark.port.customer.CustomerSessionStore;
+import com.example.smartpark.port.customer.CustomerTicketPort;
 import com.example.smartpark.port.knowledge.KnowledgePort;
 
 import java.time.Clock;
@@ -11,28 +15,22 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 public final class CustomerServiceWorkflow {
 
     private final KnowledgePort knowledgePort;
+    private final CustomerSessionStore sessionStore;
+    private final CustomerTicketPort ticketPort;
     private final Clock clock;
     private final Supplier<String> sessionIds;
-    private final AtomicInteger ticketSequence = new AtomicInteger();
-    private final AtomicInteger sessionSequence = new AtomicInteger();
-    private final int maxSessions;
-    private final Duration sessionTtl;
-    private final ConcurrentHashMap<String, SessionEntry> sessions = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, IdempotentRequest> idempotentRequests = new ConcurrentHashMap<>();
 
     public CustomerServiceWorkflow(KnowledgePort knowledgePort) {
-        this(knowledgePort, Clock.systemUTC(), () -> "cs-" + UUID.randomUUID(), 10_000, Duration.ofHours(24));
+        this(knowledgePort, new InMemoryCustomerSessionStore(), new InMemoryCustomerTicketAdapter(),
+                Clock.systemUTC(), () -> "cs-" + UUID.randomUUID());
     }
 
     CustomerServiceWorkflow(KnowledgePort knowledgePort, Clock clock, Supplier<String> sessionIds) {
@@ -41,13 +39,17 @@ public final class CustomerServiceWorkflow {
 
     CustomerServiceWorkflow(KnowledgePort knowledgePort, Clock clock, Supplier<String> sessionIds,
                             int maxSessions, Duration sessionTtl) {
+        this(knowledgePort, new InMemoryCustomerSessionStore(clock, maxSessions, sessionTtl),
+                new InMemoryCustomerTicketAdapter(), clock, sessionIds);
+    }
+
+    public CustomerServiceWorkflow(KnowledgePort knowledgePort, CustomerSessionStore sessionStore,
+                                   CustomerTicketPort ticketPort, Clock clock, Supplier<String> sessionIds) {
         this.knowledgePort = Objects.requireNonNull(knowledgePort, "knowledgePort");
+        this.sessionStore = Objects.requireNonNull(sessionStore, "sessionStore");
+        this.ticketPort = Objects.requireNonNull(ticketPort, "ticketPort");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.sessionIds = Objects.requireNonNull(sessionIds, "sessionIds");
-        if (maxSessions < 1) throw new IllegalArgumentException("maxSessions must be positive");
-        this.maxSessions = maxSessions;
-        this.sessionTtl = Objects.requireNonNull(sessionTtl, "sessionTtl");
-        if (sessionTtl.isZero() || sessionTtl.isNegative()) throw new IllegalArgumentException("sessionTtl must be positive");
     }
 
     public CustomerServiceResult handle(String question) {
@@ -59,14 +61,13 @@ public final class CustomerServiceWorkflow {
         String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
         Instant now = Instant.now(clock);
         if (normalizedKey != null) {
-            IdempotentRequest existing = idempotentRequests.get(normalizedKey);
-            if (existing != null && !isExpired(existing.createdAt(), now)) {
+            CustomerSessionStore.IdempotencyRecord existing = sessionStore.findIdempotency(normalizedKey, now).orElse(null);
+            if (existing != null) {
                 if (!existing.question().equals(normalizedQuestion)) {
                     throw new IllegalStateException("Idempotency key was already used for another question");
                 }
-                return existing.result();
+                return requiredSnapshot(existing.sessionId(), now).result();
             }
-            if (existing != null) idempotentRequests.remove(normalizedKey, existing);
         }
 
         String sessionId = sessionIds.get();
@@ -81,115 +82,95 @@ public final class CustomerServiceWorkflow {
                 documents.stream().map(KnowledgeDocument::title).toList(),
                 needsHuman,
                 ticket);
-        sessions.put(sessionId, new SessionEntry(
-                result, now, sessionSequence.incrementAndGet(),
+        sessionStore.create(sessionId, result,
                 List.of(
                         new CustomerConversation.Message("USER", normalizedQuestion, now),
                         new CustomerConversation.Message("ASSISTANT", result.answer(), now)),
                 List.of(new CustomerConversation.RetrievalTrace(
-                        intent.query, documents.stream().map(KnowledgeDocument::id).toList(), now))));
-        evictExpiredAndOverCapacity(now);
+                        intent.query, documents.stream().map(KnowledgeDocument::id).toList(), now)), now);
 
         if (normalizedKey != null) {
-            IdempotentRequest request = new IdempotentRequest(normalizedQuestion, result, now);
-            IdempotentRequest prior = idempotentRequests.putIfAbsent(normalizedKey, request);
-            if (prior != null) {
-                if (!prior.question().equals(normalizedQuestion)) {
-                    throw new IllegalStateException("Idempotency key was already used for another question");
-                }
-                return prior.result();
-            }
+            sessionStore.rememberIdempotency(normalizedKey, normalizedQuestion, sessionId, now);
         }
         return result;
     }
 
     public synchronized CustomerServiceResult reply(String sessionId, String question, String idempotencyKey) {
-        SessionEntry currentEntry = requiredEntry(sessionId);
-        if (currentEntry.result().needsHuman()) {
+        Instant now = Instant.now(clock);
+        CustomerSessionStore.SessionSnapshot current = requiredSnapshot(sessionId, now);
+        if (current.result().needsHuman()) {
             throw new IllegalStateException("Customer service session is handled by a human agent");
         }
         String normalizedQuestion = requireQuestion(question);
         String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
-        IdempotentRequest existing = normalizedKey == null ? null : idempotentRequests.get(normalizedKey);
+        CustomerSessionStore.IdempotencyRecord existing = normalizedKey == null
+                ? null : sessionStore.findIdempotency(normalizedKey, now).orElse(null);
         if (existing != null) {
             if (!existing.question().equals(normalizedQuestion)) {
                 throw new IllegalStateException("Idempotency key was already used for another question");
             }
-            return existing.result();
+            return requiredSnapshot(existing.sessionId(), now).result();
         }
         Intent classified = classify(normalizedQuestion);
-        Intent intent = classified == Intent.GENERAL ? Intent.valueOf(currentEntry.result().intent()) : classified;
-        Instant now = Instant.now(clock);
+        Intent intent = classified == Intent.GENERAL ? Intent.valueOf(current.result().intent()) : classified;
         List<KnowledgeDocument> documents = knowledgePort.search(intent.query);
         boolean needsHuman = documents.isEmpty();
         CustomerTicket ticket = needsHuman ? createTicket(sessionId, intent) : null;
         CustomerServiceResult result = new CustomerServiceResult(
                 sessionId, intent.name(), answer(intent, documents, needsHuman, ticket),
                 documents.stream().map(KnowledgeDocument::title).toList(), needsHuman, ticket);
-        List<CustomerConversation.Message> messages = new java.util.ArrayList<>(currentEntry.messages());
+        List<CustomerConversation.Message> messages = new java.util.ArrayList<>(current.messages());
         messages.add(new CustomerConversation.Message("USER", normalizedQuestion, now));
         messages.add(new CustomerConversation.Message("ASSISTANT", result.answer(), now));
-        List<CustomerConversation.RetrievalTrace> retrievals = new java.util.ArrayList<>(currentEntry.retrievals());
+        List<CustomerConversation.RetrievalTrace> retrievals = new java.util.ArrayList<>(current.retrievals());
         retrievals.add(new CustomerConversation.RetrievalTrace(
                 intent.query, documents.stream().map(KnowledgeDocument::id).toList(), now));
-        SessionEntry updated = new SessionEntry(result, currentEntry.createdAt(), currentEntry.sequence(), messages, retrievals);
-        sessions.put(sessionId, updated);
-        if (normalizedKey != null) idempotentRequests.put(normalizedKey, new IdempotentRequest(normalizedQuestion, result, now));
+        sessionStore.update(new CustomerSessionStore.SessionSnapshot(
+                sessionId, result, current.createdAt(), messages, retrievals));
+        if (normalizedKey != null) sessionStore.rememberIdempotency(normalizedKey, normalizedQuestion, sessionId, now);
         return result;
     }
 
     public CustomerConversation conversation(String sessionId) {
-        SessionEntry entry = requiredEntry(sessionId);
+        CustomerSessionStore.SessionSnapshot entry = requiredSnapshot(sessionId, Instant.now(clock));
         return new CustomerConversation(sessionId, entry.messages(), entry.retrievals(), entry.result().needsHuman());
     }
 
     public int sessionCount() {
-        return sessions.size();
+        return sessionStore.count(Instant.now(clock));
     }
 
     public synchronized List<CustomerServiceResult> tickets() {
-        return sessions.values().stream()
-                .map(SessionEntry::result)
-                .filter(result -> result.ticket() != null)
-                .sorted(java.util.Comparator.comparing(result -> result.ticket().createdAt()))
+        return sessionStore.withTickets(Instant.now(clock)).stream()
+                .map(CustomerSessionStore.SessionSnapshot::result)
                 .toList();
     }
 
     public synchronized CustomerServiceResult updateTicket(String ticketId, String status) {
         CustomerTicketStatus nextStatus = CustomerTicketStatus.valueOf(status);
-        Map.Entry<String, SessionEntry> match = sessions.entrySet().stream()
-                .filter(entry -> entry.getValue().result().ticket() != null)
-                .filter(entry -> entry.getValue().result().ticket().id().equals(ticketId))
+        CustomerTicket updatedTicket = ticketPort.update(ticketId, nextStatus);
+        CustomerSessionStore.SessionSnapshot match = sessionStore.withTickets(Instant.now(clock)).stream()
+                .filter(snapshot -> snapshot.result().ticket().id().equals(ticketId))
                 .findFirst()
                 .orElseThrow(() -> new NoSuchElementException("Unknown customer service ticket: " + ticketId));
-        CustomerServiceResult current = match.getValue().result();
-        CustomerTicket updatedTicket = current.ticket().transitionTo(nextStatus);
+        CustomerServiceResult current = match.result();
         CustomerServiceResult updated = new CustomerServiceResult(
                 current.sessionId(), current.intent(), current.answer(), current.knowledgeSources(), true, updatedTicket);
-        sessions.put(match.getKey(), new SessionEntry(
-                updated, match.getValue().createdAt(), match.getValue().sequence(),
-                match.getValue().messages(), match.getValue().retrievals()));
-        idempotentRequests.replaceAll((key, request) -> request.result().sessionId().equals(updated.sessionId())
-                ? new IdempotentRequest(request.question(), updated, request.createdAt()) : request);
+        sessionStore.update(new CustomerSessionStore.SessionSnapshot(
+                match.sessionId(), updated, match.createdAt(), match.messages(), match.retrievals()));
         return updated;
     }
     public CustomerServiceResult get(String sessionId) {
-        return requiredEntry(sessionId).result();
+        return requiredSnapshot(sessionId, Instant.now(clock)).result();
     }
 
-    private SessionEntry requiredEntry(String sessionId) {
-        SessionEntry entry = sessions.get(sessionId);
-        if (entry == null || isExpired(entry.createdAt(), Instant.now(clock))) {
-            if (entry != null) sessions.remove(sessionId, entry);
-            throw new NoSuchElementException("Unknown customer service session: " + sessionId);
-        }
-        return entry;
+    private CustomerSessionStore.SessionSnapshot requiredSnapshot(String sessionId, Instant now) {
+        return sessionStore.find(sessionId, now)
+                .orElseThrow(() -> new NoSuchElementException("Unknown customer service session: " + sessionId));
     }
 
     private CustomerTicket createTicket(String sessionId, Intent intent) {
-        return new CustomerTicket(
-                String.format("CS-%04d", ticketSequence.incrementAndGet()), sessionId, intent.name(), "WAITING_AGENT",
-                intent.safeTicketSummary, Instant.now(clock));
+        return ticketPort.create(sessionId, intent.name(), intent.safeTicketSummary, Instant.now(clock));
     }
 
     private static Intent classify(String question) {
@@ -216,22 +197,6 @@ public final class CustomerServiceWorkflow {
         };
     }
 
-    private void evictExpiredAndOverCapacity(Instant now) {
-        sessions.entrySet().removeIf(entry -> isExpired(entry.getValue().createdAt(), now));
-        idempotentRequests.entrySet().removeIf(entry -> isExpired(entry.getValue().createdAt(), now));
-        while (sessions.size() > maxSessions) {
-            Map.Entry<String, SessionEntry> oldest = sessions.entrySet().stream()
-                    .min(Map.Entry.comparingByValue(java.util.Comparator.comparing(SessionEntry::sequence)))
-                    .orElse(null);
-            if (oldest == null || !sessions.remove(oldest.getKey(), oldest.getValue())) break;
-            idempotentRequests.entrySet().removeIf(entry -> entry.getValue().result().sessionId().equals(oldest.getKey()));
-        }
-    }
-
-    private boolean isExpired(Instant createdAt, Instant now) {
-        return !createdAt.plus(sessionTtl).isAfter(now);
-    }
-
     private static boolean containsAny(String text, String... values) {
         for (String value : values) if (text.contains(value)) return true;
         return false;
@@ -250,19 +215,6 @@ public final class CustomerServiceWorkflow {
         if (normalized.length() > 500) throw new CustomerServiceValidationException("question must not exceed 500 characters");
         return normalized;
     }
-
-    private record SessionEntry(
-            CustomerServiceResult result,
-            Instant createdAt,
-            int sequence,
-            List<CustomerConversation.Message> messages,
-            List<CustomerConversation.RetrievalTrace> retrievals) {
-        private SessionEntry {
-            messages = List.copyOf(messages);
-            retrievals = List.copyOf(retrievals);
-        }
-    }
-    private record IdempotentRequest(String question, CustomerServiceResult result, Instant createdAt) { }
 
     private enum Intent {
         PARKING("parking", "停车咨询需人工跟进"),
