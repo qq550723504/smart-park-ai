@@ -4,6 +4,7 @@ import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.device.DevicePort;
 import com.example.smartpark.port.energy.EnergyPort;
 import com.example.smartpark.port.knowledge.KnowledgePort;
+import com.example.smartpark.port.security.SecurityPort;
 import com.example.smartpark.port.workorder.WorkOrderPort;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,6 +33,7 @@ class MockParkConfigurationTest {
         assertThat(applicationContext.getBeansOfType(EnergyPort.class)).hasSize(1);
         assertThat(applicationContext.getBeansOfType(KnowledgePort.class)).hasSize(1);
         assertThat(applicationContext.getBeansOfType(WorkOrderPort.class)).hasSize(1);
+        assertThat(applicationContext.getBeansOfType(SecurityPort.class)).isEmpty();
         assertThat(applicationContext.getBeansOfType(MockAlertAdapter.class)).hasSize(1);
         assertThat(applicationContext.getBeansOfType(MockDeviceAdapter.class)).hasSize(1);
         assertThat(applicationContext.getBeansOfType(MockEnergyAdapter.class)).hasSize(1);

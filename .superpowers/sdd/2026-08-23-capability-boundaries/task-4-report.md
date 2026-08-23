@@ -28,5 +28,5 @@ Task 4 已完成。`MockParkSystem` 已拆分为五个只实现单一能力端�
 
 ## 关注事项
 
-- `MockParkFixture` 是测试 fixture，为兼容现有共享状态测试额外实现了五个端口的委托；生产 adapter 本身仍严格各实现一个端口，边界测试覆盖该约束。
+- `MockParkFixture` 是测试组合 fixture，持有一个 `MockParkDataStore` 并分别暴露五个单端口 adapter；它本身不实现端口，生产 adapter 仍严格各实现一个端口，边界测试覆盖该约束。
 - 工作区原有的 Maven/Surefire 输出包含 Spring Boot 启动日志和 JVM sharing warning，但不影响测试结果。

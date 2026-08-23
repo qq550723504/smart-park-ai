@@ -166,7 +166,7 @@ git commit -m "build: scaffold smart park Spring AI application"
 - Create: `src/main/java/com/example/smartpark/model/Device.java`
 - Create: `src/main/java/com/example/smartpark/model/Diagnosis.java`
 - Create: `src/main/java/com/example/smartpark/model/KnowledgeDocument.java`
-- Create: `src/main/java/com/example/smartpark/model/ParkContext.java`
+- Create: `src/main/java/com/example/smartpark/model/alert/ParkContext.java`
 - Create: `src/main/java/com/example/smartpark/model/WorkOrder.java`
 - Create: `src/main/java/com/example/smartpark/model/ApprovalDecision.java`
 - Create: `src/main/java/com/example/smartpark/model/RiskLevel.java`

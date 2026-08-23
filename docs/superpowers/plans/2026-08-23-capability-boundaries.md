@@ -4,7 +4,7 @@
 
 **Goal:** 按告警、能耗和未来安防能力拆分领域模型、端口、工具与 Mock 适配器，同时保持现有工作流、HTTP API、DashScope 配置和种子场景行为不变。
 
-**Architecture:** 保留 `agent/`、`workflow/`、`web/` 作为跨场景应用层；将场景模型、端口和工具移动到能力包；用共享 `MockParkDataStore` 加五个端口适配器替代聚合 `MockParkSystem`。Spring 运行时通过 `MockParkConfiguration` 注入端口，测试通过 `MockParkFixture` 组装同一组适配器。
+**Architecture:** 保留 `agent/`、`workflow/`、`web/` 作为跨场景应用层；将场景模型、端口和工具移动到能力包，其中聚合告警历史的 `ParkContext` 属于 `model/alert/`，`model/common/` 不依赖告警能力；用共享 `MockParkDataStore` 加五个端口适配器替代聚合 `MockParkSystem`。Spring 运行时通过 `MockParkConfiguration` 注入端口，测试通过 `MockParkFixture` 组装同一组适配器。
 
 **Tech Stack:** Java 17, Spring Boot 3.5.8, Spring AI Alibaba 1.1.2.2, JUnit 5, AssertJ, Maven Wrapper。
 
@@ -27,7 +27,8 @@
 - Move: `src/main/java/com/example/smartpark/model/Alert.java` -> `src/main/java/com/example/smartpark/model/alert/Alert.java`
 - Move: `src/main/java/com/example/smartpark/model/AlertClassification.java` -> `src/main/java/com/example/smartpark/model/alert/AlertClassification.java`
 - Move: `src/main/java/com/example/smartpark/model/EnergyReading.java` -> `src/main/java/com/example/smartpark/model/energy/EnergyReading.java`
-- Move: `src/main/java/com/example/smartpark/model/ApprovalDecision.java`, `Diagnosis.java`, `Device.java`, `KnowledgeDocument.java`, `ParkContext.java`, `RiskLevel.java`, `WorkflowStatus.java`, `WorkOrder.java` into `src/main/java/com/example/smartpark/model/common/`
+- Move: `src/main/java/com/example/smartpark/model/ParkContext.java` into `src/main/java/com/example/smartpark/model/alert/ParkContext.java`
+- Move: `src/main/java/com/example/smartpark/model/ApprovalDecision.java`, `Diagnosis.java`, `Device.java`, `KnowledgeDocument.java`, `RiskLevel.java`, `WorkflowStatus.java`, `WorkOrder.java` into `src/main/java/com/example/smartpark/model/common/`
 - Move: `src/main/java/com/example/smartpark/park/AlertPort.java` -> `src/main/java/com/example/smartpark/port/alert/AlertPort.java`
 - Move: `src/main/java/com/example/smartpark/park/DevicePort.java` -> `src/main/java/com/example/smartpark/port/device/DevicePort.java`
 - Move: `src/main/java/com/example/smartpark/park/EnergyPort.java` -> `src/main/java/com/example/smartpark/port/energy/EnergyPort.java`
@@ -37,7 +38,7 @@
 - Test: existing model tests plus compilation of the full test source set.
 
 **Interfaces:**
-- Produces `com.example.smartpark.model.alert.Alert`, `com.example.smartpark.model.alert.AlertClassification`, `com.example.smartpark.model.energy.EnergyReading`.
+- Produces `com.example.smartpark.model.alert.Alert`, `com.example.smartpark.model.alert.AlertClassification`, `com.example.smartpark.model.alert.ParkContext`, `com.example.smartpark.model.energy.EnergyReading`.
 - Produces `com.example.smartpark.port.*` interfaces with the existing method signatures unchanged.
 
 - [ ] **Step 1: Write the failing package-boundary test**
@@ -48,6 +49,7 @@ Add `src/test/java/com/example/smartpark/architecture/CapabilityPackageTest.java
 @Test
 void scenarioModelsLiveInCapabilityPackages() {
     assertThat(Alert.class.getPackageName()).isEqualTo("com.example.smartpark.model.alert");
+    assertThat(ParkContext.class.getPackageName()).isEqualTo("com.example.smartpark.model.alert");
     assertThat(EnergyReading.class.getPackageName()).isEqualTo("com.example.smartpark.model.energy");
     assertThat(EnergyPort.class.getPackageName()).isEqualTo("com.example.smartpark.port.energy");
 }
@@ -262,8 +264,9 @@ git commit -m "refactor: wire smart park runtime through capability ports"
 - Create: `src/main/java/com/example/smartpark/model/security/SecurityEvent.java`
 - Create: `src/main/java/com/example/smartpark/port/security/SecurityPort.java`
 - Create: `src/test/java/com/example/smartpark/architecture/SecurityBoundaryTest.java`
+- Modify: `src/test/java/com/example/smartpark/adapter/mock/MockParkConfigurationTest.java` to assert `applicationContext.getBeansOfType(SecurityPort.class)` is empty.
 - Modify: `README.md`
-- Modify: `docs/superpowers/specs/2026-08-23-capability-boundaries-design.md` only if implementation details differ from the approved design.
+- Modify: `docs/superpowers/specs/2026-08-23-capability-boundaries-design.md` to record the final `ParkContext` package and the zero-runtime-security-bean constraint.
 
 **Interfaces:**
 - `SecurityEvent` is a minimal immutable boundary model with `eventId`, `parkId`, `buildingId`, `eventType`, `occurredAt`, and redacted `evidenceSummary`; it must reject blank identifiers and blank evidence.
@@ -286,7 +289,7 @@ Implement only the immutable record validation and port signature above. Do not 
 
 - [ ] **Step 4: Update README and run full verification**
 
-Document the new package layout, the future security boundary, and the fact that no security data source is wired yet. Run:
+Document the new package layout, the future security boundary, and the fact that no security data source is wired yet. Keep `SecurityPort` as a compile-time-only boundary and run:
 
 ```powershell
 .\mvnw.cmd clean test
@@ -314,7 +317,7 @@ git commit -m "refactor: reserve security capability boundary"
 ```powershell
 .\mvnw.cmd clean test
 .\mvnw.cmd package -DskipTests
-git diff --check HEAD~1
+git diff --check d76c9dd..HEAD
 git status --short
 ```
 

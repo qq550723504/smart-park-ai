@@ -24,7 +24,7 @@
 
 - 未新增 security Spring Bean、Mock adapter、HTTP endpoint 或 workflow 分支。
 - 未修改 Maven、DashScope 配置、已有端口/API 或既有非 security 校验语义。
-- approved design 无需修改。
+- design spec 已同步 `ParkContext` 的 alert capability 包归属和安防运行时零 bean 约束。
 - 提交只包含 Task 6 路径；工作区中原有的其他修改未暂存。
 
 ## Concerns

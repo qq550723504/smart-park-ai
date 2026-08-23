@@ -11,6 +11,8 @@ import com.example.smartpark.tool.energy.EnergyQueryTool;
 import com.example.smartpark.tool.knowledge.ParkKnowledgeTool;
 import com.example.smartpark.tool.workorder.WorkOrderTool;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.model.tool.ToolCallingChatOptions;
+import org.springframework.ai.tool.ToolCallback;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -60,5 +62,21 @@ class EnergyWorkflowTest {
         assertThat(diagnosisModel.lastPrompt().getUserMessage().getText())
                 .contains("Building A2 Energy Meter")
                 .contains("Energy anomaly response playbook");
+
+        assertThat(diagnosisModel.lastPrompt().getOptions()).isInstanceOf(ToolCallingChatOptions.class);
+        ToolCallingChatOptions options = (ToolCallingChatOptions) diagnosisModel.lastPrompt().getOptions();
+        assertThat(options.getToolCallbacks())
+                .extracting(callback -> callback.getToolDefinition().name())
+                .contains("lookupEnergyConsumption")
+                .doesNotContain("createWorkOrder");
+
+        ToolCallback energyLookup = options.getToolCallbacks().stream()
+                .filter(callback -> callback.getToolDefinition().name().equals("lookupEnergyConsumption"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(energyLookup.call("{\"meterId\":\"DEV-ENERGY-001\"}"))
+                .contains("DEV-ENERGY-001", "138.0");
+        assertThat(energyLookup.call("{\"meterId\":\"unknown-meter\"}"))
+                .contains("unknown-meter", "Unknown energy meter");
     }
 }

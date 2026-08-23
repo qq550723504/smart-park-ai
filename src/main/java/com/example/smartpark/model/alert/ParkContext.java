@@ -1,6 +1,7 @@
-package com.example.smartpark.model.common;
+package com.example.smartpark.model.alert;
 
-import com.example.smartpark.model.alert.Alert;
+import com.example.smartpark.model.common.Device;
+import com.example.smartpark.model.common.WorkOrder;
 
 import java.util.List;
 import java.util.Objects;

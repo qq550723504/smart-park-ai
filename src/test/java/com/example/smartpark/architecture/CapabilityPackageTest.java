@@ -1,6 +1,7 @@
 package com.example.smartpark.architecture;
 
 import com.example.smartpark.model.alert.Alert;
+import com.example.smartpark.model.alert.ParkContext;
 import com.example.smartpark.model.energy.EnergyReading;
 import com.example.smartpark.port.energy.EnergyPort;
 import com.example.smartpark.tool.alert.AlertQueryTool;
@@ -14,6 +15,11 @@ class CapabilityPackageTest {
     @Test
     void placesAlertInAlertModelPackage() {
         assertThat(Alert.class.getPackageName()).isEqualTo("com.example.smartpark.model.alert");
+    }
+
+    @Test
+    void placesParkContextInAlertCapabilityPackage() {
+        assertThat(ParkContext.class.getPackageName()).isEqualTo("com.example.smartpark.model.alert");
     }
 
     @Test

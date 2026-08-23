@@ -13,12 +13,12 @@
 - `agent/`：保留通用的告警分诊和诊断 Agent；场景特有数据通过只读工具提供。
 - `workflow/`：保留通用的告警工作流、风险门禁、人工审批和事件发布。
 - `web/`：保留 REST、SSE 和运行时装配入口，但把 Mock Bean 装配移到独立配置类。
-- `model/common/`：放置跨场景对象，例如 `RiskLevel`、`WorkflowStatus`、`ApprovalDecision`、`Diagnosis`、`WorkOrder`、`KnowledgeDocument`、`ParkContext`。
+- `model/common/`：放置跨场景对象，例如 `RiskLevel`、`WorkflowStatus`、`ApprovalDecision`、`Diagnosis`、`WorkOrder`、`KnowledgeDocument`；该包不得依赖告警能力。
 
 ### 按能力拆分的领域层
 
 ```text
-model/alert/       Alert、AlertClassification
+model/alert/       Alert、AlertClassification、ParkContext
 model/energy/      EnergyReading
 model/security/    安防事件与证据模型（本次只预留边界）
 port/alert/        AlertPort
@@ -33,6 +33,7 @@ tool/security/     安防查询工具（后续加入）
 ```
 
 `agent/` 和 `workflow/` 暂不按场景复制，避免出现 `EnergyWorkflow`、`SecurityWorkflow` 两套重复的审批与幂等逻辑。
+`ParkContext` 属于告警 capability，因为它聚合告警历史；它位于 `model/alert/`，由告警模型依赖 `model/common/` 的共享值对象。`model/common/` 不得反向依赖 `model/alert/`，以消除 common 与 alert 的环依赖。
 
 ## Mock 适配器设计
 
@@ -68,10 +69,12 @@ HTTP alertId
 - `ALT-TEMP-001`、`ALT-POWER-001`、`ALT-ENERGY-001` 的行为不变。
 - Mock 仍不控制真实设备；拆分只改变内部装配方式。
 - 真实安防适配器、认证授权、摄像头图像处理和生产持久化不在本次范围内。
+- 安防边界只保留 `SecurityEvent` 与 `SecurityPort` 类型；运行时不得注册 `SecurityPort` bean、适配器、endpoint 或 workflow 分支。
 
 ## 验证策略
 
 - 先为端口到适配器的装配增加测试，确保每个能力使用独立适配器。
 - 保留现有全量工作流、Web、敏感信息和幂等测试。
 - 新增安防边界的预留测试不调用真实摄像头或门禁系统。
+- Spring context 测试断言 `SecurityPort` bean 数量为零，能耗工作流测试断言诊断请求只包含只读能耗工具回调。
 - 执行 `./mvnw test`、`./mvnw package -DskipTests` 和 `git diff --check`。
