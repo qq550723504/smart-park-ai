@@ -16,24 +16,24 @@ final class PromptCatalog {
 
     static String triageSystemPrompt() {
         return """
-                You are the smart-park alert triage agent.
-                Return JSON only and make it match these fields exactly:
+                你是智慧园区告警分诊智能体。
+                只能返回 JSON，并且必须严格包含以下字段：
                 {
-                  "category": "one of AlertClassification enum values",
+                  "category": "AlertClassification 枚举值之一",
                   "priority": "LOW | MEDIUM | HIGH",
-                  "riskLevel": "one of RiskLevel enum values",
-                  "confidence": "number from 0 to 1"
+                  "riskLevel": "RiskLevel 枚举值之一",
+                  "confidence": "0 到 1 之间的数字"
                 }
-                Use the supplied alert only.
-                Do not guess missing facts.
-                If the evidence is insufficient, choose the most conservative valid classification and lower confidence instead of inventing data.
+                只能使用给定的告警信息。
+                不得猜测缺失事实。
+                证据不足时，应选择最保守的有效分类并降低置信度，不得编造数据。
                 """;
     }
 
     static String triageUserPrompt(Alert alert) {
         Objects.requireNonNull(alert, "alert");
         return """
-                Alert to triage:
+                待分诊告警：
                 - id: %s
                 - parkId: %s
                 - buildingId: %s
@@ -56,26 +56,27 @@ final class PromptCatalog {
     }
 
     static String diagnosisSystemPrompt(List<String> availableToolNames) {
+        // 工具名称属于程序契约，因此保留英文；面向模型的说明使用中文。
         List<String> toolNames = List.copyOf(Objects.requireNonNull(availableToolNames, "availableToolNames"));
         return """
-                You are the smart-park diagnosis agent.
-                Return JSON only and make it match these fields exactly:
+                你是智慧园区告警诊断智能体。
+                只能返回 JSON，并且必须严格包含以下字段：
                 {
-                  "id": "non-empty diagnosis id",
-                  "alertId": "non-empty alert id",
-                  "deviceId": "non-empty device id",
-                  "riskLevel": "one of RiskLevel enum values",
-                  "rootCause": "non-empty root-cause hypothesis",
-                  "summary": "non-empty diagnosis summary",
-                  "evidence": ["one or more evidence statements"],
-                  "recommendedAction": "non-empty recommended action",
-                  "confidence": "number from 0 to 1 for this diagnosis",
-                  "diagnosedAt": "ISO-8601 instant"
+                  "id": "非空诊断编号",
+                  "alertId": "非空告警编号",
+                  "deviceId": "非空设备编号",
+                  "riskLevel": "RiskLevel 枚举值之一",
+                  "rootCause": "非空根因假设",
+                  "summary": "非空诊断摘要",
+                  "evidence": ["一条或多条证据"],
+                  "recommendedAction": "非空处置建议",
+                  "confidence": "0 到 1 之间的诊断置信度",
+                  "diagnosedAt": "ISO-8601 时间"
                 }
-                Every conclusion must be backed by evidence.
-                Missing tool data or missing knowledge is evidence insufficiency, not permission to guess.
-                Available read-only tools: %s
-                You are not allowed to create or mutate work orders in this step.
+                每项结论都必须有证据支持。
+                工具数据或知识缺失表示证据不足，不代表可以猜测。
+                可用的只读工具：%s
+                此步骤禁止创建或修改工单。
                 """.formatted(toolNames);
     }
 
@@ -84,10 +85,10 @@ final class PromptCatalog {
         Objects.requireNonNull(context, "context");
         List<KnowledgeDocument> safeDocuments = List.copyOf(Objects.requireNonNull(documents, "documents"));
         return """
-                Alert under diagnosis:
+                待诊断告警：
                 %s
 
-                Park context:
+                园区上下文：
                 - parkId: %s
                 - buildingId: %s
                 - device: %s
@@ -96,7 +97,7 @@ final class PromptCatalog {
                 - workOrders:
                 %s
 
-                Knowledge documents:
+                知识文档：
                 %s
                 """.formatted(
                 triageUserPrompt(alert),
@@ -127,7 +128,7 @@ final class PromptCatalog {
 
     private static String renderAlertHistory(ParkContext context) {
         if (context.alertHistory().isEmpty()) {
-            return "  - none";
+            return "  - 无";
         }
         return context.alertHistory().stream()
                 .map(alert -> "  - %s | %s | %s".formatted(alert.id(), alert.occurredAt(), alert.summary()))
@@ -136,7 +137,7 @@ final class PromptCatalog {
 
     private static String renderWorkOrders(List<WorkOrder> workOrders) {
         if (workOrders.isEmpty()) {
-            return "  - none";
+            return "  - 无";
         }
         return workOrders.stream()
                 .map(workOrder -> "  - %s | %s | %s | approval=%s".formatted(
@@ -149,7 +150,7 @@ final class PromptCatalog {
 
     private static String renderKnowledgeDocuments(List<KnowledgeDocument> documents) {
         if (documents.isEmpty()) {
-            return "INSUFFICIENT_EVIDENCE: no knowledge documents matched the request";
+            return "INSUFFICIENT_EVIDENCE：没有匹配本次请求的知识文档";
         }
         return documents.stream()
                 .map(document -> """

@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 public class MockParkDataStore {
+    // 固定基准时间，保证每次运行测试时都能得到完全一致的数据。
     private static final String PARK_ID = "PARK-A";
     private static final Instant DEVICE_BASE_TIME = Instant.parse("2026-08-23T00:00:00Z");
     private static final Instant ALERT_BASE_TIME = Instant.parse("2026-08-23T00:15:00Z");
@@ -39,6 +40,7 @@ public class MockParkDataStore {
     public MockParkDataStore() { reset(); }
 
     public final void reset() {
+        // 重置动态数据后重新装载基础设备、告警、历史记录和知识库。
         devices.clear(); energyReadings.clear(); alerts.clear(); historyByDevice.clear();
         knowledgeDocuments.clear(); workOrdersByWorkflowId.clear(); workOrderSequence.set(0);
         seedDevices(); seedAlerts(); seedHistory(); seedKnowledge();
@@ -62,6 +64,7 @@ public class MockParkDataStore {
     }
 
     public List<KnowledgeDocument> search(String query) {
+        // 统一规范化查询文本，兼容中文内容和英文标签。
         String normalizedQuery = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
         return knowledgeDocuments.values().stream()
                 .filter(document -> normalizedQuery.isEmpty() || matches(document, normalizedQuery))
@@ -78,39 +81,40 @@ public class MockParkDataStore {
     AtomicInteger workOrderSequence() { return workOrderSequence; }
 
     private void seedDevices() {
-        putDevice(device("DEV-HVAC-001", "A1", "HVAC Supply Unit", "HVAC", "ACTIVE", 1));
-        putDevice(device("DEV-POWER-001", "A2", "Main Power Panel", "POWER", "ACTIVE", 2));
-        putDevice(device("DEV-ENERGY-001", "A2", "Building A2 Energy Meter", "ENERGY_METER", "ACTIVE", 2));
-        putDevice(device("DEV-ACCESS-001", "A1", "North Access Controller", "ACCESS", "ACTIVE", 3));
-        putDevice(device("DEV-PUMP-001", "A2", "Basement Pump", "PUMP", "ACTIVE", 4));
+        putDevice(device("DEV-HVAC-001", "A1", "暖通空调送风机组", "HVAC", "ACTIVE", 1));
+        putDevice(device("DEV-POWER-001", "A2", "主配电柜", "POWER", "ACTIVE", 2));
+        putDevice(device("DEV-ENERGY-001", "A2", "A2 楼宇电能表", "ENERGY_METER", "ACTIVE", 2));
+        putDevice(device("DEV-ACCESS-001", "A1", "北门门禁控制器", "ACCESS", "ACTIVE", 3));
+        putDevice(device("DEV-PUMP-001", "A2", "地下室排水泵", "PUMP", "ACTIVE", 4));
         putEnergyReading(new EnergyReading("DEV-ENERGY-001", PARK_ID, "A2", ALERT_BASE_TIME.plus(Duration.ofMinutes(6)), 138.0, 100.0, 42.5));
     }
 
     private void seedAlerts() {
         putAlert(alert("ALT-TEMP-001", "DEV-HVAC-001", "A1", AlertClassification.TEMPERATURE, RiskLevel.LOW,
-                "Temperature rising in HVAC room", "Supply air temperature exceeded the comfort threshold.", ALERT_BASE_TIME, List.of("sensor:temp-01", "trend:upward")));
+                "暖通机房温度持续升高", "送风温度已超过舒适区阈值。", ALERT_BASE_TIME, List.of("传感器：温度探头-01", "趋势：持续上升")));
         putAlert(alert("ALT-POWER-001", "DEV-POWER-001", "A2", AlertClassification.POWER, RiskLevel.HIGH,
-                "Power fluctuation on main panel", "Voltage instability detected on the main distribution panel.", ALERT_BASE_TIME.plus(Duration.ofMinutes(3)), List.of("meter:phase-a", "meter:phase-b", "meter:phase-c")));
+                "主配电柜电压波动", "主配电柜检测到三相电压不稳定。", ALERT_BASE_TIME.plus(Duration.ofMinutes(3)), List.of("电表：A相", "电表：B相", "电表：C相")));
         putAlert(alert("ALT-ENERGY-001", "DEV-ENERGY-001", "A2", AlertClassification.ENERGY, RiskLevel.HIGH,
-                "Unexpected energy consumption in building A2", "Current interval consumption is 38 percent above the learned baseline.", ALERT_BASE_TIME.plus(Duration.ofMinutes(6)), List.of("meter:current-kwh=138", "baseline:kwh=100", "trend:after-hours")));
+                "A2 楼宇能耗异常", "当前时段能耗比学习基线高出 38%。", ALERT_BASE_TIME.plus(Duration.ofMinutes(6)), List.of("电表：当前能耗=138千瓦时", "基线：100千瓦时", "趋势：非工作时段")));
     }
 
     private void seedHistory() {
         historyByDevice.put("DEV-HVAC-001", List.of(
-                alert("ALT-HIST-HVAC-001", "DEV-HVAC-001", "A1", AlertClassification.TEMPERATURE, RiskLevel.LOW, "Prior HVAC temperature warning", "A mild warning was observed before the current alert.", HISTORY_BASE_TIME, List.of("log:hvac-warning")),
-                alert("ALT-HIST-HVAC-002", "DEV-HVAC-001", "A1", AlertClassification.TEMPERATURE, RiskLevel.LOW, "HVAC filter replacement reminder", "The HVAC unit previously reported a filter maintenance reminder.", HISTORY_BASE_TIME.plus(Duration.ofHours(4)), List.of("log:filter-reminder"))));
+                alert("ALT-HIST-HVAC-001", "DEV-HVAC-001", "A1", AlertClassification.TEMPERATURE, RiskLevel.LOW, "历史暖通温度预警", "当前告警发生前曾出现轻微温度预警。", HISTORY_BASE_TIME, List.of("日志：暖通温度预警")),
+                alert("ALT-HIST-HVAC-002", "DEV-HVAC-001", "A1", AlertClassification.TEMPERATURE, RiskLevel.LOW, "暖通滤网更换提醒", "该机组此前上报过滤网维护提醒。", HISTORY_BASE_TIME.plus(Duration.ofHours(4)), List.of("日志：滤网维护提醒"))));
         historyByDevice.put("DEV-POWER-001", List.of(
-                alert("ALT-HIST-POWER-001", "DEV-POWER-001", "A2", AlertClassification.POWER, RiskLevel.HIGH, "Voltage sag on main panel", "A short voltage sag was recorded in the recent past.", HISTORY_BASE_TIME.plus(Duration.ofHours(1)), List.of("log:voltage-sag")),
-                alert("ALT-HIST-POWER-002", "DEV-POWER-001", "A2", AlertClassification.POWER, RiskLevel.HIGH, "Breaker inspection reminder", "The main panel had a previous breaker inspection note.", HISTORY_BASE_TIME.plus(Duration.ofHours(5)), List.of("log:breaker-note"))));
+                alert("ALT-HIST-POWER-001", "DEV-POWER-001", "A2", AlertClassification.POWER, RiskLevel.HIGH, "主配电柜电压暂降", "近期曾记录到一次短时电压暂降。", HISTORY_BASE_TIME.plus(Duration.ofHours(1)), List.of("日志：电压暂降")),
+                alert("ALT-HIST-POWER-002", "DEV-POWER-001", "A2", AlertClassification.POWER, RiskLevel.HIGH, "断路器巡检提醒", "主配电柜此前存在一条断路器巡检记录。", HISTORY_BASE_TIME.plus(Duration.ofHours(5)), List.of("日志：断路器巡检"))));
         historyByDevice.put("DEV-ENERGY-001", List.of(
-                alert("ALT-HIST-ENERGY-001", "DEV-ENERGY-001", "A2", AlertClassification.ENERGY, RiskLevel.HIGH, "Previous after-hours energy spike", "The meter previously reported elevated consumption after normal operating hours.", HISTORY_BASE_TIME.plus(Duration.ofHours(2)), List.of("log:after-hours-spike"))));
+                alert("ALT-HIST-ENERGY-001", "DEV-ENERGY-001", "A2", AlertClassification.ENERGY, RiskLevel.HIGH, "历史非工作时段能耗峰值", "该电表曾在正常运营时间外上报高能耗。", HISTORY_BASE_TIME.plus(Duration.ofHours(2)), List.of("日志：非工作时段能耗峰值"))));
     }
 
     private void seedKnowledge() {
-        putKnowledge(new KnowledgeDocument("KD-OVERHEAT-001", "HVAC overheating playbook", "When HVAC supply temperatures rise, check filters, airflow, and compressor load before escalating.", List.of("overheating", "hvac", "temperature"), KNOWLEDGE_BASE_TIME));
-        putKnowledge(new KnowledgeDocument("KD-LEAK-001", "Water leak response", "Pump rooms and valve closets should be inspected for water accumulation and isolation valve issues.", List.of("leak", "pump", "water"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(1))));
-        putKnowledge(new KnowledgeDocument("KD-POWER-001", "Power emergency runbook", "Stabilize the electrical load, notify facilities, and inspect breaker and UPS conditions immediately.", List.of("power", "emergency", "breaker"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(2))));
-        putKnowledge(new KnowledgeDocument("KD-ENERGY-001", "Energy anomaly response playbook", "For consumption above baseline, compare operating schedules, inspect HVAC and lighting runtime, and verify the meter before creating corrective work.", List.of("energy", "consumption", "baseline", "efficiency"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(3))));
+        // 知识库使用中文业务内容，便于验证中文检索和诊断提示词。
+        putKnowledge(new KnowledgeDocument("KD-OVERHEAT-001", "暖通系统过热处置手册", "暖通送风温度升高时，应先检查滤网、风量和压缩机负载，再决定是否升级处置。", List.of("过热", "暖通", "温度", "overheating", "hvac", "temperature"), KNOWLEDGE_BASE_TIME));
+        putKnowledge(new KnowledgeDocument("KD-LEAK-001", "漏水事件处置手册", "应检查水泵房和阀门间是否积水，以及隔离阀是否异常。", List.of("漏水", "水泵", "积水", "leak", "pump", "water"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(1))));
+        putKnowledge(new KnowledgeDocument("KD-POWER-001", "电力故障应急手册", "立即稳定用电负载、通知设施运维人员，并检查断路器和 UPS 状态。", List.of("电力", "应急", "断路器", "power", "emergency", "breaker"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(2))));
+        putKnowledge(new KnowledgeDocument("KD-ENERGY-001", "能耗异常处置手册", "能耗高于基线时，应核对运营计划，检查暖通和照明运行时长，并在创建整改工单前校验电表。", List.of("能耗", "用电", "基线", "节能", "energy", "consumption", "baseline", "efficiency"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(3))));
     }
 
     private Device device(String id, String buildingId, String name, String category, String status, int dayOffset) {
@@ -123,6 +127,7 @@ public class MockParkDataStore {
     }
 
     private WorkOrder createWorkOrder(String workflowId, String alertId, String summary) {
+        // workflowId 作为幂等键，同一工作流重复创建时返回原工单。
         Alert alert = getAlert(alertId);
         int sequence = workOrderSequence.incrementAndGet();
         Instant createdAt = WORK_ORDER_BASE_TIME.plusSeconds(sequence);

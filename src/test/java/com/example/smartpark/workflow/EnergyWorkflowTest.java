@@ -58,7 +58,7 @@ class EnergyWorkflowTest {
                 .contains("KD-ENERGY-001");
         assertThat(result.diagnosis().summary()).contains("38 percent");
         assertThat(diagnosisModel.lastPrompt().getUserMessage().getText())
-                .contains("Building A2 Energy Meter")
-                .contains("Energy anomaly response playbook");
+                .contains("A2 楼宇电能表")
+                .contains("能耗异常处置手册");
     }
 }
