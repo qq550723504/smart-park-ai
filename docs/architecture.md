@@ -50,7 +50,8 @@
 ┌─────────────────────────────────────────────────────────────┐
 │                         端口层                               │
 │ AlertPort / DevicePort / EnergyPort / KnowledgePort          │
-│ WorkOrderPort / SecurityPort                                 │
+│ WorkOrderPort / SecurityPort / CustomerSessionStore           │
+│ CustomerTicketPort                                           │
 └───────────────┬─────────────────────────────────────────────┘
                 │ 当前实现
                 ▼
@@ -58,6 +59,7 @@
 │                      Mock 适配器层                           │
 │ MockAlertAdapter / MockDeviceAdapter / MockEnergyAdapter     │
 │ MockKnowledgeAdapter / MockWorkOrderAdapter                  │
+│ InMemoryCustomerSessionStore / InMemoryCustomerTicketAdapter  │
 │ MockParkDataStore / MockParkConfiguration                     │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -83,7 +85,8 @@ Mock 适配器当前用于替代真实园区系统。替换为生产系统时，
 | 包 | 主要类型 | 职责 |
 |---|---|---|
 | `model.alert` | `Alert`、`AlertClassification` | 告警及告警分类 |
-| `model.common` | `Device`、`ParkContext` | 设备和诊断上下文 |
+| `model.common` | `Device` | 设备信息 |
+| `model.alert` | `ParkContext` | 告警诊断上下文 |
 | `model.common` | `Diagnosis`、`KnowledgeDocument` | 诊断结果和知识文档 |
 | `model.common` | `WorkOrder`、`ApprovalDecision` | 工单和人工审批决定 |
 | `model.common` | `RiskLevel`、`WorkflowStatus` | 风险和工作流状态 |
@@ -102,12 +105,14 @@ Mock 适配器当前用于替代真实园区系统。替换为生产系统时，
 - `KnowledgePort`：按关键词检索知识文档
 - `WorkOrderPort`：按工作流查询工单并创建工单
 - `SecurityPort`：安全事件能力边界，当前主要用于架构和边界验证
+- `CustomerSessionStore`（`port.customer`）：创建、读取和更新客服会话及幂等记录
+- `CustomerTicketPort`（`port.customer`）：创建、查询和推进客服人工工单
 
 工作流和工具依赖端口，而不直接依赖适配器。该设计允许把 Mock 数据替换为数据库、园区平台 API、消息系统或其他外部服务。
 
 ### 3.3 `adapter.mock`：Mock 外部系统
 
-`MockParkDataStore` 持有设备、能耗、告警、历史告警、知识文档和工作订单数据。各 Mock Adapter 对外实现一个端口，并把访问转发给数据存储。
+`MockParkDataStore` 持有设备、能耗、告警、历史告警、知识文档和工作订单数据。各 Mock Adapter 对外实现一个端口，并把访问转发给数据存储。客服存储由 `adapter.mock.InMemoryCustomerSessionStore` 和 `adapter.mock.InMemoryCustomerTicketAdapter` 分别实现 `port.customer.CustomerSessionStore` 与 `port.customer.CustomerTicketPort`；`CustomerServiceWorkflow` 只依赖这些端口。
 
 Mock 数据具备以下特征：
 
@@ -286,9 +291,9 @@ riskGate
 
 ### 5.3 运行时存储
 
-当前 `WorkflowExecutionStore` 使用内存实现，Graph checkpoint 使用 `MemorySaver`。客服支持同一 `sessionId` 下的多轮消息和会话历史。每轮保存用户/助手消息及安全检索轨迹；检索轨迹只保留查询意图、知识文档 ID 和时间，不保留用户原始问题。会话进入人工处理后，自动客服拒绝继续回复。
+当前 `WorkflowExecutionStore` 使用内存实现，Graph checkpoint 使用 `MemorySaver`。客服支持同一 `sessionId` 下的多轮消息和会话历史。每轮保存用户/助手消息及安全检索轨迹；检索轨迹只保留查询意图、知识文档 ID 和时间，不保留用户原始问题。会话进入人工处理后，自动客服拒绝继续回复。客服工作流通过 `CustomerSessionStore` 和 `CustomerTicketPort` 访问这些数据，默认 Bean 分别是 `InMemoryCustomerSessionStore` 和 `InMemoryCustomerTicketAdapter`。
 
-客服工作流使用有界 TTL 内存会话存储，默认最多 10,000 条、TTL 24 小时；客服请求通过 `Idempotency-Key` 防止进程内重试重复建单。当前实现适合本地学习、演示和测试，不适合直接作为多实例生产部署方案。生产环境应替换为持久化的工作流存储、checkpoint、`CustomerSessionStore` 和 `CustomerTicketPort`。
+客服工作流当前使用有界 TTL 内存会话存储，默认最多 10,000 条、TTL 24 小时；客服请求通过 `Idempotency-Key` 防止进程内重试重复建单。此次重构建立了 `CustomerSessionStore` 与 `CustomerTicketPort` 的替换边界，但没有提供持久化实现，也没有提供真实 Agent 系统；默认 Mock 分类和关键词检索仍是确定性的本地实现。当前实现适合本地学习、演示和测试，不适合直接作为多实例生产部署方案。
 
 生产化时应替换：
 
@@ -296,6 +301,8 @@ riskGate
 - `MemorySaver` 为持久化 checkpoint
 - 内存事件流为可持久化消息或事件存储
 - 单机幂等校验为跨实例一致的唯一约束或分布式锁
+- 客服内存适配器为持久化会话、工单和跨实例一致的客服处理系统
+- 确定性的 Mock 分类和关键词检索为经过约束、审计和人工兜底的生产 Agent 系统
 
 ## 6. Web 接口与事件流
 

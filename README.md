@@ -1,6 +1,6 @@
 # 智慧园区告警、能耗、安防与客服学习项目
 
-这是一个面向学习的 Spring AI Alibaba 智慧园区项目，当前提供告警处置、能耗查询、安防事件查询和园区客服四个能力。运营工作流接收园区告警，执行场景分析、结构化诊断、风险门禁、人工审批、Mock 工单和 SSE 事件；客服流程提供停车、访客通行、公共区域能耗咨询以及设施报修转人工。
+这是一个面向学习的 Spring AI Alibaba 智慧园区项目，当前提供告警处置、能耗查询、安防事件查询、园区客服、知识管理以及运营审计能力。运营工作流接收园区告警，执行场景分析、结构化诊断、风险门禁、人工审批、Mock 工单和 SSE 事件；客服流程提供停车、访客通行、公共区域能耗咨询以及设施报修转人工。
 
 > 安全边界：当前 Mock 适配器只读取种子数据，并把工单写入内存；它不会检查、切换、重启、隔离或控制任何真实设备。安防场景只有脱敏 Mock 摘要、只读查询工具和通用告警工作流入口，没有真实摄像头、门禁或人员系统接入。`SecurityEvent.evidenceSummary` 只能保存脱敏摘要，不得保存原始视频、图片、人脸特征或身份证等人员原始记录。不要把本示例当作生产控制系统使用。
 
@@ -102,7 +102,7 @@ Remove-Variable secureDashScopeKey
 - **告警（alert）：** `AlertPort`、告警查询工具和通用告警工作流负责告警读取、诊断、风险门禁、人工审批与 Mock 工单。
 - **能耗（energy）：** `EnergyPort`、`EnergyReading` 和 `EnergyQueryTool` 负责只读能耗查询；通用 Graph 会将 `ENERGY` 告警路由到 `energyAnalysis` 节点，生成当前值、基线、偏差比例和峰值需求分析，再进入知识检索和诊断。
 - **安防（security）：** `SecurityEvent`、`SecurityPort`、`MockSecurityAdapter` 和 `SecurityQueryTool` 提供脱敏 Mock 事件的只读查询。通用 Graph 会将 `ACCESS` 告警路由到 `securityReview` 节点，校验事件引用和 `REDACTED:` 摘要后再进入知识检索、诊断和强制人工审批。
-- **客服（customer service）：** `CustomerServiceWorkflow` 使用确定性的 Mock 意图识别和 Mock 知识检索处理停车、访客、能耗和报修问题。报修或知识不足时创建内存中的 `WAITING_AGENT` 客服工单；工单只保存通用安全摘要，不复制用户问题。当前客服答复不调用 DashScope，生产接入还需要大模型输出约束、内容安全、会话存储和人工坐席系统。
+- **客服（customer service）：** `CustomerServiceWorkflow` 使用确定性的 Mock 意图识别和关键词检索处理停车、访客、能耗和报修问题。报修或知识不足时创建 `WAITING_AGENT` 客服工单；工单只保存通用安全摘要，不复制用户问题。会话与工单分别通过 `port.customer.CustomerSessionStore` 和 `port.customer.CustomerTicketPort` 访问，默认实现为 `adapter.mock.InMemoryCustomerSessionStore` 和 `adapter.mock.InMemoryCustomerTicketAdapter`。当前客服答复不调用 DashScope，生产接入还需要大模型输出约束、内容安全、持久化会话/工单存储和人工坐席系统。
 
 `evidenceSummary` 的格式校验只是边界层的轻量输入约束，不等于认证、授权或业务脱敏。后续适配器仍必须负责真实身份认证、权限判断、租户/业务策略和原始数据脱敏，不能因为通过该格式校验就接入摄像头、门禁或人员原始数据。
 
@@ -110,9 +110,9 @@ Remove-Variable secureDashScopeKey
 
 ## REST 与 SSE 示例
 
-当前 API 一共提供四个端点。项目没有认证机制，只适合在可信的本地开发环境中运行。下面使用 `curl`；在 Windows PowerShell 中请使用 `curl.exe`。
+当前 API 按告警工作流、客服、知识管理、运营与审计、演示故障注入分组。项目没有认证机制，只适合在可信的本地开发环境中运行。下面使用 `curl`；在 Windows PowerShell 中请使用 `curl.exe`。
 
-### 1. 启动工作流
+### 告警工作流
 
 ```bash
 curl -X POST "http://localhost:8080/api/alerts/ALT-TEMP-001/workflows"
@@ -120,7 +120,7 @@ curl -X POST "http://localhost:8080/api/alerts/ALT-TEMP-001/workflows"
 
 也可以使用 `ALT-POWER-001`、`ALT-ENERGY-001` 或 `ALT-ACCESS-001` 练习必经人工审批的高风险流程。保存响应中的 `workflowId`，供后续请求使用。
 
-### 2. 查询工作流状态
+#### 查询工作流状态
 
 ```bash
 curl "http://localhost:8080/api/workflows/replace-with-workflow-id"
@@ -128,7 +128,7 @@ curl "http://localhost:8080/api/workflows/replace-with-workflow-id"
 
 可能的状态包括：`RUNNING`、`WAITING_APPROVAL`、`COMPLETED`、`REJECTED`、`FAILED` 和 `WORK_ORDER_FAILED`。公开 DTO 会有意对诊断、操作人、工单和错误详情进行安全摘要处理。
 
-### 3. 审批或拒绝暂停的工作流
+#### 审批或拒绝暂停的工作流
 
 只有当工作流处于 `WAITING_APPROVAL` 状态时，审批才有效。必填的 `idempotencyKey` 用于保证相同请求重试时返回已有结果，并阻止同一个 key 被用于不同审批内容。
 
@@ -149,7 +149,7 @@ curl -X POST "http://localhost:8080/api/workflows/replace-with-workflow-id/appro
 
 `decision` 取值为 `APPROVE` 或 `REJECT`。Mock 审批可能创建内存中的 Mock 工单，但不会授权或控制真实设备。
 
-### 4. 通过 SSE 订阅工作流事件
+#### 通过 SSE 订阅工作流事件
 
 ```bash
 curl -N -H "Accept: text/event-stream" "http://localhost:8080/api/workflows/replace-with-workflow-id/events"
@@ -157,7 +157,7 @@ curl -N -H "Accept: text/event-stream" "http://localhost:8080/api/workflows/repl
 
 内存事件发布器会重放指定工作流的事件，并在收到 `COMPLETED` 或 `FAILED` 事件后结束流。SSE 使用脱敏后的公开 DTO，不会暴露内部 Graph 状态。
 
-### 5. 园区客服
+### 客服
 
 ```bash
 curl -X POST "http://localhost:8080/api/customer-service/sessions" \
@@ -175,7 +175,7 @@ curl -X POST "http://localhost:8080/api/customer-service/sessions" \
 
 可通过 `GET /api/customer-service/sessions/{sessionId}` 查询本次会话结果，并通过 `POST /api/customer-service/sessions/{sessionId}/messages` 在同一会话中继续提问。无法识别的追问会继承上一轮意图；会话转人工后停止自动回复。`GET /api/customer-service/sessions/{sessionId}/conversation` 返回消息历史和安全检索轨迹，轨迹只包含检索词和 Mock 文档 ID。客服坐席或管理员可通过 `GET /api/customer-service/tickets` 查看人工工单，并通过 `PATCH /api/customer-service/tickets/{ticketId}` 推进 `WAITING_AGENT`、`ASSIGNED`、`IN_PROGRESS`、`RESOLVED`、`CLOSED` 等状态。当前没有身份认证，请勿输入身份证、手机号等个人敏感信息。
 
-### 6. 演示角色、观测与故障注入
+### 知识管理、运营与审计、演示故障注入
 
 前端可切换查看者、操作员、审批人、客服坐席和管理员角色。角色通过 `X-Demo-Role` 请求头演示接口授权边界，它不是生产认证方案。工作流响应会返回风险门禁原因；`GET /api/workflows/{workflowId}/observability` 汇总安全事件、工具调用和失败节点；管理员可以通过 `POST /api/demo/faults` 注入一次性的知识库检索故障，演示失败路径。`GET /api/operations/metrics` 返回工作流、客服会话、人工工单、知识文档、反馈和审计记录数量；管理员可通过 `GET /api/audit` 查看只包含角色、动作、资源 ID、结果和时间的安全审计记录。
 
