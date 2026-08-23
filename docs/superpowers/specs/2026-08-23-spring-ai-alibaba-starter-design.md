@@ -1,4 +1,6 @@
-# Spring AI Alibaba 最小练习项目设计
+# Spring AI Alibaba 最小练习项目设计（已废弃）
+
+> 本文档是早期 Hello World 方案，已被 [智慧园区设备告警智能处置设计](2026-08-23-smart-park-alert-workflow-design.md) 取代，不作为当前实现依据。
 
 ## 目标
 
