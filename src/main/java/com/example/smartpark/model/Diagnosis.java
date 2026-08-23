@@ -13,6 +13,7 @@ public record Diagnosis(
         String summary,
         List<String> evidence,
         String recommendedAction,
+        double confidence,
         Instant diagnosedAt) {
 
     public Diagnosis {
@@ -24,6 +25,36 @@ public record Diagnosis(
         summary = Objects.requireNonNull(summary, "summary");
         evidence = List.copyOf(Objects.requireNonNull(evidence, "evidence"));
         recommendedAction = Objects.requireNonNull(recommendedAction, "recommendedAction");
+        if (confidence < 0.0 || confidence > 1.0) {
+            throw new IllegalArgumentException("confidence must be between 0 and 1");
+        }
         diagnosedAt = Objects.requireNonNull(diagnosedAt, "diagnosedAt");
+    }
+
+    /**
+     * Compatibility constructor for diagnoses restored from pre-confidence checkpoints.
+     * A missing confidence fails closed at zero and therefore always requires approval.
+     */
+    public Diagnosis(
+            String id,
+            String alertId,
+            String deviceId,
+            RiskLevel riskLevel,
+            String rootCause,
+            String summary,
+            List<String> evidence,
+            String recommendedAction,
+            Instant diagnosedAt) {
+        this(
+                id,
+                alertId,
+                deviceId,
+                riskLevel,
+                rootCause,
+                summary,
+                evidence,
+                recommendedAction,
+                0.0,
+                diagnosedAt);
     }
 }

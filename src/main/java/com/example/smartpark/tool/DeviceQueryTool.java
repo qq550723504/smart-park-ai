@@ -3,11 +3,13 @@ package com.example.smartpark.tool;
 import com.example.smartpark.model.Device;
 import com.example.smartpark.park.DevicePort;
 import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.Objects;
 
 @Component
+@ConditionalOnProperty(name = "spring.ai.dashscope.enabled", havingValue = "true", matchIfMissing = true)
 public class DeviceQueryTool {
 
     private static final String MOCK_NOTICE = "Mock park data only. Tool outputs do not control real park devices.";

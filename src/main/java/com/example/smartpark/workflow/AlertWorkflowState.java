@@ -115,12 +115,9 @@ public final class AlertWorkflowState {
         return Collections.unmodifiableMap(data);
     }
 
-    public Map<String, Object> snapshotPayload(WorkflowStatus status, List<String> errors, long eventSequence) {
+    public Map<String, Object> snapshotPayload() {
         Map<String, Object> payload = new LinkedHashMap<>();
         REQUIRED_KEYS.forEach(key -> payload.put(key, data.get(key)));
-        payload.put(STATUS, serializable(status));
-        payload.put(ERRORS, List.copyOf(errors));
-        payload.put(EVENT_SEQUENCE, eventSequence);
         if (data.containsKey(ROUTE)) {
             payload.put(ROUTE, data.get(ROUTE));
         }

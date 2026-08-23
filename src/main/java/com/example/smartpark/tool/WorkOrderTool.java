@@ -5,12 +5,14 @@ import com.example.smartpark.park.WorkOrderPort;
 import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Objects;
 
 @Component
+@ConditionalOnProperty(name = "spring.ai.dashscope.enabled", havingValue = "true", matchIfMissing = true)
 public class WorkOrderTool {
 
     private static final String MOCK_NOTICE = "Mock workflow write only. Creating a work order here does not control real park devices.";

@@ -35,4 +35,18 @@ public record WorkflowSnapshot(
             throw new IllegalArgumentException("eventSequence must not be negative");
         }
     }
+
+    static WorkflowSnapshot from(AlertWorkflowState state) {
+        WorkflowStatus status = state.status();
+        return new WorkflowSnapshot(
+                state.workflowId(),
+                state.alertId(),
+                status,
+                state.snapshotPayload(),
+                state.diagnosis().orElse(null),
+                state.approval(),
+                state.workOrder().orElse(null),
+                state.errors(),
+                state.eventSequence());
+    }
 }

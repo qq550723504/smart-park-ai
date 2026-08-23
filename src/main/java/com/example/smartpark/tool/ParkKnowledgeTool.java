@@ -3,12 +3,14 @@ package com.example.smartpark.tool;
 import com.example.smartpark.model.KnowledgeDocument;
 import com.example.smartpark.park.KnowledgePort;
 import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Objects;
 
 @Component
+@ConditionalOnProperty(name = "spring.ai.dashscope.enabled", havingValue = "true", matchIfMissing = true)
 public class ParkKnowledgeTool {
 
     private static final String MOCK_NOTICE = "Mock knowledge data only. Tool outputs do not control real park devices.";

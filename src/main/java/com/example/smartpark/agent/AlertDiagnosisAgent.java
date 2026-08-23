@@ -17,10 +17,13 @@ import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.ToolDefinition;
+import org.springframework.ai.tool.metadata.ToolMetadata;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -31,9 +34,11 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 @Component
+@ConditionalOnProperty(name = "spring.ai.dashscope.enabled", havingValue = "true", matchIfMissing = true)
 public class AlertDiagnosisAgent {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper().findAndRegisterModules();
@@ -46,6 +51,7 @@ public class AlertDiagnosisAgent {
             "summary",
             "evidence",
             "recommendedAction",
+            "confidence",
             "diagnosedAt");
 
     private final ChatClient chatClient;
@@ -71,15 +77,24 @@ public class AlertDiagnosisAgent {
     }
 
     public Diagnosis diagnose(Alert alert, ParkContext context, List<KnowledgeDocument> documents) {
+        return diagnose(alert, context, documents, ignored -> { });
+    }
+
+    public Diagnosis diagnose(
+            Alert alert,
+            ParkContext context,
+            List<KnowledgeDocument> documents,
+            Consumer<String> toolAuditor) {
         Objects.requireNonNull(alert, "alert");
         Objects.requireNonNull(context, "context");
         List<KnowledgeDocument> safeDocuments = List.copyOf(Objects.requireNonNull(documents, "documents"));
+        Consumer<String> requiredToolAuditor = Objects.requireNonNull(toolAuditor, "toolAuditor");
 
         Prompt prompt = new Prompt(
                 new SystemMessage(PromptCatalog.diagnosisSystemPrompt(toolNames())),
                 new UserMessage(PromptCatalog.diagnosisUserPrompt(alert, context, safeDocuments)));
         String text = extractText(chatClient.prompt(prompt)
-                .toolCallbacks(toolCallbacks)
+                .toolCallbacks(auditedToolCallbacks(requiredToolAuditor))
                 .call()
                 .chatResponse(), "diagnosis");
         JsonNode root = parseObject(text, "diagnosis");
@@ -94,6 +109,7 @@ public class AlertDiagnosisAgent {
                 requireText(root, "summary", "diagnosis"),
                 requireEvidence(root.get("evidence"), "diagnosis"),
                 requireText(root, "recommendedAction", "diagnosis"),
+                requireConfidence(root, "diagnosis"),
                 requireInstant(root, "diagnosedAt", "diagnosis"));
 
         if (safeDocuments.isEmpty() && diagnosis.evidence().stream().noneMatch(item -> item.contains("INSUFFICIENT_EVIDENCE"))) {
@@ -105,6 +121,12 @@ public class AlertDiagnosisAgent {
 
     public ToolCallback[] toolCallbacks() {
         return toolCallbacks.clone();
+    }
+
+    private ToolCallback[] auditedToolCallbacks(Consumer<String> auditor) {
+        return Stream.of(toolCallbacks)
+                .map(callback -> new AuditedToolCallback(callback, auditor))
+                .toArray(ToolCallback[]::new);
     }
 
     private List<String> toolNames() {
@@ -188,12 +210,54 @@ public class AlertDiagnosisAgent {
         }
     }
 
+    private static double requireConfidence(JsonNode root, String context) {
+        JsonNode value = root.get("confidence");
+        if (value == null || !value.isNumber()) {
+            throw new IllegalStateException(context + " output field 'confidence' must be numeric");
+        }
+        double confidence = value.doubleValue();
+        if (confidence < 0.0 || confidence > 1.0) {
+            throw new IllegalStateException(context + " output field 'confidence' must be between 0 and 1");
+        }
+        return confidence;
+    }
+
     private static <E extends Enum<E>> E parseEnum(Class<E> enumType, String value, String fieldName, String context) {
         try {
             return Enum.valueOf(enumType, value);
         }
         catch (IllegalArgumentException ex) {
             throw new IllegalStateException(context + " output field '" + fieldName + "' must be one of " + List.of(enumType.getEnumConstants()), ex);
+        }
+    }
+
+    private record AuditedToolCallback(ToolCallback delegate, Consumer<String> auditor) implements ToolCallback {
+
+        private AuditedToolCallback {
+            Objects.requireNonNull(delegate, "delegate");
+            Objects.requireNonNull(auditor, "auditor");
+        }
+
+        @Override
+        public ToolDefinition getToolDefinition() {
+            return delegate.getToolDefinition();
+        }
+
+        @Override
+        public ToolMetadata getToolMetadata() {
+            return delegate.getToolMetadata();
+        }
+
+        @Override
+        public String call(String toolInput) {
+            auditor.accept(delegate.getToolDefinition().name());
+            return delegate.call(toolInput);
+        }
+
+        @Override
+        public String call(String toolInput, ToolContext toolContext) {
+            auditor.accept(delegate.getToolDefinition().name());
+            return delegate.call(toolInput, toolContext);
         }
     }
 }

@@ -69,6 +69,7 @@ final class PromptCatalog {
                   "summary": "non-empty diagnosis summary",
                   "evidence": ["one or more evidence statements"],
                   "recommendedAction": "non-empty recommended action",
+                  "confidence": "number from 0 to 1 for this diagnosis",
                   "diagnosedAt": "ISO-8601 instant"
                 }
                 Every conclusion must be backed by evidence.

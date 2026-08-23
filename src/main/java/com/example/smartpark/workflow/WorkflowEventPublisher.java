@@ -3,12 +3,18 @@ package com.example.smartpark.workflow;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
+import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 public interface WorkflowEventPublisher {
 
-    void publish(WorkflowEvent event);
+    WorkflowEvent publish(
+            String workflowId,
+            WorkflowEvent.EventType eventType,
+            String node,
+            Instant timestamp,
+            String summary);
 
     Flux<WorkflowEvent> events(String workflowId);
 
@@ -22,27 +28,65 @@ public interface WorkflowEventPublisher {
 
 final class InMemoryWorkflowEventPublisher implements WorkflowEventPublisher {
 
-    private final Map<String, Sinks.Many<WorkflowEvent>> sinks = new ConcurrentHashMap<>();
+    private final Map<String, EventStream> streams = new ConcurrentHashMap<>();
 
     @Override
-    public void publish(WorkflowEvent event) {
-        sink(event.workflowId()).emitNext(
-                event,
-                (signalType, emitResult) -> emitResult == Sinks.EmitResult.FAIL_NON_SERIALIZED);
+    public WorkflowEvent publish(
+            String workflowId,
+            WorkflowEvent.EventType eventType,
+            String node,
+            Instant timestamp,
+            String summary) {
+        return stream(workflowId).publish(workflowId, eventType, node, timestamp, summary);
     }
 
     @Override
     public Flux<WorkflowEvent> events(String workflowId) {
-        return sink(workflowId).asFlux();
+        return stream(workflowId).events();
     }
 
     @Override
     public void complete(String workflowId) {
-        sink(workflowId).emitComplete(
-                (signalType, emitResult) -> emitResult == Sinks.EmitResult.FAIL_NON_SERIALIZED);
+        stream(workflowId).complete();
     }
 
-    private Sinks.Many<WorkflowEvent> sink(String workflowId) {
-        return sinks.computeIfAbsent(workflowId, ignored -> Sinks.many().replay().all());
+    private EventStream stream(String workflowId) {
+        return streams.computeIfAbsent(workflowId, ignored -> new EventStream());
+    }
+
+    private static final class EventStream {
+        private final Sinks.Many<WorkflowEvent> sink = Sinks.many().replay().all();
+        private long sequence;
+
+        private synchronized WorkflowEvent publish(
+                String workflowId,
+                WorkflowEvent.EventType eventType,
+                String node,
+                Instant timestamp,
+                String summary) {
+            WorkflowEvent event = new WorkflowEvent(
+                    workflowId,
+                    ++sequence,
+                    eventType,
+                    node,
+                    timestamp,
+                    summary);
+            Sinks.EmitResult result = sink.tryEmitNext(event);
+            if (result.isFailure()) {
+                throw new IllegalStateException("Unable to publish workflow event: " + result);
+            }
+            return event;
+        }
+
+        private Flux<WorkflowEvent> events() {
+            return sink.asFlux();
+        }
+
+        private synchronized void complete() {
+            Sinks.EmitResult result = sink.tryEmitComplete();
+            if (result.isFailure() && result != Sinks.EmitResult.FAIL_TERMINATED) {
+                throw new IllegalStateException("Unable to complete workflow event stream: " + result);
+            }
+        }
     }
 }

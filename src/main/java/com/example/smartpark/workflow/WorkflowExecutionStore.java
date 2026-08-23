@@ -1,6 +1,7 @@
 package com.example.smartpark.workflow;
 
 import com.alibaba.cloud.ai.graph.CompiledGraph;
+import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.alibaba.cloud.ai.graph.action.InterruptionMetadata;
 import com.example.smartpark.model.WorkflowStatus;
 
@@ -8,11 +9,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
 
 public interface WorkflowExecutionStore {
-
-    WorkflowSnapshot save(WorkflowSnapshot snapshot);
 
     Optional<WorkflowSnapshot> get(String workflowId);
 
@@ -23,7 +21,7 @@ public interface WorkflowExecutionStore {
             String alertId,
             String graphThreadId,
             CompiledGraph compiledGraph,
-            WorkflowSnapshot initialSnapshot);
+            AlertWorkflowState initialState);
 
     Optional<Execution> execution(String workflowId);
 
@@ -36,14 +34,21 @@ public interface WorkflowExecutionStore {
         private final String alertId;
         private final String graphThreadId;
         private final CompiledGraph compiledGraph;
-        private final AtomicLong eventSequence = new AtomicLong();
+        private final AlertWorkflowState initialState;
         private volatile InterruptionMetadata interruption;
+        private volatile Throwable failureCause;
 
-        Execution(String workflowId, String alertId, String graphThreadId, CompiledGraph compiledGraph) {
+        Execution(
+                String workflowId,
+                String alertId,
+                String graphThreadId,
+                CompiledGraph compiledGraph,
+                AlertWorkflowState initialState) {
             this.workflowId = Objects.requireNonNull(workflowId, "workflowId");
             this.alertId = Objects.requireNonNull(alertId, "alertId");
             this.graphThreadId = Objects.requireNonNull(graphThreadId, "graphThreadId");
             this.compiledGraph = Objects.requireNonNull(compiledGraph, "compiledGraph");
+            this.initialState = Objects.requireNonNull(initialState, "initialState");
         }
 
         public String workflowId() {
@@ -62,14 +67,6 @@ public interface WorkflowExecutionStore {
             return compiledGraph;
         }
 
-        public long nextEventSequence() {
-            return eventSequence.incrementAndGet();
-        }
-
-        public long eventSequence() {
-            return eventSequence.get();
-        }
-
         public Optional<InterruptionMetadata> interruption() {
             return Optional.ofNullable(interruption);
         }
@@ -77,28 +74,41 @@ public interface WorkflowExecutionStore {
         public void interruption(InterruptionMetadata interruption) {
             this.interruption = Objects.requireNonNull(interruption, "interruption");
         }
+
+        public Optional<Throwable> failureCause() {
+            return Optional.ofNullable(failureCause);
+        }
+
+        public void failureCause(Throwable failureCause) {
+            this.failureCause = Objects.requireNonNull(failureCause, "failureCause");
+        }
+
+        AlertWorkflowState currentState() {
+            RunnableConfig config = RunnableConfig.builder().threadId(graphThreadId).build();
+            return compiledGraph.stateOf(config)
+                    .map(snapshot -> AlertWorkflowState.from(snapshot.state()))
+                    .orElse(initialState);
+        }
+
+        WorkflowSnapshot snapshot() {
+            return WorkflowSnapshot.from(currentState());
+        }
     }
 }
 
 final class InMemoryWorkflowExecutionStore implements WorkflowExecutionStore {
 
-    private final Map<String, WorkflowSnapshot> snapshots = new ConcurrentHashMap<>();
     private final Map<String, Execution> executions = new ConcurrentHashMap<>();
 
     @Override
-    public WorkflowSnapshot save(WorkflowSnapshot snapshot) {
-        snapshots.put(snapshot.workflowId(), snapshot);
-        return snapshot;
-    }
-
-    @Override
     public Optional<WorkflowSnapshot> get(String workflowId) {
-        return Optional.ofNullable(snapshots.get(workflowId));
+        return Optional.ofNullable(executions.get(workflowId)).map(Execution::snapshot);
     }
 
     @Override
     public Optional<WorkflowSnapshot> findRunningByAlertId(String alertId) {
-        return snapshots.values().stream()
+        return executions.values().stream()
+                .map(Execution::snapshot)
                 .filter(snapshot -> snapshot.alertId().equals(alertId))
                 .filter(snapshot -> isRunning(snapshot.status()))
                 .findFirst();
@@ -110,7 +120,7 @@ final class InMemoryWorkflowExecutionStore implements WorkflowExecutionStore {
             String alertId,
             String graphThreadId,
             CompiledGraph compiledGraph,
-            WorkflowSnapshot initialSnapshot) {
+            AlertWorkflowState initialState) {
         Optional<WorkflowSnapshot> running = findRunningByAlertId(alertId);
         if (running.isPresent()) {
             Execution existing = executions.get(running.get().workflowId());
@@ -123,9 +133,8 @@ final class InMemoryWorkflowExecutionStore implements WorkflowExecutionStore {
         if (executions.containsKey(workflowId)) {
             throw new IllegalStateException("Workflow already exists: " + workflowId);
         }
-        Execution execution = new Execution(workflowId, alertId, graphThreadId, compiledGraph);
+        Execution execution = new Execution(workflowId, alertId, graphThreadId, compiledGraph, initialState);
         executions.put(workflowId, execution);
-        snapshots.put(workflowId, initialSnapshot);
         return execution;
     }
 

@@ -7,13 +7,22 @@ public record ApprovalDecision(
         Decision decision,
         String reviewer,
         String comment,
+        String idempotencyKey,
         Instant decidedAt) {
 
     public ApprovalDecision {
         decision = Objects.requireNonNull(decision, "decision");
         reviewer = Objects.requireNonNull(reviewer, "reviewer");
         comment = Objects.requireNonNull(comment, "comment");
+        idempotencyKey = requireText(idempotencyKey, "idempotencyKey");
         decidedAt = Objects.requireNonNull(decidedAt, "decidedAt");
+    }
+
+    private static String requireText(String value, String name) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(name + " must not be blank");
+        }
+        return value.trim();
     }
 
     public enum Decision {

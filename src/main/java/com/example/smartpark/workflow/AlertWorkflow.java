@@ -22,6 +22,7 @@ import com.example.smartpark.park.WorkOrderPort;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.Clock;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -85,7 +86,6 @@ public final class AlertWorkflow {
                 alertPort,
                 workOrderPort,
                 knowledgePort,
-                executionStore,
                 eventPublisher,
                 clock,
                 CONFIDENCE_THRESHOLD);
@@ -102,17 +102,12 @@ public final class AlertWorkflow {
         String workflowId = requireIdentifier(workflowIds.get(), "workflowId");
         String graphThreadId = workflowId;
         AlertWorkflowState initialState = AlertWorkflowState.initial(workflowId, requiredAlertId);
-        WorkflowSnapshot initialSnapshot = snapshot(
-                initialState,
-                WorkflowStatus.RUNNING,
-                List.of(),
-                0L);
         WorkflowExecutionStore.Execution execution = executionStore.register(
                 workflowId,
                 requiredAlertId,
                 graphThreadId,
                 compiledGraph,
-                initialSnapshot);
+                initialState);
         if (!execution.workflowId().equals(workflowId)) {
             return executionStore.get(execution.workflowId()).orElseThrow();
         }
@@ -122,20 +117,25 @@ public final class AlertWorkflow {
                 WorkflowEvent.EventType.STARTED,
                 "workflow",
                 "alert workflow started");
-        executionStore.save(snapshot(initialState, WorkflowStatus.RUNNING, List.of(), startedSequence));
 
         RunnableConfig config = RunnableConfig.builder().threadId(graphThreadId).build();
         try {
-            NodeOutput output = compiledGraph.invokeAndGetOutput(initialState.data(), config)
+            Map<String, Object> graphInput = new LinkedHashMap<>(initialState.data());
+            graphInput.put(AlertWorkflowState.EVENT_SEQUENCE, startedSequence);
+            NodeOutput output = compiledGraph.invokeAndGetOutput(graphInput, config)
                     .orElseThrow(() -> new IllegalStateException("Graph produced no workflow output"));
             if (output instanceof InterruptionMetadata interruption) {
                 execution.interruption(interruption);
-                WorkflowSnapshot waiting = snapshot(
-                        AlertWorkflowState.from(interruption.state()),
-                        WorkflowStatus.WAITING_APPROVAL,
-                        List.of(),
-                        execution.eventSequence());
-                return executionStore.save(waiting);
+                long pausedSequence = interruption.metadata(AlertWorkflowState.EVENT_SEQUENCE)
+                        .filter(Number.class::isInstance)
+                        .map(Number.class::cast)
+                        .map(Number::longValue)
+                        .orElseThrow(() -> new IllegalStateException("Approval interruption has no event sequence"));
+                updateGraphState(execution, Map.of(
+                        AlertWorkflowState.STATUS, WorkflowStatus.WAITING_APPROVAL.name(),
+                        AlertWorkflowState.ERRORS, List.of(),
+                        AlertWorkflowState.EVENT_SEQUENCE, pausedSequence));
+                return status(workflowId);
             }
             return completeFromState(execution, AlertWorkflowState.from(output.state()));
         }
@@ -152,25 +152,39 @@ public final class AlertWorkflow {
 
         synchronized (execution) {
             WorkflowSnapshot current = status(requiredWorkflowId);
+            if (current.approval().isPresent()) {
+                ApprovalDecision recorded = current.approval().orElseThrow();
+                if (recorded.idempotencyKey().equals(requiredDecision.idempotencyKey())) {
+                    if (recorded.equals(requiredDecision)) {
+                        return current;
+                    }
+                    throw new IllegalArgumentException(
+                            "idempotencyKey was already used for a different approval decision");
+                }
+            }
             if (current.status() != WorkflowStatus.WAITING_APPROVAL) {
                 throw new IllegalStateException(
                         "Workflow must be WAITING_APPROVAL before approval: " + current.status());
             }
             InterruptionMetadata interruption = execution.interruption()
                     .orElseThrow(() -> new IllegalStateException("Workflow has no approval interruption"));
-            nodes.publish(
+            long resumedSequence = nodes.publish(
                     requiredWorkflowId,
                     WorkflowEvent.EventType.RESUMED,
                     AlertWorkflowNodes.HUMAN_APPROVAL,
                     "operator approval resumed workflow");
-            InterruptionMetadata feedback = InterruptionMetadata.builder(interruption)
-                    .addMetadata("approvalDecision", requiredDecision)
-                    .build();
-            RunnableConfig resumeConfig = RunnableConfig.builder()
-                    .threadId(execution.graphThreadId())
-                    .addHumanFeedback(feedback)
-                    .build();
             try {
+                updateGraphState(execution, Map.of(
+                        AlertWorkflowState.APPROVAL, AlertWorkflowState.serializable(requiredDecision),
+                        AlertWorkflowState.STATUS, WorkflowStatus.RUNNING.name(),
+                        AlertWorkflowState.EVENT_SEQUENCE, resumedSequence));
+                InterruptionMetadata feedback = InterruptionMetadata.builder(interruption)
+                        .addMetadata("approvalDecision", requiredDecision)
+                        .build();
+                RunnableConfig resumeConfig = RunnableConfig.builder()
+                        .threadId(execution.graphThreadId())
+                        .addHumanFeedback(feedback)
+                        .build();
                 NodeOutput output = execution.compiledGraph()
                         .invokeAndGetOutput(Map.of(), resumeConfig)
                         .orElseThrow(() -> new IllegalStateException("Graph produced no output after approval"));
@@ -245,8 +259,11 @@ public final class AlertWorkflow {
                 WorkflowEvent.EventType.COMPLETED,
                 "workflow",
                 status == WorkflowStatus.REJECTED ? "workflow rejected" : "workflow completed");
-        WorkflowSnapshot snapshot = snapshot(state, status, state.errors(), completedSequence);
-        executionStore.save(snapshot);
+        updateGraphState(execution, Map.of(
+                AlertWorkflowState.STATUS, status.name(),
+                AlertWorkflowState.ERRORS, state.errors(),
+                AlertWorkflowState.EVENT_SEQUENCE, completedSequence));
+        WorkflowSnapshot snapshot = execution.snapshot();
         eventPublisher.complete(execution.workflowId());
         return snapshot;
     }
@@ -255,37 +272,38 @@ public final class AlertWorkflow {
             WorkflowExecutionStore.Execution execution,
             String alertId,
             RuntimeException exception) {
-        String error = rootMessage(exception);
+        WorkflowFailure failure = findFailure(exception).orElseGet(() -> new WorkflowFailure(
+                WorkflowFailure.Code.WORKFLOW_FAILED,
+                "Workflow execution failed",
+                "workflow",
+                exception));
+        Throwable detailedCause = failure.getCause() == null ? exception : failure.getCause();
+        execution.failureCause(detailedCause);
         long sequence = nodes.publish(
                 execution.workflowId(),
                 WorkflowEvent.EventType.FAILED,
-                "workflow",
-                "workflow failed");
-        AlertWorkflowState state = execution.compiledGraph()
-                .stateOf(RunnableConfig.builder().threadId(execution.graphThreadId()).build())
-                .map(snapshot -> AlertWorkflowState.from(snapshot.state()))
-                .orElseGet(() -> AlertWorkflowState.initial(execution.workflowId(), alertId));
-        WorkflowSnapshot failed = snapshot(state, WorkflowStatus.FAILED, List.of(error), sequence);
-        executionStore.save(failed);
+                failure.node(),
+                failure.code().name());
+        updateGraphState(execution, Map.of(
+                AlertWorkflowState.STATUS, WorkflowStatus.FAILED.name(),
+                AlertWorkflowState.ERRORS, List.of(failure.publicError()),
+                AlertWorkflowState.EVENT_SEQUENCE, sequence));
+        WorkflowSnapshot failed = execution.snapshot();
         eventPublisher.complete(execution.workflowId());
         return failed;
     }
 
-    private static WorkflowSnapshot snapshot(
-            AlertWorkflowState state,
-            WorkflowStatus status,
-            List<String> errors,
-            long eventSequence) {
-        return new WorkflowSnapshot(
-                state.workflowId(),
-                state.alertId(),
-                status,
-                state.snapshotPayload(status, errors, eventSequence),
-                state.diagnosis().orElse(null),
-                state.approval(),
-                state.workOrder().orElse(null),
-                errors,
-                eventSequence);
+    private static void updateGraphState(
+            WorkflowExecutionStore.Execution execution,
+            Map<String, Object> delta) {
+        try {
+            execution.compiledGraph().updateState(
+                    RunnableConfig.builder().threadId(execution.graphThreadId()).build(),
+                    delta);
+        }
+        catch (Exception exception) {
+            throw new IllegalStateException("Unable to update workflow checkpoint", exception);
+        }
     }
 
     private static String requireIdentifier(String value, String name) {
@@ -295,12 +313,14 @@ public final class AlertWorkflow {
         return value;
     }
 
-    private static String rootMessage(Throwable throwable) {
-        Throwable root = throwable;
-        while (root.getCause() != null) {
-            root = root.getCause();
+    private static Optional<WorkflowFailure> findFailure(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (current instanceof WorkflowFailure failure) {
+                return Optional.of(failure);
+            }
+            current = current.getCause();
         }
-        String message = root.getMessage();
-        return message == null || message.isBlank() ? root.getClass().getSimpleName() : message;
+        return Optional.empty();
     }
 }

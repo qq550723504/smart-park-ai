@@ -34,6 +34,7 @@ class AlertDiagnosisAgentTest {
                   "summary":"The HVAC unit likely needs filter inspection.",
                   "evidence":["history: repeated temperature warnings","knowledge: check filters first"],
                   "recommendedAction":"Inspect and replace the HVAC filter, then verify airflow.",
+                  "confidence":0.88,
                   "diagnosedAt":"2026-08-23T01:30:00Z"
                 }
                 """);
@@ -48,6 +49,7 @@ class AlertDiagnosisAgentTest {
         Diagnosis result = agent.diagnose(sampleAlert(), sampleContext(), sampleKnowledge());
 
         assertThat(result.rootCause()).contains("filter");
+        assertThat(result.confidence()).isEqualTo(0.88);
         assertThat(model.lastPrompt().getUserMessage().getText())
                 .contains("HVAC Supply Unit")
                 .contains("Prior HVAC temperature warning")
@@ -66,6 +68,7 @@ class AlertDiagnosisAgentTest {
                   "summary":"No supporting knowledge documents were available for a confident diagnosis.",
                   "evidence":["INSUFFICIENT_EVIDENCE: no knowledge documents matched the request"],
                   "recommendedAction":"Collect additional telemetry and consult a technician before acting.",
+                  "confidence":0.31,
                   "diagnosedAt":"2026-08-23T01:35:00Z"
                 }
                 """);
@@ -97,6 +100,7 @@ class AlertDiagnosisAgentTest {
                           "summary":"n/a",
                           "evidence":["INSUFFICIENT_EVIDENCE"],
                           "recommendedAction":"n/a",
+                          "confidence":0.2,
                           "diagnosedAt":"2026-08-23T01:40:00Z"
                         }
                         """),
@@ -126,6 +130,7 @@ class AlertDiagnosisAgentTest {
                   "summary":"The HVAC unit likely needs filter inspection.",
                   "evidence":["history: repeated temperature warnings","knowledge: check filters first"],
                   "recommendedAction":"Inspect and replace the HVAC filter, then verify airflow.",
+                  "confidence":0.91,
                   "diagnosedAt":"2026-08-23T01:45:00Z"
                 }
                 """);
@@ -159,6 +164,7 @@ class AlertDiagnosisAgentTest {
                   "summary":"The HVAC unit likely needs filter inspection.",
                   "evidence":["history: repeated temperature warnings"],
                   "recommendedAction":"Inspect and replace the HVAC filter, then verify airflow.",
+                  "confidence":0.9,
                   "diagnosedAt":"2026-08-23T01:50:00Z"
                 }
                 """);
@@ -187,6 +193,7 @@ class AlertDiagnosisAgentTest {
                   "summary":"The HVAC unit likely needs filter inspection.",
                   "evidence":["history: repeated temperature warnings"],
                   "recommendedAction":"Inspect and replace the HVAC filter, then verify airflow.",
+                  "confidence":0.9,
                   "diagnosedAt":"yesterday"
                 }
                 """);

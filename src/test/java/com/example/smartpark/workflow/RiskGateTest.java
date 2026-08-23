@@ -22,7 +22,7 @@ class RiskGateTest {
         Route route = riskGate.route(
                 alert(RiskLevel.LOW),
                 classification(RiskLevel.LOW, 0.92),
-                diagnosis(RiskLevel.LOW),
+                diagnosis(RiskLevel.LOW, 0.92),
                 List.of(document()));
 
         assertThat(route).isEqualTo(Route.CREATE_WORK_ORDER);
@@ -33,18 +33,18 @@ class RiskGateTest {
         Route route = riskGate.route(
                 alert(RiskLevel.HIGH),
                 classification(RiskLevel.LOW, 0.95),
-                diagnosis(RiskLevel.LOW),
+                diagnosis(RiskLevel.LOW, 0.95),
                 List.of(document()));
 
         assertThat(route).isEqualTo(Route.WAIT_FOR_APPROVAL);
     }
 
     @Test
-    void lowConfidenceRoutesToHumanApprovalEvenWhenRiskHintIsLow() {
+    void lowDiagnosisConfidenceRoutesToHumanApprovalEvenWhenClassificationConfidenceIsHigh() {
         Route route = riskGate.route(
                 alert(RiskLevel.LOW),
-                classification(RiskLevel.LOW, 0.74),
-                diagnosis(RiskLevel.LOW),
+                classification(RiskLevel.LOW, 0.99),
+                diagnosis(RiskLevel.LOW, 0.74),
                 List.of(document()));
 
         assertThat(route).isEqualTo(Route.WAIT_FOR_APPROVAL);
@@ -55,9 +55,32 @@ class RiskGateTest {
         Route route = riskGate.route(
                 alert(RiskLevel.LOW),
                 classification(RiskLevel.LOW, 0.95),
-                diagnosis(RiskLevel.LOW),
+                diagnosis(RiskLevel.LOW, 0.95),
                 List.of());
 
+        assertThat(route).isEqualTo(Route.WAIT_FOR_APPROVAL);
+    }
+
+    @Test
+    void legacyDiagnosisWithoutConfidenceMigratesToFailClosedDefault() {
+        Diagnosis legacyDiagnosis = new Diagnosis(
+                "diag-legacy",
+                "ALT-TEST-001",
+                "DEV-TEST-001",
+                RiskLevel.LOW,
+                "legacy root cause",
+                "legacy summary",
+                List.of("legacy evidence"),
+                "inspect device",
+                Instant.parse("2026-08-23T01:30:00Z"));
+
+        Route route = riskGate.route(
+                alert(RiskLevel.LOW),
+                classification(RiskLevel.LOW, 0.99),
+                legacyDiagnosis,
+                List.of(document()));
+
+        assertThat(legacyDiagnosis.confidence()).isZero();
         assertThat(route).isEqualTo(Route.WAIT_FOR_APPROVAL);
     }
 
@@ -82,7 +105,7 @@ class RiskGateTest {
                 confidence);
     }
 
-    private static Diagnosis diagnosis(RiskLevel riskLevel) {
+    private static Diagnosis diagnosis(RiskLevel riskLevel, double confidence) {
         return new Diagnosis(
                 "diag-test",
                 "ALT-TEST-001",
@@ -92,6 +115,7 @@ class RiskGateTest {
                 "filter inspection required",
                 List.of("sensor evidence"),
                 "inspect filter",
+                confidence,
                 Instant.parse("2026-08-23T01:30:00Z"));
     }
 

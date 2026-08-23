@@ -1,11 +1,14 @@
 package com.example.smartpark.workflow;
 
+import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.example.smartpark.agent.AlertDiagnosisAgent;
 import com.example.smartpark.agent.AlertTriageAgent;
 import com.example.smartpark.agent.TestChatModel;
 import com.example.smartpark.model.ApprovalDecision;
+import com.example.smartpark.model.Diagnosis;
 import com.example.smartpark.model.WorkOrder;
 import com.example.smartpark.model.WorkflowStatus;
+import com.example.smartpark.park.AlertPort;
 import com.example.smartpark.park.KnowledgePort;
 import com.example.smartpark.park.WorkOrderPort;
 import com.example.smartpark.park.mock.MockParkSystem;
@@ -21,11 +24,16 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.LongStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class AlertWorkflowTest {
 
@@ -62,11 +70,16 @@ class AlertWorkflowTest {
         Fixture fixture = fixture("ALT-POWER-001", 0.96, "HIGH", null, sequentialIds());
 
         WorkflowSnapshot waiting = fixture.workflow.start("ALT-POWER-001");
+        assertThat(waiting.status()).isEqualTo(WorkflowStatus.WAITING_APPROVAL);
+        assertThat(checkpointState(fixture, waiting.workflowId()).status())
+                .isEqualTo(WorkflowStatus.WAITING_APPROVAL);
+        assertThat(waiting.statePayload()).containsEntry(
+                AlertWorkflowState.STATUS,
+                WorkflowStatus.WAITING_APPROVAL.name());
         WorkflowSnapshot completed = fixture.workflow.approve(
                 waiting.workflowId(),
                 approvedAt("2026-08-23T02:00:00Z"));
 
-        assertThat(waiting.status()).isEqualTo(WorkflowStatus.WAITING_APPROVAL);
         assertThat(waiting.workOrder()).isNull();
         assertThat(completed.workflowId()).isEqualTo(waiting.workflowId());
         assertThat(fixture.store.execution(completed.workflowId()))
@@ -94,6 +107,7 @@ class AlertWorkflowTest {
                         ApprovalDecision.Decision.REJECTED,
                         "operator-1",
                         "insufficient evidence",
+                        "approval-reject-1",
                         Instant.parse("2026-08-23T02:01:00Z")));
 
         assertThat(rejected.status()).isEqualTo(WorkflowStatus.REJECTED);
@@ -116,13 +130,34 @@ class AlertWorkflowTest {
     }
 
     @Test
-    void unknownAlertFailsAndPublishesNoSideEffect() {
+    void lowDiagnosisConfidencePausesEvenWhenClassificationConfidenceIsHigh() {
+        Fixture fixture = fixture(
+                "ALT-TEMP-001",
+                0.99,
+                0.42,
+                "LOW",
+                null,
+                sequentialIds());
+
+        WorkflowSnapshot waiting = fixture.workflow.start("ALT-TEMP-001");
+
+        assertThat(waiting.status()).isEqualTo(WorkflowStatus.WAITING_APPROVAL);
+        assertThat(waiting.diagnosis().confidence()).isEqualTo(0.42);
+        assertThat(fixture.parkSystem.findByWorkflowId(waiting.workflowId())).isEmpty();
+    }
+
+    @Test
+    void portFailureIsCheckpointedAndOnlyExposesAStableSafeError() {
         Fixture fixture = fixture("ALT-TEMP-001", 0.92, "LOW", null, sequentialIds());
 
         WorkflowSnapshot failed = fixture.workflow.start("ALT-MISSING");
 
         assertThat(failed.status()).isEqualTo(WorkflowStatus.FAILED);
-        assertThat(failed.errors()).singleElement().asString().contains("Unknown alert");
+        assertThat(failed.errors()).containsExactly("ALERT_LOOKUP_FAILED: Unable to load alert");
+        assertThat(checkpointState(fixture, failed.workflowId()).status()).isEqualTo(WorkflowStatus.FAILED);
+        assertThat(checkpointState(fixture, failed.workflowId()).errors()).isEqualTo(failed.errors());
+        assertThat(fixture.store.execution(failed.workflowId()).orElseThrow().failureCause().orElseThrow())
+                .hasMessageContaining("Unknown alert");
         assertThat(failed.workOrder()).isNull();
         assertThat(fixture.parkSystem.findByWorkflowId(failed.workflowId())).isEmpty();
     }
@@ -140,15 +175,48 @@ class AlertWorkflowTest {
     }
 
     @Test
-    void duplicateApprovalIsRejectedAfterTheWorkflowHasCompleted() {
+    void duplicateApprovalWithTheSameIdempotencyKeyReturnsTheRecordedResultWithoutSideEffects() {
         Fixture fixture = fixture("ALT-POWER-001", 0.96, "HIGH", null, sequentialIds());
         WorkflowSnapshot waiting = fixture.workflow.start("ALT-POWER-001");
-        fixture.workflow.approve(waiting.workflowId(), approvedAt("2026-08-23T02:00:00Z"));
+        ApprovalDecision decision = approvedAt("approval-duplicate-1", "2026-08-23T02:00:00Z");
+
+        WorkflowSnapshot completed = fixture.workflow.approve(waiting.workflowId(), decision);
+        WorkflowSnapshot duplicate = fixture.workflow.approve(waiting.workflowId(), decision);
+
+        assertThat(duplicate).isEqualTo(completed);
+        assertThat(fixture.parkSystem.findByWorkflowId(waiting.workflowId())).hasSize(1);
+    }
+
+    @Test
+    void reusingAnIdempotencyKeyWithDifferentApprovalContentIsRejected() {
+        Fixture fixture = fixture("ALT-POWER-001", 0.96, "HIGH", null, sequentialIds());
+        WorkflowSnapshot waiting = fixture.workflow.start("ALT-POWER-001");
+        fixture.workflow.approve(
+                waiting.workflowId(),
+                approvedAt("approval-conflict-1", "2026-08-23T02:00:00Z"));
 
         assertThatThrownBy(() -> fixture.workflow.approve(
-                waiting.workflowId(), approvedAt("2026-08-23T02:02:00Z")))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("WAITING_APPROVAL");
+                waiting.workflowId(),
+                new ApprovalDecision(
+                        ApprovalDecision.Decision.REJECTED,
+                        "operator-1",
+                        "changed decision",
+                        "approval-conflict-1",
+                        Instant.parse("2026-08-23T02:02:00Z"))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("idempotencyKey");
+    }
+
+    @Test
+    void approvalRequiresANonBlankExplicitIdempotencyKey() {
+        assertThatThrownBy(() -> new ApprovalDecision(
+                ApprovalDecision.Decision.APPROVED,
+                "operator-1",
+                "safe to dispatch",
+                "  ",
+                Instant.parse("2026-08-23T02:00:00Z")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("idempotencyKey");
     }
 
     @Test
@@ -174,6 +242,47 @@ class AlertWorkflowTest {
     }
 
     @Test
+    void modelFailureKeepsDetailedCauseInternalAndCheckpointsSafeError() {
+        MockParkSystem parkSystem = new MockParkSystem();
+        AlertDiagnosisAgent failingAgent = mock(AlertDiagnosisAgent.class);
+        when(failingAgent.diagnose(any(), any(), anyList(), any()))
+                .thenThrow(new IllegalStateException("model payload apiKey=secret-model-key"));
+        Fixture fixture = fixture(parkSystem, parkSystem, failingAgent, sequentialIds());
+
+        WorkflowSnapshot failed = fixture.workflow.start("ALT-TEMP-001");
+
+        assertThat(failed.status()).isEqualTo(WorkflowStatus.FAILED);
+        assertThat(failed.errors()).containsExactly("DIAGNOSIS_FAILED: Unable to diagnose alert");
+        assertThat(failed.errors().toString()).doesNotContain("secret-model-key", "apiKey");
+        assertThat(checkpointState(fixture, failed.workflowId()).errors()).isEqualTo(failed.errors());
+        assertThat(fixture.store.execution(failed.workflowId()).orElseThrow().failureCause().orElseThrow())
+                .hasMessageContaining("secret-model-key");
+    }
+
+    @Test
+    void agentInitiatedToolCallsUseTheSameRedactedAuditEventStream() {
+        MockParkSystem parkSystem = new MockParkSystem();
+        AlertDiagnosisAgent auditingAgent = mock(AlertDiagnosisAgent.class);
+        when(auditingAgent.diagnose(any(), any(), anyList(), any())).thenAnswer(invocation -> {
+            Consumer<String> auditor = invocation.getArgument(3);
+            auditor.accept("lookupDeviceStatus");
+            return diagnosis("ALT-TEMP-001", "LOW", 0.92, false);
+        });
+        Fixture fixture = fixture(parkSystem, parkSystem, auditingAgent, sequentialIds());
+
+        WorkflowSnapshot result = fixture.workflow.start("ALT-TEMP-001");
+        List<WorkflowEvent> events = fixture.publisher.events(result.workflowId())
+                .collectList()
+                .block(Duration.ofSeconds(2));
+
+        assertThat(events).anySatisfy(event -> {
+            assertThat(event.eventType()).isEqualTo(WorkflowEvent.EventType.TOOL_CALLED);
+            assertThat(event.node()).isEqualTo(AlertWorkflowNodes.DIAGNOSE_ALERT);
+            assertThat(event.redactedSummary()).isEqualTo("AgentTool.lookupDeviceStatus");
+        });
+    }
+
+    @Test
     void existingWorkflowWorkOrderIsReusedWithoutCallingCreateAgain() {
         MockParkSystem parkSystem = new MockParkSystem();
         CountingWorkOrderPort workOrderPort = new CountingWorkOrderPort(parkSystem);
@@ -182,6 +291,7 @@ class AlertWorkflowTest {
                 parkSystem,
                 workOrderPort,
                 "ALT-TEMP-001",
+                0.92,
                 0.92,
                 "LOW",
                 parkSystem,
@@ -195,11 +305,22 @@ class AlertWorkflowTest {
     }
 
     private static ApprovalDecision approvedAt(String instant) {
+        return approvedAt("approval-" + instant, instant);
+    }
+
+    private static ApprovalDecision approvedAt(String idempotencyKey, String instant) {
         return new ApprovalDecision(
                 ApprovalDecision.Decision.APPROVED,
                 "operator-1",
                 "safe to dispatch",
+                idempotencyKey,
                 Instant.parse(instant));
+    }
+
+    private static AlertWorkflowState checkpointState(Fixture fixture, String workflowId) {
+        WorkflowExecutionStore.Execution execution = fixture.store.execution(workflowId).orElseThrow();
+        return AlertWorkflowState.from(execution.compiledGraph().getState(
+                RunnableConfig.builder().threadId(execution.graphThreadId()).build()).state());
     }
 
     private static Fixture fixture(
@@ -208,12 +329,23 @@ class AlertWorkflowTest {
             String riskLevel,
             KnowledgePort knowledgePort,
             Supplier<String> workflowIds) {
+        return fixture(alertId, confidence, confidence, riskLevel, knowledgePort, workflowIds);
+    }
+
+    private static Fixture fixture(
+            String alertId,
+            double classificationConfidence,
+            double diagnosisConfidence,
+            String riskLevel,
+            KnowledgePort knowledgePort,
+            Supplier<String> workflowIds) {
         MockParkSystem parkSystem = new MockParkSystem();
         return fixture(
                 parkSystem,
                 parkSystem,
                 alertId,
-                confidence,
+                classificationConfidence,
+                diagnosisConfidence,
                 riskLevel,
                 knowledgePort == null ? parkSystem : knowledgePort,
                 workflowIds);
@@ -223,14 +355,19 @@ class AlertWorkflowTest {
             MockParkSystem parkSystem,
             WorkOrderPort workOrderPort,
             String alertId,
-            double confidence,
+            double classificationConfidence,
+            double diagnosisConfidence,
             String riskLevel,
             KnowledgePort knowledgePort,
             Supplier<String> workflowIds) {
-        TestChatModel triageModel = new TestChatModel(triageJson(alertId, confidence, riskLevel));
+        TestChatModel triageModel = new TestChatModel(triageJson(alertId, classificationConfidence, riskLevel));
         String knowledgeQuery = alertId.contains("POWER") ? "power" : "temperature";
         TestChatModel diagnosisModel = new TestChatModel(
-                diagnosisJson(alertId, riskLevel, knowledgePort.search(knowledgeQuery).isEmpty()));
+                diagnosisJson(
+                        alertId,
+                        riskLevel,
+                        diagnosisConfidence,
+                        knowledgePort.search(knowledgeQuery).isEmpty()));
         AlertTriageAgent triageAgent = new AlertTriageAgent(triageModel);
         AlertDiagnosisAgent diagnosisAgent = new AlertDiagnosisAgent(
                 diagnosisModel,
@@ -254,6 +391,29 @@ class AlertWorkflowTest {
         return new Fixture(workflow, parkSystem, store, publisher);
     }
 
+    private static Fixture fixture(
+            MockParkSystem parkSystem,
+            AlertPort alertPort,
+            AlertDiagnosisAgent diagnosisAgent,
+            Supplier<String> workflowIds) {
+        AlertTriageAgent triageAgent = new AlertTriageAgent(
+                new TestChatModel(triageJson("ALT-TEMP-001", 0.99, "LOW")));
+        WorkflowExecutionStore store = WorkflowExecutionStore.inMemory();
+        WorkflowEventPublisher publisher = WorkflowEventPublisher.inMemory();
+        AlertWorkflow workflow = new AlertWorkflow(
+                triageAgent,
+                diagnosisAgent,
+                parkSystem,
+                alertPort,
+                parkSystem,
+                parkSystem,
+                store,
+                publisher,
+                CLOCK,
+                workflowIds);
+        return new Fixture(workflow, parkSystem, store, publisher);
+    }
+
     private static Supplier<String> sequentialIds() {
         AtomicInteger sequence = new AtomicInteger();
         return () -> "wf-" + sequence.incrementAndGet();
@@ -267,7 +427,11 @@ class AlertWorkflowTest {
                 """.formatted(category, priority, riskLevel, confidence);
     }
 
-    private static String diagnosisJson(String alertId, String riskLevel, boolean insufficientEvidence) {
+    private static String diagnosisJson(
+            String alertId,
+            String riskLevel,
+            double confidence,
+            boolean insufficientEvidence) {
         String deviceId = alertId.contains("POWER") ? "DEV-POWER-001" : "DEV-HVAC-001";
         String evidence = insufficientEvidence
                 ? "INSUFFICIENT_EVIDENCE: no knowledge documents matched the request"
@@ -282,9 +446,32 @@ class AlertWorkflowTest {
                   "summary":"fixture diagnosis summary",
                   "evidence":["%s"],
                   "recommendedAction":"inspect the device",
+                  "confidence":%s,
                   "diagnosedAt":"2026-08-23T01:30:00Z"
                 }
-                """.formatted(alertId, alertId, deviceId, riskLevel, evidence);
+                """.formatted(alertId, alertId, deviceId, riskLevel, evidence, confidence);
+    }
+
+    private static Diagnosis diagnosis(
+            String alertId,
+            String riskLevel,
+            double confidence,
+            boolean insufficientEvidence) {
+        String deviceId = alertId.contains("POWER") ? "DEV-POWER-001" : "DEV-HVAC-001";
+        String evidence = insufficientEvidence
+                ? "INSUFFICIENT_EVIDENCE: no knowledge documents matched the request"
+                : "knowledge: matching playbook and device history";
+        return new Diagnosis(
+                "diag-" + alertId,
+                alertId,
+                deviceId,
+                com.example.smartpark.model.RiskLevel.valueOf(riskLevel),
+                "fixture root cause",
+                "fixture diagnosis summary",
+                List.of(evidence),
+                "inspect the device",
+                confidence,
+                Instant.parse("2026-08-23T01:30:00Z"));
     }
 
     private record Fixture(

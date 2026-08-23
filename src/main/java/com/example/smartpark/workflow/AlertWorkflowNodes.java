@@ -49,7 +49,6 @@ public final class AlertWorkflowNodes {
     private final AlertPort alertPort;
     private final WorkOrderPort workOrderPort;
     private final KnowledgePort knowledgePort;
-    private final WorkflowExecutionStore executionStore;
     private final WorkflowEventPublisher eventPublisher;
     private final Clock clock;
     private final RiskGate riskGate;
@@ -61,7 +60,6 @@ public final class AlertWorkflowNodes {
             AlertPort alertPort,
             WorkOrderPort workOrderPort,
             KnowledgePort knowledgePort,
-            WorkflowExecutionStore executionStore,
             WorkflowEventPublisher eventPublisher,
             Clock clock,
             double confidenceThreshold) {
@@ -71,7 +69,6 @@ public final class AlertWorkflowNodes {
         this.alertPort = Objects.requireNonNull(alertPort, "alertPort");
         this.workOrderPort = Objects.requireNonNull(workOrderPort, "workOrderPort");
         this.knowledgePort = Objects.requireNonNull(knowledgePort, "knowledgePort");
-        this.executionStore = Objects.requireNonNull(executionStore, "executionStore");
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.riskGate = new RiskGate(confidenceThreshold);
@@ -81,8 +78,16 @@ public final class AlertWorkflowNodes {
         return observed(CLASSIFY_ALERT, state -> {
             AlertWorkflowState workflowState = AlertWorkflowState.from(state);
             toolCall(workflowState.workflowId(), CLASSIFY_ALERT, "AlertPort.getAlert");
-            Alert alert = alertPort.getAlert(workflowState.alertId());
-            AlertTriageAgent.AlertClassificationResult classification = triageAgent.classify(alert);
+            Alert alert = guarded(
+                    WorkflowFailure.Code.ALERT_LOOKUP_FAILED,
+                    "Unable to load alert",
+                    CLASSIFY_ALERT,
+                    () -> alertPort.getAlert(workflowState.alertId()));
+            AlertTriageAgent.AlertClassificationResult classification = guarded(
+                    WorkflowFailure.Code.CLASSIFICATION_FAILED,
+                    "Unable to classify alert",
+                    CLASSIFY_ALERT,
+                    () -> triageAgent.classify(alert));
             return delta(
                     AlertWorkflowState.ALERT, AlertWorkflowState.serializable(alert),
                     AlertWorkflowState.CLASSIFICATION, AlertWorkflowState.serializable(classification),
@@ -95,11 +100,23 @@ public final class AlertWorkflowNodes {
             AlertWorkflowState workflowState = AlertWorkflowState.from(state);
             Alert alert = workflowState.alert();
             toolCall(workflowState.workflowId(), COLLECT_PARK_CONTEXT, "DevicePort.getDevice");
-            var device = devicePort.getDevice(alert.deviceId());
+            var device = guarded(
+                    WorkflowFailure.Code.PARK_CONTEXT_FAILED,
+                    "Unable to collect park context",
+                    COLLECT_PARK_CONTEXT,
+                    () -> devicePort.getDevice(alert.deviceId()));
             toolCall(workflowState.workflowId(), COLLECT_PARK_CONTEXT, "AlertPort.findHistory");
-            var alertHistory = alertPort.findHistory(alert.deviceId());
+            var alertHistory = guarded(
+                    WorkflowFailure.Code.PARK_CONTEXT_FAILED,
+                    "Unable to collect park context",
+                    COLLECT_PARK_CONTEXT,
+                    () -> alertPort.findHistory(alert.deviceId()));
             toolCall(workflowState.workflowId(), COLLECT_PARK_CONTEXT, "WorkOrderPort.findByWorkflowId");
-            var workOrders = workOrderPort.findByWorkflowId(workflowState.workflowId());
+            var workOrders = guarded(
+                    WorkflowFailure.Code.PARK_CONTEXT_FAILED,
+                    "Unable to collect park context",
+                    COLLECT_PARK_CONTEXT,
+                    () -> workOrderPort.findByWorkflowId(workflowState.workflowId()));
             ParkContext context = new ParkContext(
                     alert.parkId(),
                     alert.buildingId(),
@@ -115,7 +132,11 @@ public final class AlertWorkflowNodes {
             AlertWorkflowState workflowState = AlertWorkflowState.from(state);
             String query = workflowState.classification().category().name().toLowerCase(java.util.Locale.ROOT);
             toolCall(workflowState.workflowId(), RETRIEVE_KNOWLEDGE, "KnowledgePort.search");
-            List<KnowledgeDocument> documents = knowledgePort.search(query);
+            List<KnowledgeDocument> documents = guarded(
+                    WorkflowFailure.Code.KNOWLEDGE_RETRIEVAL_FAILED,
+                    "Unable to retrieve park knowledge",
+                    RETRIEVE_KNOWLEDGE,
+                    () -> knowledgePort.search(query));
             return Map.of(
                     AlertWorkflowState.RETRIEVED_DOCUMENTS,
                     AlertWorkflowState.serializable(List.copyOf(documents)));
@@ -125,10 +146,18 @@ public final class AlertWorkflowNodes {
     public AsyncNodeAction diagnoseAlert() {
         return observed(DIAGNOSE_ALERT, state -> {
             AlertWorkflowState workflowState = AlertWorkflowState.from(state);
-            Diagnosis diagnosis = diagnosisAgent.diagnose(
-                    workflowState.alert(),
-                    workflowState.parkContext(),
-                    workflowState.retrievedDocuments());
+            Diagnosis diagnosis = guarded(
+                    WorkflowFailure.Code.DIAGNOSIS_FAILED,
+                    "Unable to diagnose alert",
+                    DIAGNOSE_ALERT,
+                    () -> diagnosisAgent.diagnose(
+                            workflowState.alert(),
+                            workflowState.parkContext(),
+                            workflowState.retrievedDocuments(),
+                            toolName -> toolCall(
+                                    workflowState.workflowId(),
+                                    DIAGNOSE_ALERT,
+                                    "AgentTool." + toolName)));
             return delta(
                     AlertWorkflowState.DIAGNOSIS, AlertWorkflowState.serializable(diagnosis),
                     AlertWorkflowState.RISK_LEVEL, AlertWorkflowState.serializable(diagnosis.riskLevel()));
@@ -155,14 +184,22 @@ public final class AlertWorkflowNodes {
         return observed(CREATE_WORK_ORDER, state -> {
             AlertWorkflowState workflowState = AlertWorkflowState.from(state);
             toolCall(workflowState.workflowId(), CREATE_WORK_ORDER, "WorkOrderPort.findByWorkflowId");
-            List<WorkOrder> existing = workOrderPort.findByWorkflowId(workflowState.workflowId());
+            List<WorkOrder> existing = guarded(
+                    WorkflowFailure.Code.WORK_ORDER_FAILED,
+                    "Unable to create work order",
+                    CREATE_WORK_ORDER,
+                    () -> workOrderPort.findByWorkflowId(workflowState.workflowId()));
             WorkOrder workOrder;
             if (existing.isEmpty()) {
                 toolCall(workflowState.workflowId(), CREATE_WORK_ORDER, "WorkOrderPort.create");
-                workOrder = workOrderPort.create(
-                        workflowState.workflowId(),
-                        workflowState.alertId(),
-                        workflowState.diagnosis().orElseThrow().summary());
+                workOrder = guarded(
+                        WorkflowFailure.Code.WORK_ORDER_FAILED,
+                        "Unable to create work order",
+                        CREATE_WORK_ORDER,
+                        () -> workOrderPort.create(
+                                workflowState.workflowId(),
+                                workflowState.alertId(),
+                                workflowState.diagnosis().orElseThrow().summary()));
             }
             else {
                 workOrder = existing.get(0);
@@ -193,17 +230,12 @@ public final class AlertWorkflowNodes {
     }
 
     public long publish(String workflowId, WorkflowEvent.EventType type, String node, String summary) {
-        WorkflowExecutionStore.Execution execution = executionStore.execution(workflowId)
-                .orElseThrow(() -> new IllegalStateException("Unknown workflow: " + workflowId));
-        long sequence = execution.nextEventSequence();
-        eventPublisher.publish(new WorkflowEvent(
+        return eventPublisher.publish(
                 workflowId,
-                sequence,
                 type,
                 node,
                 Instant.now(clock),
-                summary));
-        return sequence;
+                summary).sequence();
     }
 
     private AsyncNodeAction observed(String node, ThrowingNodeAction action) {
@@ -222,8 +254,14 @@ public final class AlertWorkflowNodes {
                 return result;
             }
             catch (Exception exception) {
-                publish(workflowId, WorkflowEvent.EventType.FAILED, node, node + " failed");
-                throw exception;
+                if (exception instanceof RuntimeException runtimeException) {
+                    throw runtimeException;
+                }
+                throw new WorkflowFailure(
+                        WorkflowFailure.Code.WORKFLOW_FAILED,
+                        "Workflow node failed",
+                        node,
+                        exception);
             }
         });
     }
@@ -240,9 +278,30 @@ public final class AlertWorkflowNodes {
         return result;
     }
 
+    private static <T> T guarded(
+            WorkflowFailure.Code code,
+            String safeSummary,
+            String node,
+            ThrowingSupplier<T> action) {
+        try {
+            return action.get();
+        }
+        catch (WorkflowFailure failure) {
+            throw failure;
+        }
+        catch (Exception exception) {
+            throw new WorkflowFailure(code, safeSummary, node, exception);
+        }
+    }
+
     @FunctionalInterface
     private interface ThrowingNodeAction {
         Map<String, Object> apply(OverAllState state) throws Exception;
+    }
+
+    @FunctionalInterface
+    private interface ThrowingSupplier<T> {
+        T get() throws Exception;
     }
 
     private final class HumanApprovalAction implements AsyncNodeActionWithConfig, InterruptableAction {
@@ -257,9 +316,14 @@ public final class AlertWorkflowNodes {
             }
             String workflowId = AlertWorkflowState.from(state).workflowId();
             publish(workflowId, WorkflowEvent.EventType.NODE_STARTED, nodeId, nodeId + " started");
-            publish(workflowId, WorkflowEvent.EventType.PAUSED, nodeId, "waiting for operator approval");
+            long pausedSequence = publish(
+                    workflowId,
+                    WorkflowEvent.EventType.PAUSED,
+                    nodeId,
+                    "waiting for operator approval");
             return Optional.of(InterruptionMetadata.builder(nodeId, state)
                     .addMetadata("reason", "risk gate requires operator approval")
+                    .addMetadata(AlertWorkflowState.EVENT_SEQUENCE, pausedSequence)
                     .build());
         }
 
@@ -295,8 +359,11 @@ public final class AlertWorkflowNodes {
             }
             catch (Exception exception) {
                 String workflowId = AlertWorkflowState.from(state).workflowId();
-                publish(workflowId, WorkflowEvent.EventType.FAILED, HUMAN_APPROVAL, "humanApproval failed");
-                return CompletableFuture.failedFuture(exception);
+                return CompletableFuture.failedFuture(new WorkflowFailure(
+                        WorkflowFailure.Code.APPROVAL_FAILED,
+                        "Unable to apply approval",
+                        HUMAN_APPROVAL,
+                        exception));
             }
         }
     }
@@ -324,7 +391,7 @@ public final class AlertWorkflowNodes {
             if (alert.riskHint().isHighRisk()
                     || classification.riskLevel().isHighRisk()
                     || diagnosis.riskLevel().isHighRisk()
-                    || classification.confidence() < confidenceThreshold
+                    || diagnosis.confidence() < confidenceThreshold
                     || evidence.isEmpty()) {
                 return Route.WAIT_FOR_APPROVAL;
             }
