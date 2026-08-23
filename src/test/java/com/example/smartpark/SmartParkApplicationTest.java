@@ -1,5 +1,6 @@
 package com.example.smartpark;
 
+import com.example.smartpark.adapter.mock.MockParkConfiguration;
 import com.example.smartpark.agent.AlertDiagnosisAgent;
 import com.example.smartpark.agent.AlertTriageAgent;
 import org.junit.jupiter.api.Test;
@@ -28,6 +29,7 @@ class SmartParkApplicationTest {
     void applicationContextLoads() {
         assertThat(applicationContext.getBeansOfType(AlertTriageAgent.class)).isEmpty();
         assertThat(applicationContext.getBeansOfType(AlertDiagnosisAgent.class)).isEmpty();
+        assertThat(applicationContext.getBeansOfType(MockParkConfiguration.class)).isEmpty();
     }
 
     @Test

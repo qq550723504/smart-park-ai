@@ -2,12 +2,6 @@ package com.example.smartpark.web;
 
 import com.example.smartpark.agent.AlertDiagnosisAgent;
 import com.example.smartpark.agent.AlertTriageAgent;
-import com.example.smartpark.adapter.mock.MockAlertAdapter;
-import com.example.smartpark.adapter.mock.MockDeviceAdapter;
-import com.example.smartpark.adapter.mock.MockEnergyAdapter;
-import com.example.smartpark.adapter.mock.MockKnowledgeAdapter;
-import com.example.smartpark.adapter.mock.MockParkDataStore;
-import com.example.smartpark.adapter.mock.MockWorkOrderAdapter;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.device.DevicePort;
 import com.example.smartpark.port.energy.EnergyPort;
@@ -67,36 +61,6 @@ public class AlertWorkflowController {
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(name = "spring.ai.dashscope.enabled", havingValue = "true", matchIfMissing = true)
 class AlertWorkflowRuntimeConfiguration {
-
-    @Bean
-    MockParkDataStore mockParkDataStore() {
-        return new MockParkDataStore();
-    }
-
-    @Bean
-    MockAlertAdapter mockAlertAdapter(MockParkDataStore dataStore) {
-        return new MockAlertAdapter(dataStore);
-    }
-
-    @Bean
-    MockDeviceAdapter mockDeviceAdapter(MockParkDataStore dataStore) {
-        return new MockDeviceAdapter(dataStore);
-    }
-
-    @Bean
-    MockEnergyAdapter mockEnergyAdapter(MockParkDataStore dataStore) {
-        return new MockEnergyAdapter(dataStore);
-    }
-
-    @Bean
-    MockKnowledgeAdapter mockKnowledgeAdapter(MockParkDataStore dataStore) {
-        return new MockKnowledgeAdapter(dataStore);
-    }
-
-    @Bean
-    MockWorkOrderAdapter mockWorkOrderAdapter(MockParkDataStore dataStore) {
-        return new MockWorkOrderAdapter(dataStore);
-    }
 
     @Bean
     WorkflowExecutionStore workflowExecutionStore() {
