@@ -34,6 +34,7 @@ import static com.alibaba.cloud.ai.graph.action.AsyncNodeAction.node_async;
 
 public final class AlertWorkflowNodes {
 
+    // 节点名称会写入状态图和事件流，属于外部契约，不应随展示语言改变。
     public static final String CLASSIFY_ALERT = "classifyAlert";
     public static final String COLLECT_PARK_CONTEXT = "collectParkContext";
     public static final String RETRIEVE_KNOWLEDGE = "retrieveKnowledge";
@@ -75,6 +76,7 @@ public final class AlertWorkflowNodes {
     }
 
     public AsyncNodeAction classifyAlert() {
+        // 加载告警并调用大模型完成结构化分诊。
         return observed(CLASSIFY_ALERT, state -> {
             AlertWorkflowState workflowState = AlertWorkflowState.from(state);
             toolCall(workflowState.workflowId(), CLASSIFY_ALERT, "AlertPort.getAlert");
@@ -96,6 +98,7 @@ public final class AlertWorkflowNodes {
     }
 
     public AsyncNodeAction collectParkContext() {
+        // 汇总设备、历史告警和当前工作流工单，形成诊断所需上下文。
         return observed(COLLECT_PARK_CONTEXT, state -> {
             AlertWorkflowState workflowState = AlertWorkflowState.from(state);
             Alert alert = workflowState.alert();
@@ -128,6 +131,7 @@ public final class AlertWorkflowNodes {
     }
 
     public AsyncNodeAction retrieveKnowledge() {
+        // 使用告警类别检索对应的园区处置知识。
         return observed(RETRIEVE_KNOWLEDGE, state -> {
             AlertWorkflowState workflowState = AlertWorkflowState.from(state);
             String query = workflowState.classification().category().name().toLowerCase(java.util.Locale.ROOT);
@@ -165,6 +169,7 @@ public final class AlertWorkflowNodes {
     }
 
     public AsyncNodeAction riskGate() {
+        // 高风险、低置信度或证据不足的诊断必须进入人工审批。
         return observed(RISK_GATE, state -> {
             AlertWorkflowState workflowState = AlertWorkflowState.from(state);
             Route route = riskGate.route(
@@ -191,6 +196,7 @@ public final class AlertWorkflowNodes {
                     () -> workOrderPort.findByWorkflowId(workflowState.workflowId()));
             WorkOrder workOrder;
             if (existing.isEmpty()) {
+                // 仅在工作流尚无工单时创建，确保节点重试不会重复写入。
                 toolCall(workflowState.workflowId(), CREATE_WORK_ORDER, "WorkOrderPort.create");
                 workOrder = guarded(
                         WorkflowFailure.Code.WORK_ORDER_FAILED,

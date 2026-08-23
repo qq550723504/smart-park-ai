@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 public class MockParkDataStore {
+    // 固定基准时间，保证每次运行测试时都能得到完全一致的数据。
     private static final String PARK_ID = "PARK-A";
     private static final Instant DEVICE_BASE_TIME = Instant.parse("2026-08-23T00:00:00Z");
     private static final Instant ALERT_BASE_TIME = Instant.parse("2026-08-23T00:15:00Z");
@@ -39,6 +40,7 @@ public class MockParkDataStore {
     MockParkDataStore() { reset(); }
 
     final void reset() {
+        // 重置动态数据后重新装载基础设备、告警、历史记录和知识库。
         devices.clear(); energyReadings.clear(); alerts.clear(); historyByDevice.clear();
         knowledgeDocuments.clear(); workOrdersByWorkflowId.clear(); workOrderSequence.set(0);
         seedDevices(); seedAlerts(); seedHistory(); seedKnowledge();
@@ -62,6 +64,7 @@ public class MockParkDataStore {
     }
 
     List<KnowledgeDocument> search(String query) {
+        // 统一规范化查询文本，兼容中文内容和英文标签。
         String normalizedQuery = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
         return knowledgeDocuments.values().stream()
                 .filter(document -> normalizedQuery.isEmpty() || matches(document, normalizedQuery))
@@ -99,6 +102,7 @@ public class MockParkDataStore {
     }
 
     private void seedKnowledge() {
+        // 知识库集中维护诊断所需的处置手册，便于验证检索和提示词组装。
         putKnowledge(new KnowledgeDocument("KD-OVERHEAT-001", "HVAC overheating playbook", "When HVAC supply temperatures rise, check filters, airflow, and compressor load before escalating.", List.of("overheating", "hvac", "temperature"), KNOWLEDGE_BASE_TIME));
         putKnowledge(new KnowledgeDocument("KD-LEAK-001", "Water leak response", "Pump rooms and valve closets should be inspected for water accumulation and isolation valve issues.", List.of("leak", "pump", "water"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(1))));
         putKnowledge(new KnowledgeDocument("KD-POWER-001", "Power emergency runbook", "Stabilize the electrical load, notify facilities, and inspect breaker and UPS conditions immediately.", List.of("power", "emergency", "breaker"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(2))));
@@ -115,6 +119,7 @@ public class MockParkDataStore {
     }
 
     private WorkOrder createWorkOrder(String workflowId, String alertId, String summary) {
+        // workflowId 作为幂等键，同一工作流重复创建时返回原工单。
         Alert alert = getAlert(alertId);
         int sequence = workOrderSequence.incrementAndGet();
         Instant createdAt = WORK_ORDER_BASE_TIME.plusSeconds(sequence);

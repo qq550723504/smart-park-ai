@@ -32,8 +32,8 @@ public record Diagnosis(
     }
 
     /**
-     * Compatibility constructor for diagnoses restored from pre-confidence checkpoints.
-     * A missing confidence fails closed at zero and therefore always requires approval.
+     * 兼容从早期无置信度检查点恢复的诊断数据。
+     * 缺失置信度时按零处理，以保守方式强制进入人工审批。
      */
     public Diagnosis(
             String id,

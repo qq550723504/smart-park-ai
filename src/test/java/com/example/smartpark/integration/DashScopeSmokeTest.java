@@ -14,7 +14,7 @@ import org.springframework.test.context.junit.jupiter.EnabledIf;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Opt-in real-provider verification. It never runs during the normal offline test suite.
+ * 显式启用的真实模型连通性验证，常规离线测试不会运行该测试。
  */
 @Tag("dashscope")
 @SpringBootTest(properties = {

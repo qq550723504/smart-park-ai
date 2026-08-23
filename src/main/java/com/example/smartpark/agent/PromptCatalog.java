@@ -56,6 +56,7 @@ final class PromptCatalog {
     }
 
     static String diagnosisSystemPrompt(List<String> availableToolNames) {
+        // 工具名称属于程序契约，因此保留英文；面向模型的说明由提示词统一管理。
         List<String> toolNames = List.copyOf(Objects.requireNonNull(availableToolNames, "availableToolNames"));
         return """
                 You are the smart-park diagnosis agent.
