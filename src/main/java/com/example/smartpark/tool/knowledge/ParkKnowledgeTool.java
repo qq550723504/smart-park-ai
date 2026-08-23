@@ -1,4 +1,4 @@
-package com.example.smartpark.tool;
+package com.example.smartpark.tool.knowledge;
 
 import com.example.smartpark.model.common.KnowledgeDocument;
 import com.example.smartpark.port.knowledge.KnowledgePort;

@@ -2,6 +2,7 @@ package com.example.smartpark.tool;
 
 import com.example.smartpark.model.energy.EnergyReading;
 import com.example.smartpark.park.mock.MockParkSystem;
+import com.example.smartpark.tool.energy.EnergyQueryTool;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;

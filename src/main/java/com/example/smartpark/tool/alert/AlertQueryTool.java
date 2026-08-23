@@ -1,4 +1,4 @@
-package com.example.smartpark.tool;
+package com.example.smartpark.tool.alert;
 
 import com.example.smartpark.model.alert.Alert;
 import com.example.smartpark.port.alert.AlertPort;

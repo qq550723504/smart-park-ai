@@ -1,4 +1,4 @@
-package com.example.smartpark.tool;
+package com.example.smartpark.tool.device;
 
 import com.example.smartpark.model.common.Device;
 import com.example.smartpark.port.device.DevicePort;

@@ -5,11 +5,11 @@ import com.example.smartpark.agent.AlertTriageAgent;
 import com.example.smartpark.agent.TestChatModel;
 import com.example.smartpark.model.common.WorkflowStatus;
 import com.example.smartpark.park.mock.MockParkSystem;
-import com.example.smartpark.tool.AlertQueryTool;
-import com.example.smartpark.tool.DeviceQueryTool;
-import com.example.smartpark.tool.EnergyQueryTool;
-import com.example.smartpark.tool.ParkKnowledgeTool;
-import com.example.smartpark.tool.WorkOrderTool;
+import com.example.smartpark.tool.alert.AlertQueryTool;
+import com.example.smartpark.tool.device.DeviceQueryTool;
+import com.example.smartpark.tool.energy.EnergyQueryTool;
+import com.example.smartpark.tool.knowledge.ParkKnowledgeTool;
+import com.example.smartpark.tool.workorder.WorkOrderTool;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;

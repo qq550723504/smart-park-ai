@@ -1,4 +1,4 @@
-package com.example.smartpark.tool;
+package com.example.smartpark.tool.energy;
 
 import com.example.smartpark.model.energy.EnergyReading;
 import com.example.smartpark.port.energy.EnergyPort;
