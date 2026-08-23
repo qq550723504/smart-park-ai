@@ -24,10 +24,10 @@ public record SecurityEvent(
             "raw-image",
             "原始视频",
             "原始图片",
-            "人脸",
             "face embedding",
-            "身份证",
-            "id card");
+            "face_embedding",
+            "id card bytes",
+            "身份证原始数据");
 
     public SecurityEvent {
         eventId = requireText(eventId, "eventId");

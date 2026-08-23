@@ -36,46 +36,38 @@ public class MockParkDataStore {
     private final Map<String, WorkOrder> workOrdersByWorkflowId = new ConcurrentHashMap<>();
     private final AtomicInteger workOrderSequence = new AtomicInteger();
 
-    public MockParkDataStore() { reset(); }
+    MockParkDataStore() { reset(); }
 
-    public final void reset() {
+    final void reset() {
         devices.clear(); energyReadings.clear(); alerts.clear(); historyByDevice.clear();
         knowledgeDocuments.clear(); workOrdersByWorkflowId.clear(); workOrderSequence.set(0);
         seedDevices(); seedAlerts(); seedHistory(); seedKnowledge();
     }
 
-    public Device getDevice(String deviceId) { return require(devices, deviceId, "device"); }
-    public EnergyReading getLatestEnergyReading(String meterId) { return require(energyReadings, meterId, "energy meter"); }
-    public Alert getAlert(String alertId) { return require(alerts, alertId, "alert"); }
-    public List<Alert> findHistory(String deviceId) { return historyByDevice.getOrDefault(deviceId, List.of()); }
+    Device getDevice(String deviceId) { return require(devices, deviceId, "device"); }
+    EnergyReading getLatestEnergyReading(String meterId) { return require(energyReadings, meterId, "energy meter"); }
+    Alert getAlert(String alertId) { return require(alerts, alertId, "alert"); }
+    List<Alert> findHistory(String deviceId) { return historyByDevice.getOrDefault(deviceId, List.of()); }
 
-    public List<WorkOrder> findByWorkflowId(String workflowId) {
+    List<WorkOrder> findByWorkflowId(String workflowId) {
         WorkOrder workOrder = workOrdersByWorkflowId.get(workflowId);
         return workOrder == null ? List.of() : List.of(workOrder);
     }
 
-    public WorkOrder buildWorkOrder(String workflowId, String alertId, String summary) {
+    WorkOrder buildWorkOrder(String workflowId, String alertId, String summary) {
         Objects.requireNonNull(workflowId, "workflowId");
         Objects.requireNonNull(alertId, "alertId");
         Objects.requireNonNull(summary, "summary");
         return workOrdersByWorkflowId.computeIfAbsent(workflowId, key -> createWorkOrder(key, alertId, summary));
     }
 
-    public List<KnowledgeDocument> search(String query) {
+    List<KnowledgeDocument> search(String query) {
         String normalizedQuery = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
         return knowledgeDocuments.values().stream()
                 .filter(document -> normalizedQuery.isEmpty() || matches(document, normalizedQuery))
                 .sorted((left, right) -> left.id().compareTo(right.id()))
                 .collect(Collectors.toUnmodifiableList());
     }
-
-    Map<String, Device> devices() { return devices; }
-    Map<String, EnergyReading> energyReadings() { return energyReadings; }
-    Map<String, Alert> alerts() { return alerts; }
-    Map<String, List<Alert>> historyByDevice() { return historyByDevice; }
-    Map<String, KnowledgeDocument> knowledgeDocuments() { return knowledgeDocuments; }
-    Map<String, WorkOrder> workOrdersByWorkflowId() { return workOrdersByWorkflowId; }
-    AtomicInteger workOrderSequence() { return workOrderSequence; }
 
     private void seedDevices() {
         putDevice(device("DEV-HVAC-001", "A1", "HVAC Supply Unit", "HVAC", "ACTIVE", 1));

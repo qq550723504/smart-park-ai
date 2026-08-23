@@ -4,6 +4,7 @@ import com.example.smartpark.model.alert.Alert;
 import com.example.smartpark.model.common.RiskLevel;
 import com.example.smartpark.model.common.WorkOrder;
 import java.util.ArrayList;
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -13,8 +14,15 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.Arrays;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
+import com.example.smartpark.port.alert.AlertPort;
+import com.example.smartpark.port.device.DevicePort;
+import com.example.smartpark.port.energy.EnergyPort;
+import com.example.smartpark.port.knowledge.KnowledgePort;
+import com.example.smartpark.port.workorder.WorkOrderPort;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -26,6 +34,27 @@ class MockParkFixtureTest {
     void setUp() {
         fixture = new MockParkFixture();
         fixture.reset();
+    }
+
+    @Test
+    void fixtureOnlyComposesAdaptersInsteadOfImplementingOrDelegatingPorts() {
+        assertThat(AlertPort.class.isAssignableFrom(MockParkFixture.class)).isFalse();
+        assertThat(DevicePort.class.isAssignableFrom(MockParkFixture.class)).isFalse();
+        assertThat(EnergyPort.class.isAssignableFrom(MockParkFixture.class)).isFalse();
+        assertThat(KnowledgePort.class.isAssignableFrom(MockParkFixture.class)).isFalse();
+        assertThat(WorkOrderPort.class.isAssignableFrom(MockParkFixture.class)).isFalse();
+
+        assertThat(Arrays.stream(MockParkFixture.class.getDeclaredMethods())
+                .map(Method::getName)
+                .toList())
+                .doesNotContain(
+                        "getDevice",
+                        "getLatestEnergyReading",
+                        "getAlert",
+                        "findHistory",
+                        "findByWorkflowId",
+                        "create",
+                        "search");
     }
 
     @Test

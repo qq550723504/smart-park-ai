@@ -41,11 +41,19 @@ class SecurityEventTest {
                         "REDACTED: raw image bytes",
                         "REDACTED: 原始视频",
                         "REDACTED: 原始图片",
-                        "REDACTED: 人脸特征",
-                        "REDACTED: 身份证号码")
+                        "REDACTED: face embedding bytes")
                 .forEach(evidenceSummary -> assertThatThrownBy(() -> newEvent(evidenceSummary))
                         .isInstanceOf(IllegalArgumentException.class)
                         .hasMessageContaining("evidenceSummary"));
+    }
+
+    @Test
+    void acceptsBusinessTermsWhenTheSummaryStatesThatOriginalDataWasNotRetained() {
+        Stream.of(
+                        "REDACTED: 人脸识别失败，未保留原始数据",
+                        "REDACTED: 身份证件已脱敏")
+                .forEach(evidenceSummary -> assertThat(newEvent(evidenceSummary).evidenceSummary())
+                        .isEqualTo(evidenceSummary));
     }
 
     @Test

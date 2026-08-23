@@ -49,10 +49,10 @@ class AlertWorkflowFailureTest {
                 validTriageModel("ALT-TEMP-001", "LOW"),
                 new FailingChatModel("providerResponse=raw-model-payload Authorization: "
                         + "Bear" + "er model-token"),
-                park,
-                park,
-                park,
-                park,
+                park.devices(),
+                park.alerts(),
+                park.workOrders(),
+                park.knowledge(),
                 sequentialIds());
 
         WorkflowSnapshot failed = fixture.workflow().start("ALT-TEMP-001");
@@ -78,10 +78,10 @@ class AlertWorkflowFailureTest {
         Fixture fixture = fixture(
                 new TestChatModel("not-json providerResponse=raw-output"),
                 validDiagnosisModel("ALT-TEMP-001", "LOW"),
-                park,
-                park,
-                park,
-                park,
+                park.devices(),
+                park.alerts(),
+                park.workOrders(),
+                park.knowledge(),
                 sequentialIds());
 
         WorkflowSnapshot failed = fixture.workflow().start("ALT-TEMP-001");
@@ -107,9 +107,9 @@ class AlertWorkflowFailureTest {
                 validTriageModel("ALT-TEMP-001", "LOW"),
                 validDiagnosisModel("ALT-TEMP-001", "LOW"),
                 failingDevice,
-                park,
-                park,
-                park,
+                park.alerts(),
+                park.workOrders(),
+                park.knowledge(),
                 sequentialIds());
 
         WorkflowSnapshot failed = fixture.workflow().start("ALT-TEMP-001");
@@ -130,7 +130,7 @@ class AlertWorkflowFailureTest {
         AlertPort failingHistory = new AlertPort() {
             @Override
             public com.example.smartpark.model.alert.Alert getAlert(String alertId) {
-                return park.getAlert(alertId);
+                return park.alerts().getAlert(alertId);
             }
 
             @Override
@@ -141,10 +141,10 @@ class AlertWorkflowFailureTest {
         Fixture fixture = fixture(
                 validTriageModel("ALT-TEMP-001", "LOW"),
                 validDiagnosisModel("ALT-TEMP-001", "LOW"),
-                park,
+                park.devices(),
                 failingHistory,
-                park,
-                park,
+                park.workOrders(),
+                park.knowledge(),
                 sequentialIds());
 
         WorkflowSnapshot failed = fixture.workflow().start("ALT-TEMP-001");
@@ -164,9 +164,9 @@ class AlertWorkflowFailureTest {
         Fixture fixture = fixture(
                 validTriageModel("ALT-TEMP-001", "LOW"),
                 validDiagnosisModel("ALT-TEMP-001", "LOW"),
-                park,
-                park,
-                park,
+                park.devices(),
+                park.alerts(),
+                park.workOrders(),
                 failingKnowledge,
                 sequentialIds());
 
@@ -204,10 +204,10 @@ class AlertWorkflowFailureTest {
         Fixture fixture = fixture(
                 validTriageModel("ALT-TEMP-001", "LOW"),
                 validDiagnosisModel("ALT-TEMP-001", "LOW"),
-                park,
-                park,
+                park.devices(),
+                park.alerts(),
                 failingWorkOrders,
-                park,
+                park.knowledge(),
                 sequentialIds());
 
         WorkflowSnapshot failed = fixture.workflow().start("ALT-TEMP-001");
@@ -227,10 +227,10 @@ class AlertWorkflowFailureTest {
         Fixture fixture = fixture(
                 validTriageModel("ALT-POWER-001", "HIGH"),
                 validDiagnosisModel("ALT-POWER-001", "HIGH"),
-                park,
-                park,
-                park,
-                park,
+                park.devices(),
+                park.alerts(),
+                park.workOrders(),
+                park.knowledge(),
                 sequentialIds());
 
         WorkflowSnapshot first = fixture.workflow().start("ALT-POWER-001");
@@ -248,15 +248,15 @@ class AlertWorkflowFailureTest {
     @Test
     void duplicateStartReturnsTheCompletedExecutionWithoutCreatingAnotherWorkOrder() {
         MockParkFixture park = new MockParkFixture();
-        CountingWorkOrderPort workOrders = new CountingWorkOrderPort(park);
+        CountingWorkOrderPort workOrders = new CountingWorkOrderPort(park.workOrders());
         AtomicInteger generatedIds = new AtomicInteger();
         Fixture fixture = fixture(
                 validTriageModel("ALT-TEMP-001", "LOW"),
                 validDiagnosisModel("ALT-TEMP-001", "LOW"),
-                park,
-                park,
+                park.devices(),
+                park.alerts(),
                 workOrders,
-                park,
+                park.knowledge(),
                 () -> "wf-terminal-" + generatedIds.incrementAndGet());
 
         WorkflowSnapshot completed = fixture.workflow().start("ALT-TEMP-001");
@@ -275,10 +275,10 @@ class AlertWorkflowFailureTest {
         Fixture failedFixture = fixture(
                 validTriageModel("ALT-TEMP-001", "LOW"),
                 new FailingChatModel("providerResponse=terminal-failure"),
-                failedPark,
-                failedPark,
-                failedPark,
-                failedPark,
+                failedPark.devices(),
+                failedPark.alerts(),
+                failedPark.workOrders(),
+                failedPark.knowledge(),
                 () -> "wf-failed-" + failedIds.incrementAndGet());
         WorkflowSnapshot failed = failedFixture.workflow().start("ALT-TEMP-001");
 
@@ -290,10 +290,10 @@ class AlertWorkflowFailureTest {
         Fixture rejectedFixture = fixture(
                 validTriageModel("ALT-POWER-001", "HIGH"),
                 validDiagnosisModel("ALT-POWER-001", "HIGH"),
-                rejectedPark,
-                rejectedPark,
-                rejectedPark,
-                rejectedPark,
+                rejectedPark.devices(),
+                rejectedPark.alerts(),
+                rejectedPark.workOrders(),
+                rejectedPark.knowledge(),
                 () -> "wf-rejected-" + rejectedIds.incrementAndGet());
         WorkflowSnapshot waiting = rejectedFixture.workflow().start("ALT-POWER-001");
         WorkflowSnapshot rejected = rejectedFixture.workflow().approve(
@@ -306,24 +306,24 @@ class AlertWorkflowFailureTest {
 
         assertThat(rejected.status()).isEqualTo(WorkflowStatus.REJECTED);
         assertThat(rejectedFixture.workflow().start("ALT-POWER-001")).isEqualTo(rejected);
-        assertThat(rejectedPark.findByWorkflowId(rejected.workflowId())).isEmpty();
+        assertThat(rejectedPark.workOrders().findByWorkflowId(rejected.workflowId())).isEmpty();
         assertThat(rejectedIds).hasValue(1);
     }
 
     @Test
     void concurrentDuplicateStartReusesTheRegisteredExecutionAndCreatesOneWorkOrder() throws Exception {
         MockParkFixture park = new MockParkFixture();
-        CountingWorkOrderPort workOrders = new CountingWorkOrderPort(park);
+        CountingWorkOrderPort workOrders = new CountingWorkOrderPort(park.workOrders());
         BlockingChatModel diagnosisModel = new BlockingChatModel(
                 validDiagnosisModel("ALT-TEMP-001", "LOW"));
         AtomicInteger generatedIds = new AtomicInteger();
         Fixture fixture = fixture(
                 validTriageModel("ALT-TEMP-001", "LOW"),
                 diagnosisModel,
-                park,
-                park,
+                park.devices(),
+                park.alerts(),
                 workOrders,
-                park,
+                park.knowledge(),
                 () -> "wf-concurrent-" + generatedIds.incrementAndGet());
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
@@ -352,10 +352,10 @@ class AlertWorkflowFailureTest {
         Fixture fixture = fixture(
                 validTriageModel("ALT-POWER-001", "HIGH"),
                 validDiagnosisModel("ALT-POWER-001", "HIGH"),
-                park,
-                park,
-                park,
-                park,
+                park.devices(),
+                park.alerts(),
+                park.workOrders(),
+                park.knowledge(),
                 sequentialIds());
         WorkflowSnapshot waiting = fixture.workflow().start("ALT-POWER-001");
         ApprovalDecision first = approval(
@@ -374,7 +374,7 @@ class AlertWorkflowFailureTest {
                         "2026-08-23T03:02:00Z"));
 
         assertThat(duplicate).isEqualTo(completed);
-        assertThat(park.findByWorkflowId(waiting.workflowId())).hasSize(1);
+        assertThat(park.workOrders().findByWorkflowId(waiting.workflowId())).hasSize(1);
         assertThatThrownBy(() -> fixture.workflow().approve(
                 waiting.workflowId(),
                 approval(
@@ -384,7 +384,7 @@ class AlertWorkflowFailureTest {
                         "2026-08-23T03:03:00Z")))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("idempotencyKey");
-        assertThat(park.findByWorkflowId(waiting.workflowId())).hasSize(1);
+        assertThat(park.workOrders().findByWorkflowId(waiting.workflowId())).hasSize(1);
     }
 
     private static Fixture fixture(
