@@ -25,15 +25,27 @@ public class WorkOrderTool {
 
     @Tool(name = "lookupWorkOrders", description = "Look up work orders by workflowId. Returns zero or more workflow-scoped work orders.")
     public WorkOrderLookupResult lookupWorkOrders(String workflowId) {
-        String normalizedWorkflowId = requireText(workflowId, "workflowId");
+        String normalizedWorkflowId = normalize(workflowId);
+        if (normalizedWorkflowId.isEmpty()) {
+            return new WorkOrderLookupResult(normalizedWorkflowId, List.of(), "workflowId must not be blank", MOCK_NOTICE);
+        }
         return new WorkOrderLookupResult(normalizedWorkflowId, workOrderPort.findByWorkflowId(normalizedWorkflowId), null, MOCK_NOTICE);
     }
 
     @Tool(name = "createWorkOrder", description = "Create a mock work order for the workflow. Preserves workflowId idempotency and does not control real park devices.")
     public WorkOrderCreateResult createWorkOrder(String workflowId, String alertId, String summary) {
-        String normalizedWorkflowId = requireText(workflowId, "workflowId");
-        String normalizedAlertId = requireText(alertId, "alertId");
-        String normalizedSummary = requireText(summary, "summary");
+        String normalizedWorkflowId = normalize(workflowId);
+        String normalizedAlertId = normalize(alertId);
+        String normalizedSummary = normalize(summary);
+        if (normalizedWorkflowId.isEmpty()) {
+            return WorkOrderCreateResult.error(normalizedWorkflowId, normalizedAlertId, "workflowId must not be blank");
+        }
+        if (normalizedAlertId.isEmpty()) {
+            return WorkOrderCreateResult.error(normalizedWorkflowId, normalizedAlertId, "alertId must not be blank");
+        }
+        if (normalizedSummary.isEmpty()) {
+            return WorkOrderCreateResult.error(normalizedWorkflowId, normalizedAlertId, "summary must not be blank");
+        }
         try {
             return WorkOrderCreateResult.success(
                     normalizedWorkflowId,
@@ -50,20 +62,26 @@ public class WorkOrderTool {
     }
 
     private static String requireText(String value, String fieldName) {
-        if (value == null || value.isBlank()) {
+        String normalized = normalize(value);
+        if (normalized.isEmpty()) {
             throw new IllegalArgumentException(fieldName + " must not be blank");
         }
-        return value.trim();
+        return normalized;
+    }
+
+    private static String normalize(String value) {
+        return value == null ? "" : value.trim();
     }
 
     public record WorkOrderLookupResult(String workflowId, List<WorkOrder> workOrders, String error, String notice) {
 
         public WorkOrderLookupResult {
-            workflowId = requireText(workflowId, "workflowId");
+            workflowId = normalize(workflowId);
             workOrders = List.copyOf(Objects.requireNonNull(workOrders, "workOrders"));
             notice = requireText(notice, "notice");
-            if (error != null) {
-                error = error.trim();
+            error = error == null ? null : error.trim();
+            if (error == null) {
+                workflowId = requireText(workflowId, "workflowId");
             }
         }
     }
@@ -71,14 +89,17 @@ public class WorkOrderTool {
     public record WorkOrderCreateResult(String workflowId, String alertId, WorkOrder workOrder, String error, String notice) {
 
         public WorkOrderCreateResult {
-            workflowId = requireText(workflowId, "workflowId");
-            alertId = requireText(alertId, "alertId");
+            workflowId = normalize(workflowId);
+            alertId = normalize(alertId);
             notice = requireText(notice, "notice");
-            if ((workOrder == null) == (error == null || error.isBlank())) {
-                throw new IllegalArgumentException("exactly one of workOrder or error must be present");
+            error = error == null ? null : error.trim();
+            if (error == null) {
+                workflowId = requireText(workflowId, "workflowId");
+                alertId = requireText(alertId, "alertId");
+                workOrder = Objects.requireNonNull(workOrder, "workOrder");
             }
-            if (error != null) {
-                error = error.trim();
+            else if (workOrder != null) {
+                throw new IllegalArgumentException("error results must not include a work order");
             }
         }
 

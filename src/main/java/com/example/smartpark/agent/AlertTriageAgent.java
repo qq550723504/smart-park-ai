@@ -46,12 +46,16 @@ public class AlertTriageAgent {
         if (confidenceNode == null || !confidenceNode.isNumber()) {
             throw new IllegalStateException("triage output must contain a numeric confidence");
         }
+        double confidence = confidenceNode.doubleValue();
+        if (confidence < 0.0 || confidence > 1.0) {
+            throw new IllegalStateException("triage output field 'confidence' must be between 0 and 1");
+        }
 
         return new AlertClassificationResult(
-                AlertClassification.valueOf(category),
-                AlertPriority.valueOf(priority),
-                RiskLevel.valueOf(riskLevel),
-                confidenceNode.doubleValue());
+                parseEnum(AlertClassification.class, category, "category", "triage"),
+                parseEnum(AlertPriority.class, priority, "priority", "triage"),
+                parseEnum(RiskLevel.class, riskLevel, "riskLevel", "triage"),
+                confidence);
     }
 
     private static String extractText(ChatResponse response, String context) {
@@ -93,6 +97,15 @@ public class AlertTriageAgent {
             throw new IllegalStateException(context + " output field '" + fieldName + "' must be a non-empty string");
         }
         return value.textValue().trim();
+    }
+
+    private static <E extends Enum<E>> E parseEnum(Class<E> enumType, String value, String fieldName, String context) {
+        try {
+            return Enum.valueOf(enumType, value);
+        }
+        catch (IllegalArgumentException ex) {
+            throw new IllegalStateException(context + " output field '" + fieldName + "' must be one of " + java.util.List.of(enumType.getEnumConstants()), ex);
+        }
     }
 
     public enum AlertPriority {

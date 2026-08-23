@@ -21,7 +21,10 @@ public class AlertQueryTool {
 
     @Tool(name = "lookupAlert", description = "Look up an alert by alertId. Returns the alert or an explicit error result. Never invent an alert.")
     public AlertLookupResult lookupAlert(String alertId) {
-        String normalizedAlertId = requireText(alertId, "alertId");
+        String normalizedAlertId = normalize(alertId);
+        if (normalizedAlertId.isEmpty()) {
+            return AlertLookupResult.error(normalizedAlertId, "alertId must not be blank");
+        }
         try {
             return AlertLookupResult.success(normalizedAlertId, alertPort.getAlert(normalizedAlertId));
         }
@@ -32,27 +35,37 @@ public class AlertQueryTool {
 
     @Tool(name = "lookupAlertHistory", description = "Look up alert history by deviceId. Returns the known alert history for that device.")
     public AlertHistoryResult lookupAlertHistory(String deviceId) {
-        String normalizedDeviceId = requireText(deviceId, "deviceId");
+        String normalizedDeviceId = normalize(deviceId);
+        if (normalizedDeviceId.isEmpty()) {
+            return new AlertHistoryResult(normalizedDeviceId, List.of(), "deviceId must not be blank", MOCK_NOTICE);
+        }
         return new AlertHistoryResult(normalizedDeviceId, alertPort.findHistory(normalizedDeviceId), null, MOCK_NOTICE);
     }
 
     private static String requireText(String value, String fieldName) {
-        if (value == null || value.isBlank()) {
+        String normalized = normalize(value);
+        if (normalized.isEmpty()) {
             throw new IllegalArgumentException(fieldName + " must not be blank");
         }
-        return value.trim();
+        return normalized;
+    }
+
+    private static String normalize(String value) {
+        return value == null ? "" : value.trim();
     }
 
     public record AlertLookupResult(String alertId, Alert alert, String error, String notice) {
 
         public AlertLookupResult {
-            alertId = requireText(alertId, "alertId");
+            alertId = normalize(alertId);
             notice = requireText(notice, "notice");
-            if ((alert == null) == (error == null || error.isBlank())) {
-                throw new IllegalArgumentException("exactly one of alert or error must be present");
+            error = error == null ? null : error.trim();
+            if (error == null) {
+                alertId = requireText(alertId, "alertId");
+                alert = Objects.requireNonNull(alert, "alert");
             }
-            if (error != null) {
-                error = error.trim();
+            else if (alert != null) {
+                throw new IllegalArgumentException("error results must not include an alert");
             }
         }
 
@@ -68,11 +81,12 @@ public class AlertQueryTool {
     public record AlertHistoryResult(String deviceId, List<Alert> alerts, String error, String notice) {
 
         public AlertHistoryResult {
-            deviceId = requireText(deviceId, "deviceId");
+            deviceId = normalize(deviceId);
             alerts = List.copyOf(Objects.requireNonNull(alerts, "alerts"));
             notice = requireText(notice, "notice");
-            if (error != null) {
-                error = error.trim();
+            error = error == null ? null : error.trim();
+            if (error == null) {
+                deviceId = requireText(deviceId, "deviceId");
             }
         }
     }

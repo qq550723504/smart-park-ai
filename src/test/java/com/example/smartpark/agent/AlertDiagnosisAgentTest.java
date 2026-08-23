@@ -12,6 +12,7 @@ import com.example.smartpark.tool.DeviceQueryTool;
 import com.example.smartpark.tool.ParkKnowledgeTool;
 import com.example.smartpark.tool.WorkOrderTool;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 
 import java.time.Instant;
@@ -111,6 +112,95 @@ class AlertDiagnosisAgentTest {
 
         assertThat(toolNames).contains("lookupDeviceStatus", "lookupAlertHistory", "lookupWorkOrders", "searchParkKnowledge");
         assertThat(toolNames).doesNotContain("createWorkOrder");
+    }
+
+    @Test
+    void diagnosisSuppliesReadOnlyToolCallbacksToTheModelRequest() {
+        TestChatModel model = new TestChatModel("""
+                {
+                  "id":"diag-4",
+                  "alertId":"ALT-TEMP-001",
+                  "deviceId":"DEV-HVAC-001",
+                  "riskLevel":"LOW",
+                  "rootCause":"Restricted airflow from a clogged filter",
+                  "summary":"The HVAC unit likely needs filter inspection.",
+                  "evidence":["history: repeated temperature warnings","knowledge: check filters first"],
+                  "recommendedAction":"Inspect and replace the HVAC filter, then verify airflow.",
+                  "diagnosedAt":"2026-08-23T01:45:00Z"
+                }
+                """);
+        MockParkSystem parkSystem = new MockParkSystem();
+        AlertDiagnosisAgent agent = new AlertDiagnosisAgent(
+                model,
+                new DeviceQueryTool(parkSystem),
+                new AlertQueryTool(parkSystem),
+                new WorkOrderTool(parkSystem),
+                new ParkKnowledgeTool(parkSystem));
+
+        agent.diagnose(sampleAlert(), sampleContext(), sampleKnowledge());
+
+        assertThat(model.lastPrompt().getOptions()).isInstanceOf(ToolCallingChatOptions.class);
+        ToolCallingChatOptions options = (ToolCallingChatOptions) model.lastPrompt().getOptions();
+        assertThat(options.getToolCallbacks())
+                .extracting(callback -> callback.getToolDefinition().name())
+                .contains("lookupDeviceStatus", "lookupAlert", "lookupAlertHistory", "lookupWorkOrders", "searchParkKnowledge")
+                .doesNotContain("createWorkOrder");
+    }
+
+    @Test
+    void invalidDiagnosisRiskLevelFailsClosed() {
+        TestChatModel model = new TestChatModel("""
+                {
+                  "id":"diag-5",
+                  "alertId":"ALT-TEMP-001",
+                  "deviceId":"DEV-HVAC-001",
+                  "riskLevel":"SEVERE",
+                  "rootCause":"Restricted airflow from a clogged filter",
+                  "summary":"The HVAC unit likely needs filter inspection.",
+                  "evidence":["history: repeated temperature warnings"],
+                  "recommendedAction":"Inspect and replace the HVAC filter, then verify airflow.",
+                  "diagnosedAt":"2026-08-23T01:50:00Z"
+                }
+                """);
+
+        AlertDiagnosisAgent agent = new AlertDiagnosisAgent(
+                model,
+                new DeviceQueryTool(new MockParkSystem()),
+                new AlertQueryTool(new MockParkSystem()),
+                new WorkOrderTool(new MockParkSystem()),
+                new ParkKnowledgeTool(new MockParkSystem()));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> agent.diagnose(sampleAlert(), sampleContext(), sampleKnowledge()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("riskLevel");
+    }
+
+    @Test
+    void invalidDiagnosisTimestampFailsClosed() {
+        TestChatModel model = new TestChatModel("""
+                {
+                  "id":"diag-6",
+                  "alertId":"ALT-TEMP-001",
+                  "deviceId":"DEV-HVAC-001",
+                  "riskLevel":"LOW",
+                  "rootCause":"Restricted airflow from a clogged filter",
+                  "summary":"The HVAC unit likely needs filter inspection.",
+                  "evidence":["history: repeated temperature warnings"],
+                  "recommendedAction":"Inspect and replace the HVAC filter, then verify airflow.",
+                  "diagnosedAt":"yesterday"
+                }
+                """);
+
+        AlertDiagnosisAgent agent = new AlertDiagnosisAgent(
+                model,
+                new DeviceQueryTool(new MockParkSystem()),
+                new AlertQueryTool(new MockParkSystem()),
+                new WorkOrderTool(new MockParkSystem()),
+                new ParkKnowledgeTool(new MockParkSystem()));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> agent.diagnose(sampleAlert(), sampleContext(), sampleKnowledge()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("diagnosedAt");
     }
 
     private static Alert sampleAlert() {

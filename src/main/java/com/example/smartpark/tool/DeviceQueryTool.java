@@ -20,7 +20,10 @@ public class DeviceQueryTool {
 
     @Tool(name = "lookupDeviceStatus", description = "Look up a park device by deviceId. Returns the device status or an explicit error result. Never invent a device.")
     public DeviceLookupResult lookupDeviceStatus(String deviceId) {
-        String normalizedDeviceId = requireText(deviceId, "deviceId");
+        String normalizedDeviceId = normalize(deviceId);
+        if (normalizedDeviceId.isEmpty()) {
+            return DeviceLookupResult.error(normalizedDeviceId, "deviceId must not be blank");
+        }
         try {
             return DeviceLookupResult.success(normalizedDeviceId, devicePort.getDevice(normalizedDeviceId));
         }
@@ -30,22 +33,29 @@ public class DeviceQueryTool {
     }
 
     private static String requireText(String value, String fieldName) {
-        if (value == null || value.isBlank()) {
+        String normalized = normalize(value);
+        if (normalized.isEmpty()) {
             throw new IllegalArgumentException(fieldName + " must not be blank");
         }
-        return value.trim();
+        return normalized;
+    }
+
+    private static String normalize(String value) {
+        return value == null ? "" : value.trim();
     }
 
     public record DeviceLookupResult(String deviceId, Device device, String error, String notice) {
 
         public DeviceLookupResult {
-            deviceId = requireText(deviceId, "deviceId");
+            deviceId = normalize(deviceId);
             notice = requireText(notice, "notice");
-            if ((device == null) == (error == null || error.isBlank())) {
-                throw new IllegalArgumentException("exactly one of device or error must be present");
+            error = error == null ? null : error.trim();
+            if (error == null) {
+                deviceId = requireText(deviceId, "deviceId");
+                device = Objects.requireNonNull(device, "device");
             }
-            if (error != null) {
-                error = error.trim();
+            else if (device != null) {
+                throw new IllegalArgumentException("error results must not include a device");
             }
         }
 

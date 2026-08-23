@@ -12,6 +12,7 @@ import com.example.smartpark.tool.WorkOrderTool;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -47,7 +48,7 @@ public class AlertDiagnosisAgent {
             "recommendedAction",
             "diagnosedAt");
 
-    private final ChatModel chatModel;
+    private final ChatClient chatClient;
     private final ToolCallback[] toolCallbacks;
 
     public AlertDiagnosisAgent(
@@ -56,11 +57,12 @@ public class AlertDiagnosisAgent {
             AlertQueryTool alertQueryTool,
             WorkOrderTool workOrderTool,
             ParkKnowledgeTool parkKnowledgeTool) {
-        this.chatModel = Objects.requireNonNull(chatModel, "chatModel");
+        Objects.requireNonNull(chatModel, "chatModel");
         Objects.requireNonNull(deviceQueryTool, "deviceQueryTool");
         Objects.requireNonNull(alertQueryTool, "alertQueryTool");
         Objects.requireNonNull(workOrderTool, "workOrderTool");
         Objects.requireNonNull(parkKnowledgeTool, "parkKnowledgeTool");
+        this.chatClient = ChatClient.builder(chatModel).build();
         this.toolCallbacks = Stream.concat(
                         Stream.of(ToolCallbacks.from(deviceQueryTool, alertQueryTool, parkKnowledgeTool)),
                         Stream.of(workOrderTool.diagnosisCallbacks()))
@@ -76,7 +78,10 @@ public class AlertDiagnosisAgent {
         Prompt prompt = new Prompt(
                 new SystemMessage(PromptCatalog.diagnosisSystemPrompt(toolNames())),
                 new UserMessage(PromptCatalog.diagnosisUserPrompt(alert, context, safeDocuments)));
-        String text = extractText(chatModel.call(prompt), "diagnosis");
+        String text = extractText(chatClient.prompt(prompt)
+                .toolCallbacks(toolCallbacks)
+                .call()
+                .chatResponse(), "diagnosis");
         JsonNode root = parseObject(text, "diagnosis");
         validateFields(root, EXPECTED_FIELDS, "diagnosis");
 
@@ -84,7 +89,7 @@ public class AlertDiagnosisAgent {
                 requireText(root, "id", "diagnosis"),
                 requireMatchingId(root, "alertId", alert.id(), "diagnosis"),
                 requireMatchingId(root, "deviceId", alert.deviceId(), "diagnosis"),
-                RiskLevel.valueOf(requireText(root, "riskLevel", "diagnosis")),
+                parseEnum(RiskLevel.class, requireText(root, "riskLevel", "diagnosis"), "riskLevel", "diagnosis"),
                 requireText(root, "rootCause", "diagnosis"),
                 requireText(root, "summary", "diagnosis"),
                 requireEvidence(root.get("evidence"), "diagnosis"),
@@ -180,6 +185,15 @@ public class AlertDiagnosisAgent {
         }
         catch (DateTimeParseException ex) {
             throw new IllegalStateException(context + " output field '" + fieldName + "' must be an ISO-8601 instant", ex);
+        }
+    }
+
+    private static <E extends Enum<E>> E parseEnum(Class<E> enumType, String value, String fieldName, String context) {
+        try {
+            return Enum.valueOf(enumType, value);
+        }
+        catch (IllegalArgumentException ex) {
+            throw new IllegalStateException(context + " output field '" + fieldName + "' must be one of " + List.of(enumType.getEnumConstants()), ex);
         }
     }
 }

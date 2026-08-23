@@ -3,6 +3,8 @@ package com.example.smartpark.agent;
 import com.example.smartpark.model.Alert;
 import com.example.smartpark.model.AlertClassification;
 import com.example.smartpark.model.RiskLevel;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -36,6 +38,30 @@ class AlertTriageAgentTest {
         assertThatThrownBy(() -> new AlertTriageAgent(model).classify(sampleAlert()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("triage");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "{\"category\":\"BOGUS\",\"priority\":\"MEDIUM\",\"riskLevel\":\"LOW\",\"confidence\":0.92}",
+            "{\"category\":\"TEMPERATURE\",\"priority\":\"URGENT\",\"riskLevel\":\"LOW\",\"confidence\":0.92}",
+            "{\"category\":\"TEMPERATURE\",\"priority\":\"MEDIUM\",\"riskLevel\":\"SEVERE\",\"confidence\":0.92}"
+    })
+    void invalidTriageEnumsFailClosed(String content) {
+        TestChatModel model = new TestChatModel(content);
+
+        assertThatThrownBy(() -> new AlertTriageAgent(model).classify(sampleAlert()))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void outOfRangeConfidenceFailsClosed() {
+        TestChatModel model = new TestChatModel("""
+                {"category":"TEMPERATURE","priority":"MEDIUM","riskLevel":"LOW","confidence":1.5}
+                """);
+
+        assertThatThrownBy(() -> new AlertTriageAgent(model).classify(sampleAlert()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("confidence");
     }
 
     private static Alert sampleAlert() {

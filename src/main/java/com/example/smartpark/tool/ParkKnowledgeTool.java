@@ -21,25 +21,34 @@ public class ParkKnowledgeTool {
 
     @Tool(name = "searchParkKnowledge", description = "Search park knowledge documents by keyword query. Returns matching documents and never fabricates missing knowledge.")
     public KnowledgeSearchResult searchParkKnowledge(String query) {
-        String normalizedQuery = requireText(query, "query");
+        String normalizedQuery = normalize(query);
+        if (normalizedQuery.isEmpty()) {
+            return new KnowledgeSearchResult(normalizedQuery, List.of(), "query must not be blank", MOCK_NOTICE);
+        }
         return new KnowledgeSearchResult(normalizedQuery, knowledgePort.search(normalizedQuery), null, MOCK_NOTICE);
     }
 
     private static String requireText(String value, String fieldName) {
-        if (value == null || value.isBlank()) {
+        String normalized = normalize(value);
+        if (normalized.isEmpty()) {
             throw new IllegalArgumentException(fieldName + " must not be blank");
         }
-        return value.trim();
+        return normalized;
+    }
+
+    private static String normalize(String value) {
+        return value == null ? "" : value.trim();
     }
 
     public record KnowledgeSearchResult(String query, List<KnowledgeDocument> documents, String error, String notice) {
 
         public KnowledgeSearchResult {
-            query = requireText(query, "query");
+            query = normalize(query);
             documents = List.copyOf(Objects.requireNonNull(documents, "documents"));
             notice = requireText(notice, "notice");
-            if (error != null) {
-                error = error.trim();
+            error = error == null ? null : error.trim();
+            if (error == null) {
+                query = requireText(query, "query");
             }
         }
     }
