@@ -80,12 +80,13 @@ Remove-Variable secureDashScopeKey
 
 ## Mock 告警数据
 
-应用每次启动时都会重置 `MockParkSystem` 的内存数据，并提供以下两个工作流入口：
+应用每次启动时都会重置 `MockParkSystem` 的内存数据，并提供以下三个工作流入口：
 
 | 告警 ID | 设备 | 种子风险提示 | 练习内容 |
 | --- | --- | --- | --- |
 | `ALT-TEMP-001` | `DEV-HVAC-001` | `LOW` | 温度告警分诊与 HVAC 知识检索。诊断风险较高、置信度较低或证据不足时仍可能进入审批。 |
 | `ALT-POWER-001` | `DEV-POWER-001` | `HIGH` | 高风险电力告警诊断。执行到风险门禁后必须暂停等待审批。 |
+| `ALT-ENERGY-001` | `DEV-ENERGY-001` | `HIGH` | 建筑能耗高于基线的异常诊断。Agent 可以通过只读能耗工具查询当前值、基线和峰值功率；由于当前种子风险为 `HIGH`，执行到风险门禁后必须等待审批。 |
 
 工作流状态、事件、审批和工单都保存在内存中，应用重启后会丢失。
 
@@ -99,7 +100,7 @@ Remove-Variable secureDashScopeKey
 curl -X POST "http://localhost:8080/api/alerts/ALT-TEMP-001/workflows"
 ```
 
-也可以使用 `ALT-POWER-001` 练习必经人工审批的高风险流程。保存响应中的 `workflowId`，供后续请求使用。
+也可以使用 `ALT-POWER-001` 或 `ALT-ENERGY-001` 练习必经人工审批的高风险流程。保存响应中的 `workflowId`，供后续请求使用。
 
 ### 2. 查询工作流状态
 
@@ -144,6 +145,7 @@ curl -N -H "Accept: text/event-stream" "http://localhost:8080/api/workflows/repl
 | --- | --- | --- |
 | `ChatModel` / `ChatClient` | `com.example.smartpark.agent` | `AlertTriageAgent` 直接调用 `ChatModel`；`AlertDiagnosisAgent` 基于注入的模型构建 `ChatClient`。 |
 | Tool Calling | `com.example.smartpark.tool` 与 `AlertDiagnosisAgent` | 将 `@Tool` 方法转换为回调并传给诊断调用。诊断只接收经过审计的只读回调，工单创建仍由确定性的工作流动作负责。 |
+| 能耗场景 | `EnergyReading`、`EnergyPort`、`EnergyQueryTool` | 以当前能耗与基线的偏差作为诊断证据，保留表计查询和真实园区系统之间的适配器边界。 |
 | 结构化输出 | `AlertTriageAgent`、`AlertDiagnosisAgent`、`PromptCatalog` | Prompt 要求 JSON；Agent 使用 Jackson 解析，拒绝缺失字段和多余字段，校验枚举与范围，再构造类型安全的记录和领域对象。示例没有把校验隐藏在自动输出转换器后面。 |
 | Graph 与状态 | `com.example.smartpark.workflow.AlertWorkflow`、`AlertWorkflowNodes`、`AlertWorkflowState` | 将 Spring AI Alibaba `StateGraph` 编译为有序、条件化的节点，并使用明确的状态键和 reducer。 |
 | 中断与恢复 | `AlertWorkflowNodes.HumanApprovalAction`、`AlertWorkflow.approve` | 高风险或不确定流程产生中断元数据，保存内存执行状态，接收操作人反馈，并恢复同一个 Graph 线程。 |
@@ -158,4 +160,4 @@ curl -N -H "Accept: text/event-stream" "http://localhost:8080/api/workflows/repl
 - **Embedding/RAG：** `MockParkSystem.search` 只是内存中的确定性关键词匹配。当前没有 Embedding 模型、向量数据库、数据导入流程或 RAG 链路。
 - **PostgreSQL checkpoint：** Graph 执行、事件、审批、幂等记录和工单都保存在进程内存中。当前没有 PostgreSQL checkpoint 或重启恢复能力。
 - **认证与授权：** 四个 HTTP 端点没有身份、角色、租户或审批策略校验。
-- **真实适配器：** `AlertPort`、`DevicePort`、`KnowledgePort` 和 `WorkOrderPort` 是扩展边界，但当前只接入了 `MockParkSystem`。真实园区 API、持久化工单和设备控制适配器尚未实现。
+- **真实适配器：** `AlertPort`、`DevicePort`、`EnergyPort`、`KnowledgePort` 和 `WorkOrderPort` 是扩展边界，但当前只接入了 `MockParkSystem`。真实园区 API、智能电表、持久化工单和设备控制适配器尚未实现。

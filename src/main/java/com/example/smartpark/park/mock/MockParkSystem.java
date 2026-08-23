@@ -3,12 +3,14 @@ package com.example.smartpark.park.mock;
 import com.example.smartpark.model.Alert;
 import com.example.smartpark.model.AlertClassification;
 import com.example.smartpark.model.Device;
+import com.example.smartpark.model.EnergyReading;
 import com.example.smartpark.model.KnowledgeDocument;
 import com.example.smartpark.model.RiskLevel;
 import com.example.smartpark.model.WorkOrder;
 import com.example.smartpark.model.WorkflowStatus;
 import com.example.smartpark.park.AlertPort;
 import com.example.smartpark.park.DevicePort;
+import com.example.smartpark.park.EnergyPort;
 import com.example.smartpark.park.KnowledgePort;
 import com.example.smartpark.park.WorkOrderPort;
 
@@ -23,7 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
-public class MockParkSystem implements DevicePort, AlertPort, WorkOrderPort, KnowledgePort {
+public class MockParkSystem implements DevicePort, EnergyPort, AlertPort, WorkOrderPort, KnowledgePort {
 
     private static final String PARK_ID = "PARK-A";
     private static final Instant DEVICE_BASE_TIME = Instant.parse("2026-08-23T00:00:00Z");
@@ -33,6 +35,7 @@ public class MockParkSystem implements DevicePort, AlertPort, WorkOrderPort, Kno
     private static final Instant WORK_ORDER_BASE_TIME = Instant.parse("2026-08-23T01:00:00Z");
 
     private final Map<String, Device> devices = new ConcurrentHashMap<>();
+    private final Map<String, EnergyReading> energyReadings = new ConcurrentHashMap<>();
     private final Map<String, Alert> alerts = new ConcurrentHashMap<>();
     private final Map<String, List<Alert>> historyByDevice = new ConcurrentHashMap<>();
     private final Map<String, KnowledgeDocument> knowledgeDocuments = new ConcurrentHashMap<>();
@@ -45,6 +48,7 @@ public class MockParkSystem implements DevicePort, AlertPort, WorkOrderPort, Kno
 
     public final void reset() {
         devices.clear();
+        energyReadings.clear();
         alerts.clear();
         historyByDevice.clear();
         knowledgeDocuments.clear();
@@ -60,6 +64,11 @@ public class MockParkSystem implements DevicePort, AlertPort, WorkOrderPort, Kno
     @Override
     public Device getDevice(String deviceId) {
         return require(devices, deviceId, "device");
+    }
+
+    @Override
+    public EnergyReading getLatestEnergyReading(String meterId) {
+        return require(energyReadings, meterId, "energy meter");
     }
 
     @Override
@@ -99,8 +108,17 @@ public class MockParkSystem implements DevicePort, AlertPort, WorkOrderPort, Kno
     private void seedDevices() {
         putDevice(device("DEV-HVAC-001", "A1", "HVAC Supply Unit", "HVAC", "ACTIVE", 1));
         putDevice(device("DEV-POWER-001", "A2", "Main Power Panel", "POWER", "ACTIVE", 2));
+        putDevice(device("DEV-ENERGY-001", "A2", "Building A2 Energy Meter", "ENERGY_METER", "ACTIVE", 2));
         putDevice(device("DEV-ACCESS-001", "A1", "North Access Controller", "ACCESS", "ACTIVE", 3));
         putDevice(device("DEV-PUMP-001", "A2", "Basement Pump", "PUMP", "ACTIVE", 4));
+        putEnergyReading(new EnergyReading(
+                "DEV-ENERGY-001",
+                PARK_ID,
+                "A2",
+                ALERT_BASE_TIME.plus(Duration.ofMinutes(6)),
+                138.0,
+                100.0,
+                42.5));
     }
 
     private void seedAlerts() {
@@ -115,6 +133,12 @@ public class MockParkSystem implements DevicePort, AlertPort, WorkOrderPort, Kno
                 "Voltage instability detected on the main distribution panel.",
                 ALERT_BASE_TIME.plus(Duration.ofMinutes(3)),
                 List.of("meter:phase-a", "meter:phase-b", "meter:phase-c")));
+
+        putAlert(alert("ALT-ENERGY-001", "DEV-ENERGY-001", "A2", AlertClassification.ENERGY, RiskLevel.HIGH,
+                "Unexpected energy consumption in building A2",
+                "Current interval consumption is 38 percent above the learned baseline.",
+                ALERT_BASE_TIME.plus(Duration.ofMinutes(6)),
+                List.of("meter:current-kwh=138", "baseline:kwh=100", "trend:after-hours")));
     }
 
     private void seedHistory() {
@@ -139,8 +163,15 @@ public class MockParkSystem implements DevicePort, AlertPort, WorkOrderPort, Kno
                 alert("ALT-HIST-POWER-002", "DEV-POWER-001", "A2", AlertClassification.POWER, RiskLevel.HIGH,
                         "Breaker inspection reminder",
                         "The main panel had a previous breaker inspection note.",
-                HISTORY_BASE_TIME.plus(Duration.ofHours(5)),
+                        HISTORY_BASE_TIME.plus(Duration.ofHours(5)),
                         List.of("log:breaker-note"))));
+
+        historyByDevice.put("DEV-ENERGY-001", List.of(
+                alert("ALT-HIST-ENERGY-001", "DEV-ENERGY-001", "A2", AlertClassification.ENERGY, RiskLevel.HIGH,
+                        "Previous after-hours energy spike",
+                        "The meter previously reported elevated consumption after normal operating hours.",
+                        HISTORY_BASE_TIME.plus(Duration.ofHours(2)),
+                        List.of("log:after-hours-spike"))));
     }
 
     private void seedKnowledge() {
@@ -164,6 +195,13 @@ public class MockParkSystem implements DevicePort, AlertPort, WorkOrderPort, Kno
                 "Stabilize the electrical load, notify facilities, and inspect breaker and UPS conditions immediately.",
                 List.of("power", "emergency", "breaker"),
                 KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(2))));
+
+        putKnowledge(new KnowledgeDocument(
+                "KD-ENERGY-001",
+                "Energy anomaly response playbook",
+                "For consumption above baseline, compare operating schedules, inspect HVAC and lighting runtime, and verify the meter before creating corrective work.",
+                List.of("energy", "consumption", "baseline", "efficiency"),
+                KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(3))));
     }
 
     private Device device(String id, String buildingId, String name, String category, String status, int dayOffset) {
@@ -172,6 +210,10 @@ public class MockParkSystem implements DevicePort, AlertPort, WorkOrderPort, Kno
 
     private void putDevice(Device device) {
         devices.put(device.id(), device);
+    }
+
+    private void putEnergyReading(EnergyReading reading) {
+        energyReadings.put(reading.meterId(), reading);
     }
 
     private Alert alert(

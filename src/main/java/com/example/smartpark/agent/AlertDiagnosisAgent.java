@@ -7,6 +7,7 @@ import com.example.smartpark.model.ParkContext;
 import com.example.smartpark.model.RiskLevel;
 import com.example.smartpark.tool.AlertQueryTool;
 import com.example.smartpark.tool.DeviceQueryTool;
+import com.example.smartpark.tool.EnergyQueryTool;
 import com.example.smartpark.tool.ParkKnowledgeTool;
 import com.example.smartpark.tool.WorkOrderTool;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -24,6 +25,7 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.ai.tool.metadata.ToolMetadata;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -63,14 +65,28 @@ public class AlertDiagnosisAgent {
             AlertQueryTool alertQueryTool,
             WorkOrderTool workOrderTool,
             ParkKnowledgeTool parkKnowledgeTool) {
+        this(chatModel, deviceQueryTool, alertQueryTool, workOrderTool, parkKnowledgeTool, null);
+    }
+
+    @Autowired
+    public AlertDiagnosisAgent(
+            ChatModel chatModel,
+            DeviceQueryTool deviceQueryTool,
+            AlertQueryTool alertQueryTool,
+            WorkOrderTool workOrderTool,
+            ParkKnowledgeTool parkKnowledgeTool,
+            EnergyQueryTool energyQueryTool) {
         Objects.requireNonNull(chatModel, "chatModel");
         Objects.requireNonNull(deviceQueryTool, "deviceQueryTool");
         Objects.requireNonNull(alertQueryTool, "alertQueryTool");
         Objects.requireNonNull(workOrderTool, "workOrderTool");
         Objects.requireNonNull(parkKnowledgeTool, "parkKnowledgeTool");
         this.chatClient = ChatClient.builder(chatModel).build();
+        Stream<ToolCallback> parkTools = energyQueryTool == null
+                ? Stream.of(ToolCallbacks.from(deviceQueryTool, alertQueryTool, parkKnowledgeTool))
+                : Stream.of(ToolCallbacks.from(deviceQueryTool, alertQueryTool, parkKnowledgeTool, energyQueryTool));
         this.toolCallbacks = Stream.concat(
-                        Stream.of(ToolCallbacks.from(deviceQueryTool, alertQueryTool, parkKnowledgeTool)),
+                        parkTools,
                         Stream.of(workOrderTool.diagnosisCallbacks()))
                 .flatMap(Stream::of)
                 .toArray(ToolCallback[]::new);

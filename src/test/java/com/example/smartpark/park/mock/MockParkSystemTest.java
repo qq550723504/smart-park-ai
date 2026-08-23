@@ -45,6 +45,15 @@ class MockParkSystemTest {
     }
 
     @Test
+    void energyAlertHasLatestConsumptionAboveItsBaseline() {
+        Alert alert = mockParkSystem.getAlert("ALT-ENERGY-001");
+
+        assertThat(alert.classification()).isEqualTo(com.example.smartpark.model.AlertClassification.ENERGY);
+        assertThat(mockParkSystem.getLatestEnergyReading("DEV-ENERGY-001").varianceRatio())
+                .isEqualTo(0.38);
+    }
+
+    @Test
     void creatingTheSameWorkflowTwiceIsIdempotent() {
         WorkOrder first = mockParkSystem.create("wf-1", "ALT-TEMP-001", "temperature anomaly");
         WorkOrder second = mockParkSystem.create("wf-1", "ALT-TEMP-001", "temperature anomaly");

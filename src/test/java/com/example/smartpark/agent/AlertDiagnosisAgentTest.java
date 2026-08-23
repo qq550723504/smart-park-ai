@@ -9,6 +9,7 @@ import com.example.smartpark.model.RiskLevel;
 import com.example.smartpark.park.mock.MockParkSystem;
 import com.example.smartpark.tool.AlertQueryTool;
 import com.example.smartpark.tool.DeviceQueryTool;
+import com.example.smartpark.tool.EnergyQueryTool;
 import com.example.smartpark.tool.ParkKnowledgeTool;
 import com.example.smartpark.tool.WorkOrderTool;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -29,6 +30,39 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AlertDiagnosisAgentTest {
+
+    @Test
+    void diagnosisExposesReadOnlyEnergyConsumptionLookup() {
+        MockParkSystem parkSystem = new MockParkSystem();
+        AlertDiagnosisAgent agent = new AlertDiagnosisAgent(
+                new TestChatModel("""
+                        {
+                          "id":"diag-energy-1",
+                          "alertId":"ALT-ENERGY-001",
+                          "deviceId":"DEV-ENERGY-001",
+                          "riskLevel":"HIGH",
+                          "rootCause":"Unexpected after-hours load",
+                          "summary":"The building consumed more energy than its baseline.",
+                          "evidence":["meter: current consumption is above baseline"],
+                          "recommendedAction":"Inspect after-hours HVAC schedules.",
+                          "confidence":0.9,
+                          "diagnosedAt":"2026-08-23T01:45:00Z"
+                        }
+                        """),
+                new DeviceQueryTool(parkSystem),
+                new AlertQueryTool(parkSystem),
+                new WorkOrderTool(parkSystem),
+                new ParkKnowledgeTool(parkSystem),
+                new EnergyQueryTool(parkSystem));
+
+        List<String> toolNames = java.util.Arrays.stream(agent.toolCallbacks())
+                .map(ToolCallback::getToolDefinition)
+                .map(org.springframework.ai.tool.definition.ToolDefinition::name)
+                .toList();
+
+        assertThat(toolNames).contains("lookupEnergyConsumption");
+        assertThat(toolNames).doesNotContain("createWorkOrder");
+    }
 
     @Test
     void diagnosisPromptIncludesParkContextAndKnowledgeContent() {
