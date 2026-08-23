@@ -3,8 +3,8 @@ package com.example.smartpark.workflow;
 import com.example.smartpark.agent.AlertDiagnosisAgent;
 import com.example.smartpark.agent.AlertTriageAgent;
 import com.example.smartpark.agent.TestChatModel;
+import com.example.smartpark.adapter.mock.MockParkFixture;
 import com.example.smartpark.model.common.WorkflowStatus;
-import com.example.smartpark.park.mock.MockParkSystem;
 import com.example.smartpark.tool.alert.AlertQueryTool;
 import com.example.smartpark.tool.device.DeviceQueryTool;
 import com.example.smartpark.tool.energy.EnergyQueryTool;
@@ -18,7 +18,7 @@ class EnergyWorkflowTest {
 
     @Test
     void energyAnomalyUsesEnergyKnowledgeAndWaitsForApproval() {
-        MockParkSystem parkSystem = new MockParkSystem();
+        MockParkFixture fixture = new MockParkFixture();
         TestChatModel diagnosisModel = new TestChatModel("""
                 {
                   "id":"diag-energy-workflow-1",
@@ -39,15 +39,15 @@ class EnergyWorkflowTest {
                         """)),
                 new AlertDiagnosisAgent(
                         diagnosisModel,
-                        new DeviceQueryTool(parkSystem),
-                        new AlertQueryTool(parkSystem),
-                        new WorkOrderTool(parkSystem),
-                        new ParkKnowledgeTool(parkSystem),
-                        new EnergyQueryTool(parkSystem)),
-                parkSystem,
-                parkSystem,
-                parkSystem,
-                parkSystem,
+                        new DeviceQueryTool(fixture.devices()),
+                        new AlertQueryTool(fixture.alerts()),
+                        new WorkOrderTool(fixture.workOrders()),
+                        new ParkKnowledgeTool(fixture.knowledge()),
+                        new EnergyQueryTool(fixture.energy())),
+                fixture.devices(),
+                fixture.alerts(),
+                fixture.workOrders(),
+                fixture.knowledge(),
                 WorkflowExecutionStore.inMemory(),
                 WorkflowEventPublisher.inMemory());
 

@@ -1,7 +1,7 @@
 package com.example.smartpark.tool;
 
 import com.example.smartpark.model.energy.EnergyReading;
-import com.example.smartpark.park.mock.MockParkSystem;
+import com.example.smartpark.adapter.mock.MockParkFixture;
 import com.example.smartpark.tool.energy.EnergyQueryTool;
 import org.junit.jupiter.api.Test;
 
@@ -11,7 +11,7 @@ class EnergyQueryToolTest {
 
     @Test
     void returnsLatestConsumptionAndVarianceForAnEnergyMeter() {
-        EnergyQueryTool tool = new EnergyQueryTool(new MockParkSystem());
+        EnergyQueryTool tool = new EnergyQueryTool(new MockParkFixture().energy());
 
         EnergyQueryTool.EnergyLookupResult result = tool.lookupEnergyConsumption("DEV-ENERGY-001");
 
@@ -24,7 +24,7 @@ class EnergyQueryToolTest {
 
     @Test
     void unknownMeterReturnsSafeErrorWithoutInventingConsumption() {
-        EnergyQueryTool.EnergyLookupResult result = new EnergyQueryTool(new MockParkSystem())
+        EnergyQueryTool.EnergyLookupResult result = new EnergyQueryTool(new MockParkFixture().energy())
                 .lookupEnergyConsumption("missing-meter");
 
         assertThat(result.reading()).isNull();

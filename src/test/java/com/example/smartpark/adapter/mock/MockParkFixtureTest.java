@@ -1,4 +1,4 @@
-package com.example.smartpark.park.mock;
+package com.example.smartpark.adapter.mock;
 
 import com.example.smartpark.model.alert.Alert;
 import com.example.smartpark.model.common.RiskLevel;
@@ -18,19 +18,19 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class MockParkSystemTest {
+class MockParkFixtureTest {
 
-    private MockParkSystem mockParkSystem;
+    private MockParkFixture fixture;
 
     @BeforeEach
     void setUp() {
-        mockParkSystem = new MockParkSystem();
-        mockParkSystem.reset();
+        fixture = new MockParkFixture();
+        fixture.reset();
     }
 
     @Test
     void lowRiskTemperatureAlertIsAvailable() {
-        Alert alert = mockParkSystem.getAlert("ALT-TEMP-001");
+        Alert alert = fixture.alerts().getAlert("ALT-TEMP-001");
 
         assertThat(alert.riskHint()).isEqualTo(RiskLevel.LOW);
         assertThat(alert.deviceId()).isEqualTo("DEV-HVAC-001");
@@ -38,41 +38,41 @@ class MockParkSystemTest {
 
     @Test
     void highRiskPowerAlertRequiresTheHighRiskFixture() {
-        Alert alert = mockParkSystem.getAlert("ALT-POWER-001");
+        Alert alert = fixture.alerts().getAlert("ALT-POWER-001");
 
         assertThat(alert.riskHint()).isEqualTo(RiskLevel.HIGH);
-        assertThat(mockParkSystem.findHistory("DEV-POWER-001")).isNotEmpty();
+        assertThat(fixture.alerts().findHistory("DEV-POWER-001")).isNotEmpty();
     }
 
     @Test
     void energyAlertHasLatestConsumptionAboveItsBaseline() {
-        Alert alert = mockParkSystem.getAlert("ALT-ENERGY-001");
+        Alert alert = fixture.alerts().getAlert("ALT-ENERGY-001");
 
         assertThat(alert.classification()).isEqualTo(com.example.smartpark.model.alert.AlertClassification.ENERGY);
-        assertThat(mockParkSystem.getLatestEnergyReading("DEV-ENERGY-001").varianceRatio())
+        assertThat(fixture.energy().getLatestEnergyReading("DEV-ENERGY-001").varianceRatio())
                 .isEqualTo(0.38);
     }
 
     @Test
     void creatingTheSameWorkflowTwiceIsIdempotent() {
-        WorkOrder first = mockParkSystem.create("wf-1", "ALT-TEMP-001", "temperature anomaly");
-        WorkOrder second = mockParkSystem.create("wf-1", "ALT-TEMP-001", "temperature anomaly");
+        WorkOrder first = fixture.workOrders().create("wf-1", "ALT-TEMP-001", "temperature anomaly");
+        WorkOrder second = fixture.workOrders().create("wf-1", "ALT-TEMP-001", "temperature anomaly");
 
         assertThat(second.id()).isEqualTo(first.id());
-        assertThat(mockParkSystem.findByWorkflowId("wf-1")).hasSize(1);
+        assertThat(fixture.workOrders().findByWorkflowId("wf-1")).hasSize(1);
         assertThat(first.approvalDecision()).isEqualTo(Optional.empty());
     }
 
     @Test
     void resetClearsCreatedWorkOrdersAndRestoresFixtureState() {
-        WorkOrder created = mockParkSystem.create("wf-reset", "ALT-TEMP-001", "temperature anomaly");
+        WorkOrder created = fixture.workOrders().create("wf-reset", "ALT-TEMP-001", "temperature anomaly");
 
-        mockParkSystem.reset();
+        fixture.reset();
 
-        assertThat(mockParkSystem.findByWorkflowId("wf-reset")).isEmpty();
-        assertThat(mockParkSystem.getAlert("ALT-TEMP-001").riskHint()).isEqualTo(RiskLevel.LOW);
+        assertThat(fixture.workOrders().findByWorkflowId("wf-reset")).isEmpty();
+        assertThat(fixture.alerts().getAlert("ALT-TEMP-001").riskHint()).isEqualTo(RiskLevel.LOW);
 
-        WorkOrder recreated = mockParkSystem.create("wf-reset", "ALT-TEMP-001", "temperature anomaly");
+        WorkOrder recreated = fixture.workOrders().create("wf-reset", "ALT-TEMP-001", "temperature anomaly");
 
         assertThat(recreated.id()).isEqualTo(created.id());
         assertThat(recreated.approvalDecision()).isEqualTo(Optional.empty());
@@ -91,7 +91,7 @@ class MockParkSystemTest {
                 tasks.add(() -> {
                     ready.countDown();
                     start.await();
-                    return mockParkSystem.create("wf-concurrent", "ALT-TEMP-001", "temperature anomaly");
+                    return fixture.workOrders().create("wf-concurrent", "ALT-TEMP-001", "temperature anomaly");
                 });
             }
 
@@ -110,8 +110,8 @@ class MockParkSystemTest {
 
             Set<String> ids = results.stream().map(WorkOrder::id).collect(java.util.stream.Collectors.toSet());
             assertThat(ids).hasSize(1);
-            assertThat(mockParkSystem.findByWorkflowId("wf-concurrent")).hasSize(1);
-            assertThat(mockParkSystem.findByWorkflowId("wf-concurrent").get(0).approvalDecision()).isEqualTo(Optional.empty());
+            assertThat(fixture.workOrders().findByWorkflowId("wf-concurrent")).hasSize(1);
+            assertThat(fixture.workOrders().findByWorkflowId("wf-concurrent").get(0).approvalDecision()).isEqualTo(Optional.empty());
         } finally {
             executor.shutdownNow();
         }

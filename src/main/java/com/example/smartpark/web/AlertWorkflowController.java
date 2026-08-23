@@ -2,8 +2,17 @@ package com.example.smartpark.web;
 
 import com.example.smartpark.agent.AlertDiagnosisAgent;
 import com.example.smartpark.agent.AlertTriageAgent;
+import com.example.smartpark.adapter.mock.MockAlertAdapter;
+import com.example.smartpark.adapter.mock.MockDeviceAdapter;
+import com.example.smartpark.adapter.mock.MockEnergyAdapter;
+import com.example.smartpark.adapter.mock.MockKnowledgeAdapter;
+import com.example.smartpark.adapter.mock.MockParkDataStore;
+import com.example.smartpark.adapter.mock.MockWorkOrderAdapter;
 import com.example.smartpark.port.alert.AlertPort;
-import com.example.smartpark.park.mock.MockParkSystem;
+import com.example.smartpark.port.device.DevicePort;
+import com.example.smartpark.port.energy.EnergyPort;
+import com.example.smartpark.port.knowledge.KnowledgePort;
+import com.example.smartpark.port.workorder.WorkOrderPort;
 import com.example.smartpark.workflow.AlertWorkflow;
 import com.example.smartpark.workflow.WorkflowEventPublisher;
 import com.example.smartpark.workflow.WorkflowExecutionStore;
@@ -60,8 +69,33 @@ public class AlertWorkflowController {
 class AlertWorkflowRuntimeConfiguration {
 
     @Bean
-    MockParkSystem mockParkSystem() {
-        return new MockParkSystem();
+    MockParkDataStore mockParkDataStore() {
+        return new MockParkDataStore();
+    }
+
+    @Bean
+    MockAlertAdapter mockAlertAdapter(MockParkDataStore dataStore) {
+        return new MockAlertAdapter(dataStore);
+    }
+
+    @Bean
+    MockDeviceAdapter mockDeviceAdapter(MockParkDataStore dataStore) {
+        return new MockDeviceAdapter(dataStore);
+    }
+
+    @Bean
+    MockEnergyAdapter mockEnergyAdapter(MockParkDataStore dataStore) {
+        return new MockEnergyAdapter(dataStore);
+    }
+
+    @Bean
+    MockKnowledgeAdapter mockKnowledgeAdapter(MockParkDataStore dataStore) {
+        return new MockKnowledgeAdapter(dataStore);
+    }
+
+    @Bean
+    MockWorkOrderAdapter mockWorkOrderAdapter(MockParkDataStore dataStore) {
+        return new MockWorkOrderAdapter(dataStore);
     }
 
     @Bean
@@ -78,16 +112,19 @@ class AlertWorkflowRuntimeConfiguration {
     AlertWorkflow alertWorkflow(
             AlertTriageAgent triageAgent,
             AlertDiagnosisAgent diagnosisAgent,
-            MockParkSystem parkSystem,
+            DevicePort devicePort,
+            AlertPort alertPort,
+            WorkOrderPort workOrderPort,
+            KnowledgePort knowledgePort,
             WorkflowExecutionStore executionStore,
             WorkflowEventPublisher eventPublisher) {
         return new AlertWorkflow(
                 triageAgent,
                 diagnosisAgent,
-                parkSystem,
-                parkSystem,
-                parkSystem,
-                parkSystem,
+                devicePort,
+                alertPort,
+                workOrderPort,
+                knowledgePort,
                 executionStore,
                 eventPublisher);
     }

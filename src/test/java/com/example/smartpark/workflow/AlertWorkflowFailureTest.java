@@ -3,6 +3,7 @@ package com.example.smartpark.workflow;
 import com.example.smartpark.agent.AlertDiagnosisAgent;
 import com.example.smartpark.agent.AlertTriageAgent;
 import com.example.smartpark.agent.TestChatModel;
+import com.example.smartpark.adapter.mock.MockParkFixture;
 import com.example.smartpark.model.common.ApprovalDecision;
 import com.example.smartpark.model.common.WorkOrder;
 import com.example.smartpark.model.common.WorkflowStatus;
@@ -10,7 +11,6 @@ import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.device.DevicePort;
 import com.example.smartpark.port.knowledge.KnowledgePort;
 import com.example.smartpark.port.workorder.WorkOrderPort;
-import com.example.smartpark.park.mock.MockParkSystem;
 import com.example.smartpark.tool.alert.AlertQueryTool;
 import com.example.smartpark.tool.device.DeviceQueryTool;
 import com.example.smartpark.tool.knowledge.ParkKnowledgeTool;
@@ -44,7 +44,7 @@ class AlertWorkflowFailureTest {
 
     @Test
     void fixedFailingChatModelPreservesCompletedEvidenceAndKeepsProviderDetailsInternal() {
-        MockParkSystem park = new MockParkSystem();
+        MockParkFixture park = new MockParkFixture();
         Fixture fixture = fixture(
                 validTriageModel("ALT-TEMP-001", "LOW"),
                 new FailingChatModel("providerResponse=raw-model-payload Authorization: "
@@ -74,7 +74,7 @@ class AlertWorkflowFailureTest {
 
     @Test
     void malformedStructuredOutputFailsClosedWithoutInventingWorkflowEvidence() {
-        MockParkSystem park = new MockParkSystem();
+        MockParkFixture park = new MockParkFixture();
         Fixture fixture = fixture(
                 new TestChatModel("not-json providerResponse=raw-output"),
                 validDiagnosisModel("ALT-TEMP-001", "LOW"),
@@ -99,7 +99,7 @@ class AlertWorkflowFailureTest {
 
     @Test
     void deviceLookupFailurePreservesAlertAndClassificationButStopsBeforeDiagnosis() {
-        MockParkSystem park = new MockParkSystem();
+        MockParkFixture park = new MockParkFixture();
         DevicePort failingDevice = ignored -> {
             throw new IllegalStateException("device header Authorization=private-device-header");
         };
@@ -126,7 +126,7 @@ class AlertWorkflowFailureTest {
 
     @Test
     void alertHistoryFailureStopsContextCollectionWithAStableSafeError() {
-        MockParkSystem park = new MockParkSystem();
+        MockParkFixture park = new MockParkFixture();
         AlertPort failingHistory = new AlertPort() {
             @Override
             public com.example.smartpark.model.alert.Alert getAlert(String alertId) {
@@ -157,7 +157,7 @@ class AlertWorkflowFailureTest {
 
     @Test
     void knowledgeFailurePreservesCollectedParkContextAndStopsBeforeDiagnosis() {
-        MockParkSystem park = new MockParkSystem();
+        MockParkFixture park = new MockParkFixture();
         KnowledgePort failingKnowledge = ignored -> {
             throw new IllegalStateException("knowledge providerResponse=private-knowledge-response");
         };
@@ -187,7 +187,7 @@ class AlertWorkflowFailureTest {
 
     @Test
     void workOrderCreationFailureUsesSpecificStatusAndNeverFabricatesAnId() {
-        MockParkSystem park = new MockParkSystem();
+        MockParkFixture park = new MockParkFixture();
         AtomicInteger createCalls = new AtomicInteger();
         WorkOrderPort failingWorkOrders = new WorkOrderPort() {
             @Override
@@ -223,7 +223,7 @@ class AlertWorkflowFailureTest {
 
     @Test
     void duplicateStartReturnsTheWaitingExecutionWithoutStartingAnotherEventStream() {
-        MockParkSystem park = new MockParkSystem();
+        MockParkFixture park = new MockParkFixture();
         Fixture fixture = fixture(
                 validTriageModel("ALT-POWER-001", "HIGH"),
                 validDiagnosisModel("ALT-POWER-001", "HIGH"),
@@ -247,7 +247,7 @@ class AlertWorkflowFailureTest {
 
     @Test
     void duplicateStartReturnsTheCompletedExecutionWithoutCreatingAnotherWorkOrder() {
-        MockParkSystem park = new MockParkSystem();
+        MockParkFixture park = new MockParkFixture();
         CountingWorkOrderPort workOrders = new CountingWorkOrderPort(park);
         AtomicInteger generatedIds = new AtomicInteger();
         Fixture fixture = fixture(
@@ -270,7 +270,7 @@ class AlertWorkflowFailureTest {
 
     @Test
     void duplicateStartReturnsFailedAndRejectedTerminalExecutions() {
-        MockParkSystem failedPark = new MockParkSystem();
+        MockParkFixture failedPark = new MockParkFixture();
         AtomicInteger failedIds = new AtomicInteger();
         Fixture failedFixture = fixture(
                 validTriageModel("ALT-TEMP-001", "LOW"),
@@ -285,7 +285,7 @@ class AlertWorkflowFailureTest {
         assertThat(failedFixture.workflow().start("ALT-TEMP-001")).isEqualTo(failed);
         assertThat(failedIds).hasValue(1);
 
-        MockParkSystem rejectedPark = new MockParkSystem();
+        MockParkFixture rejectedPark = new MockParkFixture();
         AtomicInteger rejectedIds = new AtomicInteger();
         Fixture rejectedFixture = fixture(
                 validTriageModel("ALT-POWER-001", "HIGH"),
@@ -312,7 +312,7 @@ class AlertWorkflowFailureTest {
 
     @Test
     void concurrentDuplicateStartReusesTheRegisteredExecutionAndCreatesOneWorkOrder() throws Exception {
-        MockParkSystem park = new MockParkSystem();
+        MockParkFixture park = new MockParkFixture();
         CountingWorkOrderPort workOrders = new CountingWorkOrderPort(park);
         BlockingChatModel diagnosisModel = new BlockingChatModel(
                 validDiagnosisModel("ALT-TEMP-001", "LOW"));
@@ -348,7 +348,7 @@ class AlertWorkflowFailureTest {
 
     @Test
     void duplicateApprovalReturnsRecordedResultAndConflictingReuseIsRejected() {
-        MockParkSystem park = new MockParkSystem();
+        MockParkFixture park = new MockParkFixture();
         Fixture fixture = fixture(
                 validTriageModel("ALT-POWER-001", "HIGH"),
                 validDiagnosisModel("ALT-POWER-001", "HIGH"),

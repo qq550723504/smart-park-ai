@@ -1,6 +1,6 @@
 package com.example.smartpark.tool;
 
-import com.example.smartpark.park.mock.MockParkSystem;
+import com.example.smartpark.adapter.mock.MockParkFixture;
 import com.example.smartpark.tool.alert.AlertQueryTool;
 import com.example.smartpark.tool.device.DeviceQueryTool;
 import com.example.smartpark.tool.knowledge.ParkKnowledgeTool;
@@ -14,7 +14,7 @@ class ParkToolsTest {
 
     @Test
     void deviceLookupReturnsStructuredErrorForBlankDeviceId() {
-        DeviceQueryTool tool = new DeviceQueryTool(new MockParkSystem());
+        DeviceQueryTool tool = new DeviceQueryTool(new MockParkFixture().devices());
 
         assertThatCode(() -> tool.lookupDeviceStatus("   ")).doesNotThrowAnyException();
         DeviceQueryTool.DeviceLookupResult result = tool.lookupDeviceStatus("   ");
@@ -25,7 +25,7 @@ class ParkToolsTest {
 
     @Test
     void deviceLookupReturnsStructuredErrorForUnknownDeviceId() {
-        DeviceQueryTool tool = new DeviceQueryTool(new MockParkSystem());
+        DeviceQueryTool tool = new DeviceQueryTool(new MockParkFixture().devices());
 
         DeviceQueryTool.DeviceLookupResult result = tool.lookupDeviceStatus("DEV-MISSING");
 
@@ -35,7 +35,7 @@ class ParkToolsTest {
 
     @Test
     void alertLookupReturnsStructuredErrorForBlankAlertId() {
-        AlertQueryTool tool = new AlertQueryTool(new MockParkSystem());
+        AlertQueryTool tool = new AlertQueryTool(new MockParkFixture().alerts());
 
         assertThatCode(() -> tool.lookupAlert("   ")).doesNotThrowAnyException();
         AlertQueryTool.AlertLookupResult result = tool.lookupAlert("   ");
@@ -46,7 +46,7 @@ class ParkToolsTest {
 
     @Test
     void alertHistoryReturnsStructuredErrorForBlankDeviceId() {
-        AlertQueryTool tool = new AlertQueryTool(new MockParkSystem());
+        AlertQueryTool tool = new AlertQueryTool(new MockParkFixture().alerts());
 
         assertThatCode(() -> tool.lookupAlertHistory(" ")).doesNotThrowAnyException();
         AlertQueryTool.AlertHistoryResult result = tool.lookupAlertHistory(" ");
@@ -57,7 +57,7 @@ class ParkToolsTest {
 
     @Test
     void workOrderLookupReturnsStructuredErrorForBlankWorkflowId() {
-        WorkOrderTool tool = new WorkOrderTool(new MockParkSystem());
+        WorkOrderTool tool = new WorkOrderTool(new MockParkFixture().workOrders());
 
         assertThatCode(() -> tool.lookupWorkOrders(" ")).doesNotThrowAnyException();
         WorkOrderTool.WorkOrderLookupResult result = tool.lookupWorkOrders(" ");
@@ -68,7 +68,7 @@ class ParkToolsTest {
 
     @Test
     void createWorkOrderReturnsStructuredErrorForBlankSummary() {
-        WorkOrderTool tool = new WorkOrderTool(new MockParkSystem());
+        WorkOrderTool tool = new WorkOrderTool(new MockParkFixture().workOrders());
 
         assertThatCode(() -> tool.createWorkOrder("wf-1", "ALT-TEMP-001", " ")).doesNotThrowAnyException();
         WorkOrderTool.WorkOrderCreateResult result = tool.createWorkOrder("wf-1", "ALT-TEMP-001", " ");
@@ -79,7 +79,7 @@ class ParkToolsTest {
 
     @Test
     void knowledgeSearchReturnsStructuredErrorForBlankQuery() {
-        ParkKnowledgeTool tool = new ParkKnowledgeTool(new MockParkSystem());
+        ParkKnowledgeTool tool = new ParkKnowledgeTool(new MockParkFixture().knowledge());
 
         assertThatCode(() -> tool.searchParkKnowledge(" ")).doesNotThrowAnyException();
         ParkKnowledgeTool.KnowledgeSearchResult result = tool.searchParkKnowledge(" ");

@@ -6,7 +6,7 @@ import com.example.smartpark.model.common.Diagnosis;
 import com.example.smartpark.model.common.KnowledgeDocument;
 import com.example.smartpark.model.common.ParkContext;
 import com.example.smartpark.model.common.RiskLevel;
-import com.example.smartpark.park.mock.MockParkSystem;
+import com.example.smartpark.adapter.mock.MockParkFixture;
 import com.example.smartpark.tool.alert.AlertQueryTool;
 import com.example.smartpark.tool.device.DeviceQueryTool;
 import com.example.smartpark.tool.energy.EnergyQueryTool;
@@ -33,7 +33,7 @@ class AlertDiagnosisAgentTest {
 
     @Test
     void diagnosisExposesReadOnlyEnergyConsumptionLookup() {
-        MockParkSystem parkSystem = new MockParkSystem();
+        MockParkFixture parkSystem = new MockParkFixture();
         AlertDiagnosisAgent agent = new AlertDiagnosisAgent(
                 new TestChatModel("""
                         {
@@ -49,11 +49,11 @@ class AlertDiagnosisAgentTest {
                           "diagnosedAt":"2026-08-23T01:45:00Z"
                         }
                         """),
-                new DeviceQueryTool(parkSystem),
-                new AlertQueryTool(parkSystem),
-                new WorkOrderTool(parkSystem),
-                new ParkKnowledgeTool(parkSystem),
-                new EnergyQueryTool(parkSystem));
+                new DeviceQueryTool(parkSystem.devices()),
+                new AlertQueryTool(parkSystem.alerts()),
+                new WorkOrderTool(parkSystem.workOrders()),
+                new ParkKnowledgeTool(parkSystem.knowledge()),
+                new EnergyQueryTool(parkSystem.energy()));
 
         List<String> toolNames = java.util.Arrays.stream(agent.toolCallbacks())
                 .map(ToolCallback::getToolDefinition)
@@ -83,10 +83,10 @@ class AlertDiagnosisAgentTest {
 
         AlertDiagnosisAgent agent = new AlertDiagnosisAgent(
                 model,
-                new DeviceQueryTool(new MockParkSystem()),
-                new AlertQueryTool(new MockParkSystem()),
-                new WorkOrderTool(new MockParkSystem()),
-                new ParkKnowledgeTool(new MockParkSystem()));
+                new DeviceQueryTool(new MockParkFixture().devices()),
+                new AlertQueryTool(new MockParkFixture().alerts()),
+                new WorkOrderTool(new MockParkFixture().workOrders()),
+                new ParkKnowledgeTool(new MockParkFixture().knowledge()));
 
         Diagnosis result = agent.diagnose(sampleAlert(), sampleContext(), sampleKnowledge());
 
@@ -117,10 +117,10 @@ class AlertDiagnosisAgentTest {
 
         AlertDiagnosisAgent agent = new AlertDiagnosisAgent(
                 model,
-                new DeviceQueryTool(new MockParkSystem()),
-                new AlertQueryTool(new MockParkSystem()),
-                new WorkOrderTool(new MockParkSystem()),
-                new ParkKnowledgeTool(new MockParkSystem()));
+                new DeviceQueryTool(new MockParkFixture().devices()),
+                new AlertQueryTool(new MockParkFixture().alerts()),
+                new WorkOrderTool(new MockParkFixture().workOrders()),
+                new ParkKnowledgeTool(new MockParkFixture().knowledge()));
 
         Diagnosis result = agent.diagnose(sampleAlert(), sampleContext(), List.of());
 
@@ -130,7 +130,7 @@ class AlertDiagnosisAgentTest {
 
     @Test
     void diagnosisToolListDoesNotExposeCreateWorkOrder() {
-        MockParkSystem parkSystem = new MockParkSystem();
+        MockParkFixture parkSystem = new MockParkFixture();
         AlertDiagnosisAgent agent = new AlertDiagnosisAgent(
                 new TestChatModel("""
                         {
@@ -146,10 +146,10 @@ class AlertDiagnosisAgentTest {
                           "diagnosedAt":"2026-08-23T01:40:00Z"
                         }
                         """),
-                new DeviceQueryTool(parkSystem),
-                new AlertQueryTool(parkSystem),
-                new WorkOrderTool(parkSystem),
-                new ParkKnowledgeTool(parkSystem));
+                new DeviceQueryTool(parkSystem.devices()),
+                new AlertQueryTool(parkSystem.alerts()),
+                new WorkOrderTool(parkSystem.workOrders()),
+                new ParkKnowledgeTool(parkSystem.knowledge()));
 
         List<String> toolNames = java.util.Arrays.stream(agent.toolCallbacks())
                 .map(ToolCallback::getToolDefinition)
@@ -176,13 +176,13 @@ class AlertDiagnosisAgentTest {
                   "diagnosedAt":"2026-08-23T01:45:00Z"
                 }
                 """);
-        MockParkSystem parkSystem = new MockParkSystem();
+        MockParkFixture parkSystem = new MockParkFixture();
         AlertDiagnosisAgent agent = new AlertDiagnosisAgent(
                 model,
-                new DeviceQueryTool(parkSystem),
-                new AlertQueryTool(parkSystem),
-                new WorkOrderTool(parkSystem),
-                new ParkKnowledgeTool(parkSystem));
+                new DeviceQueryTool(parkSystem.devices()),
+                new AlertQueryTool(parkSystem.alerts()),
+                new WorkOrderTool(parkSystem.workOrders()),
+                new ParkKnowledgeTool(parkSystem.knowledge()));
 
         agent.diagnose(sampleAlert(), sampleContext(), sampleKnowledge());
 
@@ -213,10 +213,10 @@ class AlertDiagnosisAgentTest {
 
         AlertDiagnosisAgent agent = new AlertDiagnosisAgent(
                 model,
-                new DeviceQueryTool(new MockParkSystem()),
-                new AlertQueryTool(new MockParkSystem()),
-                new WorkOrderTool(new MockParkSystem()),
-                new ParkKnowledgeTool(new MockParkSystem()));
+                new DeviceQueryTool(new MockParkFixture().devices()),
+                new AlertQueryTool(new MockParkFixture().alerts()),
+                new WorkOrderTool(new MockParkFixture().workOrders()),
+                new ParkKnowledgeTool(new MockParkFixture().knowledge()));
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> agent.diagnose(sampleAlert(), sampleContext(), sampleKnowledge()))
                 .isInstanceOf(IllegalStateException.class)
@@ -242,10 +242,10 @@ class AlertDiagnosisAgentTest {
 
         AlertDiagnosisAgent agent = new AlertDiagnosisAgent(
                 model,
-                new DeviceQueryTool(new MockParkSystem()),
-                new AlertQueryTool(new MockParkSystem()),
-                new WorkOrderTool(new MockParkSystem()),
-                new ParkKnowledgeTool(new MockParkSystem()));
+                new DeviceQueryTool(new MockParkFixture().devices()),
+                new AlertQueryTool(new MockParkFixture().alerts()),
+                new WorkOrderTool(new MockParkFixture().workOrders()),
+                new ParkKnowledgeTool(new MockParkFixture().knowledge()));
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> agent.diagnose(sampleAlert(), sampleContext(), sampleKnowledge()))
                 .isInstanceOf(IllegalStateException.class)
@@ -300,13 +300,13 @@ class AlertDiagnosisAgentTest {
     }
 
     private static ParkContext sampleContext() {
-        MockParkSystem parkSystem = new MockParkSystem();
+        MockParkFixture parkSystem = new MockParkFixture();
         return new ParkContext(
                 "PARK-A",
                 "A1",
-                parkSystem.getDevice("DEV-HVAC-001"),
-                parkSystem.findHistory("DEV-HVAC-001"),
-                parkSystem.findByWorkflowId("wf-missing"));
+                parkSystem.devices().getDevice("DEV-HVAC-001"),
+                parkSystem.alerts().findHistory("DEV-HVAC-001"),
+                parkSystem.workOrders().findByWorkflowId("wf-missing"));
     }
 
     private static List<KnowledgeDocument> sampleKnowledge() {

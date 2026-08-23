@@ -4,6 +4,7 @@ import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.example.smartpark.agent.AlertDiagnosisAgent;
 import com.example.smartpark.agent.AlertTriageAgent;
 import com.example.smartpark.agent.TestChatModel;
+import com.example.smartpark.adapter.mock.MockParkFixture;
 import com.example.smartpark.model.common.ApprovalDecision;
 import com.example.smartpark.model.common.Diagnosis;
 import com.example.smartpark.model.common.WorkOrder;
@@ -11,7 +12,6 @@ import com.example.smartpark.model.common.WorkflowStatus;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.knowledge.KnowledgePort;
 import com.example.smartpark.port.workorder.WorkOrderPort;
-import com.example.smartpark.park.mock.MockParkSystem;
 import com.example.smartpark.tool.alert.AlertQueryTool;
 import com.example.smartpark.tool.device.DeviceQueryTool;
 import com.example.smartpark.tool.knowledge.ParkKnowledgeTool;
@@ -48,7 +48,7 @@ class AlertWorkflowTest {
 
         assertThat(result.status()).as("workflow errors: %s", result.errors()).isEqualTo(WorkflowStatus.COMPLETED);
         assertThat(result.workOrder()).isNotNull();
-        assertThat(fixture.parkSystem.findByWorkflowId(result.workflowId())).hasSize(1);
+        assertThat(fixture.parkSystem.workOrders().findByWorkflowId(result.workflowId())).hasSize(1);
         assertThat(result.statePayload()).containsKeys(
                 AlertWorkflowState.WORKFLOW_ID,
                 AlertWorkflowState.ALERT_ID,
@@ -88,7 +88,7 @@ class AlertWorkflowTest {
                 .isEqualTo(waiting.workflowId());
         assertThat(completed.status()).isEqualTo(WorkflowStatus.COMPLETED);
         assertThat(completed.approval()).contains(approvedAt("2026-08-23T02:00:00Z"));
-        assertThat(fixture.parkSystem.findByWorkflowId(waiting.workflowId())).hasSize(1);
+        assertThat(fixture.parkSystem.workOrders().findByWorkflowId(waiting.workflowId())).hasSize(1);
         List<WorkflowEvent.EventType> eventTypes = fixture.publisher.events(waiting.workflowId())
                 .map(WorkflowEvent::eventType)
                 .collectList()
@@ -113,7 +113,7 @@ class AlertWorkflowTest {
         assertThat(rejected.status()).isEqualTo(WorkflowStatus.REJECTED);
         assertThat(rejected.approval()).get().extracting(ApprovalDecision::decision)
                 .isEqualTo(ApprovalDecision.Decision.REJECTED);
-        assertThat(fixture.parkSystem.findByWorkflowId(waiting.workflowId())).isEmpty();
+        assertThat(fixture.parkSystem.workOrders().findByWorkflowId(waiting.workflowId())).isEmpty();
     }
 
     @Test
@@ -126,7 +126,7 @@ class AlertWorkflowTest {
         assertThat(waiting.status()).isEqualTo(WorkflowStatus.WAITING_APPROVAL);
         assertThat(waiting.diagnosis().evidence()).containsExactly(
                 "INSUFFICIENT_EVIDENCE: no knowledge documents matched the request");
-        assertThat(fixture.parkSystem.findByWorkflowId(waiting.workflowId())).isEmpty();
+        assertThat(fixture.parkSystem.workOrders().findByWorkflowId(waiting.workflowId())).isEmpty();
     }
 
     @Test
@@ -143,7 +143,7 @@ class AlertWorkflowTest {
 
         assertThat(waiting.status()).isEqualTo(WorkflowStatus.WAITING_APPROVAL);
         assertThat(waiting.diagnosis().confidence()).isEqualTo(0.42);
-        assertThat(fixture.parkSystem.findByWorkflowId(waiting.workflowId())).isEmpty();
+        assertThat(fixture.parkSystem.workOrders().findByWorkflowId(waiting.workflowId())).isEmpty();
     }
 
     @Test
@@ -159,7 +159,7 @@ class AlertWorkflowTest {
         assertThat(fixture.store.execution(failed.workflowId()).orElseThrow().failureCause().orElseThrow())
                 .hasMessageContaining("Unknown alert");
         assertThat(failed.workOrder()).isNull();
-        assertThat(fixture.parkSystem.findByWorkflowId(failed.workflowId())).isEmpty();
+        assertThat(fixture.parkSystem.workOrders().findByWorkflowId(failed.workflowId())).isEmpty();
     }
 
     @Test
@@ -186,7 +186,7 @@ class AlertWorkflowTest {
 
         assertThat(duplicate).isEqualTo(completed);
         assertThat(duplicate.approval()).contains(firstDecision);
-        assertThat(fixture.parkSystem.findByWorkflowId(waiting.workflowId())).hasSize(1);
+        assertThat(fixture.parkSystem.workOrders().findByWorkflowId(waiting.workflowId())).hasSize(1);
     }
 
     @Test
@@ -245,11 +245,11 @@ class AlertWorkflowTest {
 
     @Test
     void modelFailureKeepsDetailedCauseInternalAndCheckpointsSafeError() {
-        MockParkSystem parkSystem = new MockParkSystem();
+        MockParkFixture parkSystem = new MockParkFixture();
         AlertDiagnosisAgent failingAgent = mock(AlertDiagnosisAgent.class);
         when(failingAgent.diagnose(any(), any(), anyList(), any()))
                 .thenThrow(new IllegalStateException("model payload apiKey=secret-model-key"));
-        Fixture fixture = fixture(parkSystem, parkSystem, failingAgent, sequentialIds());
+        Fixture fixture = fixture(parkSystem, parkSystem.alerts(), failingAgent, sequentialIds());
 
         WorkflowSnapshot failed = fixture.workflow.start("ALT-TEMP-001");
 
@@ -263,14 +263,14 @@ class AlertWorkflowTest {
 
     @Test
     void agentInitiatedToolCallsUseTheSameRedactedAuditEventStream() {
-        MockParkSystem parkSystem = new MockParkSystem();
+        MockParkFixture parkSystem = new MockParkFixture();
         AlertDiagnosisAgent auditingAgent = mock(AlertDiagnosisAgent.class);
         when(auditingAgent.diagnose(any(), any(), anyList(), any())).thenAnswer(invocation -> {
             Consumer<String> auditor = invocation.getArgument(3);
             auditor.accept("lookupDeviceStatus");
             return diagnosis("ALT-TEMP-001", "LOW", 0.92, false);
         });
-        Fixture fixture = fixture(parkSystem, parkSystem, auditingAgent, sequentialIds());
+        Fixture fixture = fixture(parkSystem, parkSystem.alerts(), auditingAgent, sequentialIds());
 
         WorkflowSnapshot result = fixture.workflow.start("ALT-TEMP-001");
         List<WorkflowEvent> events = fixture.publisher.events(result.workflowId())
@@ -286,9 +286,9 @@ class AlertWorkflowTest {
 
     @Test
     void existingWorkflowWorkOrderIsReusedWithoutCallingCreateAgain() {
-        MockParkSystem parkSystem = new MockParkSystem();
-        CountingWorkOrderPort workOrderPort = new CountingWorkOrderPort(parkSystem);
-        WorkOrder existing = parkSystem.create("wf-fixed", "ALT-TEMP-001", "existing order");
+        MockParkFixture parkSystem = new MockParkFixture();
+        CountingWorkOrderPort workOrderPort = new CountingWorkOrderPort(parkSystem.workOrders());
+        WorkOrder existing = parkSystem.workOrders().create("wf-fixed", "ALT-TEMP-001", "existing order");
         Fixture fixture = fixture(
                 parkSystem,
                 workOrderPort,
@@ -296,14 +296,14 @@ class AlertWorkflowTest {
                 0.92,
                 0.92,
                 "LOW",
-                parkSystem,
+                parkSystem.knowledge(),
                 () -> "wf-fixed");
 
         WorkflowSnapshot result = fixture.workflow.start("ALT-TEMP-001");
 
         assertThat(result.workOrder().id()).isEqualTo(existing.id());
         assertThat(workOrderPort.createCalls()).isZero();
-        assertThat(parkSystem.findByWorkflowId("wf-fixed")).containsExactly(existing);
+        assertThat(parkSystem.workOrders().findByWorkflowId("wf-fixed")).containsExactly(existing);
     }
 
     private static ApprovalDecision approvedAt(String instant) {
@@ -341,20 +341,20 @@ class AlertWorkflowTest {
             String riskLevel,
             KnowledgePort knowledgePort,
             Supplier<String> workflowIds) {
-        MockParkSystem parkSystem = new MockParkSystem();
+        MockParkFixture parkSystem = new MockParkFixture();
         return fixture(
                 parkSystem,
-                parkSystem,
+                parkSystem.workOrders(),
                 alertId,
                 classificationConfidence,
                 diagnosisConfidence,
                 riskLevel,
-                knowledgePort == null ? parkSystem : knowledgePort,
+                knowledgePort == null ? parkSystem.knowledge() : knowledgePort,
                 workflowIds);
     }
 
     private static Fixture fixture(
-            MockParkSystem parkSystem,
+            MockParkFixture parkSystem,
             WorkOrderPort workOrderPort,
             String alertId,
             double classificationConfidence,
@@ -373,8 +373,8 @@ class AlertWorkflowTest {
         AlertTriageAgent triageAgent = new AlertTriageAgent(triageModel);
         AlertDiagnosisAgent diagnosisAgent = new AlertDiagnosisAgent(
                 diagnosisModel,
-                new DeviceQueryTool(parkSystem),
-                new AlertQueryTool(parkSystem),
+                new DeviceQueryTool(parkSystem.devices()),
+                new AlertQueryTool(parkSystem.alerts()),
                 new WorkOrderTool(workOrderPort),
                 new ParkKnowledgeTool(knowledgePort));
         WorkflowExecutionStore store = WorkflowExecutionStore.inMemory();
@@ -382,8 +382,8 @@ class AlertWorkflowTest {
         AlertWorkflow workflow = new AlertWorkflow(
                 triageAgent,
                 diagnosisAgent,
-                parkSystem,
-                parkSystem,
+                parkSystem.devices(),
+                parkSystem.alerts(),
                 workOrderPort,
                 knowledgePort,
                 store,
@@ -394,7 +394,7 @@ class AlertWorkflowTest {
     }
 
     private static Fixture fixture(
-            MockParkSystem parkSystem,
+            MockParkFixture parkSystem,
             AlertPort alertPort,
             AlertDiagnosisAgent diagnosisAgent,
             Supplier<String> workflowIds) {
@@ -405,10 +405,10 @@ class AlertWorkflowTest {
         AlertWorkflow workflow = new AlertWorkflow(
                 triageAgent,
                 diagnosisAgent,
-                parkSystem,
+                parkSystem.devices(),
                 alertPort,
-                parkSystem,
-                parkSystem,
+                parkSystem.workOrders(),
+                parkSystem.knowledge(),
                 store,
                 publisher,
                 CLOCK,
@@ -478,7 +478,7 @@ class AlertWorkflowTest {
 
     private record Fixture(
             AlertWorkflow workflow,
-            MockParkSystem parkSystem,
+            MockParkFixture parkSystem,
             WorkflowExecutionStore store,
             WorkflowEventPublisher publisher) {
     }
