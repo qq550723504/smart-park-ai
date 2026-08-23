@@ -100,7 +100,9 @@ Remove-Variable secureDashScopeKey
 
 - **告警（alert）：** `AlertPort`、告警查询工具和通用告警工作流负责告警读取、诊断、风险门禁、人工审批与 Mock 工单。
 - **能耗（energy）：** `EnergyPort`、`EnergyReading` 和 `EnergyQueryTool` 负责只读能耗查询；它不直接控制设备。
-- **安防（security）：** `SecurityEvent` 和 `SecurityPort` 位于独立的 `model/security`、`port/security` 包中，目前只约束事件查询接口和脱敏摘要格式，不接入任何数据源。
+- **安防（security）：** `SecurityEvent` 和 `SecurityPort` 位于独立的 `model/security`、`port/security` 包中，目前只约束事件查询接口和脱敏摘要格式，不接入任何数据源。`evidenceSummary` 必须在 `trim()` 后以稳定前缀 `REDACTED:` 开头、包含非空摘要且不超过 512 个字符；边界模型会拒绝明显的 `data:`、`base64`、原始视频/图片、人脸或身份证载荷标记。
+
+`evidenceSummary` 的格式校验只是边界层的轻量输入约束，不等于认证、授权或业务脱敏。后续适配器仍必须负责真实身份认证、权限判断、租户/业务策略和原始数据脱敏，不能因为通过该格式校验就接入摄像头、门禁或人员原始数据。
 
 后续安防接入点是实现一个经过认证、授权和脱敏处理的 `SecurityPort` 适配器，再按权限提供安防查询工具；在此之前不要把摄像头、门禁或人员原始数据接入通用告警模型。
 
