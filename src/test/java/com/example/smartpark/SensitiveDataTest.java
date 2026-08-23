@@ -323,6 +323,20 @@ class SensitiveDataTest {
         assertScannerFindsCredential(directory, fixture);
     }
 
+    @Test
+    void scannerDetectsCredentialInUtf8TextWithMalformedTrailingByte(@TempDir Path directory)
+            throws Exception {
+        String keyName = "AI_" + "DASHSCOPE_API_KEY";
+        byte[] assignment = (keyName + "=private-value-123").getBytes(StandardCharsets.UTF_8);
+        byte[] malformed = ByteBuffer.allocate(assignment.length + 1)
+                .put(assignment)
+                .put((byte) 0xFF)
+                .array();
+        EncodedText fixture = new EncodedText("utf8-malformed-trailing-byte.txt", malformed);
+
+        assertScannerFindsCredential(directory, fixture);
+    }
+
     private static void assertScannerFindsCredential(Path directory, EncodedText fixture) throws IOException {
         Path path = directory.resolve(fixture.name());
         Files.write(path, fixture.bytes());
@@ -376,23 +390,27 @@ class SensitiveDataTest {
     }
 
     private static Optional<String> decodeText(byte[] bytes) {
+        Optional<String> decoded;
         if (startsWith(bytes, 0xEF, 0xBB, 0xBF)) {
-            return decodeCandidate(bytes, 3, StandardCharsets.UTF_8).map(TextCandidate::content);
+            decoded = decodeCandidate(bytes, 3, StandardCharsets.UTF_8).map(TextCandidate::content);
         }
-        if (startsWith(bytes, 0xFF, 0xFE)) {
-            return decodeCandidate(bytes, 2, StandardCharsets.UTF_16LE).map(TextCandidate::content);
+        else if (startsWith(bytes, 0xFF, 0xFE)) {
+            decoded = decodeCandidate(bytes, 2, StandardCharsets.UTF_16LE).map(TextCandidate::content);
         }
-        if (startsWith(bytes, 0xFE, 0xFF)) {
-            return decodeCandidate(bytes, 2, StandardCharsets.UTF_16BE).map(TextCandidate::content);
+        else if (startsWith(bytes, 0xFE, 0xFF)) {
+            decoded = decodeCandidate(bytes, 2, StandardCharsets.UTF_16BE).map(TextCandidate::content);
+        }
+        else {
+            decoded = List.of(StandardCharsets.UTF_8, StandardCharsets.UTF_16LE, StandardCharsets.UTF_16BE)
+                    .stream()
+                    .map(charset -> decodeCandidate(bytes, 0, charset))
+                    .flatMap(Optional::stream)
+                    .max(Comparator.comparingDouble(TextCandidate::score)
+                            .thenComparingInt(TextCandidate::charsetPreference))
+                    .map(TextCandidate::content);
         }
 
-        return List.of(StandardCharsets.UTF_8, StandardCharsets.UTF_16LE, StandardCharsets.UTF_16BE)
-                .stream()
-                .map(charset -> decodeCandidate(bytes, 0, charset))
-                .flatMap(Optional::stream)
-                .max(Comparator.comparingDouble(TextCandidate::score)
-                        .thenComparingInt(TextCandidate::charsetPreference))
-                .map(TextCandidate::content);
+        return decoded.or(() -> Optional.of(new String(bytes, StandardCharsets.ISO_8859_1)));
     }
 
     private static Optional<TextCandidate> decodeCandidate(byte[] bytes, int offset, Charset charset) {
