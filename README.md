@@ -11,6 +11,7 @@
 - 不要求系统安装 Maven，使用仓库中的 Maven Wrapper 即可
 
 默认配置从进程环境变量 `AI_DASHSCOPE_API_KEY` 读取密钥。不要把密钥写入源码、本文档、`.env` 文件、命令行参数或 Shell 历史记录。
+DashScope 自动配置默认开启，也可以通过 `SPRING_AI_DASHSCOPE_ENABLED=false` 显式关闭。
 
 ## 构建与测试
 
@@ -62,6 +63,20 @@ unset AI_DASHSCOPE_API_KEY
 ```
 
 启动工作流会调用配置的 `qwen-plus` 聊天模型，因此需要外部模型服务和网络。单元测试与集成测试使用测试替身或禁用 DashScope，不需要真实密钥，也不会调用真实模型。
+
+### 可选的真实 DashScope 连通性验证
+
+默认测试不会访问网络。只有同时设置当前进程的 `AI_DASHSCOPE_API_KEY`，并显式传入 `run.dashscope.smoke=true`，才会执行一次真实 `qwen-plus` 调用：
+
+```powershell
+$secureDashScopeKey = Read-Host 'DashScope API key' -AsSecureString
+$env:AI_DASHSCOPE_API_KEY = [System.Net.NetworkCredential]::new('', $secureDashScopeKey).Password
+.\mvnw.cmd -Drun.dashscope.smoke=true -Dtest=DashScopeSmokeTest test
+Remove-Item Env:AI_DASHSCOPE_API_KEY
+Remove-Variable secureDashScopeKey
+```
+
+验证内容只检查模型返回非空，不会输出 API Key 或完整模型响应。没有 Key 时，该测试会安全跳过。
 
 ## Mock 告警数据
 
