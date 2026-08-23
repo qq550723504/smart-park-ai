@@ -94,4 +94,13 @@ export const demoAlerts: DemoAlert[] = [
     category: '能耗异常',
     description: '当前时段能耗比学习基线高出 38%。',
   },
+  {
+    id: 'ALT-ACCESS-001',
+    title: '北门非开放时段连续拒绝访问',
+    device: '北门门禁控制器',
+    building: 'A1 · 北门入口',
+    risk: 'HIGH',
+    category: '安防异常',
+    description: '匿名凭证连续三次被拒绝，仅提供脱敏规则摘要。',
+  },
 ]

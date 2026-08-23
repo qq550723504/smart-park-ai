@@ -1,8 +1,8 @@
-# 智慧园区告警与能耗学习项目
+# 智慧园区告警、能耗与安防学习项目
 
-这是一个面向学习的 Spring AI Alibaba 智慧园区项目，当前提供告警处置和能耗查询两个能力：接收园区告警，采集 Mock 园区上下文，生成结构化诊断，执行风险门禁，在需要时暂停等待人工审批，创建内存中的 Mock 工单，并通过 SSE 推送工作流事件。能耗能力通过只读端口向告警诊断提供当前值、基线和峰值功率。
+这是一个面向学习的 Spring AI Alibaba 智慧园区项目，当前提供告警处置、能耗查询和安防事件查询三个能力：接收园区告警，采集 Mock 园区上下文，生成结构化诊断，执行风险门禁，在需要时暂停等待人工审批，创建内存中的 Mock 工单，并通过 SSE 推送工作流事件。能耗能力通过只读端口提供当前值、基线和峰值功率；安防能力只提供脱敏事件摘要。
 
-> 安全边界：当前 Mock 适配器只读取种子数据，并把工单写入内存；它不会检查、切换、重启、隔离或控制任何真实设备。安防能力目前只有编译期边界，没有 Spring Bean、Mock 数据、HTTP 端点或工作流分支。`SecurityEvent.evidenceSummary` 只能保存脱敏摘要，不得保存原始视频、图片、人脸特征或身份证等人员原始记录。不要把本示例当作生产控制系统使用。
+> 安全边界：当前 Mock 适配器只读取种子数据，并把工单写入内存；它不会检查、切换、重启、隔离或控制任何真实设备。安防场景只有脱敏 Mock 摘要、只读查询工具和通用告警工作流入口，没有真实摄像头、门禁或人员系统接入。`SecurityEvent.evidenceSummary` 只能保存脱敏摘要，不得保存原始视频、图片、人脸特征或身份证等人员原始记录。不要把本示例当作生产控制系统使用。
 
 ## 环境要求
 
@@ -86,25 +86,26 @@ Remove-Variable secureDashScopeKey
 
 ## 当前能力与 Mock 数据
 
-应用每次启动时都会重置共享 Mock 内存数据，并提供以下三个告警工作流入口：
+应用每次启动时都会重置共享 Mock 内存数据，并提供以下四个告警工作流入口：
 
 | 告警 ID | 设备 | 种子风险提示 | 练习内容 |
 | --- | --- | --- | --- |
 | `ALT-TEMP-001` | `DEV-HVAC-001` | `LOW` | 温度告警分诊与 HVAC 知识检索。诊断风险较高、置信度较低或证据不足时仍可能进入审批。 |
 | `ALT-POWER-001` | `DEV-POWER-001` | `HIGH` | 高风险电力告警诊断。执行到风险门禁后必须暂停等待审批。 |
 | `ALT-ENERGY-001` | `DEV-ENERGY-001` | `HIGH` | 建筑能耗高于基线的异常诊断。Agent 可以通过只读能耗工具查询当前值、基线和峰值功率；由于当前种子风险为 `HIGH`，执行到风险门禁后必须等待审批。 |
+| `ALT-ACCESS-001` | `DEV-ACCESS-001` | `HIGH` | 非开放时段连续门禁拒绝事件。Agent 只能通过安防工具查询 `REDACTED:` 脱敏摘要，不会取得人员身份或原始媒体；流程必须等待人工审批。 |
 
 工作流状态、事件、审批和工单都保存在内存中，应用重启后会丢失。
 
 当前能力边界如下：
 
 - **告警（alert）：** `AlertPort`、告警查询工具和通用告警工作流负责告警读取、诊断、风险门禁、人工审批与 Mock 工单。
-- **能耗（energy）：** `EnergyPort`、`EnergyReading` 和 `EnergyQueryTool` 负责只读能耗查询；它不直接控制设备。
-- **安防（security）：** `SecurityEvent` 和 `SecurityPort` 位于独立的 `model/security`、`port/security` 包中，目前只约束事件查询接口和脱敏摘要格式，不接入任何数据源。`evidenceSummary` 必须在 `trim()` 后以稳定前缀 `REDACTED:` 开头、包含非空摘要且不超过 512 个字符；边界模型会拒绝明显的 `data:`、`base64`、原始视频/图片、人脸或身份证载荷标记。
+- **能耗（energy）：** `EnergyPort`、`EnergyReading` 和 `EnergyQueryTool` 负责只读能耗查询；通用 Graph 会将 `ENERGY` 告警路由到 `energyAnalysis` 节点，生成当前值、基线、偏差比例和峰值需求分析，再进入知识检索和诊断。
+- **安防（security）：** `SecurityEvent`、`SecurityPort`、`MockSecurityAdapter` 和 `SecurityQueryTool` 提供脱敏 Mock 事件的只读查询。通用 Graph 会将 `ACCESS` 告警路由到 `securityReview` 节点，校验事件引用和 `REDACTED:` 摘要后再进入知识检索、诊断和强制人工审批。
 
 `evidenceSummary` 的格式校验只是边界层的轻量输入约束，不等于认证、授权或业务脱敏。后续适配器仍必须负责真实身份认证、权限判断、租户/业务策略和原始数据脱敏，不能因为通过该格式校验就接入摄像头、门禁或人员原始数据。
 
-后续安防接入点是实现一个经过认证、授权和脱敏处理的 `SecurityPort` 适配器，再按权限提供安防查询工具；在此之前不要把摄像头、门禁或人员原始数据接入通用告警模型。
+当前安防适配器仅用于本地演示。接入真实系统时，必须在 `SecurityPort` 适配器前增加身份认证、细粒度授权、租户隔离、审计和专用脱敏服务，且不能把摄像头、门禁或人员原始数据接入通用告警模型。
 
 ## REST 与 SSE 示例
 
@@ -116,7 +117,7 @@ Remove-Variable secureDashScopeKey
 curl -X POST "http://localhost:8080/api/alerts/ALT-TEMP-001/workflows"
 ```
 
-也可以使用 `ALT-POWER-001` 或 `ALT-ENERGY-001` 练习必经人工审批的高风险流程。保存响应中的 `workflowId`，供后续请求使用。
+也可以使用 `ALT-POWER-001`、`ALT-ENERGY-001` 或 `ALT-ACCESS-001` 练习必经人工审批的高风险流程。保存响应中的 `workflowId`，供后续请求使用。
 
 ### 2. 查询工作流状态
 
@@ -161,7 +162,8 @@ curl -N -H "Accept: text/event-stream" "http://localhost:8080/api/workflows/repl
 | --- | --- | --- |
 | `ChatModel` / `ChatClient` | `com.example.smartpark.agent` | `AlertTriageAgent` 直接调用 `ChatModel`；`AlertDiagnosisAgent` 基于注入的模型构建 `ChatClient`。 |
 | Tool Calling | `com.example.smartpark.tool` 与 `AlertDiagnosisAgent` | 将 `@Tool` 方法转换为回调并传给诊断调用。诊断只接收经过审计的只读回调，工单创建仍由确定性的工作流动作负责。 |
-| 能耗场景 | `EnergyReading`、`EnergyPort`、`EnergyQueryTool` | 以当前能耗与基线的偏差作为诊断证据，保留表计查询和真实园区系统之间的适配器边界。 |
+| 能耗场景 | `EnergyReading`、`EnergyPort`、`EnergyQueryTool`、`energyAnalysis` | Graph 根据告警类型进入能耗专属节点，以当前值、基线、偏差和峰值需求作为诊断证据，再复用公共风险门禁和工单处理。 |
+| 安防场景 | `SecurityEvent`、`SecurityPort`、`SecurityQueryTool`、`securityReview` | Graph 根据告警类型进入安防专属节点，只向诊断提供脱敏事件摘要，再复用公共风险门禁和人工审批；明确禁止原始媒体、身份数据和控制能力。 |
 | 结构化输出 | `AlertTriageAgent`、`AlertDiagnosisAgent`、`PromptCatalog` | Prompt 要求 JSON；Agent 使用 Jackson 解析，拒绝缺失字段和多余字段，校验枚举与范围，再构造类型安全的记录和领域对象。示例没有把校验隐藏在自动输出转换器后面。 |
 | Graph 与状态 | `com.example.smartpark.workflow.AlertWorkflow`、`AlertWorkflowNodes`、`AlertWorkflowState` | 将 Spring AI Alibaba `StateGraph` 编译为有序、条件化的节点，并使用明确的状态键和 reducer。 |
 | 中断与恢复 | `AlertWorkflowNodes.HumanApprovalAction`、`AlertWorkflow.approve` | 高风险或不确定流程产生中断元数据，保存内存执行状态，接收操作人反馈，并恢复同一个 Graph 线程。 |
@@ -176,5 +178,5 @@ curl -N -H "Accept: text/event-stream" "http://localhost:8080/api/workflows/repl
 - **Embedding/RAG：** Mock 知识适配器只是内存中的确定性关键词匹配。当前没有 Embedding 模型、向量数据库、数据导入流程或 RAG 链路。
 - **PostgreSQL checkpoint：** Graph 执行、事件、审批、幂等记录和工单都保存在进程内存中。当前没有 PostgreSQL checkpoint 或重启恢复能力。
 - **认证与授权：** 四个 HTTP 端点没有身份、角色、租户或审批策略校验。
-- **真实适配器：** `AlertPort`、`DevicePort`、`EnergyPort`、`KnowledgePort` 和 `WorkOrderPort` 是扩展边界，当前接入的是按端口拆分的 Mock 适配器。真实园区 API、智能电表、持久化工单和设备控制适配器尚未实现。
-- **安防接入：** `SecurityPort.getEvent(String eventId)` 是下一步接入点；尚未实现摄像头、门禁、人员系统、认证授权、脱敏服务或安防工作流。
+- **真实适配器：** `AlertPort`、`DevicePort`、`EnergyPort`、`SecurityPort`、`KnowledgePort` 和 `WorkOrderPort` 是扩展边界，当前仅接入内存 Mock 适配器。真实园区 API、智能电表、安防系统、持久化工单和设备控制适配器尚未实现。
+- **生产安防接入：** 当前 `SecurityPort` 只读取固定脱敏种子数据；尚未实现摄像头、门禁、人员系统、认证授权、租户隔离、专用脱敏服务或安防数据持久化。

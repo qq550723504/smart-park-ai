@@ -63,7 +63,7 @@ function confidence(value?: number) {
           <p class="hero-copy">从告警分诊到 AI 诊断，再到风险闸门和人工审批，实时掌握园区异常的每一步。</p>
         </div>
         <div class="hero-metrics">
-          <div><strong>03</strong><span>演示告警</span></div>
+          <div><strong>04</strong><span>演示告警</span></div>
           <div><strong>08</strong><span>工作流节点</span></div>
           <div><strong>SSE</strong><span>实时事件</span></div>
         </div>

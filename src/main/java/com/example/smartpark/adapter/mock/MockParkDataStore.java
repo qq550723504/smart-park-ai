@@ -8,6 +8,7 @@ import com.example.smartpark.model.common.RiskLevel;
 import com.example.smartpark.model.common.WorkOrder;
 import com.example.smartpark.model.common.WorkflowStatus;
 import com.example.smartpark.model.energy.EnergyReading;
+import com.example.smartpark.model.security.SecurityEvent;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -28,9 +29,11 @@ public class MockParkDataStore {
     private static final Instant HISTORY_BASE_TIME = Instant.parse("2026-08-22T23:00:00Z");
     private static final Instant KNOWLEDGE_BASE_TIME = Instant.parse("2026-08-20T00:00:00Z");
     private static final Instant WORK_ORDER_BASE_TIME = Instant.parse("2026-08-23T01:00:00Z");
+    private static final Instant SECURITY_BASE_TIME = Instant.parse("2026-08-23T00:24:00Z");
 
     private final Map<String, Device> devices = new ConcurrentHashMap<>();
     private final Map<String, EnergyReading> energyReadings = new ConcurrentHashMap<>();
+    private final Map<String, SecurityEvent> securityEvents = new ConcurrentHashMap<>();
     private final Map<String, Alert> alerts = new ConcurrentHashMap<>();
     private final Map<String, List<Alert>> historyByDevice = new ConcurrentHashMap<>();
     private final Map<String, KnowledgeDocument> knowledgeDocuments = new ConcurrentHashMap<>();
@@ -41,13 +44,14 @@ public class MockParkDataStore {
 
     final void reset() {
         // 重置动态数据后重新装载基础设备、告警、历史记录和知识库。
-        devices.clear(); energyReadings.clear(); alerts.clear(); historyByDevice.clear();
+        devices.clear(); energyReadings.clear(); securityEvents.clear(); alerts.clear(); historyByDevice.clear();
         knowledgeDocuments.clear(); workOrdersByWorkflowId.clear(); workOrderSequence.set(0);
-        seedDevices(); seedAlerts(); seedHistory(); seedKnowledge();
+        seedDevices(); seedSecurityEvents(); seedAlerts(); seedHistory(); seedKnowledge();
     }
 
     Device getDevice(String deviceId) { return require(devices, deviceId, "device"); }
     EnergyReading getLatestEnergyReading(String meterId) { return require(energyReadings, meterId, "energy meter"); }
+    SecurityEvent getSecurityEvent(String eventId) { return require(securityEvents, eventId, "security event"); }
     Alert getAlert(String alertId) { return require(alerts, alertId, "alert"); }
     List<Alert> findHistory(String deviceId) { return historyByDevice.getOrDefault(deviceId, List.of()); }
 
@@ -81,6 +85,16 @@ public class MockParkDataStore {
         putEnergyReading(new EnergyReading("DEV-ENERGY-001", PARK_ID, "A2", ALERT_BASE_TIME.plus(Duration.ofMinutes(6)), 138.0, 100.0, 42.5));
     }
 
+    private void seedSecurityEvents() {
+        securityEvents.put("SEC-ACCESS-001", new SecurityEvent(
+                "SEC-ACCESS-001",
+                PARK_ID,
+                "A1",
+                "UNAUTHORIZED_ACCESS_ATTEMPT",
+                SECURITY_BASE_TIME,
+                "REDACTED: 北门门禁在非开放时段连续拒绝同一匿名凭证三次；仅保留规则命中与次数摘要，未保留人员身份、图像或生物特征。"));
+    }
+
     private void seedAlerts() {
         putAlert(alert("ALT-TEMP-001", "DEV-HVAC-001", "A1", AlertClassification.TEMPERATURE, RiskLevel.LOW,
                 "Temperature rising in HVAC room", "Supply air temperature exceeded the comfort threshold.", ALERT_BASE_TIME, List.of("sensor:temp-01", "trend:upward")));
@@ -88,6 +102,8 @@ public class MockParkDataStore {
                 "Power fluctuation on main panel", "Voltage instability detected on the main distribution panel.", ALERT_BASE_TIME.plus(Duration.ofMinutes(3)), List.of("meter:phase-a", "meter:phase-b", "meter:phase-c")));
         putAlert(alert("ALT-ENERGY-001", "DEV-ENERGY-001", "A2", AlertClassification.ENERGY, RiskLevel.HIGH,
                 "Unexpected energy consumption in building A2", "Current interval consumption is 38 percent above the learned baseline.", ALERT_BASE_TIME.plus(Duration.ofMinutes(6)), List.of("meter:current-kwh=138", "baseline:kwh=100", "trend:after-hours")));
+        putAlert(alert("ALT-ACCESS-001", "DEV-ACCESS-001", "A1", AlertClassification.ACCESS, RiskLevel.HIGH,
+                "Repeated access denial at the north entrance", "A redacted security event was correlated with repeated denied access attempts outside opening hours.", ALERT_BASE_TIME.plus(Duration.ofMinutes(9)), List.of("security-event:SEC-ACCESS-001", "evidence:redacted-only")));
     }
 
     private void seedHistory() {
@@ -99,6 +115,8 @@ public class MockParkDataStore {
                 alert("ALT-HIST-POWER-002", "DEV-POWER-001", "A2", AlertClassification.POWER, RiskLevel.HIGH, "Breaker inspection reminder", "The main panel had a previous breaker inspection note.", HISTORY_BASE_TIME.plus(Duration.ofHours(5)), List.of("log:breaker-note"))));
         historyByDevice.put("DEV-ENERGY-001", List.of(
                 alert("ALT-HIST-ENERGY-001", "DEV-ENERGY-001", "A2", AlertClassification.ENERGY, RiskLevel.HIGH, "Previous after-hours energy spike", "The meter previously reported elevated consumption after normal operating hours.", HISTORY_BASE_TIME.plus(Duration.ofHours(2)), List.of("log:after-hours-spike"))));
+        historyByDevice.put("DEV-ACCESS-001", List.of(
+                alert("ALT-HIST-ACCESS-001", "DEV-ACCESS-001", "A1", AlertClassification.ACCESS, RiskLevel.LOW, "Previous isolated access denial", "A single denied attempt was recorded without retained identity or media data.", HISTORY_BASE_TIME.plus(Duration.ofHours(3)), List.of("security-summary:redacted"))));
     }
 
     private void seedKnowledge() {
@@ -107,6 +125,7 @@ public class MockParkDataStore {
         putKnowledge(new KnowledgeDocument("KD-LEAK-001", "Water leak response", "Pump rooms and valve closets should be inspected for water accumulation and isolation valve issues.", List.of("leak", "pump", "water"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(1))));
         putKnowledge(new KnowledgeDocument("KD-POWER-001", "Power emergency runbook", "Stabilize the electrical load, notify facilities, and inspect breaker and UPS conditions immediately.", List.of("power", "emergency", "breaker"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(2))));
         putKnowledge(new KnowledgeDocument("KD-ENERGY-001", "Energy anomaly response playbook", "For consumption above baseline, compare operating schedules, inspect HVAC and lighting runtime, and verify the meter before creating corrective work.", List.of("energy", "consumption", "baseline", "efficiency"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(3))));
+        putKnowledge(new KnowledgeDocument("KD-ACCESS-001", "Access anomaly response playbook", "For repeated denied access, preserve only approved audit summaries, notify authorized security staff, verify controller health, and require human review before dispatch. Do not expose identity or raw media.", List.of("access", "security", "denied", "entrance"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(4))));
     }
 
     private Device device(String id, String buildingId, String name, String category, String status, int dayOffset) {

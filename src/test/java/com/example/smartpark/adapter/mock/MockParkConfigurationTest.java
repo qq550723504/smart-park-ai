@@ -33,10 +33,11 @@ class MockParkConfigurationTest {
         assertThat(applicationContext.getBeansOfType(EnergyPort.class)).hasSize(1);
         assertThat(applicationContext.getBeansOfType(KnowledgePort.class)).hasSize(1);
         assertThat(applicationContext.getBeansOfType(WorkOrderPort.class)).hasSize(1);
-        assertThat(applicationContext.getBeansOfType(SecurityPort.class)).isEmpty();
+        assertThat(applicationContext.getBeansOfType(SecurityPort.class)).hasSize(1);
         assertThat(applicationContext.getBeansOfType(MockAlertAdapter.class)).hasSize(1);
         assertThat(applicationContext.getBeansOfType(MockDeviceAdapter.class)).hasSize(1);
         assertThat(applicationContext.getBeansOfType(MockEnergyAdapter.class)).hasSize(1);
+        assertThat(applicationContext.getBeansOfType(MockSecurityAdapter.class)).hasSize(1);
         assertThat(applicationContext.getBeansOfType(MockKnowledgeAdapter.class)).hasSize(1);
         assertThat(applicationContext.getBeansOfType(MockWorkOrderAdapter.class)).hasSize(1);
 
@@ -44,6 +45,7 @@ class MockParkConfigurationTest {
         assertThat(readDataStoreField(applicationContext.getBean(MockAlertAdapter.class))).isSameAs(dataStore);
         assertThat(readDataStoreField(applicationContext.getBean(MockDeviceAdapter.class))).isSameAs(dataStore);
         assertThat(readDataStoreField(applicationContext.getBean(MockEnergyAdapter.class))).isSameAs(dataStore);
+        assertThat(readDataStoreField(applicationContext.getBean(MockSecurityAdapter.class))).isSameAs(dataStore);
         assertThat(readDataStoreField(applicationContext.getBean(MockKnowledgeAdapter.class))).isSameAs(dataStore);
         assertThat(readDataStoreField(applicationContext.getBean(MockWorkOrderAdapter.class))).isSameAs(dataStore);
 

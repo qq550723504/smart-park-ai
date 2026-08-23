@@ -10,16 +10,27 @@ import '@vue-flow/controls/dist/style.css'
 
 const props = defineProps<{ workflow: WorkflowResponse | null; events: WorkflowEvent[] }>()
 
-const definitions = [
-  ['classifyAlert', '告警分诊', 30, 130],
-  ['collectParkContext', '收集园区上下文', 230, 130],
-  ['retrieveKnowledge', '检索知识库', 450, 130],
-  ['diagnoseAlert', 'AI 告警诊断', 650, 130],
-  ['riskGate', '风险判断', 850, 130],
-  ['humanApproval', '人工审批', 850, 280],
-  ['createWorkOrder', '创建工单', 1070, 130],
-  ['summarizeResult', '汇总结果', 1270, 130],
-] as const
+const selectedDefinition = computed(() => {
+  const alertId = props.workflow?.alertId ?? ''
+  if (alertId === 'ALT-ENERGY-001') return ['energyAnalysis', '能耗基线分析'] as const
+  if (alertId === 'ALT-ACCESS-001') return ['securityReview', '安防脱敏复核'] as const
+  return null
+})
+
+const definitions = computed(() => {
+  const scenario = selectedDefinition.value
+  return [
+    ['classifyAlert', '告警分诊', 20, 130],
+    ['collectParkContext', '收集园区上下文', 200, 130],
+    ...(scenario ? [[scenario[0], scenario[1], 400, 130] as const] : []),
+    ['retrieveKnowledge', '检索知识库', scenario ? 600 : 400, 130],
+    ['diagnoseAlert', 'AI 场景诊断', scenario ? 800 : 600, 130],
+    ['riskGate', '风险判断', scenario ? 1000 : 800, 130],
+    ['humanApproval', '人工审批', scenario ? 1000 : 800, 280],
+    ['createWorkOrder', '创建工单', scenario ? 1200 : 1000, 130],
+    ['summarizeResult', '汇总结果', scenario ? 1400 : 1200, 130],
+  ] as const
+})
 
 function nodeStatus(id: string) {
   const related = props.events.filter((event) => event.node === id)
@@ -32,7 +43,7 @@ function nodeStatus(id: string) {
   return 'pending'
 }
 
-const nodes = computed<Node[]>(() => definitions.map(([id, label, x, y]) => ({
+const nodes = computed<Node[]>(() => definitions.value.map(([id, label, x, y]) => ({
   id,
   position: { x, y },
   sourcePosition: Position.Right,
@@ -42,17 +53,22 @@ const nodes = computed<Node[]>(() => definitions.map(([id, label, x, y]) => ({
   draggable: false,
 })))
 
-const edges: Edge[] = [
-  ['classifyAlert', 'collectParkContext'],
-  ['collectParkContext', 'retrieveKnowledge'],
-  ['retrieveKnowledge', 'diagnoseAlert'],
-  ['diagnoseAlert', 'riskGate'],
-  ['riskGate', 'createWorkOrder'],
-  ['riskGate', 'humanApproval'],
-  ['humanApproval', 'createWorkOrder'],
-  ['humanApproval', 'summarizeResult'],
-  ['createWorkOrder', 'summarizeResult'],
-].map(([source, target], index) => ({ id: `e${index}`, source, target, animated: true }))
+const edges = computed<Edge[]>(() => {
+  const scenario = selectedDefinition.value?.[0]
+  const pairs = [
+    ['classifyAlert', 'collectParkContext'],
+    ['collectParkContext', scenario ?? 'retrieveKnowledge'],
+    ...(scenario ? [[scenario, 'retrieveKnowledge']] : []),
+    ['retrieveKnowledge', 'diagnoseAlert'],
+    ['diagnoseAlert', 'riskGate'],
+    ['riskGate', 'createWorkOrder'],
+    ['riskGate', 'humanApproval'],
+    ['humanApproval', 'createWorkOrder'],
+    ['humanApproval', 'summarizeResult'],
+    ['createWorkOrder', 'summarizeResult'],
+  ]
+  return pairs.map(([source, target], index) => ({ id: `e${index}`, source, target, animated: true }))
+})
 </script>
 
 <template>

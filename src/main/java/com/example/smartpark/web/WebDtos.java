@@ -28,7 +28,7 @@ public final class WebDtos {
     private static final Pattern PARK_ID = Pattern.compile("PARK-[A-Z0-9-]{1,120}");
     private static final Pattern BUILDING_ID = Pattern.compile("[A-Z][A-Z0-9-]{0,31}");
     private static final Pattern EVENT_NODE = Pattern.compile(
-            "(?:workflow|classifyAlert|collectParkContext|retrieveKnowledge|diagnoseAlert|riskGate|humanApproval|createWorkOrder|summarizeResult)");
+            "(?:workflow|classifyAlert|collectParkContext|energyAnalysis|securityReview|retrieveKnowledge|diagnoseAlert|riskGate|humanApproval|createWorkOrder|summarizeResult)");
 
     private WebDtos() {
     }

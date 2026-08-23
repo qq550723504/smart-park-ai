@@ -51,13 +51,17 @@ class EnergyWorkflowTest {
                 fixture.workOrders(),
                 fixture.knowledge(),
                 WorkflowExecutionStore.inMemory(),
-                WorkflowEventPublisher.inMemory());
+                WorkflowEventPublisher.inMemory(),
+                fixture.energy(),
+                fixture.security());
 
         WorkflowSnapshot result = workflow.start("ALT-ENERGY-001");
 
         assertThat(result.status()).isEqualTo(WorkflowStatus.WAITING_APPROVAL);
         assertThat(result.statePayload().get(AlertWorkflowState.RETRIEVED_DOCUMENTS).toString())
                 .contains("KD-ENERGY-001");
+        assertThat(result.statePayload().get(AlertWorkflowState.SCENARIO_ANALYSIS).toString())
+                .contains("ENERGY_BASELINE", "current=138.0kWh", "variance=38.0%");
         assertThat(result.diagnosis().summary()).contains("38 percent");
         assertThat(diagnosisModel.lastPrompt().getUserMessage().getText())
                 .contains("Building A2 Energy Meter")

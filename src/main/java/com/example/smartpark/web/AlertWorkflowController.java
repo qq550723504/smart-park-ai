@@ -79,6 +79,8 @@ class AlertWorkflowRuntimeConfiguration {
             AlertPort alertPort,
             WorkOrderPort workOrderPort,
             KnowledgePort knowledgePort,
+            com.example.smartpark.port.energy.EnergyPort energyPort,
+            com.example.smartpark.port.security.SecurityPort securityPort,
             WorkflowExecutionStore executionStore,
             WorkflowEventPublisher eventPublisher) {
         return new AlertWorkflow(
@@ -89,6 +91,8 @@ class AlertWorkflowRuntimeConfiguration {
                 workOrderPort,
                 knowledgePort,
                 executionStore,
-                eventPublisher);
+                eventPublisher,
+                energyPort,
+                securityPort);
     }
 }

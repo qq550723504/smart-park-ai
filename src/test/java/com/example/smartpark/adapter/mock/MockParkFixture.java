@@ -5,6 +5,7 @@ public final class MockParkFixture {
     private final MockAlertAdapter alerts = new MockAlertAdapter(dataStore);
     private final MockDeviceAdapter devices = new MockDeviceAdapter(dataStore);
     private final MockEnergyAdapter energy = new MockEnergyAdapter(dataStore);
+    private final MockSecurityAdapter security = new MockSecurityAdapter(dataStore);
     private final MockKnowledgeAdapter knowledge = new MockKnowledgeAdapter(dataStore);
     private final MockWorkOrderAdapter workOrders = new MockWorkOrderAdapter(dataStore);
 
@@ -18,6 +19,10 @@ public final class MockParkFixture {
 
     public MockEnergyAdapter energy() {
         return energy;
+    }
+
+    public MockSecurityAdapter security() {
+        return security;
     }
 
     public MockKnowledgeAdapter knowledge() {

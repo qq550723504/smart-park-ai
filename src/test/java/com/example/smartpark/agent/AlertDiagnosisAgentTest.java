@@ -11,6 +11,7 @@ import com.example.smartpark.tool.alert.AlertQueryTool;
 import com.example.smartpark.tool.device.DeviceQueryTool;
 import com.example.smartpark.tool.energy.EnergyQueryTool;
 import com.example.smartpark.tool.knowledge.ParkKnowledgeTool;
+import com.example.smartpark.tool.security.SecurityQueryTool;
 import com.example.smartpark.tool.workorder.WorkOrderTool;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -61,6 +62,40 @@ class AlertDiagnosisAgentTest {
                 .toList();
 
         assertThat(toolNames).contains("lookupEnergyConsumption");
+        assertThat(toolNames).doesNotContain("createWorkOrder");
+    }
+
+    @Test
+    void diagnosisExposesOnlyRedactedSecurityEventLookup() {
+        MockParkFixture parkSystem = new MockParkFixture();
+        AlertDiagnosisAgent agent = new AlertDiagnosisAgent(
+                new TestChatModel("""
+                        {
+                          "id":"diag-security-1",
+                          "alertId":"ALT-ACCESS-001",
+                          "deviceId":"DEV-ACCESS-001",
+                          "riskLevel":"HIGH",
+                          "rootCause":"Repeated denied access",
+                          "summary":"An authorized operator should review the redacted event.",
+                          "evidence":["security-event: redacted summary only"],
+                          "recommendedAction":"Review without retrieving raw identity or media.",
+                          "confidence":0.9,
+                          "diagnosedAt":"2026-08-23T01:46:00Z"
+                        }
+                        """),
+                new DeviceQueryTool(parkSystem.devices()),
+                new AlertQueryTool(parkSystem.alerts()),
+                new WorkOrderTool(parkSystem.workOrders()),
+                new ParkKnowledgeTool(parkSystem.knowledge()),
+                new EnergyQueryTool(parkSystem.energy()),
+                new SecurityQueryTool(parkSystem.security()));
+
+        List<String> toolNames = java.util.Arrays.stream(agent.toolCallbacks())
+                .map(ToolCallback::getToolDefinition)
+                .map(org.springframework.ai.tool.definition.ToolDefinition::name)
+                .toList();
+
+        assertThat(toolNames).contains("lookupSecurityEvent");
         assertThat(toolNames).doesNotContain("createWorkOrder");
     }
 

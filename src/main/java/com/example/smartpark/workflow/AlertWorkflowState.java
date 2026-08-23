@@ -39,6 +39,7 @@ public final class AlertWorkflowState {
     public static final String EVENT_SEQUENCE = "eventSequence";
     public static final String ROUTE = "route";
     public static final String RESULT_SUMMARY = "resultSummary";
+    public static final String SCENARIO_ANALYSIS = "scenarioAnalysis";
 
     private static final List<String> REQUIRED_KEYS = List.of(
             WORKFLOW_ID,
@@ -82,6 +83,7 @@ public final class AlertWorkflowState {
         REQUIRED_KEYS.forEach(key -> strategies.put(key, new ReplaceStrategy()));
         strategies.put(ROUTE, new ReplaceStrategy());
         strategies.put(RESULT_SUMMARY, new ReplaceStrategy());
+        strategies.put(SCENARIO_ANALYSIS, new ReplaceStrategy());
         return strategies;
     }
 
@@ -123,6 +125,9 @@ public final class AlertWorkflowState {
         }
         if (data.containsKey(RESULT_SUMMARY)) {
             payload.put(RESULT_SUMMARY, data.get(RESULT_SUMMARY));
+        }
+        if (data.containsKey(SCENARIO_ANALYSIS)) {
+            payload.put(SCENARIO_ANALYSIS, data.get(SCENARIO_ANALYSIS));
         }
         return payload;
     }

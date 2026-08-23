@@ -17,7 +17,9 @@ import com.example.smartpark.model.common.ApprovalDecision;
 import com.example.smartpark.model.common.WorkflowStatus;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.device.DevicePort;
+import com.example.smartpark.port.energy.EnergyPort;
 import com.example.smartpark.port.knowledge.KnowledgePort;
+import com.example.smartpark.port.security.SecurityPort;
 import com.example.smartpark.port.workorder.WorkOrderPort;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -62,7 +64,25 @@ public final class AlertWorkflow {
                 executionStore,
                 eventPublisher,
                 Clock.systemUTC(),
-                () -> UUID.randomUUID().toString());
+                () -> UUID.randomUUID().toString(),
+                null,
+                null);
+    }
+
+    public AlertWorkflow(
+            AlertTriageAgent triageAgent,
+            AlertDiagnosisAgent diagnosisAgent,
+            DevicePort devicePort,
+            AlertPort alertPort,
+            WorkOrderPort workOrderPort,
+            KnowledgePort knowledgePort,
+            WorkflowExecutionStore executionStore,
+            WorkflowEventPublisher eventPublisher,
+            EnergyPort energyPort,
+            SecurityPort securityPort) {
+        this(triageAgent, diagnosisAgent, devicePort, alertPort, workOrderPort, knowledgePort,
+                executionStore, eventPublisher, Clock.systemUTC(), () -> UUID.randomUUID().toString(),
+                energyPort, securityPort);
     }
 
     AlertWorkflow(
@@ -76,6 +96,23 @@ public final class AlertWorkflow {
             WorkflowEventPublisher eventPublisher,
             Clock clock,
             Supplier<String> workflowIds) {
+        this(triageAgent, diagnosisAgent, devicePort, alertPort, workOrderPort, knowledgePort,
+                executionStore, eventPublisher, clock, workflowIds, null, null);
+    }
+
+    AlertWorkflow(
+            AlertTriageAgent triageAgent,
+            AlertDiagnosisAgent diagnosisAgent,
+            DevicePort devicePort,
+            AlertPort alertPort,
+            WorkOrderPort workOrderPort,
+            KnowledgePort knowledgePort,
+            WorkflowExecutionStore executionStore,
+            WorkflowEventPublisher eventPublisher,
+            Clock clock,
+            Supplier<String> workflowIds,
+            EnergyPort energyPort,
+            SecurityPort securityPort) {
         this.executionStore = Objects.requireNonNull(executionStore, "executionStore");
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher");
         this.workflowIds = Objects.requireNonNull(workflowIds, "workflowIds");
@@ -88,7 +125,9 @@ public final class AlertWorkflow {
                 knowledgePort,
                 eventPublisher,
                 clock,
-                CONFIDENCE_THRESHOLD);
+                CONFIDENCE_THRESHOLD,
+                energyPort,
+                securityPort);
         this.compiledGraph = compileGraph();
     }
 
@@ -215,6 +254,8 @@ public final class AlertWorkflow {
             graph.addNode(AlertWorkflowNodes.CLASSIFY_ALERT, nodes.classifyAlert())
                     .addNode(AlertWorkflowNodes.COLLECT_PARK_CONTEXT, nodes.collectParkContext())
                     .addNode(AlertWorkflowNodes.RETRIEVE_KNOWLEDGE, nodes.retrieveKnowledge())
+                    .addNode(AlertWorkflowNodes.ENERGY_ANALYSIS, nodes.energyAnalysis())
+                    .addNode(AlertWorkflowNodes.SECURITY_REVIEW, nodes.securityReview())
                     .addNode(AlertWorkflowNodes.DIAGNOSE_ALERT, nodes.diagnoseAlert())
                     .addNode(AlertWorkflowNodes.RISK_GATE, nodes.riskGate())
                     .addNode(AlertWorkflowNodes.HUMAN_APPROVAL, nodes.humanApproval())
@@ -222,7 +263,15 @@ public final class AlertWorkflow {
                     .addNode(AlertWorkflowNodes.SUMMARIZE_RESULT, nodes.summarizeResult())
                     .addEdge(StateGraph.START, AlertWorkflowNodes.CLASSIFY_ALERT)
                     .addEdge(AlertWorkflowNodes.CLASSIFY_ALERT, AlertWorkflowNodes.COLLECT_PARK_CONTEXT)
-                    .addEdge(AlertWorkflowNodes.COLLECT_PARK_CONTEXT, AlertWorkflowNodes.RETRIEVE_KNOWLEDGE)
+                    .addConditionalEdges(
+                            AlertWorkflowNodes.COLLECT_PARK_CONTEXT,
+                            edge_async(nodes::scenarioRoute),
+                            Map.of(
+                                    AlertWorkflowNodes.ENERGY_ANALYSIS, AlertWorkflowNodes.ENERGY_ANALYSIS,
+                                    AlertWorkflowNodes.SECURITY_REVIEW, AlertWorkflowNodes.SECURITY_REVIEW,
+                                    AlertWorkflowNodes.RETRIEVE_KNOWLEDGE, AlertWorkflowNodes.RETRIEVE_KNOWLEDGE))
+                    .addEdge(AlertWorkflowNodes.ENERGY_ANALYSIS, AlertWorkflowNodes.RETRIEVE_KNOWLEDGE)
+                    .addEdge(AlertWorkflowNodes.SECURITY_REVIEW, AlertWorkflowNodes.RETRIEVE_KNOWLEDGE)
                     .addEdge(AlertWorkflowNodes.RETRIEVE_KNOWLEDGE, AlertWorkflowNodes.DIAGNOSE_ALERT)
                     .addEdge(AlertWorkflowNodes.DIAGNOSE_ALERT, AlertWorkflowNodes.RISK_GATE)
                     .addConditionalEdges(

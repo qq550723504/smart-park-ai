@@ -33,6 +33,8 @@ public record WorkflowEvent(
             "WorkOrderPort.findByWorkflowId",
             "WorkOrderPort.create",
             "KnowledgePort.search",
+            "EnergyPort.getLatestEnergyReading",
+            "SecurityPort.getEvent",
             "AgentTool.lookupDeviceStatus",
             "AgentTool.lookupAlert",
             "AgentTool.lookupAlertHistory",
@@ -41,6 +43,8 @@ public record WorkflowEvent(
     private static final Set<String> SAFE_NODES = Set.of(
             "classifyAlert",
             "collectParkContext",
+            "energyAnalysis",
+            "securityReview",
             "retrieveKnowledge",
             "diagnoseAlert",
             "riskGate",

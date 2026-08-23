@@ -38,6 +38,8 @@ public final class AlertWorkflowNodes {
     public static final String CLASSIFY_ALERT = "classifyAlert";
     public static final String COLLECT_PARK_CONTEXT = "collectParkContext";
     public static final String RETRIEVE_KNOWLEDGE = "retrieveKnowledge";
+    public static final String ENERGY_ANALYSIS = "energyAnalysis";
+    public static final String SECURITY_REVIEW = "securityReview";
     public static final String DIAGNOSE_ALERT = "diagnoseAlert";
     public static final String RISK_GATE = "riskGate";
     public static final String HUMAN_APPROVAL = "humanApproval";
@@ -50,6 +52,8 @@ public final class AlertWorkflowNodes {
     private final AlertPort alertPort;
     private final WorkOrderPort workOrderPort;
     private final KnowledgePort knowledgePort;
+    private final com.example.smartpark.port.energy.EnergyPort energyPort;
+    private final com.example.smartpark.port.security.SecurityPort securityPort;
     private final WorkflowEventPublisher eventPublisher;
     private final Clock clock;
     private final RiskGate riskGate;
@@ -64,12 +68,30 @@ public final class AlertWorkflowNodes {
             WorkflowEventPublisher eventPublisher,
             Clock clock,
             double confidenceThreshold) {
+        this(triageAgent, diagnosisAgent, devicePort, alertPort, workOrderPort, knowledgePort,
+                eventPublisher, clock, confidenceThreshold, null, null);
+    }
+
+    public AlertWorkflowNodes(
+            AlertTriageAgent triageAgent,
+            AlertDiagnosisAgent diagnosisAgent,
+            DevicePort devicePort,
+            AlertPort alertPort,
+            WorkOrderPort workOrderPort,
+            KnowledgePort knowledgePort,
+            WorkflowEventPublisher eventPublisher,
+            Clock clock,
+            double confidenceThreshold,
+            com.example.smartpark.port.energy.EnergyPort energyPort,
+            com.example.smartpark.port.security.SecurityPort securityPort) {
         this.triageAgent = Objects.requireNonNull(triageAgent, "triageAgent");
         this.diagnosisAgent = Objects.requireNonNull(diagnosisAgent, "diagnosisAgent");
         this.devicePort = Objects.requireNonNull(devicePort, "devicePort");
         this.alertPort = Objects.requireNonNull(alertPort, "alertPort");
         this.workOrderPort = Objects.requireNonNull(workOrderPort, "workOrderPort");
         this.knowledgePort = Objects.requireNonNull(knowledgePort, "knowledgePort");
+        this.energyPort = energyPort;
+        this.securityPort = securityPort;
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.riskGate = new RiskGate(confidenceThreshold);
@@ -128,6 +150,61 @@ public final class AlertWorkflowNodes {
                     workOrders);
             return Map.of(AlertWorkflowState.PARK_CONTEXT, AlertWorkflowState.serializable(context));
         });
+    }
+
+    public AsyncNodeAction energyAnalysis() {
+        return observed(ENERGY_ANALYSIS, state -> {
+            AlertWorkflowState workflowState = AlertWorkflowState.from(state);
+            if (energyPort == null) {
+                throw new IllegalStateException("Energy scenario is not configured");
+            }
+            Alert alert = workflowState.alert();
+            toolCall(workflowState.workflowId(), ENERGY_ANALYSIS, "EnergyPort.getLatestEnergyReading");
+            var reading = guarded(
+                    WorkflowFailure.Code.PARK_CONTEXT_FAILED,
+                    "Unable to analyze energy scenario",
+                    ENERGY_ANALYSIS,
+                    () -> energyPort.getLatestEnergyReading(alert.deviceId()));
+            String analysis = "ENERGY_BASELINE: current=" + reading.currentKwh()
+                    + "kWh, baseline=" + reading.baselineKwh()
+                    + "kWh, variance=" + (reading.varianceRatio() * 100)
+                    + "%, peak=" + reading.peakDemandKw() + "kW";
+            return Map.of(AlertWorkflowState.SCENARIO_ANALYSIS, analysis);
+        });
+    }
+
+    public AsyncNodeAction securityReview() {
+        return observed(SECURITY_REVIEW, state -> {
+            AlertWorkflowState workflowState = AlertWorkflowState.from(state);
+            if (securityPort == null) {
+                throw new IllegalStateException("Security scenario is not configured");
+            }
+            String eventId = workflowState.alert().evidence().stream()
+                    .filter(item -> item.startsWith("security-event:"))
+                    .map(item -> item.substring("security-event:".length()))
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException("Security alert has no event reference"));
+            toolCall(workflowState.workflowId(), SECURITY_REVIEW, "SecurityPort.getEvent");
+            var event = guarded(
+                    WorkflowFailure.Code.PARK_CONTEXT_FAILED,
+                    "Unable to review security scenario",
+                    SECURITY_REVIEW,
+                    () -> securityPort.getEvent(eventId));
+            if (!event.evidenceSummary().startsWith("REDACTED:")) {
+                throw new IllegalStateException("Security evidence is not redacted");
+            }
+            String analysis = "SECURITY_REDACTED_REVIEW: " + event.eventType()
+                    + " | " + event.evidenceSummary();
+            return Map.of(AlertWorkflowState.SCENARIO_ANALYSIS, analysis);
+        });
+    }
+
+    public String scenarioRoute(OverAllState state) {
+        return switch (AlertWorkflowState.from(state).alert().classification()) {
+            case ENERGY -> ENERGY_ANALYSIS;
+            case ACCESS -> SECURITY_REVIEW;
+            default -> RETRIEVE_KNOWLEDGE;
+        };
     }
 
     public AsyncNodeAction retrieveKnowledge() {

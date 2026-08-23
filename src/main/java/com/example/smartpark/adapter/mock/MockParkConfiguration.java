@@ -29,6 +29,11 @@ public class MockParkConfiguration {
     }
 
     @Bean
+    MockSecurityAdapter mockSecurityAdapter(MockParkDataStore dataStore) {
+        return new MockSecurityAdapter(dataStore);
+    }
+
+    @Bean
     MockKnowledgeAdapter mockKnowledgeAdapter(MockParkDataStore dataStore) {
         return new MockKnowledgeAdapter(dataStore);
     }

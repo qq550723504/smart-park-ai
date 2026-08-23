@@ -19,6 +19,7 @@ class MockParkDataStoreTest {
                 "reset",
                 "getDevice",
                 "getLatestEnergyReading",
+                "getSecurityEvent",
                 "getAlert",
                 "findHistory",
                 "findByWorkflowId",
@@ -35,6 +36,7 @@ class MockParkDataStoreTest {
                 .doesNotContain(
                         "devices",
                         "energyReadings",
+                        "securityEvents",
                         "alerts",
                         "historyByDevice",
                         "knowledgeDocuments",

@@ -8,6 +8,7 @@ import com.example.smartpark.model.common.RiskLevel;
 import com.example.smartpark.tool.alert.AlertQueryTool;
 import com.example.smartpark.tool.device.DeviceQueryTool;
 import com.example.smartpark.tool.energy.EnergyQueryTool;
+import com.example.smartpark.tool.security.SecurityQueryTool;
 import com.example.smartpark.tool.knowledge.ParkKnowledgeTool;
 import com.example.smartpark.tool.workorder.WorkOrderTool;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -65,7 +66,17 @@ public class AlertDiagnosisAgent {
             AlertQueryTool alertQueryTool,
             WorkOrderTool workOrderTool,
             ParkKnowledgeTool parkKnowledgeTool) {
-        this(chatModel, deviceQueryTool, alertQueryTool, workOrderTool, parkKnowledgeTool, null);
+        this(chatModel, deviceQueryTool, alertQueryTool, workOrderTool, parkKnowledgeTool, null, null);
+    }
+
+    public AlertDiagnosisAgent(
+            ChatModel chatModel,
+            DeviceQueryTool deviceQueryTool,
+            AlertQueryTool alertQueryTool,
+            WorkOrderTool workOrderTool,
+            ParkKnowledgeTool parkKnowledgeTool,
+            EnergyQueryTool energyQueryTool) {
+        this(chatModel, deviceQueryTool, alertQueryTool, workOrderTool, parkKnowledgeTool, energyQueryTool, null);
     }
 
     @Autowired
@@ -75,16 +86,23 @@ public class AlertDiagnosisAgent {
             AlertQueryTool alertQueryTool,
             WorkOrderTool workOrderTool,
             ParkKnowledgeTool parkKnowledgeTool,
-            EnergyQueryTool energyQueryTool) {
+            EnergyQueryTool energyQueryTool,
+            SecurityQueryTool securityQueryTool) {
         Objects.requireNonNull(chatModel, "chatModel");
         Objects.requireNonNull(deviceQueryTool, "deviceQueryTool");
         Objects.requireNonNull(alertQueryTool, "alertQueryTool");
         Objects.requireNonNull(workOrderTool, "workOrderTool");
         Objects.requireNonNull(parkKnowledgeTool, "parkKnowledgeTool");
         this.chatClient = ChatClient.builder(chatModel).build();
-        Stream<ToolCallback> parkTools = energyQueryTool == null
-                ? Stream.of(ToolCallbacks.from(deviceQueryTool, alertQueryTool, parkKnowledgeTool))
-                : Stream.of(ToolCallbacks.from(deviceQueryTool, alertQueryTool, parkKnowledgeTool, energyQueryTool));
+        List<Object> readOnlyTools = new ArrayList<>(List.of(
+                deviceQueryTool, alertQueryTool, parkKnowledgeTool));
+        if (energyQueryTool != null) {
+            readOnlyTools.add(energyQueryTool);
+        }
+        if (securityQueryTool != null) {
+            readOnlyTools.add(securityQueryTool);
+        }
+        Stream<ToolCallback> parkTools = Stream.of(ToolCallbacks.from(readOnlyTools.toArray()));
         this.toolCallbacks = Stream.concat(
                         parkTools,
                         Stream.of(workOrderTool.diagnosisCallbacks()))
