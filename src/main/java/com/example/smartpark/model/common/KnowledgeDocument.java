@@ -13,9 +13,10 @@ public record KnowledgeDocument(
 
     public KnowledgeDocument {
         id = Objects.requireNonNull(id, "id");
-        title = Objects.requireNonNull(title, "title");
+        title = PublicMetadata.requireTitle(title);
         content = Objects.requireNonNull(content, "content");
         tags = List.copyOf(Objects.requireNonNull(tags, "tags"));
         updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
     }
+
 }

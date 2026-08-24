@@ -3,29 +3,34 @@ package com.example.smartpark.model.customer;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 public record CustomerServiceResult(
         String sessionId,
         String intent,
         String answer,
         List<String> knowledgeSources,
-        List<KnowledgeCitation> knowledgeCitations,
         boolean needsHuman,
         CustomerTicket ticket,
-        CustomerAnswer.Reason reason,
+        String reason,
         List<String> citationIds) {
 
-    public CustomerServiceResult(String sessionId, String intent, String answer, List<String> knowledgeSources,
-                                 List<KnowledgeCitation> knowledgeCitations, boolean needsHuman,
-                                 CustomerTicket ticket) {
-        this(sessionId, intent, answer, knowledgeSources, knowledgeCitations, needsHuman, ticket,
-                needsHuman ? CustomerAnswer.Reason.POLICY_LIMIT : CustomerAnswer.Reason.SUPPORTED,
-                needsHuman ? List.of() : knowledgeCitations.stream().map(KnowledgeCitation::documentId).toList());
-    }
+    private static final Pattern SAFE_CITATION_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}");
+    private static final Set<String> HANDOFF_REASONS = Set.of(
+            "HUMAN_HANDOFF", "INSUFFICIENT_EVIDENCE", "POLICY_LIMIT", "RETRIEVAL_UNAVAILABLE");
+    private static final Set<String> KNOWN_REASONS = Set.of(
+            "SUPPORTED", "HUMAN_HANDOFF", "INSUFFICIENT_EVIDENCE", "POLICY_LIMIT", "RETRIEVAL_UNAVAILABLE");
 
-    public CustomerServiceResult(String sessionId, String intent, String answer, List<String> knowledgeSources,
-                                 boolean needsHuman, CustomerTicket ticket) {
-        this(sessionId, intent, answer, knowledgeSources, List.of(), needsHuman, ticket);
+    /**
+     * @deprecated Supported results must provide stable citation IDs through the canonical constructor.
+     */
+    @Deprecated(forRemoval = false)
+    public CustomerServiceResult(String sessionId, String intent, String answer,
+                                 List<String> knowledgeSources, boolean needsHuman,
+                                 CustomerTicket ticket) {
+        this(sessionId, intent, answer, knowledgeSources, needsHuman, ticket,
+                needsHuman ? "HUMAN_HANDOFF" : "SUPPORTED",
+                requireExplicitCitationIds(needsHuman));
     }
 
     public CustomerServiceResult {
@@ -33,33 +38,37 @@ public record CustomerServiceResult(
         intent = requireText(intent, "intent");
         answer = requireText(answer, "answer");
         knowledgeSources = List.copyOf(knowledgeSources);
-        knowledgeCitations = List.copyOf(knowledgeCitations);
-        if (reason == null) throw new IllegalArgumentException("reason must be present");
-        citationIds = List.copyOf(citationIds == null ? List.of() : citationIds);
+        reason = requireText(reason, "reason");
+        citationIds = List.copyOf(citationIds);
+        if (!KNOWN_REASONS.contains(reason)) {
+            throw new IllegalArgumentException("unsupported reason: " + reason);
+        }
         if (needsHuman != (ticket != null)) {
             throw new IllegalArgumentException("needsHuman must match ticket presence");
         }
-        if (needsHuman && reason == CustomerAnswer.Reason.SUPPORTED) {
-            throw new IllegalArgumentException("human transfer cannot be supported");
+        if ("SUPPORTED".equals(reason)) {
+            if (needsHuman) throw new IllegalArgumentException("SUPPORTED results must not need human handoff");
+            if (citationIds.isEmpty()) throw new IllegalArgumentException("SUPPORTED results require at least one citationId");
         }
-        if (!needsHuman && reason != CustomerAnswer.Reason.SUPPORTED) {
-            throw new IllegalArgumentException("non-human answer must be supported");
-        }
-        if (needsHuman && !citationIds.isEmpty()) {
-            throw new IllegalArgumentException("human handoff must not include citationIds");
-        }
-        if (!needsHuman && citationIds.isEmpty()) {
-            throw new IllegalArgumentException("supported results require at least one citationId");
+        if (HANDOFF_REASONS.contains(reason) && !needsHuman) {
+            throw new IllegalArgumentException(reason + " results must require human handoff");
         }
         if (new LinkedHashSet<>(citationIds).size() != citationIds.size()) {
             throw new IllegalArgumentException("citationIds must not contain duplicates");
         }
-        citationIds.forEach(id -> requireText(id, "citationId"));
-        Set<String> availableCitationIds = knowledgeCitations.stream()
-                .map(KnowledgeCitation::documentId)
-                .collect(java.util.stream.Collectors.toUnmodifiableSet());
-        if (!availableCitationIds.containsAll(citationIds)) {
-            throw new IllegalArgumentException("citationIds must reference knowledgeCitations");
+        citationIds.forEach(CustomerServiceResult::requireCitationId);
+    }
+
+    private static List<String> requireExplicitCitationIds(boolean needsHuman) {
+        if (!needsHuman) {
+            throw new IllegalArgumentException("supported results require explicit citationIds");
+        }
+        return List.of();
+    }
+
+    private static void requireCitationId(String value) {
+        if (value == null || !SAFE_CITATION_ID.matcher(value).matches()) {
+            throw new IllegalArgumentException("citationId must be a safe opaque identifier");
         }
     }
 

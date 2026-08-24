@@ -2,10 +2,11 @@ package com.example.smartpark.adapter.mock;
 
 import com.example.smartpark.demo.DemoFaultInjector;
 import com.example.smartpark.model.common.KnowledgeDocument;
-import com.example.smartpark.model.common.KnowledgeMatch;
 import com.example.smartpark.port.knowledge.KnowledgeAdminPort;
+import com.example.smartpark.port.knowledge.KnowledgeMatch;
 
 import java.util.List;
+import java.util.Locale;
 
 public final class MockKnowledgeAdapter implements KnowledgeAdminPort {
     private final MockParkDataStore dataStore;
@@ -44,16 +45,19 @@ public final class MockKnowledgeAdapter implements KnowledgeAdminPort {
     @Override
     public List<KnowledgeMatch> rankedSearch(String query) {
         return search(query).stream()
-                .map(document -> new KnowledgeMatch(document, stableScore(document, query)))
+                .map(document -> new KnowledgeMatch(document.id(), document.title(), score(document, query)))
+                .sorted(java.util.Comparator.comparingDouble(KnowledgeMatch::score).reversed()
+                        .thenComparing(KnowledgeMatch::citationId))
                 .toList();
     }
 
-    private static double stableScore(KnowledgeDocument document, String query) {
-        if (query == null || query.isBlank()) return 0.0;
-        String normalized = query.trim().toLowerCase(java.util.Locale.ROOT);
-        boolean tagMatch = document.tags().stream()
-                .map(tag -> tag.toLowerCase(java.util.Locale.ROOT))
-                .anyMatch(tag -> tag.contains(normalized));
-        return tagMatch ? 0.95 : 0.85;
+    private static double score(KnowledgeDocument document, String query) {
+        String normalizedQuery = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        if (normalizedQuery.isEmpty()) return 0.0;
+        if (document.tags().stream().anyMatch(tag -> tag.equalsIgnoreCase(normalizedQuery))) return 1.0;
+        if (document.title().toLowerCase(Locale.ROOT).contains(normalizedQuery)) return 0.85;
+        if (document.tags().stream().anyMatch(tag -> tag.toLowerCase(Locale.ROOT).contains(normalizedQuery))) return 0.75;
+        if (document.content().toLowerCase(Locale.ROOT).contains(normalizedQuery)) return 0.70;
+        return 0.0;
     }
 }

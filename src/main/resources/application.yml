@@ -7,10 +7,6 @@ spring:
       chat:
         options:
           model: qwen-plus
-
 smartpark:
-  knowledge:
-    mode: ${SMARTPARK_KNOWLEDGE_MODE:mock}
-    min-similarity-score: ${SMARTPARK_KNOWLEDGE_MIN_SIMILARITY_SCORE:0.65}
-  customer-service:
-    answer-mode: ${SMARTPARK_CUSTOMER_SERVICE_ANSWER_MODE:mock}
+  customer:
+    minimum-knowledge-score: ${SMARTPARK_CUSTOMER_MINIMUM_KNOWLEDGE_SCORE:0.70}

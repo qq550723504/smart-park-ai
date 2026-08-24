@@ -72,6 +72,8 @@ export interface CustomerServiceResponse {
   reason: 'SUPPORTED' | 'INSUFFICIENT_EVIDENCE' | 'POLICY_LIMIT' | 'RETRIEVAL_UNAVAILABLE'
   citationIds: string[]
   ticket: CustomerTicketResponse | null
+  reason: 'SUPPORTED' | 'INSUFFICIENT_EVIDENCE' | 'POLICY_LIMIT' | 'HUMAN_HANDOFF' | 'RETRIEVAL_UNAVAILABLE'
+  citationIds: string[]
 }
 
 export type WorkflowStatus = 'RUNNING' | 'WAITING_APPROVAL' | 'COMPLETED' | 'REJECTED' | 'FAILED' | 'WORK_ORDER_FAILED'

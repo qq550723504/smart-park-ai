@@ -68,6 +68,16 @@ export function submitFeedback(targetType: 'CUSTOMER_SESSION' | 'ALERT_WORKFLOW'
   })
 }
 
+export interface OperationsCapabilities {
+  knowledgeMode: 'mock' | 'rag'
+  customerAnswerMode: 'mock' | 'dashscope'
+  vectorStore: 'none'
+}
+
+export function getOperationsCapabilities() {
+  return request<OperationsCapabilities>('/api/operations/capabilities')
+}
+
 export function getOperationsMetrics() {
   return request<OperationsMetrics>('/api/operations/metrics')
 }
