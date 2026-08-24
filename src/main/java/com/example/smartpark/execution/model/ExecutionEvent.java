@@ -40,7 +40,8 @@ public record ExecutionEvent(
         safeSummary = Objects.requireNonNull(safeSummary, "safeSummary");
     }
 
+    /** Terminal only when the event type closes the run; per-step status stays non-terminal. */
     public boolean isTerminal() {
-        return eventType.isTerminal() || status.isTerminal();
+        return eventType.isTerminal();
     }
 }

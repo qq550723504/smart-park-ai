@@ -15,6 +15,7 @@ public enum ExecutionStage {
     QUERY_EXECUTION,
     RENDERING,
     RESPONSE_DELIVERY,
+    HUMAN_APPROVAL,
     COMPLETION,
     FAILURE
 }
