@@ -136,6 +136,55 @@ class CustomerServiceWorkflowConcurrencyTest {
         assertThat(workflow.conversation(session.sessionId()).messages()).hasSize(6);
     }
 
+    @Test
+    void concurrentRetriesShareOneInFlightIdempotentExecution() throws Exception {
+        CountDownLatch providerEntered = new CountDownLatch(1);
+        CountDownLatch releaseProvider = new CountDownLatch(1);
+        AtomicInteger searches = new AtomicInteger();
+        KnowledgeDocument parking = document("KD-PARKING-001", "Parking", "parking");
+        KnowledgePort knowledge = new KnowledgePort() {
+            @Override
+            public List<com.example.smartpark.model.common.KnowledgeDocument> search(KnowledgeDomain domain, String query) {
+                return List.of();
+            }
+
+            @Override
+            public List<KnowledgeMatch> rankedSearch(KnowledgeDomain domain, String query) {
+                searches.incrementAndGet();
+                providerEntered.countDown();
+                await(releaseProvider);
+                return List.of(new KnowledgeMatch(parking, .9));
+            }
+        };
+        CustomerAnswerPort answer = (question, intent, evidence) ->
+                new CustomerAnswer("safe answer", false, CustomerAnswer.Reason.SUPPORTED,
+                        List.of(evidence.get(0).documentId()));
+        Clock clock = Clock.fixed(Instant.EPOCH, ZoneOffset.UTC);
+        CustomerServiceWorkflow workflow = new CustomerServiceWorkflow(
+                knowledge, new InMemoryCustomerSessionStore(clock, 100, Duration.ofHours(24)),
+                new InMemoryCustomerTicketAdapter(), answer, clock, new AtomicInteger()::toString);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<CustomerServiceResult> first = executor.submit(
+                    () -> workflow.handle("访客停车怎么收费？", "same-request"));
+            assertThat(providerEntered.await(5, TimeUnit.SECONDS)).isTrue();
+
+            Future<CustomerServiceResult> retry = executor.submit(
+                    () -> workflow.handle("访客停车怎么收费？", "same-request"));
+            Thread.sleep(250);
+            assertThat(retry.isDone()).isFalse();
+            assertThat(searches).hasValue(1);
+
+            releaseProvider.countDown();
+            CustomerServiceResult firstResult = first.get(5, TimeUnit.SECONDS);
+            assertThat(retry.get(5, TimeUnit.SECONDS)).isEqualTo(firstResult);
+            assertThat(searches).hasValue(1);
+        } finally {
+            releaseProvider.countDown();
+            executor.shutdownNow();
+        }
+    }
+
     private static void await(CountDownLatch latch) {
         try {
             if (!latch.await(5, TimeUnit.SECONDS)) {

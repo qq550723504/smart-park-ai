@@ -26,7 +26,9 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 
@@ -41,7 +43,7 @@ public final class CustomerServiceWorkflow {
     private final Clock clock;
     private final Supplier<String> sessionIds;
     private final double minimumKnowledgeScore;
-    private final ConcurrentHashMap<String, LockReference> idempotencyLocks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, CompletableFuture<CustomerServiceResult>> idempotencyReservations = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, LockReference> sessionLocks = new ConcurrentHashMap<>();
 
     public CustomerServiceWorkflow(KnowledgePort knowledgePort) {
@@ -103,7 +105,7 @@ public final class CustomerServiceWorkflow {
     public CustomerServiceResult handle(String question, String idempotencyKey) {
         String normalizedQuestion = requireQuestion(question);
         String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
-        return withLock(idempotencyLocks, normalizedKey,
+        return withIdempotencyReservation(normalizedKey,
                 () -> handleInternal(normalizedQuestion, normalizedKey));
     }
 
@@ -142,7 +144,7 @@ public final class CustomerServiceWorkflow {
         String normalizedQuestion = requireQuestion(question);
         String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
         return withLock(sessionLocks, normalizedSessionId,
-                () -> withLock(idempotencyLocks, normalizedKey,
+                () -> withIdempotencyReservation(normalizedKey,
                         () -> replyInternal(normalizedSessionId, normalizedQuestion, normalizedKey)));
     }
 
@@ -362,6 +364,38 @@ public final class CustomerServiceWorkflow {
             throw new IllegalArgumentException("sessionId must not be blank");
         }
         return sessionId.trim();
+    }
+
+    private CustomerServiceResult withIdempotencyReservation(
+            String key, Supplier<CustomerServiceResult> action) {
+        if (key == null) return action.get();
+        CompletableFuture<CustomerServiceResult> reservation = new CompletableFuture<>();
+        CompletableFuture<CustomerServiceResult> existing = idempotencyReservations.putIfAbsent(key, reservation);
+        if (existing != null) {
+            try {
+                existing.join();
+            } catch (CompletionException failure) {
+                throw rethrowCompletion(failure);
+            }
+            return action.get();
+        }
+        try {
+            CustomerServiceResult result = action.get();
+            reservation.complete(result);
+            return result;
+        } catch (RuntimeException | Error failure) {
+            reservation.completeExceptionally(failure);
+            throw failure;
+        } finally {
+            idempotencyReservations.remove(key, reservation);
+        }
+    }
+
+    private static RuntimeException rethrowCompletion(CompletionException failure) {
+        Throwable cause = failure.getCause();
+        if (cause instanceof RuntimeException runtimeFailure) return runtimeFailure;
+        if (cause instanceof Error errorFailure) throw errorFailure;
+        return new IllegalStateException("idempotent customer request failed", cause);
     }
 
     private static <T> T withLock(ConcurrentHashMap<String, LockReference> locks,
