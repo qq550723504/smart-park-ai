@@ -84,6 +84,28 @@ class CustomerServiceAnswerFailureTest {
     }
 
     @Test
+    void answerPortCannotPublishWorkflowOnlyRetrievalFailureReasonAfterSuccessfulRetrieval() {
+        KnowledgeDocument document = new KnowledgeDocument("KB-PARKING-001", KnowledgeDomain.CUSTOMER_SERVICE, "Parking", "private body", List.of("parking"), Instant.EPOCH);
+        KnowledgePort knowledge = new KnowledgePort() {
+            @Override public List<KnowledgeDocument> search(KnowledgeDomain domain, String query) { return List.of(document); }
+            @Override public List<KnowledgeMatch> rankedSearch(KnowledgeDomain domain, String query) { return List.of(new KnowledgeMatch(document, .9)); }
+        };
+        CustomerAnswerPort invalid = (question, intent, evidence) ->
+                new CustomerAnswer("检索暂不可用。", true, CustomerAnswer.Reason.RETRIEVAL_UNAVAILABLE, List.of());
+        CustomerServiceWorkflow workflow = new CustomerServiceWorkflow(knowledge,
+                new InMemoryCustomerSessionStore(), new InMemoryCustomerTicketAdapter(), invalid,
+                Clock.fixed(Instant.EPOCH, ZoneOffset.UTC), () -> "cs-invalid-reason");
+
+        var result = workflow.handle("访客停车怎么收费？");
+
+        assertThat(result.needsHuman()).isTrue();
+        assertThat(result.reason()).isEqualTo(CustomerAnswer.Reason.INSUFFICIENT_EVIDENCE);
+        assertThat(result.answer()).contains("当前无法确认答案");
+        assertThat(result.answer()).doesNotContain("检索暂不可用");
+        assertThat(result.ticket().status()).isEqualTo("WAITING_AGENT");
+    }
+
+    @Test
     void answerPortFailureCreatesWaitingAgentTicketWithoutLeakingFailureText() {
         KnowledgeDocument document = new KnowledgeDocument("KB-PARKING-001", KnowledgeDomain.CUSTOMER_SERVICE, "Parking", "private body", List.of("parking"), Instant.EPOCH);
         KnowledgePort knowledge = new KnowledgePort() {

@@ -87,3 +87,14 @@
 - [x] Make tag count, per-tag length, total tag length, and assembled embedding text bounded before vector-store writes.
 - [x] Add a regression test proving repair confirmation is preserved when knowledge retrieval fails; bypass retrieval for deterministic repair intent.
 - [x] Run focused tests, full backend tests, frontend build, and `git diff --check`.
+
+### Task 7: Keep the answer-port reason boundary closed
+
+**Files:**
+- Modify: `src/main/java/com/example/smartpark/workflow/CustomerServiceWorkflow.java`
+- Modify: `docs/architecture.md`
+- Test: `src/test/java/com/example/smartpark/workflow/CustomerServiceAnswerFailureTest.java`
+
+- [x] Add a failing regression test for a custom answer port returning internal `RETRIEVAL_UNAVAILABLE` after successful retrieval.
+- [x] Reject workflow-only reasons at the workflow port boundary and map the violation to the existing safe contract-failure handoff.
+- [x] Document that retrieval-unavailable is workflow-owned and not answer-port selectable.

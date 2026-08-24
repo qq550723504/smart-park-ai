@@ -324,6 +324,9 @@ public final class CustomerServiceWorkflow {
                     ? new CustomerAnswer(intent == Intent.REPAIR ? "已记录设施报修，客服将核实后安排处理。" : "当前知识库没有足够信息，已转人工客服处理。", true,
                     intent == Intent.REPAIR ? CustomerAnswer.Reason.POLICY_LIMIT : CustomerAnswer.Reason.INSUFFICIENT_EVIDENCE, List.of())
                     : answerPort.answer(question, intent.name(), matches);
+            if (!retrieval.unavailable() && !generated.reason().modelSelectable()) {
+                throw new IllegalArgumentException("answer port returned a workflow-only reason");
+            }
             boolean generatedNeedsHuman = generated.needsHuman();
             if (generatedNeedsHuman != needsHuman) {
                 generated = generatedNeedsHuman
