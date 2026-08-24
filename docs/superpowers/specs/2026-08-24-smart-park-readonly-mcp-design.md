@@ -226,6 +226,13 @@ spring:
         type: SYNC
         name: smart-park-readonly
         version: 0.1.0
+        annotation-scanner:
+          enabled: false
+        capabilities:
+          tool: true
+          resource: false
+          prompt: false
+          completion: false
         streamable-http:
           mcp-endpoint: /mcp
 ```
@@ -260,6 +267,7 @@ MCP tools/call
 - 第一阶段不自制 API Key 认证。生产认证应作为独立切片，使用标准 OAuth2 Resource Server、权限和租户策略。
 - MCP 不读取或返回 API Key、Prompt、完整模型响应、诊断、审批、工单、知识正文、告警摘要、告警证据、安防事件或人员数据。
 - MCP 工具只依赖只读 Port；工具名称、描述和服务说明均明确“Mock、只读、无设备控制”。
+- 关闭 Starter 的 MCP 注解扫描，避免未来新增的 `@McpTool` Bean 被自动公开；装配和协议测试必须锁定工具集合恰好为本设计的三个工具。
 - DTO 白名单映射是字段边界的唯一来源，禁止使用领域对象的通用 JSON 序列化作为 MCP 返回值。
 - 输入和输出均有界：参数长度受限、知识结果最多 5 条、列表字段沿用领域公开元数据限制。
 
