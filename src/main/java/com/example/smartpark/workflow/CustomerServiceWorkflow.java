@@ -4,6 +4,7 @@ import com.example.smartpark.adapter.mock.InMemoryCustomerSessionStore;
 import com.example.smartpark.adapter.mock.InMemoryCustomerTicketAdapter;
 import com.example.smartpark.adapter.mock.MockCustomerAnswerAdapter;
 import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.model.common.KnowledgeDomain;
 import com.example.smartpark.model.common.KnowledgeMatch;
 import com.example.smartpark.model.customer.CustomerAnswer;
 import com.example.smartpark.model.customer.KnowledgeCitation;
@@ -197,7 +198,7 @@ public final class CustomerServiceWorkflow {
     private RetrievalOutcome retrieve(Intent intent) {
         if (intent == Intent.GENERAL) return RetrievalOutcome.noEvidence();
         try {
-            return RetrievalOutcome.success(knowledgePort.rankedSearch(intent.query));
+            return RetrievalOutcome.success(knowledgePort.rankedSearch(KnowledgeDomain.CUSTOMER_SERVICE, intent.query));
         } catch (RuntimeException failure) {
             // Embedding and vector-store failures must enter the same safe handoff path.
             return RetrievalOutcome.retrievalUnavailable();

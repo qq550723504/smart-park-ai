@@ -7,6 +7,7 @@ import com.example.smartpark.agent.TestChatModel;
 import com.example.smartpark.adapter.mock.MockParkFixture;
 import com.example.smartpark.model.common.ApprovalDecision;
 import com.example.smartpark.model.common.Diagnosis;
+import com.example.smartpark.model.common.KnowledgeDomain;
 import com.example.smartpark.model.common.WorkOrder;
 import com.example.smartpark.model.common.WorkOrderStatus;
 import com.example.smartpark.model.common.WorkflowStatus;
@@ -120,7 +121,7 @@ class AlertWorkflowTest {
 
     @Test
     void missingKnowledgeEvidencePausesBeforeSideEffects() {
-        KnowledgePort noKnowledge = query -> List.of();
+        KnowledgePort noKnowledge = (domain, query) -> List.of();
         Fixture fixture = fixture("ALT-TEMP-001", 0.95, "LOW", noKnowledge, sequentialIds());
 
         WorkflowSnapshot waiting = fixture.workflow.start("ALT-TEMP-001");
@@ -371,7 +372,7 @@ class AlertWorkflowTest {
                         alertId,
                         riskLevel,
                         diagnosisConfidence,
-                        knowledgePort.search(knowledgeQuery).isEmpty()));
+                        knowledgePort.search(KnowledgeDomain.ALERT_OPERATIONS, knowledgeQuery).isEmpty()));
         AlertTriageAgent triageAgent = new AlertTriageAgent(triageModel);
         AlertDiagnosisAgent diagnosisAgent = new AlertDiagnosisAgent(
                 diagnosisModel,

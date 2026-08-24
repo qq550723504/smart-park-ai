@@ -5,6 +5,7 @@ import com.example.smartpark.model.alert.AlertClassification;
 import com.example.smartpark.model.alert.ParkContext;
 import com.example.smartpark.model.common.Diagnosis;
 import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.model.common.KnowledgeDomain;
 import com.example.smartpark.model.common.RiskLevel;
 import com.example.smartpark.adapter.mock.MockParkFixture;
 import com.example.smartpark.tool.alert.AlertQueryTool;
@@ -373,6 +374,7 @@ class AlertDiagnosisAgentTest {
     private static List<KnowledgeDocument> sampleKnowledge() {
         return List.of(new KnowledgeDocument(
                 "KD-OVERHEAT-001",
+                KnowledgeDomain.ALERT_OPERATIONS,
                 "HVAC overheating playbook",
                 "When HVAC supply temperatures rise, check filters, airflow, and compressor load before escalating.",
                 List.of("overheating", "hvac", "temperature"),

@@ -1,6 +1,7 @@
 package com.example.smartpark.adapter.rag;
 
 import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.model.common.KnowledgeDomain;
 import com.example.smartpark.model.common.KnowledgeMatch;
 import com.example.smartpark.port.knowledge.KnowledgeAdminPort;
 import org.springframework.ai.document.Document;
@@ -42,12 +43,12 @@ public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
     }
 
     @Override
-    public List<KnowledgeDocument> search(String query) {
-        return rankedSearch(query).stream().map(KnowledgeMatch::document).toList();
+    public List<KnowledgeDocument> search(KnowledgeDomain domain, String query) {
+        return rankedSearch(domain, query).stream().map(KnowledgeMatch::document).toList();
     }
 
     @Override
-    public List<KnowledgeMatch> rankedSearch(String query) {
+    public List<KnowledgeMatch> rankedSearch(KnowledgeDomain domain, String query) {
         String normalized = validateQuery(query);
         if (normalized.isBlank()) return List.of();
         return vectorStore.similaritySearch(SearchRequest.builder()

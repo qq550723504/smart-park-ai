@@ -2,6 +2,7 @@ package com.example.smartpark.adapter.rag;
 
 import com.example.smartpark.agent.TestChatModel;
 import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.model.common.KnowledgeDomain;
 import com.example.smartpark.model.common.KnowledgeMatch;
 import com.example.smartpark.model.customer.CustomerAnswer;
 import org.junit.jupiter.api.Test;
@@ -14,7 +15,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class DashScopeCustomerAnswerAdapterTest {
     private final KnowledgeMatch parking = new KnowledgeMatch(
-            new KnowledgeDocument("KB-PARKING-001", "Visitor parking guide", "private knowledge body", List.of("parking"), Instant.EPOCH), .92);
+            new KnowledgeDocument("KB-PARKING-001", KnowledgeDomain.CUSTOMER_SERVICE, "Visitor parking guide", "private knowledge body", List.of("parking"), Instant.EPOCH), .92);
 
     @Test
     void parsesStructuredModelAnswerAndOnlySendsBoundedEvidenceContext() {

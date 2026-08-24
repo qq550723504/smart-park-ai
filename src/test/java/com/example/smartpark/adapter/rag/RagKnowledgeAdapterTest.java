@@ -1,6 +1,7 @@
 package com.example.smartpark.adapter.rag;
 
 import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.model.common.KnowledgeDomain;
 import com.example.smartpark.model.common.KnowledgeMatch;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.document.Document;
@@ -24,7 +25,7 @@ class RagKnowledgeAdapterTest {
                 document("KD-ENERGY-001", "Energy", "energy meter baseline")));
         adapter.setActive("KD-ENERGY-001", false);
 
-        List<KnowledgeMatch> matches = adapter.rankedSearch("visitor parking");
+        List<KnowledgeMatch> matches = adapter.rankedSearch(KnowledgeDomain.CUSTOMER_SERVICE, "visitor parking");
 
         assertThat(matches).extracting(KnowledgeMatch::documentId).containsExactly("KD-PARKING-001");
         assertThat(matches).allMatch(match -> match.score() >= 0 && match.score() <= 1);
@@ -36,8 +37,8 @@ class RagKnowledgeAdapterTest {
                 .mapToObj(index -> document("KD-TEST-" + index, "Test " + index, "parking " + index)).toList();
         RagKnowledgeAdapter adapter = new RagKnowledgeAdapter(SimpleVectorStore.builder(new KeywordEmbeddingModel()).build(), documents);
 
-        assertThat(adapter.rankedSearch("parking")).hasSize(RagKnowledgeAdapter.MAX_RESULTS);
-        assertThatThrownBy(() -> adapter.search("x".repeat(501))).isInstanceOf(IllegalArgumentException.class);
+        assertThat(adapter.rankedSearch(KnowledgeDomain.CUSTOMER_SERVICE, "parking")).hasSize(RagKnowledgeAdapter.MAX_RESULTS);
+        assertThatThrownBy(() -> adapter.search(KnowledgeDomain.CUSTOMER_SERVICE, "x".repeat(501))).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -49,7 +50,7 @@ class RagKnowledgeAdapterTest {
                         document("KD-LOW-001", "Low", "low")),
                 0.65);
 
-        assertThat(adapter.rankedSearch("query"))
+        assertThat(adapter.rankedSearch(KnowledgeDomain.CUSTOMER_SERVICE, "query"))
                 .extracting(KnowledgeMatch::documentId)
                 .containsExactly("KD-HIGH-001");
     }
@@ -68,7 +69,7 @@ class RagKnowledgeAdapterTest {
             adapter.setActive("KD-INACTIVE-" + index, false);
         }
 
-        assertThat(adapter.rankedSearch("query"))
+        assertThat(adapter.rankedSearch(KnowledgeDomain.CUSTOMER_SERVICE, "query"))
                 .extracting(KnowledgeMatch::documentId)
                 .containsExactly("KD-ACTIVE-001");
     }
@@ -81,11 +82,11 @@ class RagKnowledgeAdapterTest {
         assertThatThrownBy(() -> adapter.save(document("KD-SAFE-001", "Replacement", "FAIL")))
                 .isInstanceOf(IllegalStateException.class);
         assertThat(adapter.list().get(0).document().title()).isEqualTo("Original");
-        assertThat(adapter.search("parking")).extracting(KnowledgeDocument::id).containsExactly("KD-SAFE-001");
+        assertThat(adapter.search(KnowledgeDomain.CUSTOMER_SERVICE, "parking")).extracting(KnowledgeDocument::id).containsExactly("KD-SAFE-001");
     }
 
     private static KnowledgeDocument document(String id, String title, String content) {
-        return new KnowledgeDocument(id, title, content, List.of("test"), Instant.EPOCH);
+        return new KnowledgeDocument(id, KnowledgeDomain.CUSTOMER_SERVICE, title, content, List.of("test"), Instant.EPOCH);
     }
 
     private static final class KeywordEmbeddingModel implements EmbeddingModel {

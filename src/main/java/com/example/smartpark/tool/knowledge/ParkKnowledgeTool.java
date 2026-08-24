@@ -1,6 +1,7 @@
 package com.example.smartpark.tool.knowledge;
 
 import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.model.common.KnowledgeDomain;
 import com.example.smartpark.port.knowledge.KnowledgePort;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -27,7 +28,8 @@ public class ParkKnowledgeTool {
         if (normalizedQuery.isEmpty()) {
             return new KnowledgeSearchResult(normalizedQuery, List.of(), "query must not be blank", MOCK_NOTICE);
         }
-        return new KnowledgeSearchResult(normalizedQuery, knowledgePort.search(normalizedQuery), null, MOCK_NOTICE);
+        return new KnowledgeSearchResult(normalizedQuery,
+                knowledgePort.search(KnowledgeDomain.ALERT_OPERATIONS, normalizedQuery), null, MOCK_NOTICE);
     }
 
     private static String requireText(String value, String fieldName) {

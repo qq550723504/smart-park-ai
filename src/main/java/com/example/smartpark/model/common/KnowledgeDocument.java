@@ -6,6 +6,7 @@ import java.util.Objects;
 
 public record KnowledgeDocument(
         String id,
+        KnowledgeDomain domain,
         String title,
         String content,
         List<String> tags,
@@ -13,6 +14,7 @@ public record KnowledgeDocument(
 
     public KnowledgeDocument {
         id = Objects.requireNonNull(id, "id");
+        domain = Objects.requireNonNull(domain, "domain");
         title = Objects.requireNonNull(title, "title");
         content = Objects.requireNonNull(content, "content");
         tags = List.copyOf(Objects.requireNonNull(tags, "tags"));

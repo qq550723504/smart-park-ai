@@ -2,6 +2,7 @@ package com.example.smartpark.web;
 
 import com.example.smartpark.audit.AuditTrail;
 import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.model.common.KnowledgeDomain;
 import com.example.smartpark.port.knowledge.KnowledgeAdminPort;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -56,7 +57,7 @@ public class KnowledgeAdminController {
             @RequestHeader("X-Demo-Role") String role) {
         DemoRole.require(role, DemoRole.ADMIN);
         KnowledgeDocument saved = knowledge.save(new KnowledgeDocument(
-                request.id(), request.title(), request.content(), request.tags(), Instant.now(clock)));
+                request.id(), request.domain(), request.title(), request.content(), request.tags(), Instant.now(clock)));
         auditTrail.record(DemoRole.parse(role).name(), "CREATE_KNOWLEDGE", saved.id(), "SUCCESS");
         return metadata(new KnowledgeAdminPort.ManagedDocument(saved, true));
     }
@@ -75,15 +76,16 @@ public class KnowledgeAdminController {
     private static KnowledgeMetadataResponse metadata(KnowledgeAdminPort.ManagedDocument managed) {
         var document = managed.document();
         return new KnowledgeMetadataResponse(
-                document.id(), document.title(), document.tags(), document.updatedAt(), managed.active());
+                document.id(), document.domain(), document.title(), document.tags(), document.updatedAt(), managed.active());
     }
 
     public record KnowledgeCreateRequest(
             @NotBlank @Pattern(regexp = "KD-[A-Z0-9-]{1,120}") String id,
+            @NotNull KnowledgeDomain domain,
             @NotBlank @Size(max = 160) String title,
             @NotBlank @Size(max = 2000) String content,
             @NotEmpty List<@NotBlank String> tags) { }
     public record KnowledgeActiveRequest(@NotNull Boolean active) { }
     public record KnowledgeMetadataResponse(
-            String id, String title, List<String> tags, Instant updatedAt, boolean active) { }
+            String id, KnowledgeDomain domain, String title, List<String> tags, Instant updatedAt, boolean active) { }
 }

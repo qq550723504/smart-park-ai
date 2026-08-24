@@ -1,6 +1,7 @@
 package com.example.smartpark.adapter.rag;
 
 import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.model.common.KnowledgeDomain;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ClassPathResource;
@@ -29,7 +30,7 @@ public class RagSeedKnowledgeConfiguration {
         try {
             String content = new ClassPathResource(path).getContentAsString(StandardCharsets.UTF_8).trim();
             if (content.isBlank()) throw new IllegalStateException("RAG seed resource was blank: " + path);
-            return new KnowledgeDocument(id, title, content, tags, UPDATED_AT);
+            return new KnowledgeDocument(id, KnowledgeDomain.CUSTOMER_SERVICE, title, content, tags, UPDATED_AT);
         } catch (IOException exception) {
             throw new UncheckedIOException("Failed to load RAG seed resource: " + path, exception);
         }
