@@ -220,11 +220,11 @@ $env:SERVER_ADDRESS='127.0.0.1'
 知识领域仅允许 `CUSTOMER_SERVICE` 和 `ALERT_OPERATIONS`。可使用 MCP Inspector 验证发现和调用：
 
 ```powershell
-npx.cmd -y @modelcontextprotocol/inspector --cli http://127.0.0.1:8080/mcp --transport http --method tools/list
-npx.cmd -y @modelcontextprotocol/inspector --cli http://127.0.0.1:8080/mcp --transport http --method tools/call --tool-name smartpark_lookup_alert --tool-arg alertId=ALT-ENERGY-001
-npx.cmd -y @modelcontextprotocol/inspector --cli http://127.0.0.1:8080/mcp --transport http --method tools/call --tool-name smartpark_lookup_energy --tool-arg meterId=DEV-ENERGY-001
-npx.cmd -y @modelcontextprotocol/inspector --cli http://127.0.0.1:8080/mcp --transport http --method tools/call --tool-name smartpark_search_knowledge --tool-arg query=energy --tool-arg domain=ALERT_OPERATIONS
-npx.cmd -y @modelcontextprotocol/inspector --web --server-url http://127.0.0.1:8080/mcp --transport http
+npx.cmd -y @modelcontextprotocol/inspector@2.3.0 --cli http://127.0.0.1:8080/mcp --transport http --method tools/list
+npx.cmd -y @modelcontextprotocol/inspector@2.3.0 --cli http://127.0.0.1:8080/mcp --transport http --method tools/call --tool-name smartpark_lookup_alert --tool-arg alertId=ALT-ENERGY-001
+npx.cmd -y @modelcontextprotocol/inspector@2.3.0 --cli http://127.0.0.1:8080/mcp --transport http --method tools/call --tool-name smartpark_lookup_energy --tool-arg meterId=DEV-ENERGY-001
+npx.cmd -y @modelcontextprotocol/inspector@2.3.0 --cli http://127.0.0.1:8080/mcp --transport http --method tools/call --tool-name smartpark_search_knowledge --tool-arg query=energy --tool-arg domain=ALERT_OPERATIONS
+npx.cmd -y @modelcontextprotocol/inspector@2.3.0 --web --server-url http://127.0.0.1:8080/mcp --transport http
 ```
 
 Codex 可按需连接；实现过程不会修改用户全局配置：

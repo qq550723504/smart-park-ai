@@ -44,9 +44,8 @@ public final class McpToolResults {
             tags = List.copyOf(Objects.requireNonNull(tags, "tags"));
         }
     }
-    public record KnowledgeData(String query, String domain, List<KnowledgeMatchData> matches) {
+    public record KnowledgeData(String domain, List<KnowledgeMatchData> matches) {
         public KnowledgeData {
-            query = Objects.requireNonNull(query, "query");
             domain = Objects.requireNonNull(domain, "domain");
             matches = List.copyOf(Objects.requireNonNull(matches, "matches"));
         }

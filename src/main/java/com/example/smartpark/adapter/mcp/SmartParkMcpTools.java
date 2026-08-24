@@ -81,7 +81,7 @@ public final class SmartParkMcpTools {
                     .sorted(Comparator.comparingDouble(KnowledgeMatch::score).reversed().thenComparing(KnowledgeMatch::documentId))
                     .limit(MAX_KNOWLEDGE_MATCHES)
                     .map(this::mapKnowledge).toList();
-            return new McpToolResults.KnowledgeSearchResult(true, new McpToolResults.KnowledgeData(normalizedQuery, parsed.name(), matches), null, McpToolResults.NOTICE);
+            return new McpToolResults.KnowledgeSearchResult(true, new McpToolResults.KnowledgeData(parsed.name(), matches), null, McpToolResults.NOTICE);
         } catch (RuntimeException exception) {
             logFailure("smartpark_search_knowledge", exception);
             return new McpToolResults.KnowledgeSearchResult(false, null, McpToolResults.internalError(), McpToolResults.NOTICE);
