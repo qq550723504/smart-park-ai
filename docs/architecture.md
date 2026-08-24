@@ -95,7 +95,7 @@ Mock 适配器当前用于替代真实园区系统。替换为生产系统时，
 
 领域模型负责基本的不变量校验，例如必填字段、枚举值和置信度范围。它不依赖 Spring Web、具体数据库或 Mock 实现。
 
-知识文档必须显式声明 `KnowledgeDomain`；`KnowledgeDocument` 统一校验安全文档 ID、标题和正文长度。检索结果只使用 `model.common.KnowledgeMatch`，不再提供默认 CUSTOMER_SERVICE 的无领域检索入口，避免调用方绕过领域边界。
+知识文档必须显式声明 `KnowledgeDomain`；`KnowledgeDocument` 统一校验安全文档 ID、标题、正文长度以及标签数量、单标签长度和标签总长度。标签约束在领域模型边界生效，Web DTO 只做提前反馈，RAG 适配器在拼接 embedding 输入前仍保留存储侧总长度保护。检索结果只使用 `model.common.KnowledgeMatch`，不再提供默认 CUSTOMER_SERVICE 的无领域检索入口，避免调用方绕过领域边界。
 
 ### 3.2 `port`：外部能力边界
 
@@ -301,7 +301,7 @@ riskGate
 
 当前 `WorkflowExecutionStore` 使用内存实现，Graph checkpoint 使用 `MemorySaver`。客服支持同一 `sessionId` 下的多轮消息和会话历史。每轮保存用户/助手消息及安全检索轨迹；检索轨迹只保留查询意图、知识文档 ID 和时间，不保留用户原始问题。会话进入人工处理后，自动客服拒绝新的自动回复，但同一幂等请求仍返回请求当时的稳定结果。客服工作流通过 `CustomerSessionStore` 和 `CustomerTicketPort` 访问这些数据，默认 Bean 分别是 `InMemoryCustomerSessionStore` 和 `InMemoryCustomerTicketAdapter`。
 
-客服工作流当前使用有界 TTL 内存会话存储，默认最多 10,000 条、TTL 24 小时；客服请求通过 `Idempotency-Key` 防止进程内重试重复建单，幂等作用域包含 `handle/reply` 操作和 reply 的目标会话。相同幂等键使用完成结果 reservation 协调，外部检索/回答调用不持有 workflow 实例 monitor；同一 session 的不同请求使用 session 级串行协调，避免多轮消息丢失。历史请求结果保持不变，当前工单状态通过会话或以 `CustomerTicketPort` 为唯一来源的工单查询获得。会话过期或容量淘汰时，工作流会协调删除对应工单，避免不可达的内存工单。此次重构建立了 `CustomerSessionStore` 与 `CustomerTicketPort` 的替换边界，但没有提供持久化实现，也没有提供真实 Agent 系统；默认 Mock 分类和关键词检索仍是确定性的本地实现。当前实现适合本地学习、演示和测试，不适合直接作为多实例生产部署方案。
+客服工作流当前使用有界 TTL 内存会话存储，默认最多 10,000 条、TTL 24 小时；客服请求通过 `Idempotency-Key` 防止进程内重试重复建单，幂等作用域包含 `handle/reply` 操作和 reply 的目标会话。相同幂等键使用完成结果 reservation 协调，外部检索/回答调用不持有 workflow 实例 monitor；同一 session 的不同请求使用 session 级串行协调，避免多轮消息丢失。工单创建、会话发布和淘汰清理在同一个客服状态写锁内完成，查询不会看到并删除尚未发布会话的孤儿工单。报修意图不依赖知识检索，检索故障不会覆盖确定的报修确认。历史请求结果保持不变，当前工单状态通过会话或以 `CustomerTicketPort` 为唯一来源的工单查询获得。会话过期或容量淘汰时，工作流会协调删除对应工单，避免不可达的内存工单。此次重构建立了 `CustomerSessionStore` 与 `CustomerTicketPort` 的替换边界，但没有提供持久化实现，也没有提供真实 Agent 系统；默认 Mock 分类和关键词检索仍是确定性的本地实现。当前实现适合本地学习、演示和测试，不适合直接作为多实例生产部署方案。
 
 生产化时应替换：
 

@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:test-driven-development and superpowers:verification-before-completion. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Establish single ownership for knowledge contracts, fail fast on inconsistent index state, and keep customer workflow concurrency scoped to the state it protects so future RAG changes do not recreate review findings.
+**Goal:** Establish single ownership for knowledge contracts, fail fast on inconsistent index state, bound embedding inputs, and keep customer workflow publication and intent handling scoped to the state and contract they protect so future RAG changes do not recreate review findings.
 
-**Architecture:** `KnowledgeDocument` owns the invariant for identifiers and bounded knowledge metadata; adapters consume already-valid domain objects and only enforce storage-specific limits. RAG seed loading rejects duplicate IDs before indexing. Customer request coordination remains keyed by idempotency/session state rather than the workflow instance monitor, with tests defining the concurrency contract.
+**Architecture:** `KnowledgeDocument` owns the invariant for identifiers and bounded knowledge metadata; adapters consume already-valid domain objects and only enforce storage-specific limits. RAG seed loading rejects duplicate IDs before indexing. Customer request coordination remains keyed by idempotency/session state rather than the workflow instance monitor; handoff ticket and session publication share a state write lock, and deterministic repair handoff bypasses retrieval failure, with tests defining the concurrency and fallback contracts.
 
 **Tech Stack:** Java 17, Spring Boot 3.5.8, Spring AI `VectorStore`, JUnit 5, AssertJ, Maven Wrapper.
 
@@ -66,6 +66,24 @@
 ### Task 5: Full verification and handoff
 
 - [x] Run `git diff --check`.
-- [x] Run `./mvnw test` and record 231 tests, 0 failures, and 1 skip.
+- [x] Run `./mvnw test` and record 234 tests, 0 failures, and 1 skip.
 - [x] Run `npm.cmd run build` under `ui`.
 - [x] Review the complete diff for unrelated changes, commit each independently verified slice, and push the PR branch; remote CI/review state remains to be checked after this push.
+
+### Task 6: Close the newly exposed publication and input-boundary gaps
+
+**Files:**
+- Modify: `src/main/java/com/example/smartpark/workflow/CustomerServiceWorkflow.java`
+- Modify: `src/main/java/com/example/smartpark/model/common/KnowledgeDocument.java`
+- Modify: `src/main/java/com/example/smartpark/model/common/PublicMetadata.java`
+- Modify: `src/main/java/com/example/smartpark/adapter/rag/RagKnowledgeAdapter.java`
+- Modify: `src/main/java/com/example/smartpark/web/KnowledgeAdminController.java`
+- Test: `src/test/java/com/example/smartpark/workflow/CustomerServiceWorkflowConcurrencyTest.java`
+- Test: `src/test/java/com/example/smartpark/workflow/CustomerServiceAnswerFailureTest.java`
+- Test: `src/test/java/com/example/smartpark/model/common/KnowledgeDocumentTest.java`
+
+- [x] Add a concurrency regression test proving ticket listing cannot delete a handoff between ticket creation and session publication.
+- [x] Publish handoff ticket and session under one state write lock while leaving provider calls outside the lock.
+- [x] Make tag count, per-tag length, total tag length, and assembled embedding text bounded before vector-store writes.
+- [x] Add a regression test proving repair confirmation is preserved when knowledge retrieval fails; bypass retrieval for deterministic repair intent.
+- [x] Run focused tests, full backend tests, frontend build, and `git diff --check`.

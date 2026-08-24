@@ -86,7 +86,8 @@ public class KnowledgeAdminController {
             @NotNull KnowledgeDomain domain,
             @NotBlank @Size(max = 160) String title,
             @NotBlank @Size(max = KnowledgeDocument.MAX_CONTENT_LENGTH) String content,
-            @NotEmpty List<@NotBlank String> tags) {
+            @NotEmpty @Size(max = KnowledgeDocument.MAX_TAG_COUNT)
+            List<@NotBlank @Size(max = KnowledgeDocument.MAX_TAG_LENGTH) String> tags) {
         @AssertTrue(message = "title must be bounded public metadata")
         public boolean hasSafePublicTitle() {
             return PublicMetadata.isSafeTitle(title);

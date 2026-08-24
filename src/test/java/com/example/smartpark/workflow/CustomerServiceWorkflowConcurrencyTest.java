@@ -2,13 +2,17 @@ package com.example.smartpark.workflow;
 
 import com.example.smartpark.adapter.mock.InMemoryCustomerSessionStore;
 import com.example.smartpark.adapter.mock.InMemoryCustomerTicketAdapter;
+import com.example.smartpark.adapter.mock.MockCustomerAnswerAdapter;
 import com.example.smartpark.model.common.KnowledgeDocument;
 import com.example.smartpark.model.common.KnowledgeDomain;
 import com.example.smartpark.model.common.KnowledgeMatch;
 import com.example.smartpark.model.customer.CustomerAnswer;
 import com.example.smartpark.model.customer.CustomerServiceResult;
+import com.example.smartpark.model.customer.CustomerTicket;
+import com.example.smartpark.model.customer.CustomerTicketStatus;
 import com.example.smartpark.port.customer.CustomerAnswerPort;
 import com.example.smartpark.port.knowledge.KnowledgePort;
+import com.example.smartpark.port.customer.CustomerTicketPort;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -185,6 +189,35 @@ class CustomerServiceWorkflowConcurrencyTest {
         }
     }
 
+    @Test
+    void ticketListCannotDeleteAHandOffBeforeItsSessionIsPublished() throws Exception {
+        BlockingTicketPort tickets = new BlockingTicketPort();
+        KnowledgePort knowledge = (domain, query) -> List.of();
+        Clock clock = Clock.fixed(Instant.EPOCH, ZoneOffset.UTC);
+        CustomerServiceWorkflow workflow = new CustomerServiceWorkflow(
+                knowledge, new InMemoryCustomerSessionStore(clock, 100, Duration.ofHours(24)),
+                tickets, new MockCustomerAnswerAdapter(), clock, () -> "cs-atomic");
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<CustomerServiceResult> request = executor.submit(
+                    () -> workflow.handle("A1 洗手间漏水，需要报修？", "repair-atomic"));
+            assertThat(tickets.createEntered.await(5, TimeUnit.SECONDS)).isTrue();
+
+            Future<List<CustomerServiceResult>> listed = executor.submit(workflow::tickets);
+            Thread.sleep(250);
+            assertThat(listed.isDone()).isFalse();
+
+            tickets.releaseCreate.countDown();
+            CustomerServiceResult result = request.get(5, TimeUnit.SECONDS);
+            assertThat(result.needsHuman()).isTrue();
+            assertThat(listed.get(5, TimeUnit.SECONDS)).extracting(CustomerServiceResult::sessionId)
+                    .containsExactly("cs-atomic");
+        } finally {
+            tickets.releaseCreate.countDown();
+            executor.shutdownNow();
+        }
+    }
+
     private static void await(CountDownLatch latch) {
         try {
             if (!latch.await(5, TimeUnit.SECONDS)) {
@@ -198,5 +231,30 @@ class CustomerServiceWorkflowConcurrencyTest {
 
     private static KnowledgeDocument document(String id, String title, String content) {
         return new KnowledgeDocument(id, KnowledgeDomain.CUSTOMER_SERVICE, title, content, List.of("test"), Instant.EPOCH);
+    }
+
+    private static final class BlockingTicketPort implements CustomerTicketPort {
+        private final InMemoryCustomerTicketAdapter delegate = new InMemoryCustomerTicketAdapter();
+        private final CountDownLatch createEntered = new CountDownLatch(1);
+        private final CountDownLatch releaseCreate = new CountDownLatch(1);
+
+        @Override
+        public CustomerTicket create(String sessionId, String intent, String safeSummary, Instant createdAt) {
+            CustomerTicket ticket = delegate.create(sessionId, intent, safeSummary, createdAt);
+            createEntered.countDown();
+            try {
+                if (!releaseCreate.await(5, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("timed out waiting for ticket publication release");
+                }
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("interrupted while blocking ticket publication", interrupted);
+            }
+            return ticket;
+        }
+
+        @Override public List<CustomerTicket> list() { return delegate.list(); }
+        @Override public CustomerTicket update(String ticketId, CustomerTicketStatus nextStatus) { return delegate.update(ticketId, nextStatus); }
+        @Override public void deleteBySessionId(String sessionId) { delegate.deleteBySessionId(sessionId); }
     }
 }

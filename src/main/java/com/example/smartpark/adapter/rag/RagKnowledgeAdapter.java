@@ -27,6 +27,7 @@ public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
     public static final int MAX_RESULTS = 5;
     public static final int MAX_QUERY_LENGTH = 500;
     public static final int MAX_DOCUMENT_LENGTH = KnowledgeDocument.MAX_CONTENT_LENGTH;
+    public static final int MAX_EMBEDDED_TEXT_LENGTH = 3_000;
     public static final double DEFAULT_MIN_SIMILARITY_SCORE = 0.65;
 
     private final Map<KnowledgeDomain, VectorStore> vectorStores;
@@ -158,10 +159,14 @@ public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
     }
 
     private static Document toVectorDocument(KnowledgeDocument document) {
+        String embeddedText = "Title: " + document.title() + "\nTags: " + String.join(", ", document.tags())
+                + "\nContent: " + document.content();
+        if (embeddedText.length() > MAX_EMBEDDED_TEXT_LENGTH) {
+            throw new IllegalArgumentException("knowledge embedding input must not exceed " + MAX_EMBEDDED_TEXT_LENGTH + " characters");
+        }
         return Document.builder()
                 .id(document.id())
-                .text("Title: " + document.title() + "\nTags: " + String.join(", ", document.tags())
-                        + "\nContent: " + document.content())
+                .text(embeddedText)
                 .metadata(Map.of("title", document.title(), "tags", String.join(",", document.tags()),
                         "updatedAt", document.updatedAt().toString()))
                 .build();

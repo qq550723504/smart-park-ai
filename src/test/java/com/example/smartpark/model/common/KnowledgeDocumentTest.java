@@ -32,6 +32,27 @@ class KnowledgeDocumentTest {
     }
 
     @Test
+    void rejectsOversizedKnowledgeTagsAtTheDomainBoundary() {
+        assertThatThrownBy(() -> new KnowledgeDocument(
+                "KD-TAGS-001", KnowledgeDomain.CUSTOMER_SERVICE, "Parking guide", "Body",
+                List.of("x".repeat(81)), Instant.EPOCH))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("knowledge tag");
+
+        assertThatThrownBy(() -> new KnowledgeDocument(
+                "KD-TAGS-002", KnowledgeDomain.CUSTOMER_SERVICE, "Parking guide", "Body",
+                java.util.stream.IntStream.range(0, 33).mapToObj(index -> "tag-" + index).toList(), Instant.EPOCH))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("knowledge tags");
+
+        assertThatThrownBy(() -> new KnowledgeDocument(
+                "KD-TAGS-003", KnowledgeDomain.CUSTOMER_SERVICE, "Parking guide", "Body",
+                java.util.stream.IntStream.range(0, 7).mapToObj(index -> "x".repeat(80)).toList(), Instant.EPOCH))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("in total");
+    }
+
+    @Test
     void rejectsControlCharactersInPublicTitleAtTheDomainBoundary() {
         assertThatThrownBy(() -> new KnowledgeDocument(
                 "KD-INVALID-001", KnowledgeDomain.CUSTOMER_SERVICE, "Parking guide\ninternal", "Body", List.of("parking"), Instant.EPOCH))

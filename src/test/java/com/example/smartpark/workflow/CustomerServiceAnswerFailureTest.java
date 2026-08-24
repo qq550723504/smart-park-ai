@@ -19,6 +19,28 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class CustomerServiceAnswerFailureTest {
     @Test
+    void repairConfirmationSurvivesKnowledgeSearchFailure() {
+        KnowledgePort rankedFailure = new KnowledgePort() {
+            @Override public List<KnowledgeDocument> search(KnowledgeDomain domain, String query) { return List.of(); }
+            @Override public List<KnowledgeMatch> rankedSearch(KnowledgeDomain domain, String query) {
+                throw new IllegalStateException("EmbeddingModel/vector store raw failure");
+            }
+        };
+        CustomerServiceWorkflow workflow = new CustomerServiceWorkflow(rankedFailure,
+                new InMemoryCustomerSessionStore(), new InMemoryCustomerTicketAdapter(),
+                (question, intent, evidence) -> { throw new AssertionError("repair handoff must not generate an answer"); },
+                Clock.fixed(Instant.EPOCH, ZoneOffset.UTC), () -> "cs-repair-failure");
+
+        var result = workflow.handle("A1 洗手间漏水，需要报修");
+
+        assertThat(result.needsHuman()).isTrue();
+        assertThat(result.answer()).contains("已记录设施报修");
+        assertThat(result.answer()).doesNotContain("知识检索暂时不可用");
+        assertThat(result.reason()).isEqualTo(CustomerAnswer.Reason.POLICY_LIMIT);
+        assertThat(result.ticket().status()).isEqualTo("WAITING_AGENT");
+    }
+
+    @Test
     void rankedRetrievalFailureCreatesWaitingAgentTicketWithoutLeakingFailureText() {
         KnowledgePort failing = (domain, query) -> { throw new IllegalStateException("legacy search should not be called"); };
         KnowledgePort rankedFailure = new KnowledgePort() {

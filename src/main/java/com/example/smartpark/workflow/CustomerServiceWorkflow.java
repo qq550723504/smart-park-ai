@@ -29,7 +29,9 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
 
 public final class CustomerServiceWorkflow {
@@ -45,6 +47,7 @@ public final class CustomerServiceWorkflow {
     private final double minimumKnowledgeScore;
     private final ConcurrentHashMap<String, CompletableFuture<CustomerServiceResult>> idempotencyReservations = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, LockReference> sessionLocks = new ConcurrentHashMap<>();
+    private final ReadWriteLock customerStateLock = new ReentrantReadWriteLock();
 
     public CustomerServiceWorkflow(KnowledgePort knowledgePort) {
         this(knowledgePort, new InMemoryCustomerSessionStore(), new InMemoryCustomerTicketAdapter(),
@@ -124,19 +127,9 @@ public final class CustomerServiceWorkflow {
         String sessionId = sessionIds.get();
         Intent intent = classify(normalizedQuestion);
         RetrievalOutcome retrieval = retrieve(intent);
-        CustomerServiceResult result = resolve(sessionId, normalizedQuestion, intent, retrieval);
-        sessionStore.create(sessionId, result,
-                List.of(
-                        new CustomerConversation.Message("USER", normalizedQuestion, now),
-                        new CustomerConversation.Message("ASSISTANT", result.answer(), now)),
-                List.of(new CustomerConversation.RetrievalTrace(
-                        intent.query, retrieval.matches().stream().map(KnowledgeMatch::documentId).toList(), now)), now);
-        retireEvictedSessions(now);
-
-        if (normalizedKey != null) {
-            sessionStore.rememberIdempotency(normalizedKey, scope, normalizedQuestion, result, now);
-        }
-        return result;
+        ResolvedAnswer resolved = resolve(normalizedQuestion, intent, retrieval);
+        return publishNewSession(sessionId, normalizedQuestion, intent, retrieval, resolved,
+                normalizedKey, scope, now);
     }
 
     public CustomerServiceResult reply(String sessionId, String question, String idempotencyKey) {
@@ -165,19 +158,77 @@ public final class CustomerServiceWorkflow {
         Intent classified = classify(normalizedQuestion);
         Intent intent = classified == Intent.GENERAL ? Intent.valueOf(current.result().intent()) : classified;
         RetrievalOutcome retrieval = retrieve(intent);
-        CustomerServiceResult result = resolve(sessionId, normalizedQuestion, intent, retrieval);
-        List<CustomerConversation.Message> messages = new java.util.ArrayList<>(current.messages());
-        messages.add(new CustomerConversation.Message("USER", normalizedQuestion, now));
-        messages.add(new CustomerConversation.Message("ASSISTANT", result.answer(), now));
-        List<CustomerConversation.RetrievalTrace> retrievals = new java.util.ArrayList<>(current.retrievals());
-        retrievals.add(new CustomerConversation.RetrievalTrace(
-                intent.query, retrieval.matches().stream().map(KnowledgeMatch::documentId).toList(), now));
-        sessionStore.update(new CustomerSessionStore.SessionSnapshot(
-                sessionId, result, current.createdAt(), messages, retrievals));
-        if (normalizedKey != null) {
-            sessionStore.rememberIdempotency(normalizedKey, scope, normalizedQuestion, result, now);
+        ResolvedAnswer resolved = resolve(normalizedQuestion, intent, retrieval);
+        return publishReply(sessionId, normalizedQuestion, intent, retrieval, resolved,
+                current, normalizedKey, scope, now);
+    }
+
+    private CustomerServiceResult publishNewSession(
+            String sessionId, String question, Intent intent, RetrievalOutcome retrieval,
+            ResolvedAnswer resolved, String idempotencyKey,
+            CustomerSessionStore.IdempotencyScope scope, Instant now) {
+        customerStateLock.writeLock().lock();
+        try {
+            CustomerServiceResult result = buildResultSafely(sessionId, intent, retrieval, resolved, now);
+            sessionStore.create(sessionId, result,
+                    List.of(
+                            new CustomerConversation.Message("USER", question, now),
+                            new CustomerConversation.Message("ASSISTANT", result.answer(), now)),
+                    List.of(new CustomerConversation.RetrievalTrace(
+                            intent.query, retrieval.matches().stream().map(KnowledgeMatch::documentId).toList(), now)), now);
+            if (idempotencyKey != null) {
+                sessionStore.rememberIdempotency(idempotencyKey, scope, question, result, now);
+            }
+            retireEvictedSessions(now);
+            return result;
+        } finally {
+            customerStateLock.writeLock().unlock();
         }
-        return result;
+    }
+
+    private CustomerServiceResult publishReply(
+            String sessionId, String question, Intent intent, RetrievalOutcome retrieval,
+            ResolvedAnswer resolved, CustomerSessionStore.SessionSnapshot current,
+            String idempotencyKey, CustomerSessionStore.IdempotencyScope scope, Instant now) {
+        customerStateLock.writeLock().lock();
+        try {
+            CustomerServiceResult result = buildResultSafely(sessionId, intent, retrieval, resolved, now);
+            List<CustomerConversation.Message> messages = new java.util.ArrayList<>(current.messages());
+            messages.add(new CustomerConversation.Message("USER", question, now));
+            messages.add(new CustomerConversation.Message("ASSISTANT", result.answer(), now));
+            List<CustomerConversation.RetrievalTrace> retrievals = new java.util.ArrayList<>(current.retrievals());
+            retrievals.add(new CustomerConversation.RetrievalTrace(
+                    intent.query, retrieval.matches().stream().map(KnowledgeMatch::documentId).toList(), now));
+            sessionStore.update(new CustomerSessionStore.SessionSnapshot(
+                    sessionId, result, current.createdAt(), messages, retrievals));
+            if (idempotencyKey != null) {
+                sessionStore.rememberIdempotency(idempotencyKey, scope, question, result, now);
+            }
+            return result;
+        } finally {
+            customerStateLock.writeLock().unlock();
+        }
+    }
+
+    private CustomerServiceResult buildResult(
+            String sessionId, Intent intent, RetrievalOutcome retrieval, ResolvedAnswer resolved, Instant now) {
+        CustomerTicket ticket = resolved.needsHuman() ? createTicket(sessionId, intent, now) : null;
+        List<KnowledgeMatch> matches = retrieval.matches();
+        return new CustomerServiceResult(sessionId, intent.name(), resolved.answer(),
+                matches.stream().map(KnowledgeMatch::title).toList(),
+                matches.stream().map(match -> new KnowledgeCitation(match.documentId(), match.title(), match.score())).toList(),
+                resolved.needsHuman(), ticket, resolved.reason(), resolved.citationIds());
+    }
+
+    private CustomerServiceResult buildResultSafely(
+            String sessionId, Intent intent, RetrievalOutcome retrieval, ResolvedAnswer resolved, Instant now) {
+        try {
+            return buildResult(sessionId, intent, retrieval, resolved, now);
+        } catch (RuntimeException failure) {
+            return buildResult(sessionId, intent, retrieval,
+                    new ResolvedAnswer("当前无法确认答案，已转人工客服处理。", true,
+                            CustomerAnswer.Reason.INSUFFICIENT_EVIDENCE, List.of()), now);
+        }
     }
 
     public CustomerConversation conversation(String sessionId) {
@@ -193,40 +244,50 @@ public final class CustomerServiceWorkflow {
         return sessionStore.count(now);
     }
 
-    public synchronized List<CustomerServiceResult> tickets() {
-        Instant now = Instant.now(clock);
-        retireEvictedSessions(now);
-        List<CustomerServiceResult> results = new java.util.ArrayList<>();
-        for (CustomerTicket ticket : ticketPort.list()) {
-            CustomerSessionStore.SessionSnapshot snapshot = sessionStore.find(ticket.sessionId(), now).orElse(null);
-            if (snapshot == null) {
-                ticketPort.deleteBySessionId(ticket.sessionId());
-                continue;
+    public List<CustomerServiceResult> tickets() {
+        customerStateLock.writeLock().lock();
+        try {
+            Instant now = Instant.now(clock);
+            retireEvictedSessions(now);
+            List<CustomerServiceResult> results = new java.util.ArrayList<>();
+            for (CustomerTicket ticket : ticketPort.list()) {
+                CustomerSessionStore.SessionSnapshot snapshot = sessionStore.find(ticket.sessionId(), now).orElse(null);
+                if (snapshot == null) {
+                    ticketPort.deleteBySessionId(ticket.sessionId());
+                    continue;
+                }
+                results.add(withTicket(snapshot.result(), ticket));
             }
-            results.add(withTicket(snapshot.result(), ticket));
+            return List.copyOf(results);
+        } finally {
+            customerStateLock.writeLock().unlock();
         }
-        return List.copyOf(results);
     }
 
-    public synchronized CustomerServiceResult updateTicket(String ticketId, String status) {
-        Instant now = Instant.now(clock);
-        retireEvictedSessions(now);
-        CustomerTicketStatus nextStatus = CustomerTicketStatus.valueOf(status);
-        CustomerTicket currentTicket = ticketPort.list().stream()
-                .filter(ticket -> ticket.id().equals(ticketId))
-                .findFirst()
-                .orElseThrow(() -> new NoSuchElementException("Unknown customer service ticket: " + ticketId));
-        CustomerSessionStore.SessionSnapshot match = sessionStore.find(currentTicket.sessionId(), now).orElse(null);
-        if (match == null) {
-            ticketPort.deleteBySessionId(currentTicket.sessionId());
-            throw new NoSuchElementException("Unknown customer service ticket: " + ticketId);
+    public CustomerServiceResult updateTicket(String ticketId, String status) {
+        customerStateLock.writeLock().lock();
+        try {
+            Instant now = Instant.now(clock);
+            retireEvictedSessions(now);
+            CustomerTicketStatus nextStatus = CustomerTicketStatus.valueOf(status);
+            CustomerTicket currentTicket = ticketPort.list().stream()
+                    .filter(ticket -> ticket.id().equals(ticketId))
+                    .findFirst()
+                    .orElseThrow(() -> new NoSuchElementException("Unknown customer service ticket: " + ticketId));
+            CustomerSessionStore.SessionSnapshot match = sessionStore.find(currentTicket.sessionId(), now).orElse(null);
+            if (match == null) {
+                ticketPort.deleteBySessionId(currentTicket.sessionId());
+                throw new NoSuchElementException("Unknown customer service ticket: " + ticketId);
+            }
+            currentTicket.transitionTo(nextStatus);
+            CustomerTicket updatedTicket = ticketPort.update(ticketId, nextStatus);
+            CustomerServiceResult updated = withTicket(match.result(), updatedTicket);
+            sessionStore.update(new CustomerSessionStore.SessionSnapshot(
+                    match.sessionId(), updated, match.createdAt(), match.messages(), match.retrievals()));
+            return updated;
+        } finally {
+            customerStateLock.writeLock().unlock();
         }
-        currentTicket.transitionTo(nextStatus);
-        CustomerTicket updatedTicket = ticketPort.update(ticketId, nextStatus);
-        CustomerServiceResult updated = withTicket(match.result(), updatedTicket);
-        sessionStore.update(new CustomerSessionStore.SessionSnapshot(
-                match.sessionId(), updated, match.createdAt(), match.messages(), match.retrievals()));
-        return updated;
     }
     public CustomerServiceResult get(String sessionId) {
         Instant now = Instant.now(clock);
@@ -240,7 +301,7 @@ public final class CustomerServiceWorkflow {
     }
 
     private RetrievalOutcome retrieve(Intent intent) {
-        if (intent == Intent.GENERAL) return RetrievalOutcome.noEvidence();
+        if (intent == Intent.GENERAL || intent == Intent.REPAIR) return RetrievalOutcome.noEvidence();
         try {
             List<KnowledgeMatch> matches = uniqueMatchesByDocumentId(
                     knowledgePort.rankedSearch(KnowledgeDomain.CUSTOMER_SERVICE, intent.query).stream()
@@ -253,10 +314,9 @@ public final class CustomerServiceWorkflow {
         }
     }
 
-    private CustomerServiceResult resolve(String sessionId, String question, Intent intent, RetrievalOutcome retrieval) {
+    private ResolvedAnswer resolve(String question, Intent intent, RetrievalOutcome retrieval) {
         List<KnowledgeMatch> matches = retrieval.matches();
         boolean needsHuman = intent == Intent.REPAIR || intent == Intent.GENERAL || matches.isEmpty();
-        CustomerTicket ticket = needsHuman ? createTicket(sessionId, intent) : null;
         try {
             CustomerAnswer generated = retrieval.unavailable()
                     ? new CustomerAnswer("当前知识检索暂时不可用，已转人工客服处理。", true, CustomerAnswer.Reason.RETRIEVAL_UNAVAILABLE, List.of())
@@ -266,7 +326,6 @@ public final class CustomerServiceWorkflow {
                     : answerPort.answer(question, intent.name(), matches);
             boolean generatedNeedsHuman = generated.needsHuman();
             if (generatedNeedsHuman != needsHuman) {
-                if (ticket == null) ticket = createTicket(sessionId, intent);
                 generated = generatedNeedsHuman
                         ? generated
                         : new CustomerAnswer("当前无法确认答案，已转人工客服处理。", true,
@@ -275,16 +334,17 @@ public final class CustomerServiceWorkflow {
             }
             List<String> citationIds = needsHuman ? List.of() : generated.citationIds();
             CustomerAnswer.Reason reason = needsHuman ? generated.reason() : CustomerAnswer.Reason.SUPPORTED;
-            return new CustomerServiceResult(sessionId, intent.name(), generated.answer(),
-                    matches.stream().map(KnowledgeMatch::title).toList(),
-                    matches.stream().map(match -> new KnowledgeCitation(match.documentId(), match.title(), match.score())).toList(),
-                    needsHuman, ticket, reason, citationIds);
+            return new ResolvedAnswer(generated.answer(), needsHuman, reason, citationIds);
         } catch (RuntimeException failure) {
-            if (ticket == null) ticket = createTicket(sessionId, intent);
-            return new CustomerServiceResult(sessionId, intent.name(), "当前无法确认答案，已转人工客服处理。",
-                    matches.stream().map(KnowledgeMatch::title).toList(),
-                    matches.stream().map(match -> new KnowledgeCitation(match.documentId(), match.title(), match.score())).toList(),
-                    true, ticket, CustomerAnswer.Reason.INSUFFICIENT_EVIDENCE, List.of());
+            return new ResolvedAnswer("当前无法确认答案，已转人工客服处理。", true,
+                    CustomerAnswer.Reason.INSUFFICIENT_EVIDENCE, List.of());
+        }
+    }
+
+    private record ResolvedAnswer(
+            String answer, boolean needsHuman, CustomerAnswer.Reason reason, List<String> citationIds) {
+        private ResolvedAnswer {
+            citationIds = List.copyOf(citationIds);
         }
     }
 
@@ -312,8 +372,8 @@ public final class CustomerServiceWorkflow {
         return List.copyOf(unique.values());
     }
 
-    private CustomerTicket createTicket(String sessionId, Intent intent) {
-        return ticketPort.create(sessionId, intent.name(), intent.safeTicketSummary, Instant.now(clock));
+    private CustomerTicket createTicket(String sessionId, Intent intent, Instant createdAt) {
+        return ticketPort.create(sessionId, intent.name(), intent.safeTicketSummary, createdAt);
     }
 
     private void retireEvictedSessions(Instant now) {

@@ -12,9 +12,12 @@ public final class PublicMetadata {
     private PublicMetadata() { }
 
     public static boolean isSafeTitle(String value) {
+        return value != null && value.length() <= MAX_TITLE_LENGTH && isSafePublicText(value);
+    }
+
+    public static boolean isSafePublicText(String value) {
         return value != null
                 && !value.isBlank()
-                && value.length() <= MAX_TITLE_LENGTH
                 && value.codePoints().noneMatch(PublicMetadata::isUnsafePublicCharacter);
     }
 
