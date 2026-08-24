@@ -196,6 +196,58 @@ curl -X POST "http://localhost:8080/api/customer-service/sessions" \
 
 管理员可通过 `GET /api/knowledge` 查看带 `domain` 的知识文档元数据，通过 `POST /api/knowledge` 新增必须明确属于 `CUSTOMER_SERVICE` 或 `ALERT_OPERATIONS` 的文档，并通过 `PATCH /api/knowledge/{documentId}/active` 启用或停用文档。公开响应不返回知识正文；停用文档会真实影响对应领域的告警或客服检索，知识不足时进入审批或转人工。客服坐席、审批人或管理员可通过 `POST /api/feedback` 提交枚举化反馈，管理员可通过 `GET /api/feedback` 查看反馈记录。当前不接受自由文本，避免反馈接口成为敏感信息旁路。
 
+## 只读 MCP 工具生态演示
+
+MCP Server **默认关闭**，且本切片没有认证、租户隔离或生产网络边界，仅适用于可信的本地演示，禁止直接暴露到公网。关闭 DashScope 后无需模型 API Key：三个工具直接通过只读应用 Port 查询 Mock 园区适配器。服务不公开 Resources、Prompts、Completion、工作流变更或设备控制能力。
+
+Spring AI 1.1.2 将 Java 结果信封编码为 MCP `TextContent` 中的 JSON；客户端应解析该文本 JSON，不应依赖 `structuredContent`。
+
+启动服务：
+
+```powershell
+$env:SPRING_AI_DASHSCOPE_ENABLED='false'
+$env:SMARTPARK_MCP_ENABLED='true'
+.\mvnw.cmd spring-boot:run
+```
+
+| Tool | Inputs | Safe output |
+|---|---|---|
+| `smartpark_lookup_alert` | `alertId` | IDs, classification, risk hint, occurrence time |
+| `smartpark_lookup_energy` | `meterId` | reading, baseline, peak demand, variance |
+| `smartpark_search_knowledge` | `query`, `domain` | up to five metadata-only matches |
+
+知识领域仅允许 `CUSTOMER_SERVICE` 和 `ALERT_OPERATIONS`。可使用 MCP Inspector 验证发现和调用：
+
+```powershell
+npx.cmd -y @modelcontextprotocol/inspector --cli http://127.0.0.1:8080/mcp --transport http --method tools/list
+npx.cmd -y @modelcontextprotocol/inspector --cli http://127.0.0.1:8080/mcp --transport http --method tools/call --tool-name smartpark_lookup_alert --tool-arg alertId=ALT-ENERGY-001
+npx.cmd -y @modelcontextprotocol/inspector --cli http://127.0.0.1:8080/mcp --transport http --method tools/call --tool-name smartpark_lookup_energy --tool-arg meterId=DEV-ENERGY-001
+npx.cmd -y @modelcontextprotocol/inspector --cli http://127.0.0.1:8080/mcp --transport http --method tools/call --tool-name smartpark_search_knowledge --tool-arg query=能耗 --tool-arg domain=ALERT_OPERATIONS
+npx.cmd -y @modelcontextprotocol/inspector --web --server-url http://127.0.0.1:8080/mcp --transport http
+```
+
+Codex 可按需连接；实现过程不会修改用户全局配置：
+
+```powershell
+codex mcp add smart-park --url http://127.0.0.1:8080/mcp
+codex mcp get smart-park
+codex mcp remove smart-park
+```
+
+等价配置：
+
+```toml
+[mcp_servers.smart-park]
+url = "http://127.0.0.1:8080/mcp"
+```
+
+停止服务后清理当前 PowerShell 环境变量：
+
+```powershell
+Remove-Item Env:SPRING_AI_DASHSCOPE_ENABLED -ErrorAction SilentlyContinue
+Remove-Item Env:SMARTPARK_MCP_ENABLED -ErrorAction SilentlyContinue
+```
+
 ## 技术与场景说明
 
 | 技术主题 | 代码位置 | 本项目的实现 |
