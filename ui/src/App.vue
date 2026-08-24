@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import AlertSelector from './components/AlertSelector.vue'
 import WorkflowGraph from './components/WorkflowGraph.vue'
 import DemoConsole from './components/DemoConsole.vue'
 import EventTimeline from './components/EventTimeline.vue'
 import CustomerServiceConsole from './components/CustomerServiceConsole.vue'
+import ExecutionTraceRail from './components/execution/ExecutionTraceRail.vue'
 import { demoAlerts, type DemoRole } from './types/workflow'
 import { useWorkflow } from './composables/useWorkflow'
+import { useExecutionTrace } from './composables/useExecutionTrace'
 import { getOperationsCapabilities, submitFeedback } from './services/workflowApi'
 import { customerIntentLabel, workflowNodeLabel } from './utils/labels'
+import { alertWorkflowRunId } from './utils/runId'
 import './styles.css'
 
 const capabilities = ref<{ knowledgeMode: string; customerAnswerMode: string; vectorStore: string } | null>(null)
@@ -29,6 +32,18 @@ const role = ref<DemoRole>('ADMIN')
 const reviewer = ref('')
 const comment = ref('')
 const { workflow, events, loading, approving, error, isTerminal, start, approve } = useWorkflow()
+
+// 统一执行轨迹：告警工作流通过确定性 runId 同时出现在右侧轨迹栏。
+const trace = useExecutionTrace()
+watch(
+  () => workflow.value?.workflowId,
+  (workflowId) => {
+    if (workflowId) {
+      // 订阅会重放统一发布器中的全部历史事件，重复调用是安全的。
+      trace.subscribe(alertWorkflowRunId(workflowId))
+    }
+  },
+)
 const selectedAlert = computed(() => demoAlerts.find((item) => item.id === selectedAlertId.value) ?? demoAlerts[0])
 const needsApproval = computed(() => workflow.value?.status === 'WAITING_APPROVAL')
 const hasStarted = computed(() => Boolean(workflow.value))
@@ -128,11 +143,18 @@ function confidence(value?: number) {
       </div>
       <div class="topbar-actions">
         <el-select v-model="role" class="role-select" aria-label="演示角色"><el-option label="查看者" value="VIEWER" /><el-option label="操作员" value="OPERATOR" /><el-option label="审批人" value="APPROVER" /><el-option label="客服坐席" value="CUSTOMER_AGENT" /><el-option label="管理员" value="ADMIN" /></el-select>
-        <nav class="view-switch"><button :class="{ active: activeView === 'workflow' }" @click="activeView = 'workflow'">运营工作流</button><button :class="{ active: activeView === 'customer' }" @click="activeView = 'customer'">园区客服</button></nav>
+        <nav class="view-switch" aria-label="场景导航">
+          <button :class="{ active: activeView === 'workflow' }" @click="activeView = 'workflow'">告警工作流</button>
+          <button :class="{ active: activeView === 'customer' }" @click="activeView = 'customer'">园区客服</button>
+          <button type="button" disabled title="实时语音助手将在 P1 后续切片开放">实时语音</button>
+          <button type="button" disabled title="专家协作将在 P1 后续切片开放">专家协作</button>
+          <button type="button" disabled title="运营分析将在 P1 后续切片开放">运营分析</button>
+        </nav>
         <div class="system-status"><span class="status-pulse"></span><span>模拟园区系统</span><span class="divider"></span><span class="muted">知识检索 {{ capabilityLabels?.knowledge ?? '--' }} · 客服回答 {{ capabilityLabels?.customer ?? '--' }} · 索引存储 {{ capabilityLabels?.vector ?? '--' }}</span></div>
       </div>
     </header>
 
+    <div class="workspace">
     <main v-if="activeView === 'customer'" class="main-content customer-main">
       <section class="hero-row customer-hero"><div><span class="eyebrow">园区服务 · 02</span><h2>园区服务问题<br /><em>快速响应与有序转人工</em></h2><p class="hero-copy">基于模拟园区知识回答常见咨询，报修或知识不足时自动生成客服工单。</p></div></section>
       <CustomerServiceConsole :role="role" />
@@ -192,6 +214,15 @@ function confidence(value?: number) {
         <div class="result-footer"><div class="result-note">诊断原文和敏感业务内容已按后端安全策略脱敏展示。</div><div v-if="['APPROVER', 'ADMIN'].includes(role)" class="result-feedback"><el-button size="small" @click="rateWorkflow('CORRECT')">诊断正确</el-button><el-button size="small" @click="rateWorkflow('INCORRECT')">诊断不正确</el-button></div></div>
       </section>
     </main>
+
+    <ExecutionTraceRail
+      class="global-rail"
+      :events="trace.events.value"
+      :status="trace.status.value"
+      :error="trace.error.value"
+    />
+    </div>
+
     <footer><span>智慧园区运营中心</span><span>工作流状态由后端图实时驱动</span></footer>
   </div>
 </template>
