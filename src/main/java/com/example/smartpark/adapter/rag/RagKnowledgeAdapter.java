@@ -13,16 +13,18 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /** Adapter from the application knowledge ports to Spring AI's VectorStore abstraction. */
 public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
     public static final int MAX_RESULTS = 5;
     public static final int MAX_QUERY_LENGTH = 500;
-    public static final int MAX_DOCUMENT_LENGTH = 2_000;
+    public static final int MAX_DOCUMENT_LENGTH = KnowledgeDocument.MAX_CONTENT_LENGTH;
     public static final double DEFAULT_MIN_SIMILARITY_SCORE = 0.65;
 
     private final Map<KnowledgeDomain, VectorStore> vectorStores;
@@ -48,7 +50,14 @@ public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
         }
         this.minSimilarityScore = minSimilarityScore;
         this.faultInjector = Objects.requireNonNull(faultInjector, "faultInjector");
-        Objects.requireNonNull(seedDocuments, "seedDocuments").forEach(this::save);
+        List<KnowledgeDocument> seeds = List.copyOf(Objects.requireNonNull(seedDocuments, "seedDocuments"));
+        Set<String> seedIds = new HashSet<>();
+        for (KnowledgeDocument seed : seeds) {
+            if (!seedIds.add(Objects.requireNonNull(seed, "seed document").id())) {
+                throw new IllegalArgumentException("duplicate knowledge document id in seed documents: " + seed.id());
+            }
+        }
+        seeds.forEach(this::save);
     }
 
     @Override
@@ -161,7 +170,5 @@ public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
 
     private static void validateDocument(KnowledgeDocument document) {
         Objects.requireNonNull(document, "document");
-        if (document.content().length() > MAX_DOCUMENT_LENGTH) throw new IllegalArgumentException(
-                "knowledge document content must not exceed " + MAX_DOCUMENT_LENGTH + " characters");
     }
 }

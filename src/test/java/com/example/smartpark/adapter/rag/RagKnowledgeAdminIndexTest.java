@@ -14,8 +14,21 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class RagKnowledgeAdminIndexTest {
+    @Test
+    void rejectsDuplicateSeedIdentifiersBeforeBuildingTheIndex() {
+        KnowledgeDocument first = new KnowledgeDocument(
+                "KB-DUPLICATE-001", KnowledgeDomain.CUSTOMER_SERVICE, "First", "parking", List.of("parking"), Instant.EPOCH);
+        KnowledgeDocument second = new KnowledgeDocument(
+                "KB-DUPLICATE-001", KnowledgeDomain.ALERT_OPERATIONS, "Second", "power", List.of("power"), Instant.EPOCH);
+
+        assertThatThrownBy(() -> new RagKnowledgeAdapter(stores(new KeywordEmbeddingModel()), List.of(first, second)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("duplicate knowledge document id");
+    }
+
     @Test
     void saveAndActivationChangesAreImmediatelyVisibleToSearch() {
         RagKnowledgeAdapter adapter = new RagKnowledgeAdapter(stores(new KeywordEmbeddingModel()), List.of(

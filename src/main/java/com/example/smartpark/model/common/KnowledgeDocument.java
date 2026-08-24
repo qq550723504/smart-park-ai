@@ -12,6 +12,8 @@ public record KnowledgeDocument(
         List<String> tags,
         Instant updatedAt) {
 
+    public static final int MAX_CONTENT_LENGTH = 2_000;
+
     /** @deprecated New documents must declare their domain explicitly. */
     @Deprecated(forRemoval = false)
     public KnowledgeDocument(String id, String title, String content, List<String> tags, Instant updatedAt) {
@@ -19,10 +21,13 @@ public record KnowledgeDocument(
     }
 
     public KnowledgeDocument {
-        id = Objects.requireNonNull(id, "id");
+        id = PublicMetadata.requireIdentifier(id, "id");
         domain = Objects.requireNonNull(domain, "domain");
         title = PublicMetadata.requireTitle(title);
         content = Objects.requireNonNull(content, "content");
+        if (content.length() > MAX_CONTENT_LENGTH) {
+            throw new IllegalArgumentException("knowledge document content must not exceed " + MAX_CONTENT_LENGTH + " characters");
+        }
         tags = List.copyOf(Objects.requireNonNull(tags, "tags"));
         updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
     }

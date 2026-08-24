@@ -45,7 +45,7 @@ class KnowledgeManagementTest {
     void mockKnowledgeProvidesLowerScoreForPartialMatches() {
         KnowledgeAdminPort knowledge = new MockKnowledgeAdapter(new MockParkDataStore());
 
-        assertThat(knowledge.rankedSearch("park"))
+        assertThat(knowledge.rankedSearch(KnowledgeDomain.CUSTOMER_SERVICE, "park"))
                 .allSatisfy(match -> assertThat(match.score()).isLessThan(1.0));
     }
 }

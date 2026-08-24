@@ -85,7 +85,7 @@ public class KnowledgeAdminController {
             @NotBlank @Pattern(regexp = "KD-[A-Z0-9-]{1,120}") String id,
             @NotNull KnowledgeDomain domain,
             @NotBlank @Size(max = 160) String title,
-            @NotBlank @Size(max = 2000) String content,
+            @NotBlank @Size(max = KnowledgeDocument.MAX_CONTENT_LENGTH) String content,
             @NotEmpty List<@NotBlank String> tags) {
         @AssertTrue(message = "title must be bounded public metadata")
         public boolean hasSafePublicTitle() {
