@@ -9,7 +9,8 @@ public interface KnowledgePort {
 
     default List<KnowledgeMatch> rankedSearch(String query) {
         return search(query).stream()
-                .map(document -> new KnowledgeMatch(document.id(), document.title(), 1.0))
+                // An adapter that cannot provide a relevance score must fail closed.
+                .map(document -> new KnowledgeMatch(document.id(), document.title(), 0.0))
                 .toList();
     }
 }

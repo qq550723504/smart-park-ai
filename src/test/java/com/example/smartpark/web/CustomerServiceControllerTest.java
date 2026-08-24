@@ -2,6 +2,7 @@ package com.example.smartpark.web;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.example.smartpark.adapter.mock.MockParkFixture;
+import com.example.smartpark.port.knowledge.KnowledgeMatch;
 import com.example.smartpark.port.knowledge.KnowledgePort;
 import com.example.smartpark.workflow.CustomerServiceWorkflow;
 import org.junit.jupiter.api.Test;
@@ -104,6 +105,13 @@ class CustomerServiceControllerTest {
             public java.util.List<com.example.smartpark.model.common.KnowledgeDocument> search(String query) {
                 if (++calls == 1) return new MockParkFixture().knowledge().search(query);
                 throw new IllegalStateException(secret);
+            }
+
+            @Override
+            public java.util.List<KnowledgeMatch> rankedSearch(String query) {
+                return search(query).stream()
+                        .map(document -> new KnowledgeMatch(document.id(), document.title(), 1.0))
+                        .toList();
             }
         };
         MockMvc failingMockMvc = MockMvcBuilders.standaloneSetup(

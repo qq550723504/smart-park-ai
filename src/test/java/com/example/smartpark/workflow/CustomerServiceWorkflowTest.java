@@ -90,6 +90,13 @@ class CustomerServiceWorkflowTest {
                 if (++calls == 1) return new MockParkFixture().knowledge().search(query);
                 throw new IllegalStateException(secret);
             }
+
+            @Override
+            public java.util.List<KnowledgeMatch> rankedSearch(String query) {
+                return search(query).stream()
+                        .map(document -> new KnowledgeMatch(document.id(), document.title(), 1.0))
+                        .toList();
+            }
         };
         CustomerServiceWorkflow failing = new CustomerServiceWorkflow(
                 failingKnowledge,

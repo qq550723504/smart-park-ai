@@ -12,10 +12,6 @@ public class OperationsCapabilitiesController {
     private final String knowledgeMode;
     private final String customerAnswerMode;
 
-    public OperationsCapabilitiesController() {
-        this("mock", "mock");
-    }
-
     public OperationsCapabilitiesController(
             @Value("${smartpark.knowledge.mode:mock}") String knowledgeMode,
             @Value("${smartpark.customer.answer-mode:mock}") String customerAnswerMode) {
