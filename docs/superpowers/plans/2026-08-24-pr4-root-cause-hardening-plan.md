@@ -22,13 +22,13 @@
 
 **Files:**
 - Modify: `src/main/java/com/example/smartpark/model/common/KnowledgeDocument.java`
-- Modify: `src/main/java/com/example/smartpark/port/knowledge/KnowledgeMatch.java`
+- Delete: `src/main/java/com/example/smartpark/port/knowledge/KnowledgeMatch.java`
 - Test: `src/test/java/com/example/smartpark/model/common/KnowledgeDocumentTest.java`
 
-- [ ] Add failing tests for control-character and overlong document IDs at the `KnowledgeDocument` constructor boundary.
-- [ ] Run `KnowledgeDocumentTest` and confirm failure comes from the missing identifier invariant.
-- [ ] Reuse `PublicMetadata.requireIdentifier` in `KnowledgeDocument`; keep `KnowledgeMatch` and legacy citation validation defensive and backed by the same helper.
-- [ ] Run the focused model and citation tests and confirm they pass.
+- [x] Add failing tests for control-character and overlong document IDs at the `KnowledgeDocument` constructor boundary.
+- [x] Run `KnowledgeDocumentTest` and confirm failure comes from the missing identifier invariant.
+- [x] Reuse `PublicMetadata.requireIdentifier` in `KnowledgeDocument`; remove the legacy domainless constructor and duplicate `KnowledgeMatch` type.
+- [x] Run the focused model and citation tests and confirm they pass.
 
 ### Task 2: Reject inconsistent RAG seed state before indexing
 
@@ -36,20 +36,20 @@
 - Modify: `src/main/java/com/example/smartpark/adapter/rag/RagKnowledgeAdapter.java`
 - Test: `src/test/java/com/example/smartpark/adapter/rag/RagKnowledgeAdminIndexTest.java`
 
-- [ ] Add a failing test showing duplicate seed IDs are rejected rather than silently replacing metadata after multiple vector writes.
-- [ ] Validate seed IDs as a complete set before calling `save` so construction is atomic from the adapter's perspective.
-- [ ] Run RAG admin/index tests, including move, activation, rollback, and duplicate-seed cases.
+- [x] Add a failing test showing duplicate seed IDs are rejected rather than silently replacing metadata after multiple vector writes.
+- [x] Validate seed IDs as a complete set before calling `save` so construction is atomic from the adapter's perspective.
+- [x] Run RAG admin/index tests, including move, activation, rollback, and duplicate-seed cases.
 
-### Task 3: Add adapter contract coverage
+### Task 3: Add boundary guardrails
 
 **Files:**
-- Create or modify: `src/test/java/com/example/smartpark/architecture/KnowledgeContractTest.java`
+- Create: `src/test/java/com/example/smartpark/architecture/KnowledgePortBoundaryTest.java`
 - Modify: `src/test/java/com/example/smartpark/adapter/mock/KnowledgeManagementTest.java`
 - Modify: `src/test/java/com/example/smartpark/adapter/rag/RagKnowledgeAdapterTest.java`
 
-- [ ] Define shared assertions for domain isolation, inactive-document exclusion, bounded ranked results, and safe citation metadata.
-- [ ] Run the contract against Mock and RAG implementations with their real adapters and test doubles.
-- [ ] Keep adapter-specific tests only for storage behavior such as vector rollback and embedding input construction.
+- [x] Add a source-level guard that forbids the domainless search overload and duplicate ranked-match type.
+- [x] Keep domain isolation, inactive-document exclusion, bounded ranked results, vector rollback, and embedding-input behavior covered by adapter tests.
+- [x] Run Mock and RAG adapter tests with real adapters and local test doubles.
 
 ### Task 4: Revalidate workflow state coordination
 
@@ -58,14 +58,14 @@
 - Modify: `src/test/java/com/example/smartpark/workflow/CustomerServiceWorkflowConcurrencyTest.java`
 - Modify: `src/test/java/com/example/smartpark/workflow/CustomerServiceWorkflowTest.java`
 
-- [ ] Add a regression test that same-session replies with different idempotency keys cannot lose a conversation update.
-- [ ] Add a regression test that identical concurrent idempotency requests invoke retrieval and answer only once.
-- [ ] Keep synchronization scoped to the idempotency/session coordinator and ensure unrelated sessions/requests progress while a provider call is blocked.
-- [ ] Run the workflow concurrency, idempotency, answer-failure, and port tests.
+- [x] Add a regression test that same-session replies with different idempotency keys cannot lose a conversation update.
+- [x] Add a regression test that identical concurrent idempotency requests invoke retrieval and answer only once.
+- [x] Replace idempotency locking with completion reservations; keep session synchronization scoped to the session coordinator and ensure unrelated requests progress while a provider call is blocked.
+- [x] Run the workflow concurrency, idempotency, answer-failure, and port tests.
 
 ### Task 5: Full verification and handoff
 
-- [ ] Run `git diff --check`.
-- [ ] Run `./mvnw test` and record test count, failures, and skips.
-- [ ] Run `npm.cmd run build` under `ui`.
-- [ ] Review the complete diff for unrelated changes, commit each independently verified slice, push the PR branch, and report CI/review state separately.
+- [x] Run `git diff --check`.
+- [x] Run `./mvnw test` and record 231 tests, 0 failures, and 1 skip.
+- [x] Run `npm.cmd run build` under `ui`.
+- [x] Review the complete diff for unrelated changes, commit each independently verified slice, and push the PR branch; remote CI/review state remains to be checked after this push.
