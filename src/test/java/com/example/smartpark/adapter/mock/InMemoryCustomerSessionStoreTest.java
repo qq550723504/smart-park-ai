@@ -1,6 +1,8 @@
 package com.example.smartpark.adapter.mock;
 
+import com.example.smartpark.model.customer.CustomerAnswer;
 import com.example.smartpark.model.customer.CustomerServiceResult;
+import com.example.smartpark.model.customer.KnowledgeCitation;
 import com.example.smartpark.port.customer.CustomerSessionStore;
 import com.example.smartpark.workflow.CustomerConversation;
 import org.junit.jupiter.api.Test;
@@ -109,7 +111,17 @@ class InMemoryCustomerSessionStoreTest {
     }
 
     private static CustomerServiceResult result(String sessionId) {
-        return new CustomerServiceResult(sessionId, "PARKING", "Use visitor parking.", List.of("KD-PARKING-001"), false, null);
+        KnowledgeCitation citation = new KnowledgeCitation("KD-PARKING-001", "Parking", 1.0);
+        return new CustomerServiceResult(
+                sessionId,
+                "PARKING",
+                "Use visitor parking.",
+                List.of(citation.title()),
+                List.of(citation),
+                false,
+                null,
+                CustomerAnswer.Reason.SUPPORTED,
+                List.of(citation.documentId()));
     }
 
     private static CustomerConversation.Message message(String role, String text, Instant createdAt) {

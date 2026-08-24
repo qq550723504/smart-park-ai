@@ -102,9 +102,24 @@ Remove-Variable secureDashScopeKey
 - **告警（alert）：** `AlertPort`、告警查询工具和通用告警工作流负责告警读取、诊断、风险门禁、人工审批与 Mock 工单。
 - **能耗（energy）：** `EnergyPort`、`EnergyReading` 和 `EnergyQueryTool` 负责只读能耗查询；通用 Graph 会将 `ENERGY` 告警路由到 `energyAnalysis` 节点，生成当前值、基线、偏差比例和峰值需求分析，再进入知识检索和诊断。
 - **安防（security）：** `SecurityEvent`、`SecurityPort`、`MockSecurityAdapter` 和 `SecurityQueryTool` 提供脱敏 Mock 事件的只读查询。通用 Graph 会将 `ACCESS` 告警路由到 `securityReview` 节点，校验事件引用和 `REDACTED:` 摘要后再进入知识检索、诊断和强制人工审批。
-- **客服（customer service）：** `CustomerServiceWorkflow` 使用确定性的 Mock 意图识别和关键词检索处理停车、访客、能耗和报修问题。报修或知识不足时创建 `WAITING_AGENT` 客服工单；工单只保存通用安全摘要，不复制用户问题。会话与工单分别通过 `port.customer.CustomerSessionStore` 和 `port.customer.CustomerTicketPort` 访问，默认实现为 `adapter.mock.InMemoryCustomerSessionStore` 和 `adapter.mock.InMemoryCustomerTicketAdapter`。工单端口是当前工单状态的唯一来源；会话过期或因容量被淘汰时，对应工单会一并删除。`Idempotency-Key` 按 `handle/reply` 操作及 reply 目标会话隔离，重试返回请求当时的稳定结果。当前客服答复不调用 DashScope，生产接入还需要大模型输出约束、内容安全、持久化会话/工单存储和人工坐席系统。
+- **客服（customer service）：** `CustomerServiceWorkflow` 通过 `KnowledgePort` 检索停车、访客和能耗知识，并通过配置在 Mock 答复与 DashScope 结构化答复之间切换。报修、知识不足、检索失败、模型失败或引用校验失败时创建 `WAITING_AGENT` 客服工单；工单只保存通用安全摘要，不复制用户问题。会话与工单分别通过 `port.customer.CustomerSessionStore` 和 `port.customer.CustomerTicketPort` 访问，默认实现为 `adapter.mock.InMemoryCustomerSessionStore` 和 `adapter.mock.InMemoryCustomerTicketAdapter`。工单端口是当前工单状态的唯一来源；会话过期或因容量被淘汰时，对应工单会一并删除。`Idempotency-Key` 按 `handle/reply` 操作及 reply 目标会话隔离，重试返回请求当时的稳定结果。对外只返回知识文档 ID、标题和相似度分数，不返回知识正文。
 
-`evidenceSummary` 的格式校验只是边界层的轻量输入约束，不等于认证、授权或业务脱敏。后续适配器仍必须负责真实身份认证、权限判断、租户/业务策略和原始数据脱敏，不能因为通过该格式校验就接入摄像头、门禁或人员原始数据。
+当前客服流程支持通过配置切换检索和回答实现：
+
+```yaml
+smartpark:
+  knowledge:
+    mode: mock # mock 或 rag，默认 mock
+    min-similarity-score: 0.65 # RAG 最低相似度，默认 0.65
+  customer-service:
+    answer-mode: mock # mock 或 dashscope，默认 mock
+```
+
+`mock` 模式完全离线，不需要 API Key。`rag` 模式使用 DashScope `EmbeddingModel` 和 Spring AI `SimpleVectorStore` 进程内向量索引，只返回相似度不低于 `min-similarity-score` 的结果；`dashscope` 回答模式使用 `ChatClient`，只接收当前问题、确定性意图和长度受限的检索上下文。两者可以独立切换。DashScope 密钥只从 `AI_DASHSCOPE_API_KEY` 环境变量读取。也可以通过 `SMARTPARK_KNOWLEDGE_MIN_SIMILARITY_SCORE` 覆盖阈值。
+
+客服响应中的 `knowledgeCitations` 只包含文档 ID、标题和相似度分数，不包含知识正文；会话检索轨迹也只保存安全查询词、文档 ID 和时间。检索为空、模型失败、输出校验失败、引用未知或报修意图都会转人工并创建 `WAITING_AGENT` 工单。RAG 向量索引为单进程内存生命周期，应用重启后重新加载种子文档。
+
+后续适配器仍必须负责真实身份认证、权限判断、租户/业务策略和原始数据脱敏，不能因为通过该格式校验就接入摄像头、门禁或人员原始数据。
 
 当前安防适配器仅用于本地演示。接入真实系统时，必须在 `SecurityPort` 适配器前增加身份认证、细粒度授权、租户隔离、审计和专用脱敏服务，且不能把摄像头、门禁或人员原始数据接入通用告警模型。
 
@@ -200,7 +215,7 @@ curl -X POST "http://localhost:8080/api/customer-service/sessions" \
 
 这是第一个可运行的垂直切片，尚未达到生产级别。以下内容是后续练习，并非当前已经提供的功能：
 
-- **Embedding/RAG：** Mock 知识适配器只是内存中的确定性关键词匹配。当前没有 Embedding 模型、向量数据库、数据导入流程或 RAG 链路。
+- **持久化 RAG：** 当前已经提供基于 DashScope EmbeddingModel 和 SimpleVectorStore 的进程内 RAG 学习链路，但索引会在应用重启后重建。后续可替换为 PostgreSQL/pgvector、Redis 或其他持久化向量库，并补充文档切片、批量导入和索引版本管理。
 - **PostgreSQL checkpoint：** Graph 执行、事件、审批、幂等记录和工单都保存在进程内存中。当前没有 PostgreSQL checkpoint 或重启恢复能力。
 - **认证与授权：** 当前演示 HTTP 接口没有生产级身份认证、租户隔离或授权策略；`X-Demo-Role` 只用于本地演示角色边界。
 - **真实适配器：** `AlertPort`、`DevicePort`、`EnergyPort`、`SecurityPort`、`KnowledgePort` 和 `WorkOrderPort` 是扩展边界，当前仅接入内存 Mock 适配器。真实园区 API、智能电表、安防系统、持久化工单和设备控制适配器尚未实现。
