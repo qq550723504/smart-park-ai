@@ -55,6 +55,25 @@ class RagKnowledgeAdapterTest {
     }
 
     @Test
+    void excludesInactiveDocumentsBeforeApplyingTopK() {
+        List<KnowledgeDocument> documents = new java.util.ArrayList<>();
+        for (int index = 0; index < RagKnowledgeAdapter.MAX_RESULTS; index++) {
+            documents.add(document("KD-INACTIVE-" + index, "Inactive " + index, "high"));
+        }
+        documents.add(document("KD-ACTIVE-001", "Active", "active"));
+        RagKnowledgeAdapter adapter = new RagKnowledgeAdapter(
+                SimpleVectorStore.builder(new TopKEmbeddingModel()).build(), documents);
+
+        for (int index = 0; index < RagKnowledgeAdapter.MAX_RESULTS; index++) {
+            adapter.setActive("KD-INACTIVE-" + index, false);
+        }
+
+        assertThat(adapter.rankedSearch("query"))
+                .extracting(KnowledgeMatch::documentId)
+                .containsExactly("KD-ACTIVE-001");
+    }
+
+    @Test
     void failedEmbeddingDoesNotPublishPartialDocumentUpdate() {
         RagKnowledgeAdapter adapter = new RagKnowledgeAdapter(SimpleVectorStore.builder(new KeywordEmbeddingModel()).build(),
                 List.of(document("KD-SAFE-001", "Original", "parking")));
@@ -62,6 +81,7 @@ class RagKnowledgeAdapterTest {
         assertThatThrownBy(() -> adapter.save(document("KD-SAFE-001", "Replacement", "FAIL")))
                 .isInstanceOf(IllegalStateException.class);
         assertThat(adapter.list().get(0).document().title()).isEqualTo("Original");
+        assertThat(adapter.search("parking")).extracting(KnowledgeDocument::id).containsExactly("KD-SAFE-001");
     }
 
     private static KnowledgeDocument document(String id, String title, String content) {
@@ -85,6 +105,20 @@ class RagKnowledgeAdapterTest {
             return switch (text) {
                 case "query", "high" -> new float[] {1.0f, 0.0f};
                 case "low" -> new float[] {0.4f, 0.9165151f};
+                default -> new float[] {0.0f, 1.0f};
+            };
+        }
+
+        @Override public EmbeddingResponse call(EmbeddingRequest request) { throw new UnsupportedOperationException(); }
+    }
+
+    private static final class TopKEmbeddingModel implements EmbeddingModel {
+        @Override public float[] embed(Document document) { return embed(document.getText()); }
+
+        @Override public float[] embed(String text) {
+            return switch (text) {
+                case "query", "high" -> new float[] {1.0f, 0.0f};
+                case "active" -> new float[] {0.8f, 0.6f};
                 default -> new float[] {0.0f, 1.0f};
             };
         }

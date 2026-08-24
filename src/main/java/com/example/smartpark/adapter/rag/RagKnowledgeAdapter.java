@@ -71,19 +71,25 @@ public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
     public synchronized KnowledgeDocument save(KnowledgeDocument document) {
         validateDocument(document);
         Document vectorDocument = toVectorDocument(document);
-        vectorStore.delete(List.of(document.id()));
         vectorStore.add(List.of(vectorDocument));
         metadata.put(document.id(), new ManagedDocument(document, true));
         return document;
     }
 
     @Override
-    public ManagedDocument setActive(String documentId, boolean active) {
+    public synchronized ManagedDocument setActive(String documentId, boolean active) {
         Objects.requireNonNull(documentId, "documentId");
-        return metadata.compute(documentId, (id, current) -> {
-            if (current == null) throw new IllegalArgumentException("Unknown knowledge document: " + id);
-            return new ManagedDocument(current.document(), active);
-        });
+        ManagedDocument current = metadata.get(documentId);
+        if (current == null) throw new IllegalArgumentException("Unknown knowledge document: " + documentId);
+        if (current.active() == active) return current;
+        if (active) {
+            vectorStore.add(List.of(toVectorDocument(current.document())));
+        } else {
+            vectorStore.delete(List.of(documentId));
+        }
+        ManagedDocument updated = new ManagedDocument(current.document(), active);
+        metadata.put(documentId, updated);
+        return updated;
     }
 
     private KnowledgeMatch toMatch(Document document) {

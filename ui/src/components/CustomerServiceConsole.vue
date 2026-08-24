@@ -73,7 +73,7 @@ onMounted(loadTickets)
       <div class="service-metrics"><div><strong>4</strong><span>演示意图</span></div><div><strong>安全</strong><span>知识引用</span></div></div>
       <h3>快捷咨询</h3>
       <button v-for="item in suggestions" :key="item" type="button" class="suggestion" @click="ask(item)">{{ item }}</button>
-      <div class="privacy-note"><strong>数据边界</strong><span>对话仅使用本地模拟知识。请勿输入身份证、手机号或其他个人敏感信息。</span></div>
+      <div class="privacy-note"><strong>数据边界</strong><span>对话可能由本地模拟知识或已配置的 DashScope 服务处理。请勿输入身份证、手机号或其他个人敏感信息。</span></div>
     </aside>
 
     <section class="panel chat-panel">

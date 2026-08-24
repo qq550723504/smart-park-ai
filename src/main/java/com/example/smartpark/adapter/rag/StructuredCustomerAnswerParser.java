@@ -8,7 +8,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 
@@ -29,15 +28,22 @@ public final class StructuredCustomerAnswerParser {
             if (!root.get("needsHuman").isBoolean()) throw invalid("needsHuman must be boolean");
             if (!root.get("reason").isTextual()) throw invalid("reason must be string");
             if (!root.get("citationIds").isArray()) throw invalid("citationIds must be array");
+            boolean needsHuman = root.get("needsHuman").booleanValue();
             CustomerAnswer.Reason reason = CustomerAnswer.Reason.valueOf(root.get("reason").textValue());
             List<String> citations = new java.util.ArrayList<>();
             for (JsonNode citation : root.get("citationIds")) {
                 if (!citation.isTextual() || citation.textValue().isBlank()) throw invalid("citationIds must contain strings");
                 citations.add(citation.textValue());
             }
+            if (!needsHuman && reason == CustomerAnswer.Reason.SUPPORTED && citations.isEmpty()) {
+                throw invalid("supported answers must cite at least one document");
+            }
+            if (new HashSet<>(citations).size() != citations.size()) {
+                throw invalid("citationIds must not contain duplicates");
+            }
             Set<String> allowed = evidence.stream().map(KnowledgeMatch::documentId).collect(java.util.stream.Collectors.toSet());
             if (!allowed.containsAll(citations)) throw invalid("citationIds must be retrieved document IDs");
-            return new CustomerAnswer(root.get("answer").textValue(), root.get("needsHuman").booleanValue(), reason, citations);
+            return new CustomerAnswer(root.get("answer").textValue(), needsHuman, reason, citations);
         } catch (Exception ex) {
             if (ex instanceof ModelOutputException) throw (ModelOutputException) ex;
             throw new ModelOutputException("customer answer response was invalid", ex);

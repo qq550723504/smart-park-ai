@@ -39,4 +39,13 @@ class StructuredCustomerAnswerParserTest {
         String json = "{\"answer\":\"" + "x".repeat(2001) + "\",\"needsHuman\":false,\"reason\":\"SUPPORTED\",\"citationIds\":[]}";
         assertThatThrownBy(() -> StructuredCustomerAnswerParser.parse(json, evidence)).isInstanceOf(ModelOutputException.class);
     }
+
+    @Test void rejectsSupportedAnswersWithoutUniqueCitations() {
+        assertThatThrownBy(() -> StructuredCustomerAnswerParser.parse("""
+                {"answer":"x","needsHuman":false,"reason":"SUPPORTED","citationIds":[]}
+                """, evidence)).isInstanceOf(ModelOutputException.class);
+        assertThatThrownBy(() -> StructuredCustomerAnswerParser.parse("""
+                {"answer":"x","needsHuman":false,"reason":"SUPPORTED","citationIds":["KD-PARKING-001","KD-PARKING-001"]}
+                """, evidence)).isInstanceOf(ModelOutputException.class);
+    }
 }
