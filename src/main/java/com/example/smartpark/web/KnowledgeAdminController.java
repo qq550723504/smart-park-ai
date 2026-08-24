@@ -2,8 +2,10 @@ package com.example.smartpark.web;
 
 import com.example.smartpark.audit.AuditTrail;
 import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.model.common.PublicMetadata;
 import com.example.smartpark.port.knowledge.KnowledgeAdminPort;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
@@ -80,9 +82,14 @@ public class KnowledgeAdminController {
 
     public record KnowledgeCreateRequest(
             @NotBlank @Pattern(regexp = "KD-[A-Z0-9-]{1,120}") String id,
-            @NotBlank @Size(max = 160) String title,
+            @NotBlank @Size(max = PublicMetadata.MAX_TITLE_LENGTH) String title,
             @NotBlank @Size(max = 2000) String content,
-            @NotEmpty List<@NotBlank String> tags) { }
+            @NotEmpty List<@NotBlank String> tags) {
+        @AssertTrue(message = "title must be bounded public metadata")
+        public boolean hasSafePublicTitle() {
+            return PublicMetadata.isSafeTitle(title);
+        }
+    }
     public record KnowledgeActiveRequest(@NotNull Boolean active) { }
     public record KnowledgeMetadataResponse(
             String id, String title, List<String> tags, Instant updatedAt, boolean active) { }

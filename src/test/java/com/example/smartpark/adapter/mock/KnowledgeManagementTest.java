@@ -39,4 +39,12 @@ class KnowledgeManagementTest {
         assertThat(knowledge.search("shuttle")).extracting(KnowledgeDocument::id)
                 .contains("KD-SHUTTLE-001");
     }
+
+    @Test
+    void mockKnowledgeProvidesLowerScoreForPartialMatches() {
+        KnowledgeAdminPort knowledge = new MockKnowledgeAdapter(new MockParkDataStore());
+
+        assertThat(knowledge.rankedSearch("park"))
+                .allSatisfy(match -> assertThat(match.score()).isLessThan(1.0));
+    }
 }

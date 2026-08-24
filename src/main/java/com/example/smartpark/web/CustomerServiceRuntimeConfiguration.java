@@ -9,6 +9,7 @@ import com.example.smartpark.port.customer.CustomerTicketPort;
 import com.example.smartpark.port.knowledge.KnowledgeAdminPort;
 import com.example.smartpark.port.knowledge.KnowledgePort;
 import com.example.smartpark.workflow.CustomerServiceWorkflow;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -40,9 +41,11 @@ public class CustomerServiceRuntimeConfiguration {
     @Bean
     CustomerServiceWorkflow customerServiceWorkflow(KnowledgePort knowledgePort,
                                                     CustomerSessionStore sessionStore,
-                                                    CustomerTicketPort ticketPort) {
+                                                    CustomerTicketPort ticketPort,
+                                                    @Value("${smartpark.customer.minimum-knowledge-score:0.70}")
+                                                    double minimumKnowledgeScore) {
         return new CustomerServiceWorkflow(knowledgePort, sessionStore, ticketPort,
-                java.time.Clock.systemUTC(), () -> "cs-" + java.util.UUID.randomUUID());
+                java.time.Clock.systemUTC(), () -> "cs-" + java.util.UUID.randomUUID(), minimumKnowledgeScore);
     }
 
     @Bean

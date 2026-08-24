@@ -7,3 +7,6 @@ spring:
       chat:
         options:
           model: qwen-plus
+smartpark:
+  customer:
+    minimum-knowledge-score: ${SMARTPARK_CUSTOMER_MINIMUM_KNOWLEDGE_SCORE:0.70}
