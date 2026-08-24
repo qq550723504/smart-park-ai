@@ -25,8 +25,8 @@ public record ExecutionEvent(
     public ExecutionEvent {
         Objects.requireNonNull(eventId, "eventId");
         Objects.requireNonNull(runId, "runId");
-        if (sequence < 1) {
-            throw new IllegalArgumentException("sequence must be positive");
+        if (sequence < 0) {
+            throw new IllegalArgumentException("sequence must not be negative");
         }
         Objects.requireNonNull(timestamp, "timestamp");
         Objects.requireNonNull(scenario, "scenario");

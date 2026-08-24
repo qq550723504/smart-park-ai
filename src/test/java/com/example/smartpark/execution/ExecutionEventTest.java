@@ -33,8 +33,8 @@ class ExecutionEventTest {
     }
 
     @Test
-    void rejectsNonPositiveSequence() {
-        assertThatThrownBy(() -> new ExecutionEvent(UUID.randomUUID(), RUN_ID, 0, Instant.now(),
+    void rejectsNegativeSequence() {
+        assertThatThrownBy(() -> new ExecutionEvent(UUID.randomUUID(), RUN_ID, -1, Instant.now(),
                 ExecutionScenario.VOICE, "system", ExecutionStage.INPUT_CAPTURE,
                 ExecutionEventType.RUN_STARTED, ExecutionStatus.RUNNING, "started", null))
                 .isInstanceOf(IllegalArgumentException.class);
