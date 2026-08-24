@@ -217,7 +217,9 @@ public final class CustomerServiceWorkflow {
         try {
             // Keep retrieval to one port call so a transient provider failure has one safe mapping.
             List<KnowledgeMatch> documents = knowledgePort.rankedSearch(intent.query).stream()
-                    .filter(match -> match.score() >= minimumKnowledgeScore)
+                    // A zero score means that the adapter did not establish relevance.
+                    // It must never become evidence merely because the configured threshold is zero.
+                    .filter(match -> match.score() > 0.0 && match.score() >= minimumKnowledgeScore)
                     .toList();
             return documents.isEmpty() ? RetrievalOutcome.noEvidence() : RetrievalOutcome.supported(documents);
         } catch (RuntimeException exception) {

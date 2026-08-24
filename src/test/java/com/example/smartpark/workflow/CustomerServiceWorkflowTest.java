@@ -60,6 +60,17 @@ class CustomerServiceWorkflowTest {
     }
 
     @Test
+    void zeroScoreMatchIsRejectedEvenWhenMinimumThresholdIsZero() {
+        CustomerServiceWorkflow thresholded = workflowWithRankedMatch(0.0, 0.0, "cs-zero-score");
+
+        CustomerServiceResult result = thresholded.handle("访客停车怎么收费？");
+
+        assertThat(result.needsHuman()).isTrue();
+        assertThat(result.reason()).isEqualTo("INSUFFICIENT_EVIDENCE");
+        assertThat(result.citationIds()).isEmpty();
+    }
+
+    @Test
     void initialKnowledgeSearchFailureTransfersToHumanWithWaitingTicket() {
         String secret = "providerResponse=private-knowledge-body";
         KnowledgePort failingKnowledge = query -> {
