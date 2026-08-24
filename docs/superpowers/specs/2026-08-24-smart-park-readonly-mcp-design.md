@@ -184,6 +184,8 @@ com.example.smartpark.adapter.mcp
 }
 ```
 
+Spring AI 1.1.2 的 `MethodToolCallbackProvider` 会把强类型返回记录序列化为 MCP `TextContent` 中的 JSON 文本；本设计不承诺 `CallToolResult.structuredContent` 非空。客户端和协议测试从文本内容解析上述 JSON 契约。
+
 失败时：
 
 ```json
@@ -301,7 +303,7 @@ initialize
   -> tools/list
   -> 精确发现三个工具
   -> tools/call
-  -> 校验结构化成功与失败结果
+  -> 解析 TextContent JSON 并校验成功与失败结果
 ```
 
 集成测试必须完全离线，不调用 DashScope 或外部 MCP 服务。
