@@ -102,7 +102,7 @@ Mock 适配器当前用于替代真实园区系统。替换为生产系统时，
 - `AlertPort`：查询当前告警和设备告警历史
 - `DevicePort`：查询设备状态和设备信息
 - `EnergyPort`：查询最新能耗读数
-- `KnowledgePort`：检索知识文档；`rankedSearch` 返回包含文档和相似度分数的内部结果
+- `KnowledgePort`：按 `KnowledgeDomain` 检索知识文档；`rankedSearch` 返回包含文档和相似度分数的内部结果
 - `WorkOrderPort`：按工作流查询工单并创建工单
 - `SecurityPort`：安全事件能力边界，当前主要用于架构和边界验证
 - `CustomerSessionStore`（`port.customer`）：创建、读取和更新客服会话，保存按操作与目标会话隔离的幂等记录，并报告 TTL/容量淘汰
@@ -124,7 +124,7 @@ Mock 数据具备以下特征：
 
 ### 3.4 `adapter.rag`：Spring AI 向量检索
 
-启用 `smartpark.knowledge.mode=rag` 后，`RagKnowledgeConfiguration` 创建 Spring AI `SimpleVectorStore`，并由 `RagKnowledgeAdapter` 将它适配为 `KnowledgePort` 与 `KnowledgeAdminPort`。种子知识从 `src/main/resources/knowledge/` 加载，新增或停用文档会同步影响当前进程内索引。
+启用 `smartpark.knowledge.mode=rag` 后，`RagKnowledgeConfiguration` 为 `CUSTOMER_SERVICE` 与 `ALERT_OPERATIONS` 分别创建 Spring AI `SimpleVectorStore`，并由 `RagKnowledgeAdapter` 将它们适配为带领域参数的 `KnowledgePort` 与 `KnowledgeAdminPort`。种子知识从 `src/main/resources/knowledge/` 加载，新增或停用文档只影响其所属领域的当前进程内索引。
 
 RAG 检索默认最多返回 5 条结果，并使用 `smartpark.knowledge.min-similarity-score`（默认 `0.65`）过滤低相关结果。索引和会话一样只存在于当前进程；应用重启后会重新加载种子文档。该实现用于学习和 Mock 验证，不是多实例生产存储。
 

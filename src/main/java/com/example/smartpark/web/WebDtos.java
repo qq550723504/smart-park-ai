@@ -73,7 +73,7 @@ public final class WebDtos {
                 result.sessionId(), result.intent(), result.answer(), result.knowledgeSources(), result.needsHuman(),
                 ticket == null ? null : new CustomerTicketResponse(
                         ticket.id(), ticket.sessionId(), ticket.intent(), ticket.status(), ticket.safeSummary(), ticket.createdAt()),
-                result.reason(), result.citationIds());
+                result.reason().name(), result.citationIds());
     }
 
     private static final String REDACTED = "[REDACTED]";

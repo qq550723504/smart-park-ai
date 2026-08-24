@@ -1,0 +1,1 @@
+For repeated denied access, preserve only the approved redacted audit summary, notify authorized security staff, and verify controller health. Require human review before dispatch and never expose identity data or raw media.

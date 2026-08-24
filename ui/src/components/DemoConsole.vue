@@ -45,7 +45,7 @@ watch(() => [props.workflow?.eventSequence, props.role], refresh, { immediate: t
     <div><span class="eyebrow">故障演示</span><el-button size="small" :disabled="role !== 'ADMIN'" @click="inject">注入知识库故障</el-button><small>仅影响下一次检索</small></div>
     <div v-if="role === 'ADMIN'" class="knowledge-admin">
       <span class="eyebrow">知识状态</span>
-      <button v-for="item in knowledge" :key="item.id" type="button" :class="{ inactive: !item.active }" @click="toggleKnowledge(item)"><i></i>{{ item.id }}</button>
+      <button v-for="item in knowledge" :key="item.id" type="button" :class="{ inactive: !item.active }" @click="toggleKnowledge(item)"><i></i>{{ item.id }} · {{ item.domain === 'CUSTOMER_SERVICE' ? '客服' : '告警运维' }}</button>
     </div>
   </section>
 </template>

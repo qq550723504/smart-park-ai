@@ -14,6 +14,7 @@ export interface OperationsMetrics {
 
 export interface KnowledgeMetadata {
   id: string
+  domain: 'CUSTOMER_SERVICE' | 'ALERT_OPERATIONS'
   title: string
   tags: string[]
   updatedAt: string
@@ -72,8 +73,6 @@ export interface CustomerServiceResponse {
   reason: 'SUPPORTED' | 'INSUFFICIENT_EVIDENCE' | 'POLICY_LIMIT' | 'RETRIEVAL_UNAVAILABLE'
   citationIds: string[]
   ticket: CustomerTicketResponse | null
-  reason: 'SUPPORTED' | 'INSUFFICIENT_EVIDENCE' | 'POLICY_LIMIT' | 'HUMAN_HANDOFF' | 'RETRIEVAL_UNAVAILABLE'
-  citationIds: string[]
 }
 
 export type WorkflowStatus = 'RUNNING' | 'WAITING_APPROVAL' | 'COMPLETED' | 'REJECTED' | 'FAILED' | 'WORK_ORDER_FAILED'

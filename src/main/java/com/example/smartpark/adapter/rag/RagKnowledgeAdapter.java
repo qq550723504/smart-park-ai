@@ -1,6 +1,7 @@
 package com.example.smartpark.adapter.rag;
 
 import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.model.common.KnowledgeDomain;
 import com.example.smartpark.model.common.KnowledgeMatch;
 import com.example.smartpark.port.knowledge.KnowledgeAdminPort;
 import org.springframework.ai.document.Document;
@@ -9,6 +10,8 @@ import org.springframework.ai.vectorstore.VectorStore;
 
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -21,19 +24,15 @@ public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
     public static final int MAX_DOCUMENT_LENGTH = 2_000;
     public static final double DEFAULT_MIN_SIMILARITY_SCORE = 0.65;
 
-    private final VectorStore vectorStore;
+    private final Map<KnowledgeDomain, VectorStore> vectorStores;
     private final double minSimilarityScore;
     private final Map<String, ManagedDocument> metadata = new ConcurrentHashMap<>();
 
-    public RagKnowledgeAdapter(VectorStore vectorStore, Collection<KnowledgeDocument> seedDocuments) {
-        this(vectorStore, seedDocuments, DEFAULT_MIN_SIMILARITY_SCORE);
-    }
-
     public RagKnowledgeAdapter(
-            VectorStore vectorStore,
+            Map<KnowledgeDomain, VectorStore> vectorStores,
             Collection<KnowledgeDocument> seedDocuments,
             double minSimilarityScore) {
-        this.vectorStore = Objects.requireNonNull(vectorStore, "vectorStore");
+        this.vectorStores = validateVectorStores(vectorStores);
         if (!Double.isFinite(minSimilarityScore) || minSimilarityScore < 0.0 || minSimilarityScore > 1.0) {
             throw new IllegalArgumentException("minSimilarityScore must be between 0 and 1");
         }
@@ -42,15 +41,21 @@ public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
     }
 
     @Override
-    public List<KnowledgeDocument> search(String query) {
-        return rankedSearch(query).stream().map(KnowledgeMatch::document).toList();
+    public List<KnowledgeDocument> search(KnowledgeDomain domain, String query) {
+        return rankedSearch(domain, query).stream().map(KnowledgeMatch::document).toList();
+    }
+
+    public RagKnowledgeAdapter(
+            Map<KnowledgeDomain, VectorStore> vectorStores,
+            Collection<KnowledgeDocument> seedDocuments) {
+        this(vectorStores, seedDocuments, DEFAULT_MIN_SIMILARITY_SCORE);
     }
 
     @Override
-    public List<KnowledgeMatch> rankedSearch(String query) {
+    public List<KnowledgeMatch> rankedSearch(KnowledgeDomain domain, String query) {
         String normalized = validateQuery(query);
         if (normalized.isBlank()) return List.of();
-        return vectorStore.similaritySearch(SearchRequest.builder()
+        return vectorStore(domain).similaritySearch(SearchRequest.builder()
                         .query(normalized)
                         .topK(MAX_RESULTS)
                         .similarityThreshold(minSimilarityScore)
@@ -71,7 +76,7 @@ public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
     public synchronized KnowledgeDocument save(KnowledgeDocument document) {
         validateDocument(document);
         Document vectorDocument = toVectorDocument(document);
-        vectorStore.add(List.of(vectorDocument));
+        vectorStore(document.domain()).add(List.of(vectorDocument));
         metadata.put(document.id(), new ManagedDocument(document, true));
         return document;
     }
@@ -83,9 +88,9 @@ public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
         if (current == null) throw new IllegalArgumentException("Unknown knowledge document: " + documentId);
         if (current.active() == active) return current;
         if (active) {
-            vectorStore.add(List.of(toVectorDocument(current.document())));
+            vectorStore(current.document().domain()).add(List.of(toVectorDocument(current.document())));
         } else {
-            vectorStore.delete(List.of(documentId));
+            vectorStore(current.document().domain()).delete(List.of(documentId));
         }
         ManagedDocument updated = new ManagedDocument(current.document(), active);
         metadata.put(documentId, updated);
@@ -106,6 +111,23 @@ public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
                 .metadata(Map.of("title", document.title(), "tags", String.join(",", document.tags()),
                         "updatedAt", document.updatedAt().toString()))
                 .build();
+    }
+
+    private VectorStore vectorStore(KnowledgeDomain domain) {
+        return vectorStores.get(Objects.requireNonNull(domain, "domain"));
+    }
+
+    private static Map<KnowledgeDomain, VectorStore> validateVectorStores(
+            Map<KnowledgeDomain, VectorStore> vectorStores) {
+        Objects.requireNonNull(vectorStores, "vectorStores");
+        EnumSet<KnowledgeDomain> missing = EnumSet.allOf(KnowledgeDomain.class);
+        missing.removeAll(vectorStores.keySet());
+        if (!missing.isEmpty()) throw new IllegalArgumentException("vectorStores missing domains: " + missing);
+        EnumMap<KnowledgeDomain, VectorStore> copy = new EnumMap<>(KnowledgeDomain.class);
+        for (KnowledgeDomain domain : KnowledgeDomain.values()) {
+            copy.put(domain, Objects.requireNonNull(vectorStores.get(domain), domain.name()));
+        }
+        return Map.copyOf(copy);
     }
 
     private static String validateQuery(String query) {

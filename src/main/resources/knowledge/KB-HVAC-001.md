@@ -1,0 +1,1 @@
+When HVAC supply temperature rises, inspect filters and airflow first, compare the recent trend with the comfort threshold, and escalate to facilities if the compressor or fan load is abnormal. Do not change equipment controls from the knowledge workflow.

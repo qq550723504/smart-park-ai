@@ -13,6 +13,7 @@ import com.example.smartpark.model.alert.ParkContext;
 import com.example.smartpark.model.common.ApprovalDecision;
 import com.example.smartpark.model.common.Diagnosis;
 import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.model.common.KnowledgeDomain;
 import com.example.smartpark.model.common.RiskLevel;
 import com.example.smartpark.model.common.WorkOrder;
 import com.example.smartpark.model.common.WorkflowStatus;
@@ -218,7 +219,7 @@ public final class AlertWorkflowNodes {
                     WorkflowFailure.Code.KNOWLEDGE_RETRIEVAL_FAILED,
                     "Unable to retrieve park knowledge",
                     RETRIEVE_KNOWLEDGE,
-                    () -> knowledgePort.search(query));
+                    () -> knowledgePort.search(KnowledgeDomain.ALERT_OPERATIONS, query));
             return Map.of(
                     AlertWorkflowState.RETRIEVED_DOCUMENTS,
                     AlertWorkflowState.serializable(List.copyOf(documents)));

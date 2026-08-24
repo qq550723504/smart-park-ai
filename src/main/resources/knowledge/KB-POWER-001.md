@@ -1,0 +1,1 @@
+For a power fluctuation on the main panel, stabilize the electrical load, notify authorized facilities staff, and inspect breaker and UPS conditions. High-risk electrical work requires human approval before dispatch.

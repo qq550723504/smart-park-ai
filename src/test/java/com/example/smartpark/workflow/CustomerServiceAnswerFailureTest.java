@@ -3,6 +3,7 @@ package com.example.smartpark.workflow;
 import com.example.smartpark.adapter.mock.InMemoryCustomerSessionStore;
 import com.example.smartpark.adapter.mock.InMemoryCustomerTicketAdapter;
 import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.model.common.KnowledgeDomain;
 import com.example.smartpark.model.common.KnowledgeMatch;
 import com.example.smartpark.model.customer.CustomerAnswer;
 import com.example.smartpark.port.customer.CustomerAnswerPort;
@@ -19,10 +20,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CustomerServiceAnswerFailureTest {
     @Test
     void rankedRetrievalFailureCreatesWaitingAgentTicketWithoutLeakingFailureText() {
-        KnowledgePort failing = query -> { throw new IllegalStateException("legacy search should not be called"); };
+        KnowledgePort failing = (domain, query) -> { throw new IllegalStateException("legacy search should not be called"); };
         KnowledgePort rankedFailure = new KnowledgePort() {
-            @Override public List<KnowledgeDocument> search(String query) { return List.of(); }
-            @Override public List<KnowledgeMatch> rankedSearch(String query) {
+            @Override public List<KnowledgeDocument> search(KnowledgeDomain domain, String query) { return List.of(); }
+            @Override public List<KnowledgeMatch> rankedSearch(KnowledgeDomain domain, String query) {
                 throw new IllegalStateException("EmbeddingModel/vector store raw failure");
             }
         };
@@ -40,10 +41,10 @@ class CustomerServiceAnswerFailureTest {
     }
     @Test
     void answerPortHumanDecisionSynchronizesReasonAndCitations() {
-        KnowledgeDocument document = new KnowledgeDocument("KB-PARKING-001", "Parking", "private body", List.of("parking"), Instant.EPOCH);
+        KnowledgeDocument document = new KnowledgeDocument("KB-PARKING-001", KnowledgeDomain.CUSTOMER_SERVICE, "Parking", "private body", List.of("parking"), Instant.EPOCH);
         KnowledgePort knowledge = new KnowledgePort() {
-            @Override public List<KnowledgeDocument> search(String query) { return List.of(document); }
-            @Override public List<KnowledgeMatch> rankedSearch(String query) { return List.of(new KnowledgeMatch(document, .9)); }
+            @Override public List<KnowledgeDocument> search(KnowledgeDomain domain, String query) { return List.of(document); }
+            @Override public List<KnowledgeMatch> rankedSearch(KnowledgeDomain domain, String query) { return List.of(new KnowledgeMatch(document, .9)); }
         };
         CustomerAnswerPort cautious = (question, intent, evidence) ->
                 new CustomerAnswer("需要人工核实。", true, CustomerAnswer.Reason.INSUFFICIENT_EVIDENCE, List.of());
@@ -62,10 +63,10 @@ class CustomerServiceAnswerFailureTest {
 
     @Test
     void answerPortFailureCreatesWaitingAgentTicketWithoutLeakingFailureText() {
-        KnowledgeDocument document = new KnowledgeDocument("KB-PARKING-001", "Parking", "private body", List.of("parking"), Instant.EPOCH);
+        KnowledgeDocument document = new KnowledgeDocument("KB-PARKING-001", KnowledgeDomain.CUSTOMER_SERVICE, "Parking", "private body", List.of("parking"), Instant.EPOCH);
         KnowledgePort knowledge = new KnowledgePort() {
-            @Override public List<KnowledgeDocument> search(String query) { return List.of(document); }
-            @Override public List<KnowledgeMatch> rankedSearch(String query) { return List.of(new KnowledgeMatch(document, .9)); }
+            @Override public List<KnowledgeDocument> search(KnowledgeDomain domain, String query) { return List.of(document); }
+            @Override public List<KnowledgeMatch> rankedSearch(KnowledgeDomain domain, String query) { return List.of(new KnowledgeMatch(document, .9)); }
         };
         CustomerAnswerPort failing = (question, intent, evidence) -> { throw new IllegalStateException("model raw response secret"); };
         CustomerServiceWorkflow workflow = new CustomerServiceWorkflow(knowledge,

@@ -2,6 +2,7 @@ package com.example.smartpark.adapter.rag;
 
 import com.example.smartpark.agent.ModelOutputException;
 import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.model.common.KnowledgeDomain;
 import com.example.smartpark.model.common.KnowledgeMatch;
 import com.example.smartpark.model.customer.CustomerAnswer;
 import org.junit.jupiter.api.Test;
@@ -14,7 +15,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class StructuredCustomerAnswerParserTest {
     private final List<KnowledgeMatch> evidence = List.of(new KnowledgeMatch(
-            new KnowledgeDocument("KD-PARKING-001", "Parking", "private body", List.of("parking"), Instant.EPOCH), .9));
+            new KnowledgeDocument("KD-PARKING-001", KnowledgeDomain.CUSTOMER_SERVICE, "Parking", "private body", List.of("parking"), Instant.EPOCH), .9));
 
     @Test void acceptsStrictAnswerWithRetrievedCitation() {
         CustomerAnswer answer = StructuredCustomerAnswerParser.parse("""
@@ -46,6 +47,20 @@ class StructuredCustomerAnswerParserTest {
                 """, evidence)).isInstanceOf(ModelOutputException.class);
         assertThatThrownBy(() -> StructuredCustomerAnswerParser.parse("""
                 {"answer":"x","needsHuman":false,"reason":"SUPPORTED","citationIds":["KD-PARKING-001","KD-PARKING-001"]}
+                """, evidence)).isInstanceOf(ModelOutputException.class);
+    }
+
+    @Test
+    void rejectsWorkflowOnlyRetrievalFailureReasonFromTheModel() {
+        assertThatThrownBy(() -> StructuredCustomerAnswerParser.parse("""
+                {"answer":"检索暂不可用。","needsHuman":true,"reason":"RETRIEVAL_UNAVAILABLE","citationIds":[]}
+                """, evidence)).isInstanceOf(ModelOutputException.class);
+    }
+
+    @Test
+    void rejectsCitationsWhenTheModelTransfersToHuman() {
+        assertThatThrownBy(() -> StructuredCustomerAnswerParser.parse("""
+                {"answer":"需要人工处理。","needsHuman":true,"reason":"POLICY_LIMIT","citationIds":["KD-PARKING-001"]}
                 """, evidence)).isInstanceOf(ModelOutputException.class);
     }
 }

@@ -102,9 +102,24 @@ Remove-Variable secureDashScopeKey
 - **告警（alert）：** `AlertPort`、告警查询工具和通用告警工作流负责告警读取、诊断、风险门禁、人工审批与 Mock 工单。
 - **能耗（energy）：** `EnergyPort`、`EnergyReading` 和 `EnergyQueryTool` 负责只读能耗查询；通用 Graph 会将 `ENERGY` 告警路由到 `energyAnalysis` 节点，生成当前值、基线、偏差比例和峰值需求分析，再进入知识检索和诊断。
 - **安防（security）：** `SecurityEvent`、`SecurityPort`、`MockSecurityAdapter` 和 `SecurityQueryTool` 提供脱敏 Mock 事件的只读查询。通用 Graph 会将 `ACCESS` 告警路由到 `securityReview` 节点，校验事件引用和 `REDACTED:` 摘要后再进入知识检索、诊断和强制人工审批。
-- **客服（customer service）：** `CustomerServiceWorkflow` 使用确定性的 Mock 意图识别、关键词检索和安全答复模板处理停车、访客、能耗和报修问题，当前客服答复不调用 DashScope。自动回答仅在有知识支持时返回 `reason: SUPPORTED`、`needsHuman: false` 和至少一个不重复的知识文档 `citationId`；检索结果还必须达到 `smartpark.customer.minimum-knowledge-score`（默认 `0.70`，可由 `SMARTPARK_CUSTOMER_MINIMUM_KNOWLEDGE_SCORE` 覆盖），低于阈值按知识不足转人工。知识不足、策略限制或检索异常会返回固定安全答复并创建 `WAITING_AGENT` 工单，人工转接回答可以不带引用。工单只保存通用安全摘要，不复制用户问题，检索轨迹也只保存查询标识、文档 ID 和时间，不保存正文或异常消息。会话与工单分别通过 `port.customer.CustomerSessionStore` 和 `port.customer.CustomerTicketPort` 访问，默认实现为 `adapter.mock.InMemoryCustomerSessionStore` 和 `adapter.mock.InMemoryCustomerTicketAdapter`。工单端口是当前工单状态的唯一来源；会话过期或因容量被淘汰时，对应工单会一并删除。`Idempotency-Key` 按 `handle/reply` 操作及 reply 目标会话隔离，重试返回请求当时的稳定结果。生产接入仍需要真实 RAG/大模型适配器、内容安全、持久化会话/工单存储和人工坐席系统。
+- **客服（customer service）：** `CustomerServiceWorkflow` 通过 `KnowledgePort` 检索停车、访客和能耗知识，并通过配置在 Mock 答复与 DashScope 结构化答复之间切换。报修、知识不足、检索失败、模型失败或引用校验失败时创建 `WAITING_AGENT` 客服工单；工单只保存通用安全摘要，不复制用户问题。会话与工单分别通过 `port.customer.CustomerSessionStore` 和 `port.customer.CustomerTicketPort` 访问，默认实现为 `adapter.mock.InMemoryCustomerSessionStore` 和 `adapter.mock.InMemoryCustomerTicketAdapter`。工单端口是当前工单状态的唯一来源；会话过期或因容量被淘汰时，对应工单会一并删除。`Idempotency-Key` 按 `handle/reply` 操作及 reply 目标会话隔离，重试返回请求当时的稳定结果。对外只返回知识文档 ID、标题和相似度分数，不返回知识正文。
 
-`evidenceSummary` 的格式校验只是边界层的轻量输入约束，不等于认证、授权或业务脱敏。后续适配器仍必须负责真实身份认证、权限判断、租户/业务策略和原始数据脱敏，不能因为通过该格式校验就接入摄像头、门禁或人员原始数据。
+当前客服流程支持通过配置切换检索和回答实现：
+
+```yaml
+smartpark:
+  knowledge:
+    mode: mock # mock 或 rag，默认 mock
+    min-similarity-score: 0.65 # RAG 最低相似度，默认 0.65
+  customer-service:
+    answer-mode: mock # mock 或 dashscope，默认 mock
+```
+
+`mock` 模式完全离线，不需要 API Key。`rag` 模式使用 DashScope `EmbeddingModel` 和 Spring AI `SimpleVectorStore` 进程内向量索引，并为 `CUSTOMER_SERVICE` 与 `ALERT_OPERATIONS` 建立独立索引，只返回相似度不低于 `min-similarity-score` 的结果；`dashscope` 回答模式使用 `ChatClient`，只接收当前问题、确定性意图和长度受限的检索上下文。两者可以独立切换。DashScope 密钥只从 `AI_DASHSCOPE_API_KEY` 环境变量读取。也可以通过 `SMARTPARK_KNOWLEDGE_MIN_SIMILARITY_SCORE` 覆盖阈值。
+
+客服响应中的 `knowledgeCitations` 只包含文档 ID、标题和相似度分数，不包含知识正文；会话检索轨迹也只保存安全查询词、文档 ID 和时间。检索为空、模型失败、输出校验失败、引用未知或报修意图都会转人工并创建 `WAITING_AGENT` 工单。RAG 向量索引为单进程内存生命周期，应用重启后重新加载种子文档。
+
+后续适配器仍必须负责真实身份认证、权限判断、租户/业务策略和原始数据脱敏，不能因为通过该格式校验就接入摄像头、门禁或人员原始数据。
 
 当前安防适配器仅用于本地演示。接入真实系统时，必须在 `SecurityPort` 适配器前增加身份认证、细粒度授权、租户隔离、审计和专用脱敏服务，且不能把摄像头、门禁或人员原始数据接入通用告警模型。
 
@@ -173,13 +188,13 @@ curl -X POST "http://localhost:8080/api/customer-service/sessions" \
   --data '{"question":"A1 洗手间漏水，需要报修"}'
 ```
 
-可通过 `GET /api/customer-service/sessions/{sessionId}` 查询本次会话结果，并通过 `POST /api/customer-service/sessions/{sessionId}/messages` 在同一会话中继续提问。无法识别的追问会继承上一轮意图；会话转人工后停止自动回复。`GET /api/customer-service/sessions/{sessionId}/conversation` 返回消息历史和安全检索轨迹，轨迹只包含检索词和 Mock 文档 ID。客服坐席或管理员可通过 `GET /api/customer-service/tickets` 查看人工工单，并通过 `PATCH /api/customer-service/tickets/{ticketId}` 推进 `WAITING_AGENT`、`ASSIGNED`、`IN_PROGRESS`、`RESOLVED`、`CLOSED` 等状态。知识检索发生异常时，首次咨询和会话追问均返回 HTTP 200 的固定人工转接答复，而不是暴露异常或返回 500。当前没有身份认证，请勿输入身份证、手机号等个人敏感信息。
+可通过 `GET /api/customer-service/sessions/{sessionId}` 查询本次会话结果，并通过 `POST /api/customer-service/sessions/{sessionId}/messages` 在同一会话中继续提问。无法识别的追问会继承上一轮意图；会话转人工后停止自动回复。`GET /api/customer-service/sessions/{sessionId}/conversation` 返回消息历史和安全检索轨迹，轨迹只包含检索词和 Mock 文档 ID。客服坐席或管理员可通过 `GET /api/customer-service/tickets` 查看人工工单，并通过 `PATCH /api/customer-service/tickets/{ticketId}` 推进 `WAITING_AGENT`、`ASSIGNED`、`IN_PROGRESS`、`RESOLVED`、`CLOSED` 等状态。当前没有身份认证，请勿输入身份证、手机号等个人敏感信息。
 
 ### 知识管理、运营与审计、演示故障注入
 
-前端可切换查看者、操作员、审批人、客服坐席和管理员角色。角色通过 `X-Demo-Role` 请求头演示接口授权边界，它不是生产认证方案。工作流响应会返回风险门禁原因；`GET /api/workflows/{workflowId}/observability` 汇总安全事件、工具调用和失败节点；管理员可以通过 `POST /api/demo/faults` 注入一次性的知识库检索故障，演示失败路径。`GET /api/operations/metrics` 返回工作流、客服会话、人工工单、知识文档、反馈和审计记录数量；`GET /api/operations/capabilities` 只返回 `knowledgeMode`、`customerAnswerMode` 和 `vectorStore` 三项安全运行模式（当前为 `mock`、`mock`、`none`，表示没有向量存储），不返回 API Key、Base URL、Prompt、模型原始响应或知识正文。管理员可通过 `GET /api/audit` 查看只包含角色、动作、资源 ID、结果和时间的安全审计记录。
+前端可切换查看者、操作员、审批人、客服坐席和管理员角色。角色通过 `X-Demo-Role` 请求头演示接口授权边界，它不是生产认证方案。工作流响应会返回风险门禁原因；`GET /api/workflows/{workflowId}/observability` 汇总安全事件、工具调用和失败节点；管理员可以通过 `POST /api/demo/faults` 注入一次性的知识库检索故障，演示失败路径。`GET /api/operations/metrics` 返回工作流、客服会话、人工工单、知识文档、反馈和审计记录数量；管理员可通过 `GET /api/audit` 查看只包含角色、动作、资源 ID、结果和时间的安全审计记录。
 
-管理员可通过 `GET /api/knowledge` 查看知识文档元数据，通过 `POST /api/knowledge` 新增文档，并通过 `PATCH /api/knowledge/{documentId}/active` 启用或停用文档。当前 Mock 实现会立即更新进程内关键词索引：新增文档可被客服检索命中，停用后不再命中；这不是 Embedding 或向量 RAG。公开响应与审计记录均不返回知识正文；知识不足时进入审批或转人工。客服坐席、审批人或管理员可通过 `POST /api/feedback` 提交枚举化反馈，管理员可通过 `GET /api/feedback` 查看反馈记录。当前不接受自由文本，避免反馈接口成为敏感信息旁路。
+管理员可通过 `GET /api/knowledge` 查看带 `domain` 的知识文档元数据，通过 `POST /api/knowledge` 新增必须明确属于 `CUSTOMER_SERVICE` 或 `ALERT_OPERATIONS` 的文档，并通过 `PATCH /api/knowledge/{documentId}/active` 启用或停用文档。公开响应不返回知识正文；停用文档会真实影响对应领域的告警或客服检索，知识不足时进入审批或转人工。客服坐席、审批人或管理员可通过 `POST /api/feedback` 提交枚举化反馈，管理员可通过 `GET /api/feedback` 查看反馈记录。当前不接受自由文本，避免反馈接口成为敏感信息旁路。
 
 ## 学习路线
 
@@ -200,7 +215,7 @@ curl -X POST "http://localhost:8080/api/customer-service/sessions" \
 
 这是第一个可运行的垂直切片，尚未达到生产级别。以下内容是后续练习，并非当前已经提供的功能：
 
-- **Embedding/RAG：** Mock 知识适配器只是内存中的确定性关键词匹配。当前没有 Embedding 模型、向量数据库、数据导入流程或 RAG 链路。
+- **持久化 RAG：** 当前已经提供基于 DashScope EmbeddingModel 和 SimpleVectorStore 的进程内 RAG 学习链路，但索引会在应用重启后重建。后续可替换为 PostgreSQL/pgvector、Redis 或其他持久化向量库，并补充文档切片、批量导入和索引版本管理。
 - **PostgreSQL checkpoint：** Graph 执行、事件、审批、幂等记录和工单都保存在进程内存中。当前没有 PostgreSQL checkpoint 或重启恢复能力。
 - **认证与授权：** 当前演示 HTTP 接口没有生产级身份认证、租户隔离或授权策略；`X-Demo-Role` 只用于本地演示角色边界。
 - **真实适配器：** `AlertPort`、`DevicePort`、`EnergyPort`、`SecurityPort`、`KnowledgePort` 和 `WorkOrderPort` 是扩展边界，当前仅接入内存 Mock 适配器。真实园区 API、智能电表、安防系统、持久化工单和设备控制适配器尚未实现。
