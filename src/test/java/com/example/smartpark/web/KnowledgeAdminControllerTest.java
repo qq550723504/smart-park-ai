@@ -74,4 +74,15 @@ class KnowledgeAdminControllerTest {
                         .content("{\"id\":\"KD-HTTP-002\",\"title\":\"Title\",\"content\":\"Body\",\"tags\":[\"tag\"]}"))
                 .andExpect(status().isForbidden());
     }
+
+    @Test
+    void rejectsControlCharactersInKnowledgeTitleBeforeStorage() throws Exception {
+        mockMvc.perform(post("/api/knowledge")
+                        .header("X-Demo-Role", "ADMIN")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":\"KD-HTTP-003\",\"title\":\"Parking guide\\ninternal\",\"content\":\"Body\",\"tags\":[\"parking\"]}"))
+                .andExpect(status().isBadRequest());
+
+        assertThat(knowledge.list()).noneMatch(document -> document.document().id().equals("KD-HTTP-003"));
+    }
 }

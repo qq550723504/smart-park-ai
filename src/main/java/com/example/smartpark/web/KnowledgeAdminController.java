@@ -80,7 +80,7 @@ public class KnowledgeAdminController {
 
     public record KnowledgeCreateRequest(
             @NotBlank @Pattern(regexp = "KD-[A-Z0-9-]{1,120}") String id,
-            @NotBlank @Size(max = 160) String title,
+            @NotBlank @Size(max = 160) @Pattern(regexp = "[^\\p{Cntrl}]*") String title,
             @NotBlank @Size(max = 2000) String content,
             @NotEmpty List<@NotBlank String> tags) { }
     public record KnowledgeActiveRequest(@NotNull Boolean active) { }

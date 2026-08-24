@@ -177,7 +177,7 @@ curl -X POST "http://localhost:8080/api/customer-service/sessions" \
 
 ### 知识管理、运营与审计、演示故障注入
 
-前端可切换查看者、操作员、审批人、客服坐席和管理员角色。角色通过 `X-Demo-Role` 请求头演示接口授权边界，它不是生产认证方案。工作流响应会返回风险门禁原因；`GET /api/workflows/{workflowId}/observability` 汇总安全事件、工具调用和失败节点；管理员可以通过 `POST /api/demo/faults` 注入一次性的知识库检索故障，演示失败路径。`GET /api/operations/metrics` 返回工作流、客服会话、人工工单、知识文档、反馈和审计记录数量；`GET /api/operations/capabilities` 只返回 `knowledgeMode`、`customerAnswerMode` 和 `vectorStore` 三项安全运行模式（当前为 `mock`、`mock`、`in-memory`），不返回 API Key、Base URL、Prompt、模型原始响应或知识正文。管理员可通过 `GET /api/audit` 查看只包含角色、动作、资源 ID、结果和时间的安全审计记录。
+前端可切换查看者、操作员、审批人、客服坐席和管理员角色。角色通过 `X-Demo-Role` 请求头演示接口授权边界，它不是生产认证方案。工作流响应会返回风险门禁原因；`GET /api/workflows/{workflowId}/observability` 汇总安全事件、工具调用和失败节点；管理员可以通过 `POST /api/demo/faults` 注入一次性的知识库检索故障，演示失败路径。`GET /api/operations/metrics` 返回工作流、客服会话、人工工单、知识文档、反馈和审计记录数量；`GET /api/operations/capabilities` 只返回 `knowledgeMode`、`customerAnswerMode` 和 `vectorStore` 三项安全运行模式（当前为 `mock`、`mock`、`none`，表示没有向量存储），不返回 API Key、Base URL、Prompt、模型原始响应或知识正文。管理员可通过 `GET /api/audit` 查看只包含角色、动作、资源 ID、结果和时间的安全审计记录。
 
 管理员可通过 `GET /api/knowledge` 查看知识文档元数据，通过 `POST /api/knowledge` 新增文档，并通过 `PATCH /api/knowledge/{documentId}/active` 启用或停用文档。当前 Mock 实现会立即更新进程内关键词索引：新增文档可被客服检索命中，停用后不再命中；这不是 Embedding 或向量 RAG。公开响应与审计记录均不返回知识正文；知识不足时进入审批或转人工。客服坐席、审批人或管理员可通过 `POST /api/feedback` 提交枚举化反馈，管理员可通过 `GET /api/feedback` 查看反馈记录。当前不接受自由文本，避免反馈接口成为敏感信息旁路。
 

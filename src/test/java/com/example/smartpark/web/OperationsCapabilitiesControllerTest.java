@@ -13,7 +13,7 @@ class OperationsCapabilitiesControllerTest {
 
         assertThat(capabilities.knowledgeMode()).isEqualTo("mock");
         assertThat(capabilities.customerAnswerMode()).isEqualTo("mock");
-        assertThat(capabilities.vectorStore()).isEqualTo("in-memory");
+        assertThat(capabilities.vectorStore()).isEqualTo("none");
     }
 
     @Test

@@ -109,7 +109,8 @@ class InMemoryCustomerSessionStoreTest {
     }
 
     private static CustomerServiceResult result(String sessionId) {
-        return new CustomerServiceResult(sessionId, "PARKING", "Use visitor parking.", List.of("KD-PARKING-001"), false, null);
+        return new CustomerServiceResult(sessionId, "PARKING", "Use visitor parking.",
+                List.of("Visitor parking guide"), false, null, "SUPPORTED", List.of("KD-PARKING-001"));
     }
 
     private static CustomerConversation.Message message(String role, String text, Instant createdAt) {

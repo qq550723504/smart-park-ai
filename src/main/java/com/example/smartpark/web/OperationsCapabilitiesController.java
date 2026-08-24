@@ -22,7 +22,7 @@ public class OperationsCapabilitiesController {
 
     @GetMapping("/capabilities")
     public Capabilities capabilities() {
-        return new Capabilities(knowledgeMode, customerAnswerMode, "in-memory");
+        return new Capabilities(knowledgeMode, customerAnswerMode, "none");
     }
 
     private static String safeMode(String value, String... allowed) {

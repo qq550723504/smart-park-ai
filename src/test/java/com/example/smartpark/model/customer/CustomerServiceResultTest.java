@@ -18,12 +18,21 @@ class CustomerServiceResultTest {
     }
 
     @Test
-    void compatibilityConstructorKeepsHumanReadableSourcesOutOfCitationIds() {
+    void compatibilityConstructorRequiresExplicitCitationIdsForSupportedResults() {
+        assertThatThrownBy(() -> new CustomerServiceResult(
+                "cs-1", "PARKING", "supported answer", List.of("Visitor parking guide"), false, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("explicit citationIds");
+    }
+
+    @Test
+    void canonicalConstructorKeepsHumanReadableSourcesSeparateFromStableCitationIds() {
         CustomerServiceResult result = new CustomerServiceResult(
-                "cs-1", "PARKING", "supported answer", List.of("Visitor parking guide"), false, null);
+                "cs-1", "PARKING", "supported answer", List.of("Visitor parking guide"), false, null,
+                "SUPPORTED", List.of("KD-PARKING-001"));
 
         assertThat(result.knowledgeSources()).containsExactly("Visitor parking guide");
-        assertThat(result.citationIds()).containsExactly("legacy-source-1");
+        assertThat(result.citationIds()).containsExactly("KD-PARKING-001");
     }
 
     @Test

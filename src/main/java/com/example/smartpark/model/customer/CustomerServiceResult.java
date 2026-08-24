@@ -16,18 +16,21 @@ public record CustomerServiceResult(
         List<String> citationIds) {
 
     private static final Pattern SAFE_CITATION_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}");
-    private static final Set<String> SUPPORTED_REASONS = Set.of("SUPPORTED");
     private static final Set<String> HANDOFF_REASONS = Set.of(
             "HUMAN_HANDOFF", "INSUFFICIENT_EVIDENCE", "POLICY_LIMIT", "RETRIEVAL_UNAVAILABLE");
     private static final Set<String> KNOWN_REASONS = Set.of(
             "SUPPORTED", "HUMAN_HANDOFF", "INSUFFICIENT_EVIDENCE", "POLICY_LIMIT", "RETRIEVAL_UNAVAILABLE");
 
+    /**
+     * @deprecated Supported results must provide stable citation IDs through the canonical constructor.
+     */
+    @Deprecated(forRemoval = false)
     public CustomerServiceResult(String sessionId, String intent, String answer,
                                  List<String> knowledgeSources, boolean needsHuman,
                                  CustomerTicket ticket) {
         this(sessionId, intent, answer, knowledgeSources, needsHuman, ticket,
                 needsHuman ? "HUMAN_HANDOFF" : "SUPPORTED",
-                needsHuman ? List.of() : legacyCitationIds(knowledgeSources));
+                requireExplicitCitationIds(needsHuman));
     }
 
     public CustomerServiceResult {
@@ -43,7 +46,7 @@ public record CustomerServiceResult(
         if (needsHuman != (ticket != null)) {
             throw new IllegalArgumentException("needsHuman must match ticket presence");
         }
-        if (SUPPORTED_REASONS.contains(reason)) {
+        if ("SUPPORTED".equals(reason)) {
             if (needsHuman) throw new IllegalArgumentException("SUPPORTED results must not need human handoff");
             if (citationIds.isEmpty()) throw new IllegalArgumentException("SUPPORTED results require at least one citationId");
         }
@@ -56,10 +59,11 @@ public record CustomerServiceResult(
         citationIds.forEach(CustomerServiceResult::requireCitationId);
     }
 
-    private static List<String> legacyCitationIds(List<String> knowledgeSources) {
-        return java.util.stream.IntStream.range(0, knowledgeSources.size())
-                .mapToObj(index -> "legacy-source-" + (index + 1))
-                .toList();
+    private static List<String> requireExplicitCitationIds(boolean needsHuman) {
+        if (!needsHuman) {
+            throw new IllegalArgumentException("supported results require explicit citationIds");
+        }
+        return List.of();
     }
 
     private static void requireCitationId(String value) {
