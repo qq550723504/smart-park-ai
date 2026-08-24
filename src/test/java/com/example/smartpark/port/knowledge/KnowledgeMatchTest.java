@@ -18,6 +18,10 @@ class KnowledgeMatchTest {
     void rejectsTitlesThatCouldBecomeUnboundedOrMultilinePublicMetadata() {
         assertThatThrownBy(() -> new KnowledgeMatch("KD-SAFE-001", "private body\nsecond line", 0.8))
                 .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new KnowledgeMatch("KD-SAFE-001", "line\u2028separator", 0.8))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new KnowledgeMatch("KD-SAFE-001", "bidi\u202Eoverride", 0.8))
+                .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new KnowledgeMatch("KD-SAFE-001", "a".repeat(161), 0.8))
                 .isInstanceOf(IllegalArgumentException.class);
     }

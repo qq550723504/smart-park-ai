@@ -13,8 +13,10 @@ import com.example.smartpark.port.knowledge.KnowledgePort;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.UUID;
@@ -216,11 +218,11 @@ public final class CustomerServiceWorkflow {
         if (intent == Intent.GENERAL) return RetrievalOutcome.noEvidence();
         try {
             // Keep retrieval to one port call so a transient provider failure has one safe mapping.
-            List<KnowledgeMatch> documents = knowledgePort.rankedSearch(intent.query).stream()
+            List<KnowledgeMatch> documents = uniqueMatchesByCitationId(knowledgePort.rankedSearch(intent.query).stream()
                     // A zero score means that the adapter did not establish relevance.
                     // It must never become evidence merely because the configured threshold is zero.
                     .filter(match -> match.score() > 0.0 && match.score() >= minimumKnowledgeScore)
-                    .toList();
+                    .toList());
             return documents.isEmpty() ? RetrievalOutcome.noEvidence() : RetrievalOutcome.supported(documents);
         } catch (RuntimeException exception) {
             // Embedding and vector-store failures are operational failures, not empty evidence.
@@ -250,6 +252,12 @@ public final class CustomerServiceWorkflow {
         if ("RETRIEVAL_UNAVAILABLE".equals(retrieval.reason())) return retrieval.reason();
         if (!needsHuman) return "SUPPORTED";
         return retrieval.documents().isEmpty() ? "INSUFFICIENT_EVIDENCE" : "POLICY_LIMIT";
+    }
+
+    private static List<KnowledgeMatch> uniqueMatchesByCitationId(List<KnowledgeMatch> matches) {
+        Map<String, KnowledgeMatch> unique = new LinkedHashMap<>();
+        matches.forEach(match -> unique.putIfAbsent(match.citationId(), match));
+        return List.copyOf(unique.values());
     }
 
     private CustomerTicket createTicket(String sessionId, Intent intent) {

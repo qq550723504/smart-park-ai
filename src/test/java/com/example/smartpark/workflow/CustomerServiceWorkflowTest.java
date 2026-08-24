@@ -71,6 +71,33 @@ class CustomerServiceWorkflowTest {
     }
 
     @Test
+    void deduplicatesRankedChunksBeforeBuildingPublicCitationMetadata() {
+        KnowledgePort chunked = new KnowledgePort() {
+            @Override
+            public java.util.List<KnowledgeDocument> search(String query) {
+                return java.util.List.of();
+            }
+
+            @Override
+            public java.util.List<KnowledgeMatch> rankedSearch(String query) {
+                return java.util.List.of(
+                        new KnowledgeMatch("KD-PARKING-001", "Visitor parking guide", 0.90),
+                        new KnowledgeMatch("KD-PARKING-001", "Visitor parking guide - chunk 2", 0.80));
+            }
+        };
+        CustomerServiceWorkflow deduplicated = new CustomerServiceWorkflow(
+                chunked, Clock.fixed(Instant.parse("2026-08-23T02:00:00Z"), ZoneOffset.UTC),
+                () -> "cs-duplicate-citation");
+
+        CustomerServiceResult result = deduplicated.handle("访客停车怎么收费？");
+
+        assertThat(result.knowledgeSources()).containsExactly("Visitor parking guide");
+        assertThat(result.citationIds()).containsExactly("KD-PARKING-001");
+        assertThat(deduplicated.conversation(result.sessionId()).retrievals()).singleElement()
+                .satisfies(trace -> assertThat(trace.documentIds()).containsExactly("KD-PARKING-001"));
+    }
+
+    @Test
     void initialKnowledgeSearchFailureTransfersToHumanWithWaitingTicket() {
         String secret = "providerResponse=private-knowledge-body";
         KnowledgePort failingKnowledge = query -> {

@@ -84,5 +84,13 @@ class KnowledgeAdminControllerTest {
                 .andExpect(status().isBadRequest());
 
         assertThat(knowledge.list()).noneMatch(document -> document.document().id().equals("KD-HTTP-003"));
+
+        mockMvc.perform(post("/api/knowledge")
+                        .header("X-Demo-Role", "ADMIN")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":\"KD-HTTP-004\",\"title\":\"Parking guide\\u202Einternal\",\"content\":\"Body\",\"tags\":[\"parking\"]}"))
+                .andExpect(status().isBadRequest());
+
+        assertThat(knowledge.list()).noneMatch(document -> document.document().id().equals("KD-HTTP-004"));
     }
 }
