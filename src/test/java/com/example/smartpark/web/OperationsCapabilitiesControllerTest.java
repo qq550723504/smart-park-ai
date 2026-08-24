@@ -7,12 +7,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 class OperationsCapabilitiesControllerTest {
 
     @Test
-    void exposesConfiguredCapabilityModes() {
+    void reportsOnlyCapabilityModesBackedByCurrentRuntime() {
         OperationsCapabilitiesController.Capabilities capabilities =
                 new OperationsCapabilitiesController("rag", "dashscope").capabilities();
 
-        assertThat(capabilities.knowledgeMode()).isEqualTo("rag");
-        assertThat(capabilities.customerAnswerMode()).isEqualTo("dashscope");
+        assertThat(capabilities.knowledgeMode()).isEqualTo("mock");
+        assertThat(capabilities.customerAnswerMode()).isEqualTo("mock");
         assertThat(capabilities.vectorStore()).isEqualTo("in-memory");
     }
 

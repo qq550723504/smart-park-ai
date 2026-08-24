@@ -15,8 +15,9 @@ public class OperationsCapabilitiesController {
     public OperationsCapabilitiesController(
             @Value("${smartpark.knowledge.mode:mock}") String knowledgeMode,
             @Value("${smartpark.customer.answer-mode:mock}") String customerAnswerMode) {
-        this.knowledgeMode = safeMode(knowledgeMode, "mock", "rag");
-        this.customerAnswerMode = safeMode(customerAnswerMode, "mock", "dashscope");
+        // RAG and DashScope adapters are not wired in this runtime yet.
+        this.knowledgeMode = safeMode(knowledgeMode, "mock");
+        this.customerAnswerMode = safeMode(customerAnswerMode, "mock");
     }
 
     @GetMapping("/capabilities")

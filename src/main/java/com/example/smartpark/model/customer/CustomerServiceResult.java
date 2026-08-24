@@ -2,6 +2,7 @@ package com.example.smartpark.model.customer;
 
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.regex.Pattern;
 
 public record CustomerServiceResult(
         String sessionId,
@@ -12,6 +13,8 @@ public record CustomerServiceResult(
         CustomerTicket ticket,
         String reason,
         List<String> citationIds) {
+
+    private static final Pattern SAFE_CITATION_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}");
 
     public CustomerServiceResult(String sessionId, String intent, String answer,
                                  List<String> knowledgeSources, boolean needsHuman,
@@ -41,7 +44,13 @@ public record CustomerServiceResult(
         if (new LinkedHashSet<>(citationIds).size() != citationIds.size()) {
             throw new IllegalArgumentException("citationIds must not contain duplicates");
         }
-        citationIds.forEach(id -> requireText(id, "citationId"));
+        citationIds.forEach(CustomerServiceResult::requireCitationId);
+    }
+
+    private static void requireCitationId(String value) {
+        if (value == null || !SAFE_CITATION_ID.matcher(value).matches()) {
+            throw new IllegalArgumentException("citationId must be a safe opaque identifier");
+        }
     }
 
     private static String requireText(String value, String fieldName) {
