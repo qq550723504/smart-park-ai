@@ -1,5 +1,6 @@
 package com.example.smartpark.adapter.mock;
 
+import com.example.smartpark.demo.DemoFaultInjector;
 import com.example.smartpark.model.common.KnowledgeDocument;
 import com.example.smartpark.port.knowledge.KnowledgeAdminPort;
 
@@ -7,13 +8,13 @@ import java.util.List;
 
 public final class MockKnowledgeAdapter implements KnowledgeAdminPort {
     private final MockParkDataStore dataStore;
-    private final com.example.smartpark.web.DemoFaultInjector faultInjector;
+    private final DemoFaultInjector faultInjector;
 
     public MockKnowledgeAdapter(MockParkDataStore dataStore) {
-        this(dataStore, new com.example.smartpark.web.DemoFaultInjector());
+        this(dataStore, new DemoFaultInjector());
     }
 
-    public MockKnowledgeAdapter(MockParkDataStore dataStore, com.example.smartpark.web.DemoFaultInjector faultInjector) {
+    public MockKnowledgeAdapter(MockParkDataStore dataStore, DemoFaultInjector faultInjector) {
         this.dataStore = dataStore;
         this.faultInjector = faultInjector;
     }
@@ -35,7 +36,7 @@ public final class MockKnowledgeAdapter implements KnowledgeAdminPort {
 
     @Override
     public List<KnowledgeDocument> search(String query) {
-        faultInjector.failIfRequested(com.example.smartpark.web.DemoFaultInjector.FaultPoint.KNOWLEDGE_SEARCH);
+        faultInjector.failIfRequested(DemoFaultInjector.FaultPoint.KNOWLEDGE_SEARCH);
         return dataStore.search(query);
     }
 }

@@ -1,6 +1,8 @@
 package com.example.smartpark.workflow;
 
 import com.example.smartpark.adapter.mock.MockParkFixture;
+import com.example.smartpark.adapter.mock.InMemoryCustomerSessionStore;
+import com.example.smartpark.adapter.mock.InMemoryCustomerTicketAdapter;
 import com.example.smartpark.model.customer.CustomerServiceResult;
 import org.junit.jupiter.api.Test;
 
@@ -49,12 +51,91 @@ class CustomerServiceWorkflowTest {
     }
 
     @Test
+    void repairFollowUpCreatesHumanTicketEvenWhenRepairKnowledgeExists() {
+        CustomerServiceResult first = workflow.handle("访客停车怎么收费？");
+
+        CustomerServiceResult repair = workflow.reply(
+                first.sessionId(), "A1 洗手间漏水，需要报修", "repair-follow-up");
+
+        assertThat(repair.intent()).isEqualTo("REPAIR");
+        assertThat(repair.needsHuman()).isTrue();
+        assertThat(repair.ticket()).isNotNull();
+        assertThat(repair.ticket().status()).isEqualTo("WAITING_AGENT");
+    }
+
+    @Test
     void sameIdempotencyKeyReturnsTheOriginalSessionAndTicket() {
         CustomerServiceResult first = workflow.handle("A1 洗手间漏水，需要报修", "request-1");
         CustomerServiceResult retry = workflow.handle("A1 洗手间漏水，需要报修", "request-1");
 
         assertThat(retry).isEqualTo(first);
         assertThat(retry.ticket().id()).isEqualTo(first.ticket().id());
+    }
+
+    @Test
+    void idempotentHandleRetryReturnsItsOriginalResultAfterALaterReply() {
+        CustomerServiceResult first = workflow.handle("访客停车怎么收费？", "parking-request");
+        CustomerServiceResult reply = workflow.reply(first.sessionId(), "访客如何预约进入园区？", "visitor-request");
+
+        CustomerServiceResult retry = workflow.handle("访客停车怎么收费？", "parking-request");
+
+        assertThat(reply.intent()).isEqualTo("VISITOR");
+        assertThat(retry).isEqualTo(first);
+    }
+
+    @Test
+    void idempotencyKeyCannotBeReusedAcrossHandleAndReply() {
+        workflow.handle("访客停车怎么收费？", "shared-operation-key");
+        CustomerServiceResult target = workflow.handle("访客如何预约进入园区？");
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> workflow.reply(
+                        target.sessionId(), "访客停车怎么收费？", "shared-operation-key"))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void replyIdempotencyKeyCannotBeReusedForAnotherSession() {
+        java.util.concurrent.atomic.AtomicInteger ids = new java.util.concurrent.atomic.AtomicInteger();
+        CustomerServiceWorkflow scoped = new CustomerServiceWorkflow(
+                new MockParkFixture().knowledge(),
+                Clock.fixed(Instant.parse("2026-08-23T02:00:00Z"), ZoneOffset.UTC),
+                () -> "cs-scope-" + ids.incrementAndGet());
+        CustomerServiceResult firstSession = scoped.handle("访客停车怎么收费？");
+        CustomerServiceResult secondSession = scoped.handle("访客如何预约进入园区？");
+        scoped.reply(firstSession.sessionId(), "公共区域能耗如何查询？", "shared-reply-key");
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> scoped.reply(
+                        secondSession.sessionId(), "公共区域能耗如何查询？", "shared-reply-key"))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void idempotentHandleRetryKeepsOriginalTicketSnapshotAfterTicketUpdate() {
+        CustomerServiceResult first = workflow.handle(
+                "A1 洗手间漏水，需要报修", "repair-handle-request");
+        workflow.updateTicket(first.ticket().id(), "ASSIGNED");
+
+        CustomerServiceResult retry = workflow.handle(
+                "A1 洗手间漏水，需要报修", "repair-handle-request");
+
+        assertThat(retry).isEqualTo(first);
+        assertThat(retry.ticket().status()).isEqualTo("WAITING_AGENT");
+        assertThat(workflow.get(first.sessionId()).ticket().status()).isEqualTo("ASSIGNED");
+    }
+
+    @Test
+    void idempotentReplyRetryKeepsOriginalTicketSnapshotAfterTicketUpdate() {
+        CustomerServiceResult session = workflow.handle("访客停车怎么收费？");
+        CustomerServiceResult firstReply = workflow.reply(
+                session.sessionId(), "A1 洗手间漏水，需要报修", "repair-reply-request");
+        workflow.updateTicket(firstReply.ticket().id(), "ASSIGNED");
+
+        CustomerServiceResult retry = workflow.reply(
+                session.sessionId(), "A1 洗手间漏水，需要报修", "repair-reply-request");
+
+        assertThat(retry).isEqualTo(firstReply);
+        assertThat(retry.ticket().status()).isEqualTo("WAITING_AGENT");
+        assertThat(workflow.get(session.sessionId()).ticket().status()).isEqualTo("ASSIGNED");
     }
 
     @Test
@@ -111,7 +192,9 @@ class CustomerServiceWorkflowTest {
     void expiredSessionsAndIdempotencyEntriesAreRemoved() {
         java.time.Clock mutableClock = new MutableClock(Instant.parse("2026-08-23T02:00:00Z"));
         CustomerServiceWorkflow expiring = new CustomerServiceWorkflow(
-                new MockParkFixture().knowledge(), mutableClock, () -> "cs-expiring", 10, Duration.ofMinutes(5));
+                new MockParkFixture().knowledge(),
+                new InMemoryCustomerSessionStore(mutableClock, 10, Duration.ofMinutes(5)),
+                new InMemoryCustomerTicketAdapter(), mutableClock, () -> "cs-expiring");
         expiring.handle("访客停车怎么收费？", "expiring-request");
         ((MutableClock) mutableClock).instant = Instant.parse("2026-08-23T02:06:00Z");
 
@@ -120,12 +203,32 @@ class CustomerServiceWorkflowTest {
     }
 
     @Test
+    void expiredSessionPreventsTicketTransitionFromPersisting() {
+        MutableClock mutableClock = new MutableClock(Instant.parse("2026-08-23T02:00:00Z"));
+        InMemoryCustomerTicketAdapter tickets = new InMemoryCustomerTicketAdapter();
+        CustomerServiceWorkflow expiring = new CustomerServiceWorkflow(
+                new MockParkFixture().knowledge(),
+                new InMemoryCustomerSessionStore(mutableClock, 10, Duration.ofMinutes(5)),
+                tickets, mutableClock, () -> "cs-expiring-ticket");
+        CustomerServiceResult created = expiring.handle("A1 洗手间漏水，需要报修");
+        mutableClock.instant = Instant.parse("2026-08-23T02:06:00Z");
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> expiring.updateTicket(created.ticket().id(), "ASSIGNED"))
+                .isInstanceOf(java.util.NoSuchElementException.class)
+                .hasMessage("Unknown customer service ticket: " + created.ticket().id());
+
+        assertThat(tickets.list()).isEmpty();
+    }
+
+    @Test
     void sessionCapacityEvictsTheOldestSession() {
         java.util.concurrent.atomic.AtomicInteger ids = new java.util.concurrent.atomic.AtomicInteger();
+        Clock clock = Clock.fixed(Instant.parse("2026-08-23T02:00:00Z"), ZoneOffset.UTC);
         CustomerServiceWorkflow bounded = new CustomerServiceWorkflow(
                 new MockParkFixture().knowledge(),
-                Clock.fixed(Instant.parse("2026-08-23T02:00:00Z"), ZoneOffset.UTC),
-                () -> "cs-" + ids.incrementAndGet(), 2, Duration.ofHours(1));
+                new InMemoryCustomerSessionStore(clock, 2, Duration.ofHours(1)),
+                new InMemoryCustomerTicketAdapter(), clock, () -> "cs-" + ids.incrementAndGet());
 
         bounded.handle("停车怎么收费？");
         bounded.handle("访客怎么预约？");
@@ -135,6 +238,31 @@ class CustomerServiceWorkflowTest {
                 .isInstanceOf(java.util.NoSuchElementException.class);
         assertThat(bounded.get("cs-2")).isNotNull();
         assertThat(bounded.get("cs-3")).isNotNull();
+    }
+
+    @Test
+    void capacityEvictionRemovesTicketFromApiAndCanonicalPortWithoutPartialUpdate() {
+        java.util.concurrent.atomic.AtomicInteger ids = new java.util.concurrent.atomic.AtomicInteger();
+        Clock clock = Clock.fixed(Instant.parse("2026-08-23T02:00:00Z"), ZoneOffset.UTC);
+        InMemoryCustomerTicketAdapter tickets = new InMemoryCustomerTicketAdapter();
+        CustomerServiceWorkflow bounded = new CustomerServiceWorkflow(
+                new MockParkFixture().knowledge(),
+                new InMemoryCustomerSessionStore(clock, 1, Duration.ofHours(1)),
+                tickets, clock, () -> "cs-ticket-" + ids.incrementAndGet());
+        CustomerServiceResult evicted = bounded.handle("A1 洗手间漏水，需要报修");
+        CustomerServiceResult retained = bounded.handle("B2 空调坏了，需要维修");
+
+        assertThat(bounded.tickets()).extracting(result -> result.ticket().id())
+                .containsExactly(retained.ticket().id());
+        assertThat(tickets.list()).extracting(ticket -> ticket.id())
+                .containsExactly(retained.ticket().id());
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> bounded.updateTicket(evicted.ticket().id(), "ASSIGNED"))
+                .isInstanceOf(java.util.NoSuchElementException.class)
+                .hasMessage("Unknown customer service ticket: " + evicted.ticket().id());
+        assertThat(tickets.list()).containsExactly(retained.ticket());
+        assertThat(bounded.get(retained.sessionId())).isEqualTo(retained);
     }
 
     private static final class MutableClock extends Clock {
