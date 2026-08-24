@@ -1,6 +1,6 @@
-# 智慧园区告警、能耗、安防与客服学习项目
+# 智慧园区告警、能耗、安防与客服示例项目
 
-这是一个面向学习的 Spring AI Alibaba 智慧园区项目，当前提供告警处置、能耗查询、安防事件查询、园区客服、知识管理以及运营审计能力。运营工作流接收园区告警，执行场景分析、结构化诊断、风险门禁、人工审批、Mock 工单和 SSE 事件；客服流程提供停车、访客通行、公共区域能耗咨询以及设施报修转人工。
+这是一个面向智慧园区业务场景的 Spring AI Alibaba 示例项目，当前提供告警处置、能耗查询、安防事件查询、园区客服、知识管理以及运营审计能力。运营工作流接收园区告警，执行场景分析、结构化诊断、风险门禁、人工审批、Mock 工单和 SSE 事件；客服流程提供停车、访客通行、公共区域能耗咨询以及设施报修转人工。
 
 > 安全边界：当前 Mock 适配器只读取种子数据，并把工单写入内存；它不会检查、切换、重启、隔离或控制任何真实设备。安防场景只有脱敏 Mock 摘要、只读查询工具和通用告警工作流入口，没有真实摄像头、门禁或人员系统接入。`SecurityEvent.evidenceSummary` 只能保存脱敏摘要，不得保存原始视频、图片、人脸特征或身份证等人员原始记录。不要把本示例当作生产控制系统使用。
 
@@ -88,7 +88,7 @@ Remove-Variable secureDashScopeKey
 
 应用每次启动时都会重置共享 Mock 内存数据，并提供以下四个告警工作流入口：
 
-| 告警 ID | 设备 | 种子风险提示 | 练习内容 |
+| 告警 ID | 设备 | 种子风险提示 | 场景说明 |
 | --- | --- | --- | --- |
 | `ALT-TEMP-001` | `DEV-HVAC-001` | `LOW` | 温度告警分诊与 HVAC 知识检索。诊断风险较高、置信度较低或证据不足时仍可能进入审批。 |
 | `ALT-POWER-001` | `DEV-POWER-001` | `HIGH` | 高风险电力告警诊断。执行到风险门禁后必须暂停等待审批。 |
@@ -118,7 +118,7 @@ Remove-Variable secureDashScopeKey
 curl -X POST "http://localhost:8080/api/alerts/ALT-TEMP-001/workflows"
 ```
 
-也可以使用 `ALT-POWER-001`、`ALT-ENERGY-001` 或 `ALT-ACCESS-001` 练习必经人工审批的高风险流程。保存响应中的 `workflowId`，供后续请求使用。
+也可以使用 `ALT-POWER-001`、`ALT-ENERGY-001` 或 `ALT-ACCESS-001` 验证必经人工审批的高风险流程。保存响应中的 `workflowId`，供后续请求使用。
 
 #### 查询工作流状态
 
@@ -181,9 +181,9 @@ curl -X POST "http://localhost:8080/api/customer-service/sessions" \
 
 管理员可通过 `GET /api/knowledge` 查看知识文档元数据，通过 `POST /api/knowledge` 新增文档，并通过 `PATCH /api/knowledge/{documentId}/active` 启用或停用文档。当前 Mock 实现会立即更新进程内关键词索引：新增文档可被客服检索命中，停用后不再命中；这不是 Embedding 或向量 RAG。公开响应与审计记录均不返回知识正文；知识不足时进入审批或转人工。客服坐席、审批人或管理员可通过 `POST /api/feedback` 提交枚举化反馈，管理员可通过 `GET /api/feedback` 查看反馈记录。当前不接受自由文本，避免反馈接口成为敏感信息旁路。
 
-## 学习路线
+## 技术与场景说明
 
-| 学习主题 | 代码位置 | 本项目展示的内容 |
+| 技术主题 | 代码位置 | 本项目的实现 |
 | --- | --- | --- |
 | `ChatModel` / `ChatClient` | `com.example.smartpark.agent` | `AlertTriageAgent` 直接调用 `ChatModel`；`AlertDiagnosisAgent` 基于注入的模型构建 `ChatClient`。 |
 | Tool Calling | `com.example.smartpark.tool` 与 `AlertDiagnosisAgent` | 将 `@Tool` 方法转换为回调并传给诊断调用。诊断只接收经过审计的只读回调，工单创建仍由确定性的工作流动作负责。 |
@@ -196,9 +196,9 @@ curl -X POST "http://localhost:8080/api/customer-service/sessions" \
 | 幂等性 | `ApprovalDecision`、`AlertWorkflow`、`WorkflowExecutionStore`、Mock 适配器 | 审批重试由 `idempotencyKey` 标识；工作流启动和 Mock 工单写入也在内存中保持工作流级别的身份。 |
 | SSE | `WorkflowEventPublisher`、`WorkflowEventController`、`WebDtos.WorkflowEventDto` | 使用 Reactor `Flux` 将可重放的工作流事件转换为脱敏的 Spring `ServerSentEvent`，并在终态事件后关闭。 |
 
-## 暂后练习
+## 后续建设方向
 
-这是第一个可运行的垂直切片，尚未达到生产级别。以下内容是后续练习，并非当前已经提供的功能：
+这是一个可运行的垂直切片，尚未达到生产级别。以下内容属于后续建设方向，并非当前已经提供的功能：
 
 - **Embedding/RAG：** Mock 知识适配器只是内存中的确定性关键词匹配。当前没有 Embedding 模型、向量数据库、数据导入流程或 RAG 链路。
 - **PostgreSQL checkpoint：** Graph 执行、事件、审批、幂等记录和工单都保存在进程内存中。当前没有 PostgreSQL checkpoint 或重启恢复能力。
