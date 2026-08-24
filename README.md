@@ -207,6 +207,7 @@ Spring AI 1.1.2 将 Java 结果信封编码为 MCP `TextContent` 中的 JSON；�
 ```powershell
 $env:SPRING_AI_DASHSCOPE_ENABLED='false'
 $env:SMARTPARK_MCP_ENABLED='true'
+$env:SERVER_ADDRESS='127.0.0.1'
 .\mvnw.cmd spring-boot:run
 ```
 
@@ -222,7 +223,7 @@ $env:SMARTPARK_MCP_ENABLED='true'
 npx.cmd -y @modelcontextprotocol/inspector --cli http://127.0.0.1:8080/mcp --transport http --method tools/list
 npx.cmd -y @modelcontextprotocol/inspector --cli http://127.0.0.1:8080/mcp --transport http --method tools/call --tool-name smartpark_lookup_alert --tool-arg alertId=ALT-ENERGY-001
 npx.cmd -y @modelcontextprotocol/inspector --cli http://127.0.0.1:8080/mcp --transport http --method tools/call --tool-name smartpark_lookup_energy --tool-arg meterId=DEV-ENERGY-001
-npx.cmd -y @modelcontextprotocol/inspector --cli http://127.0.0.1:8080/mcp --transport http --method tools/call --tool-name smartpark_search_knowledge --tool-arg query=能耗 --tool-arg domain=ALERT_OPERATIONS
+npx.cmd -y @modelcontextprotocol/inspector --cli http://127.0.0.1:8080/mcp --transport http --method tools/call --tool-name smartpark_search_knowledge --tool-arg query=energy --tool-arg domain=ALERT_OPERATIONS
 npx.cmd -y @modelcontextprotocol/inspector --web --server-url http://127.0.0.1:8080/mcp --transport http
 ```
 
@@ -246,6 +247,7 @@ url = "http://127.0.0.1:8080/mcp"
 ```powershell
 Remove-Item Env:SPRING_AI_DASHSCOPE_ENABLED -ErrorAction SilentlyContinue
 Remove-Item Env:SMARTPARK_MCP_ENABLED -ErrorAction SilentlyContinue
+Remove-Item Env:SERVER_ADDRESS -ErrorAction SilentlyContinue
 ```
 
 ## 技术与场景说明
