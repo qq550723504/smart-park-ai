@@ -224,9 +224,11 @@ spring:
         type: SYNC
         name: smart-park-readonly
         version: 0.1.0
-        stateless:
+        streamable-http:
           mcp-endpoint: /mcp
 ```
+
+Spring AI 1.1.2 的 `STATELESS` 协议仍复用 `spring.ai.mcp.server.streamable-http` 传输属性；不要使用后续文档版本中可能出现的 `stateless.mcp-endpoint` 前缀。
 
 `SmartParkMcpConfiguration` 使用同一个 `smartpark.mcp.enabled` 条件创建工具 Provider。默认值为 `false`；关闭时既不注册三个工具，也不暴露 MCP 端点。启用 MCP 不要求启用 DashScope，也不要求模型 API Key。
 
