@@ -115,7 +115,7 @@ smartpark:
     answer-mode: mock # mock 或 dashscope，默认 mock
 ```
 
-`mock` 模式完全离线，不需要 API Key。`rag` 模式使用 DashScope `EmbeddingModel` 和 Spring AI `SimpleVectorStore` 进程内向量索引，只返回相似度不低于 `min-similarity-score` 的结果；`dashscope` 回答模式使用 `ChatClient`，只接收当前问题、确定性意图和长度受限的检索上下文。两者可以独立切换。DashScope 密钥只从 `AI_DASHSCOPE_API_KEY` 环境变量读取。也可以通过 `SMARTPARK_KNOWLEDGE_MIN_SIMILARITY_SCORE` 覆盖阈值。
+`mock` 模式完全离线，不需要 API Key。`rag` 模式使用 DashScope `EmbeddingModel` 和 Spring AI `SimpleVectorStore` 进程内向量索引，并为 `CUSTOMER_SERVICE` 与 `ALERT_OPERATIONS` 建立独立索引，只返回相似度不低于 `min-similarity-score` 的结果；`dashscope` 回答模式使用 `ChatClient`，只接收当前问题、确定性意图和长度受限的检索上下文。两者可以独立切换。DashScope 密钥只从 `AI_DASHSCOPE_API_KEY` 环境变量读取。也可以通过 `SMARTPARK_KNOWLEDGE_MIN_SIMILARITY_SCORE` 覆盖阈值。
 
 客服响应中的 `knowledgeCitations` 只包含文档 ID、标题和相似度分数，不包含知识正文；会话检索轨迹也只保存安全查询词、文档 ID 和时间。检索为空、模型失败、输出校验失败、引用未知或报修意图都会转人工并创建 `WAITING_AGENT` 工单。RAG 向量索引为单进程内存生命周期，应用重启后重新加载种子文档。
 
@@ -194,7 +194,7 @@ curl -X POST "http://localhost:8080/api/customer-service/sessions" \
 
 前端可切换查看者、操作员、审批人、客服坐席和管理员角色。角色通过 `X-Demo-Role` 请求头演示接口授权边界，它不是生产认证方案。工作流响应会返回风险门禁原因；`GET /api/workflows/{workflowId}/observability` 汇总安全事件、工具调用和失败节点；管理员可以通过 `POST /api/demo/faults` 注入一次性的知识库检索故障，演示失败路径。`GET /api/operations/metrics` 返回工作流、客服会话、人工工单、知识文档、反馈和审计记录数量；管理员可通过 `GET /api/audit` 查看只包含角色、动作、资源 ID、结果和时间的安全审计记录。
 
-管理员可通过 `GET /api/knowledge` 查看知识文档元数据，通过 `POST /api/knowledge` 新增文档，并通过 `PATCH /api/knowledge/{documentId}/active` 启用或停用文档。公开响应不返回知识正文；停用文档会真实影响告警和客服检索，知识不足时进入审批或转人工。客服坐席、审批人或管理员可通过 `POST /api/feedback` 提交枚举化反馈，管理员可通过 `GET /api/feedback` 查看反馈记录。当前不接受自由文本，避免反馈接口成为敏感信息旁路。
+管理员可通过 `GET /api/knowledge` 查看带 `domain` 的知识文档元数据，通过 `POST /api/knowledge` 新增必须明确属于 `CUSTOMER_SERVICE` 或 `ALERT_OPERATIONS` 的文档，并通过 `PATCH /api/knowledge/{documentId}/active` 启用或停用文档。公开响应不返回知识正文；停用文档会真实影响对应领域的告警或客服检索，知识不足时进入审批或转人工。客服坐席、审批人或管理员可通过 `POST /api/feedback` 提交枚举化反馈，管理员可通过 `GET /api/feedback` 查看反馈记录。当前不接受自由文本，避免反馈接口成为敏感信息旁路。
 
 ## 学习路线
 

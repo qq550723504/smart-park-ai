@@ -14,6 +14,7 @@ export interface OperationsMetrics {
 
 export interface KnowledgeMetadata {
   id: string
+  domain: 'CUSTOMER_SERVICE' | 'ALERT_OPERATIONS'
   title: string
   tags: string[]
   updatedAt: string
