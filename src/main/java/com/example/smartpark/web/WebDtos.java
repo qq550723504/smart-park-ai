@@ -5,6 +5,7 @@ import com.example.smartpark.model.common.Diagnosis;
 import com.example.smartpark.model.common.WorkOrder;
 import com.example.smartpark.model.common.WorkOrderStatus;
 import com.example.smartpark.model.common.WorkflowStatus;
+import com.example.smartpark.model.customer.CustomerAnswer;
 import com.example.smartpark.workflow.AlertWorkflowState;
 import com.example.smartpark.workflow.CustomerConversation;
 import com.example.smartpark.workflow.WorkflowEvent;
@@ -62,13 +63,17 @@ public final class WebDtos {
             String intent,
             String answer,
             List<String> knowledgeSources,
+            List<com.example.smartpark.model.customer.KnowledgeCitation> knowledgeCitations,
             boolean needsHuman,
+            CustomerAnswer.Reason reason,
+            List<String> citationIds,
             CustomerTicketResponse ticket) { }
 
     static CustomerServiceResponse from(com.example.smartpark.model.customer.CustomerServiceResult result) {
         var ticket = result.ticket();
         return new CustomerServiceResponse(
-                result.sessionId(), result.intent(), result.answer(), result.knowledgeSources(), result.needsHuman(),
+                result.sessionId(), result.intent(), result.answer(), result.knowledgeSources(), result.knowledgeCitations(),
+                result.needsHuman(), result.reason(), result.citationIds(),
                 ticket == null ? null : new CustomerTicketResponse(
                         ticket.id(), ticket.sessionId(), ticket.intent(), ticket.status(), ticket.safeSummary(), ticket.createdAt()));
     }
