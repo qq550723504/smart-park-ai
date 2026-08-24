@@ -239,33 +239,35 @@ public final class CustomerServiceWorkflow {
         List<KnowledgeMatch> matches = retrieval.matches();
         boolean needsHuman = intent == Intent.REPAIR || intent == Intent.GENERAL || matches.isEmpty();
         CustomerTicket ticket = needsHuman ? createTicket(sessionId, intent) : null;
-        CustomerAnswer generated;
         try {
-            generated = retrieval.unavailable()
+            CustomerAnswer generated = retrieval.unavailable()
                     ? new CustomerAnswer("当前知识检索暂时不可用，已转人工客服处理。", true, CustomerAnswer.Reason.RETRIEVAL_UNAVAILABLE, List.of())
                     : needsHuman
                     ? new CustomerAnswer(intent == Intent.REPAIR ? "已记录设施报修，客服将核实后安排处理。" : "当前知识库没有足够信息，已转人工客服处理。", true,
                     intent == Intent.REPAIR ? CustomerAnswer.Reason.POLICY_LIMIT : CustomerAnswer.Reason.INSUFFICIENT_EVIDENCE, List.of())
                     : answerPort.answer(question, intent.name(), matches);
+            boolean generatedNeedsHuman = generated.needsHuman();
+            if (generatedNeedsHuman != needsHuman) {
+                if (ticket == null) ticket = createTicket(sessionId, intent);
+                generated = generatedNeedsHuman
+                        ? generated
+                        : new CustomerAnswer("当前无法确认答案，已转人工客服处理。", true,
+                        CustomerAnswer.Reason.INSUFFICIENT_EVIDENCE, List.of());
+                needsHuman = true;
+            }
+            List<String> citationIds = needsHuman ? List.of() : generated.citationIds();
+            CustomerAnswer.Reason reason = needsHuman ? generated.reason() : CustomerAnswer.Reason.SUPPORTED;
+            return new CustomerServiceResult(sessionId, intent.name(), generated.answer(),
+                    matches.stream().map(KnowledgeMatch::title).toList(),
+                    matches.stream().map(match -> new KnowledgeCitation(match.documentId(), match.title(), match.score())).toList(),
+                    needsHuman, ticket, reason, citationIds);
         } catch (RuntimeException failure) {
             if (ticket == null) ticket = createTicket(sessionId, intent);
-            generated = new CustomerAnswer("当前无法确认答案，已转人工客服处理。", true, CustomerAnswer.Reason.INSUFFICIENT_EVIDENCE, List.of());
+            return new CustomerServiceResult(sessionId, intent.name(), "当前无法确认答案，已转人工客服处理。",
+                    matches.stream().map(KnowledgeMatch::title).toList(),
+                    matches.stream().map(match -> new KnowledgeCitation(match.documentId(), match.title(), match.score())).toList(),
+                    true, ticket, CustomerAnswer.Reason.INSUFFICIENT_EVIDENCE, List.of());
         }
-        boolean generatedNeedsHuman = generated.needsHuman();
-        if (generatedNeedsHuman != needsHuman) {
-            if (ticket == null) ticket = createTicket(sessionId, intent);
-            generated = generatedNeedsHuman
-                    ? generated
-                    : new CustomerAnswer("当前无法确认答案，已转人工客服处理。", true,
-                    CustomerAnswer.Reason.INSUFFICIENT_EVIDENCE, List.of());
-            needsHuman = true;
-        }
-        List<String> citationIds = needsHuman ? List.of() : generated.citationIds();
-        CustomerAnswer.Reason reason = needsHuman ? generated.reason() : CustomerAnswer.Reason.SUPPORTED;
-        return new CustomerServiceResult(sessionId, intent.name(), generated.answer(),
-                matches.stream().map(KnowledgeMatch::title).toList(),
-                matches.stream().map(match -> new KnowledgeCitation(match.documentId(), match.title(), match.score())).toList(),
-                needsHuman, ticket, reason, citationIds);
     }
 
     private record RetrievalOutcome(List<KnowledgeMatch> matches, boolean unavailable) {

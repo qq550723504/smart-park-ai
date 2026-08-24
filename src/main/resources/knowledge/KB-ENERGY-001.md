@@ -1,1 +1,1 @@
-Customer service can explain public-area energy trends and efficiency guidance. Tenant billing details and equipment controls require authorized staff verification.
+For consumption above baseline, compare operating schedules, inspect HVAC and lighting runtime, and verify the meter before creating corrective work.

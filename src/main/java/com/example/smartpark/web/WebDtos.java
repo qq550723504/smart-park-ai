@@ -62,15 +62,21 @@ public final class WebDtos {
             String intent,
             String answer,
             List<String> knowledgeSources,
+            List<KnowledgeCitationResponse> knowledgeCitations,
             boolean needsHuman,
             CustomerTicketResponse ticket,
             String reason,
             List<String> citationIds) { }
 
+    public record KnowledgeCitationResponse(String documentId, String title, double score) { }
+
     static CustomerServiceResponse from(com.example.smartpark.model.customer.CustomerServiceResult result) {
         var ticket = result.ticket();
         return new CustomerServiceResponse(
-                result.sessionId(), result.intent(), result.answer(), result.knowledgeSources(), result.needsHuman(),
+                result.sessionId(), result.intent(), result.answer(), result.knowledgeSources(),
+                result.knowledgeCitations().stream()
+                        .map(citation -> new KnowledgeCitationResponse(citation.documentId(), citation.title(), citation.score()))
+                        .toList(), result.needsHuman(),
                 ticket == null ? null : new CustomerTicketResponse(
                         ticket.id(), ticket.sessionId(), ticket.intent(), ticket.status(), ticket.safeSummary(), ticket.createdAt()),
                 result.reason().name(), result.citationIds());

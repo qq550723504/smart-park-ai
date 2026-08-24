@@ -1,5 +1,6 @@
 package com.example.smartpark.adapter.rag;
 
+import com.example.smartpark.demo.DemoFaultInjector;
 import com.example.smartpark.model.common.KnowledgeDocument;
 import com.example.smartpark.model.common.KnowledgeDomain;
 import com.example.smartpark.model.common.KnowledgeMatch;
@@ -102,6 +103,34 @@ class RagKnowledgeAdapterTest {
                 .isInstanceOf(IllegalStateException.class);
         assertThat(adapter.list().get(0).document().title()).isEqualTo("Original");
         assertThat(adapter.search(KnowledgeDomain.CUSTOMER_SERVICE, "parking")).extracting(KnowledgeDocument::id).containsExactly("KD-SAFE-001");
+    }
+
+    @Test
+    void movingDocumentToAnotherDomainRemovesItFromTheOldVectorIndex() {
+        RagKnowledgeAdapter adapter = new RagKnowledgeAdapter(stores(new KeywordEmbeddingModel()),
+                List.of(document("KD-MOVE-001", "Customer parking", "customer parking")));
+
+        adapter.save(document("KD-MOVE-001", "Alert energy", "alert energy", KnowledgeDomain.ALERT_OPERATIONS));
+
+        assertThat(adapter.search(KnowledgeDomain.CUSTOMER_SERVICE, "parking")).isEmpty();
+        assertThat(adapter.search(KnowledgeDomain.ALERT_OPERATIONS, "energy"))
+                .extracting(KnowledgeDocument::id)
+                .containsExactly("KD-MOVE-001");
+    }
+
+    @Test
+    void consumesInjectedKnowledgeSearchFaults() {
+        DemoFaultInjector injector = new DemoFaultInjector();
+        RagKnowledgeAdapter adapter = new RagKnowledgeAdapter(
+                stores(new KeywordEmbeddingModel()),
+                List.of(document("KD-FAULT-001", "Parking", "parking")),
+                RagKnowledgeAdapter.DEFAULT_MIN_SIMILARITY_SCORE,
+                injector);
+        injector.inject(new DemoFaultInjector.Fault(DemoFaultInjector.FaultPoint.KNOWLEDGE_SEARCH));
+
+        assertThatThrownBy(() -> adapter.search(KnowledgeDomain.CUSTOMER_SERVICE, "parking"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Injected demo fault at KNOWLEDGE_SEARCH");
     }
 
     private static KnowledgeDocument document(String id, String title, String content) {

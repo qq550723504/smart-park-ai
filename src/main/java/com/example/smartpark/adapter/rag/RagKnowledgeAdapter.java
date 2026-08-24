@@ -1,5 +1,6 @@
 package com.example.smartpark.adapter.rag;
 
+import com.example.smartpark.demo.DemoFaultInjector;
 import com.example.smartpark.model.common.KnowledgeDocument;
 import com.example.smartpark.model.common.KnowledgeDomain;
 import com.example.smartpark.model.common.KnowledgeMatch;
@@ -26,17 +27,27 @@ public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
 
     private final Map<KnowledgeDomain, VectorStore> vectorStores;
     private final double minSimilarityScore;
+    private final DemoFaultInjector faultInjector;
     private final Map<String, ManagedDocument> metadata = new ConcurrentHashMap<>();
 
     public RagKnowledgeAdapter(
             Map<KnowledgeDomain, VectorStore> vectorStores,
             Collection<KnowledgeDocument> seedDocuments,
             double minSimilarityScore) {
+        this(vectorStores, seedDocuments, minSimilarityScore, new DemoFaultInjector());
+    }
+
+    public RagKnowledgeAdapter(
+            Map<KnowledgeDomain, VectorStore> vectorStores,
+            Collection<KnowledgeDocument> seedDocuments,
+            double minSimilarityScore,
+            DemoFaultInjector faultInjector) {
         this.vectorStores = validateVectorStores(vectorStores);
         if (!Double.isFinite(minSimilarityScore) || minSimilarityScore < 0.0 || minSimilarityScore > 1.0) {
             throw new IllegalArgumentException("minSimilarityScore must be between 0 and 1");
         }
         this.minSimilarityScore = minSimilarityScore;
+        this.faultInjector = Objects.requireNonNull(faultInjector, "faultInjector");
         Objects.requireNonNull(seedDocuments, "seedDocuments").forEach(this::save);
     }
 
@@ -55,6 +66,7 @@ public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
     public List<KnowledgeMatch> rankedSearch(KnowledgeDomain domain, String query) {
         String normalized = validateQuery(query);
         if (normalized.isBlank()) return List.of();
+        faultInjector.failIfRequested(DemoFaultInjector.FaultPoint.KNOWLEDGE_SEARCH);
         return vectorStore(domain).similaritySearch(SearchRequest.builder()
                         .query(normalized)
                         .topK(MAX_RESULTS)
@@ -77,6 +89,15 @@ public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
         validateDocument(document);
         Document vectorDocument = toVectorDocument(document);
         vectorStore(document.domain()).add(List.of(vectorDocument));
+        ManagedDocument previous = metadata.get(document.id());
+        if (previous != null && previous.document().domain() != document.domain()) {
+            try {
+                vectorStore(previous.document().domain()).delete(List.of(document.id()));
+            } catch (RuntimeException failure) {
+                vectorStore(document.domain()).delete(List.of(document.id()));
+                throw failure;
+            }
+        }
         metadata.put(document.id(), new ManagedDocument(document, true));
         return document;
     }

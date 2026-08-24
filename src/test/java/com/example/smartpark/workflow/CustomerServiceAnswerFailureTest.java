@@ -79,4 +79,25 @@ class CustomerServiceAnswerFailureTest {
         assertThat(result.ticket().status()).isEqualTo("WAITING_AGENT");
         assertThat(result.answer()).doesNotContain("model raw response secret");
     }
+
+    @Test
+    void invalidAnswerCitationsCreateSafeHandoffInsteadOfEscapingTheWorkflow() {
+        KnowledgeDocument document = new KnowledgeDocument("KB-PARKING-001", KnowledgeDomain.CUSTOMER_SERVICE, "Parking", "private body", List.of("parking"), Instant.EPOCH);
+        KnowledgePort knowledge = new KnowledgePort() {
+            @Override public List<KnowledgeDocument> search(KnowledgeDomain domain, String query) { return List.of(document); }
+            @Override public List<KnowledgeMatch> rankedSearch(KnowledgeDomain domain, String query) { return List.of(new KnowledgeMatch(document, .9)); }
+        };
+        CustomerAnswerPort malformed = (question, intent, evidence) ->
+                new CustomerAnswer("看起来可以。", false, CustomerAnswer.Reason.SUPPORTED, List.of("UNKNOWN-DOCUMENT"));
+        CustomerServiceWorkflow workflow = new CustomerServiceWorkflow(knowledge,
+                new InMemoryCustomerSessionStore(), new InMemoryCustomerTicketAdapter(), malformed,
+                Clock.fixed(Instant.EPOCH, ZoneOffset.UTC), () -> "cs-invalid-citation");
+
+        var result = workflow.handle("访客停车怎么收费？");
+
+        assertThat(result.needsHuman()).isTrue();
+        assertThat(result.reason()).isEqualTo(CustomerAnswer.Reason.INSUFFICIENT_EVIDENCE);
+        assertThat(result.citationIds()).isEmpty();
+        assertThat(result.ticket().status()).isEqualTo("WAITING_AGENT");
+    }
 }
