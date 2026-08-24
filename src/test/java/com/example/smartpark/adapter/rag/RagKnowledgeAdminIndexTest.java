@@ -11,13 +11,14 @@ import org.springframework.ai.embedding.EmbeddingResponse;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class RagKnowledgeAdminIndexTest {
     @Test
     void saveAndActivationChangesAreImmediatelyVisibleToSearch() {
-        RagKnowledgeAdapter adapter = new RagKnowledgeAdapter(SimpleVectorStore.builder(new KeywordEmbeddingModel()).build(), List.of(
+        RagKnowledgeAdapter adapter = new RagKnowledgeAdapter(stores(new KeywordEmbeddingModel()), List.of(
                 new KnowledgeDocument("KB-INITIAL-001", KnowledgeDomain.CUSTOMER_SERVICE, "Initial", "parking", List.of("parking"), Instant.EPOCH)));
         KnowledgeDocument added = new KnowledgeDocument("KB-NEW-001", KnowledgeDomain.CUSTOMER_SERVICE, "New parking guide", "parking", List.of("parking"), Instant.EPOCH);
 
@@ -33,5 +34,11 @@ class RagKnowledgeAdminIndexTest {
         @Override public float[] embed(Document document) { return embed(document.getText()); }
         @Override public float[] embed(String text) { return new float[] { text.contains("parking") ? 1 : 0, .1f }; }
         @Override public EmbeddingResponse call(EmbeddingRequest request) { throw new UnsupportedOperationException(); }
+    }
+
+    private static Map<KnowledgeDomain, org.springframework.ai.vectorstore.VectorStore> stores(EmbeddingModel model) {
+        return Map.of(
+                KnowledgeDomain.CUSTOMER_SERVICE, SimpleVectorStore.builder(model).build(),
+                KnowledgeDomain.ALERT_OPERATIONS, SimpleVectorStore.builder(model).build());
     }
 }

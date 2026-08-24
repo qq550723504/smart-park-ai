@@ -2,6 +2,7 @@ package com.example.smartpark.integration;
 
 import com.example.smartpark.adapter.mock.MockKnowledgeAdapter;
 import com.example.smartpark.adapter.rag.RagKnowledgeAdapter;
+import com.example.smartpark.model.common.KnowledgeDomain;
 import com.example.smartpark.port.knowledge.KnowledgeAdminPort;
 import com.example.smartpark.port.knowledge.KnowledgePort;
 import org.junit.jupiter.api.Test;
@@ -32,6 +33,10 @@ class RagModeContextTest {
         assertThat(knowledgePort).isSameAs(knowledgeAdminPort);
         assertThat(knowledgeAdminPort.list()).extracting(item -> item.document().id())
                 .contains("KB-PARKING-001", "KB-VISITOR-001", "KB-ENERGY-001", "KB-REPAIR-001");
+        assertThat(knowledgePort.search(KnowledgeDomain.ALERT_OPERATIONS, "temperature"))
+                .extracting(document -> document.id()).contains("KB-HVAC-001");
+        assertThat(knowledgePort.search(KnowledgeDomain.CUSTOMER_SERVICE, "temperature"))
+                .extracting(document -> document.id()).doesNotContain("KB-HVAC-001");
     }
 
     @TestConfiguration(proxyBeanMethods = false)
