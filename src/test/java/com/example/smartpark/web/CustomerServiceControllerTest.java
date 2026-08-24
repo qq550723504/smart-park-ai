@@ -2,6 +2,7 @@ package com.example.smartpark.web;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.example.smartpark.adapter.mock.MockParkFixture;
+import com.example.smartpark.port.knowledge.KnowledgePort;
 import com.example.smartpark.workflow.CustomerServiceWorkflow;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -70,6 +71,60 @@ class CustomerServiceControllerTest {
                         .content("{\"question\":\"访客如何预约进入园区？\"}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.message").value("Idempotency-Key 已用于其他问题，请生成新的请求键"));
+    }
+
+    @Test
+    void initialKnowledgeSearchFailureReturnsSafeHumanHandoffInsteadOfServerError() throws Exception {
+        String secret = "providerResponse=private-knowledge-body";
+        KnowledgePort failingKnowledge = query -> {
+            throw new IllegalStateException(secret);
+        };
+        MockMvc failingMockMvc = MockMvcBuilders.standaloneSetup(
+                        new CustomerServiceController(new CustomerServiceWorkflow(failingKnowledge)))
+                .setControllerAdvice(new ApiExceptionHandler())
+                .build();
+
+        failingMockMvc.perform(post("/api/customer-service/sessions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"访客停车怎么收费？\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.answer").value(org.hamcrest.Matchers.containsString("已创建人工客服工单")))
+                .andExpect(jsonPath("$.answer").value(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString(secret))))
+                .andExpect(jsonPath("$.needsHuman").value(true))
+                .andExpect(jsonPath("$.ticket.status").value("WAITING_AGENT"));
+    }
+
+    @Test
+    void followUpKnowledgeSearchFailureReturnsSafeHumanHandoffInsteadOfServerError() throws Exception {
+        String secret = "raw knowledge body and exception token";
+        KnowledgePort failingKnowledge = new KnowledgePort() {
+            private int calls;
+
+            @Override
+            public java.util.List<com.example.smartpark.model.common.KnowledgeDocument> search(String query) {
+                if (++calls == 1) return new MockParkFixture().knowledge().search(query);
+                throw new IllegalStateException(secret);
+            }
+        };
+        MockMvc failingMockMvc = MockMvcBuilders.standaloneSetup(
+                        new CustomerServiceController(new CustomerServiceWorkflow(failingKnowledge)))
+                .setControllerAdvice(new ApiExceptionHandler())
+                .build();
+        String first = failingMockMvc.perform(post("/api/customer-service/sessions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"访客停车怎么收费？\"}"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String sessionId = new ObjectMapper().readTree(first).get("sessionId").asText();
+
+        failingMockMvc.perform(post("/api/customer-service/sessions/" + sessionId + "/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"访客如何预约进入园区？\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.answer").value(org.hamcrest.Matchers.containsString("已创建人工客服工单")))
+                .andExpect(jsonPath("$.answer").value(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString(secret))))
+                .andExpect(jsonPath("$.needsHuman").value(true))
+                .andExpect(jsonPath("$.ticket.status").value("WAITING_AGENT"));
     }
 
     @Test

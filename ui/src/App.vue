@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import AlertSelector from './components/AlertSelector.vue'
 import WorkflowGraph from './components/WorkflowGraph.vue'
@@ -8,10 +8,21 @@ import EventTimeline from './components/EventTimeline.vue'
 import CustomerServiceConsole from './components/CustomerServiceConsole.vue'
 import { demoAlerts, type DemoRole } from './types/workflow'
 import { useWorkflow } from './composables/useWorkflow'
-import { submitFeedback } from './services/workflowApi'
+import { getOperationsCapabilities, submitFeedback } from './services/workflowApi'
 import { customerIntentLabel, workflowNodeLabel } from './utils/labels'
 import './styles.css'
 
+const capabilities = ref<{ knowledgeMode: string; customerAnswerMode: string; vectorStore: string } | null>(null)
+const capabilityLabels = computed(() => capabilities.value ? {
+  knowledge: capabilities.value.knowledgeMode === 'mock' ? 'Mock' : 'RAG',
+  customer: capabilities.value.customerAnswerMode === 'mock' ? 'Mock' : 'DashScope',
+  vector: capabilities.value.vectorStore === 'in-memory' ? '进程内' : capabilities.value.vectorStore,
+} : null)
+onMounted(() => {
+  void getOperationsCapabilities()
+    .then((value) => { capabilities.value = value })
+    .catch(() => { capabilities.value = null })
+})
 const selectedAlertId = ref(demoAlerts[0].id)
 const activeView = ref<'workflow' | 'customer'>('workflow')
 const role = ref<DemoRole>('ADMIN')
@@ -118,7 +129,7 @@ function confidence(value?: number) {
       <div class="topbar-actions">
         <el-select v-model="role" class="role-select" aria-label="演示角色"><el-option label="查看者" value="VIEWER" /><el-option label="操作员" value="OPERATOR" /><el-option label="审批人" value="APPROVER" /><el-option label="客服坐席" value="CUSTOMER_AGENT" /><el-option label="管理员" value="ADMIN" /></el-select>
         <nav class="view-switch"><button :class="{ active: activeView === 'workflow' }" @click="activeView = 'workflow'">运营工作流</button><button :class="{ active: activeView === 'customer' }" @click="activeView = 'customer'">园区客服</button></nav>
-        <div class="system-status"><span class="status-pulse"></span><span>模拟园区系统</span><span class="divider"></span><span class="muted">DashScope 智能体</span></div>
+        <div class="system-status"><span class="status-pulse"></span><span>模拟园区系统</span><span class="divider"></span><span class="muted">知识检索 {{ capabilityLabels?.knowledge ?? '--' }} · 客服回答 {{ capabilityLabels?.customer ?? '--' }} · 索引存储 {{ capabilityLabels?.vector ?? '--' }}</span></div>
       </div>
     </header>
 

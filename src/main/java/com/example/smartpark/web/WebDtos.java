@@ -63,14 +63,17 @@ public final class WebDtos {
             String answer,
             List<String> knowledgeSources,
             boolean needsHuman,
-            CustomerTicketResponse ticket) { }
+            CustomerTicketResponse ticket,
+            String reason,
+            List<String> citationIds) { }
 
     static CustomerServiceResponse from(com.example.smartpark.model.customer.CustomerServiceResult result) {
         var ticket = result.ticket();
         return new CustomerServiceResponse(
                 result.sessionId(), result.intent(), result.answer(), result.knowledgeSources(), result.needsHuman(),
                 ticket == null ? null : new CustomerTicketResponse(
-                        ticket.id(), ticket.sessionId(), ticket.intent(), ticket.status(), ticket.safeSummary(), ticket.createdAt()));
+                        ticket.id(), ticket.sessionId(), ticket.intent(), ticket.status(), ticket.safeSummary(), ticket.createdAt()),
+                result.reason(), result.citationIds());
     }
 
     private static final String REDACTED = "[REDACTED]";

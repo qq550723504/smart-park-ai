@@ -3,7 +3,10 @@ package com.example.smartpark.workflow;
 import com.example.smartpark.adapter.mock.MockParkFixture;
 import com.example.smartpark.adapter.mock.InMemoryCustomerSessionStore;
 import com.example.smartpark.adapter.mock.InMemoryCustomerTicketAdapter;
+import com.example.smartpark.model.common.KnowledgeDocument;
 import com.example.smartpark.model.customer.CustomerServiceResult;
+import com.example.smartpark.port.knowledge.KnowledgeMatch;
+import com.example.smartpark.port.knowledge.KnowledgePort;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -28,6 +31,104 @@ class CustomerServiceWorkflowTest {
         assertThat(result.knowledgeSources()).contains("Visitor parking guide");
         assertThat(result.needsHuman()).isFalse();
         assertThat(result.ticket()).isNull();
+    }
+
+    @Test
+    void knowledgeBelowConfiguredScoreThresholdTransfersToHuman() {
+        CustomerServiceWorkflow thresholded = workflowWithRankedMatch(0.69, 0.70, "cs-low-score");
+
+        CustomerServiceResult result = thresholded.handle("访客停车怎么收费？");
+
+        assertThat(result.needsHuman()).isTrue();
+        assertThat(result.reason()).isEqualTo("INSUFFICIENT_EVIDENCE");
+        assertThat(result.ticket().status()).isEqualTo("WAITING_AGENT");
+        assertThat(result.knowledgeSources()).isEmpty();
+        assertThat(result.citationIds()).isEmpty();
+        assertThat(thresholded.conversation(result.sessionId()).retrievals()).singleElement()
+                .satisfies(trace -> assertThat(trace.documentIds()).isEmpty());
+    }
+
+    @Test
+    void knowledgeAtConfiguredScoreThresholdRemainsSupported() {
+        CustomerServiceWorkflow thresholded = workflowWithRankedMatch(0.70, 0.70, "cs-at-threshold");
+
+        CustomerServiceResult result = thresholded.handle("访客停车怎么收费？");
+
+        assertThat(result.needsHuman()).isFalse();
+        assertThat(result.reason()).isEqualTo("SUPPORTED");
+        assertThat(result.citationIds()).containsExactly("parking-low-score");
+    }
+
+    @Test
+    void initialKnowledgeSearchFailureTransfersToHumanWithWaitingTicket() {
+        String secret = "providerResponse=private-knowledge-body";
+        KnowledgePort failingKnowledge = query -> {
+            throw new IllegalStateException(secret);
+        };
+        CustomerServiceWorkflow failing = new CustomerServiceWorkflow(
+                failingKnowledge,
+                Clock.fixed(Instant.parse("2026-08-23T02:00:00Z"), ZoneOffset.UTC),
+                () -> "cs-search-failure");
+        CustomerServiceResult result = failing.handle("访客停车怎么收费？");
+
+        assertThat(result.needsHuman()).isTrue();
+        assertThat(result.reason()).isEqualTo("RETRIEVAL_UNAVAILABLE");
+        assertThat(result.ticket().status()).isEqualTo("WAITING_AGENT");
+        assertThat(result.answer()).doesNotContain(secret, "private-knowledge-body");
+        assertThat(failing.conversation(result.sessionId()).retrievals()).singleElement()
+                .satisfies(trace -> assertThat(trace.documentIds()).isEmpty());
+    }
+
+    @Test
+    void followUpKnowledgeSearchFailureTransfersToHumanWithoutPersistingResponseOrException() {
+        String secret = "raw knowledge body and exception token";
+        KnowledgePort failingKnowledge = new KnowledgePort() {
+            private int calls;
+
+            @Override
+            public java.util.List<com.example.smartpark.model.common.KnowledgeDocument> search(String query) {
+                if (++calls == 1) return new MockParkFixture().knowledge().search(query);
+                throw new IllegalStateException(secret);
+            }
+        };
+        CustomerServiceWorkflow failing = new CustomerServiceWorkflow(
+                failingKnowledge,
+                Clock.fixed(Instant.parse("2026-08-23T02:00:00Z"), ZoneOffset.UTC),
+                () -> "cs-follow-up-search-failure");
+        CustomerServiceResult first = failing.handle("访客停车怎么收费？");
+
+        CustomerServiceResult result = failing.reply(
+                first.sessionId(), "访客如何预约进入园区？", "search-failure-reply");
+
+        assertThat(result.needsHuman()).isTrue();
+        assertThat(result.reason()).isEqualTo("RETRIEVAL_UNAVAILABLE");
+        assertThat(result.ticket().status()).isEqualTo("WAITING_AGENT");
+        assertThat(failing.conversation(result.sessionId()).messages())
+                .extracting(CustomerConversation.Message::text)
+                .allMatch(content -> !content.contains(secret));
+        assertThat(failing.conversation(result.sessionId()).retrievals()).last()
+                .satisfies(trace -> {
+                    assertThat(trace.documentIds()).isEmpty();
+                    assertThat(trace.query()).doesNotContain(secret);
+                });
+    }
+
+    @Test
+    void vectorRetrievalFailureUsesTheSameSafeHandoffMapping() {
+        KnowledgePort vectorStoreFailure = query -> {
+            throw new RuntimeException("EmbeddingModel timeout: raw provider response");
+        };
+        CustomerServiceWorkflow failing = new CustomerServiceWorkflow(
+                vectorStoreFailure,
+                Clock.fixed(Instant.parse("2026-08-23T02:00:00Z"), ZoneOffset.UTC),
+                () -> "cs-vector-failure");
+
+        CustomerServiceResult result = failing.handle("访客停车怎么收费？");
+
+        assertThat(result.reason()).isEqualTo("RETRIEVAL_UNAVAILABLE");
+        assertThat(result.needsHuman()).isTrue();
+        assertThat(result.answer()).doesNotContain("EmbeddingModel", "raw provider response");
+        assertThat(result.ticket()).isNotNull();
     }
 
     @Test
@@ -263,6 +364,25 @@ class CustomerServiceWorkflowTest {
                 .hasMessage("Unknown customer service ticket: " + evicted.ticket().id());
         assertThat(tickets.list()).containsExactly(retained.ticket());
         assertThat(bounded.get(retained.sessionId())).isEqualTo(retained);
+    }
+
+    private static CustomerServiceWorkflow workflowWithRankedMatch(
+            double score, double minimumScore, String sessionId) {
+        KnowledgePort knowledge = new KnowledgePort() {
+            @Override
+            public java.util.List<KnowledgeDocument> search(String query) {
+                return java.util.List.of();
+            }
+
+            @Override
+            public java.util.List<KnowledgeMatch> rankedSearch(String query) {
+                return java.util.List.of(new KnowledgeMatch("parking-low-score", "Weak parking match", score));
+            }
+        };
+        Clock clock = Clock.fixed(Instant.parse("2026-08-23T02:00:00Z"), ZoneOffset.UTC);
+        return new CustomerServiceWorkflow(
+                knowledge, new InMemoryCustomerSessionStore(clock, 10, Duration.ofHours(1)),
+                new InMemoryCustomerTicketAdapter(), clock, () -> sessionId, minimumScore);
     }
 
     private static final class MutableClock extends Clock {
