@@ -21,6 +21,7 @@ public class RagSeedKnowledgeConfiguration {
         return List.of(
                 seed(KnowledgeDomain.CUSTOMER_SERVICE, "KB-PARKING-001", "Visitor parking guide", List.of("parking", "visitor", "停车")),
                 seed(KnowledgeDomain.CUSTOMER_SERVICE, "KB-VISITOR-001", "Visitor access guide", List.of("visitor", "appointment", "访客")),
+                seed(KnowledgeDomain.CUSTOMER_SERVICE, "KB-CUSTOMER-ENERGY-001", "Tenant energy service guide", List.of("energy", "customer service", "billing", "能耗")),
                 seed(KnowledgeDomain.CUSTOMER_SERVICE, "KB-REPAIR-001", "Facility repair intake guide", List.of("repair", "maintenance", "报修")),
                 seed(KnowledgeDomain.ALERT_OPERATIONS, "KB-HVAC-001", "HVAC temperature response", List.of("temperature", "hvac", "暖通")),
                 seed(KnowledgeDomain.ALERT_OPERATIONS, "KB-POWER-001", "Power emergency runbook", List.of("power", "breaker", "配电")),

@@ -8,13 +8,19 @@ import org.junit.jupiter.api.Test;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.SimpleVectorStore;
+import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.ai.embedding.EmbeddingRequest;
 import org.springframework.ai.embedding.EmbeddingResponse;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -119,6 +125,37 @@ class RagKnowledgeAdapterTest {
     }
 
     @Test
+    void doesNotExposeMovedDocumentDuringConcurrentCrossDomainSearch() throws Exception {
+        BlockingAddVectorStore alertStore = new BlockingAddVectorStore(
+                SimpleVectorStore.builder(new KeywordEmbeddingModel()).build());
+        RagKnowledgeAdapter adapter = new RagKnowledgeAdapter(
+                Map.of(
+                        KnowledgeDomain.CUSTOMER_SERVICE,
+                        SimpleVectorStore.builder(new KeywordEmbeddingModel()).build(),
+                        KnowledgeDomain.ALERT_OPERATIONS,
+                        alertStore),
+                List.of(document("KD-MOVE-RACE-001", "Customer parking", "parking")));
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            alertStore.blockNextAdd();
+            var move = executor.submit(() -> adapter.save(
+                    document("KD-MOVE-RACE-001", "Alert energy", "energy", KnowledgeDomain.ALERT_OPERATIONS)));
+
+            assertThat(alertStore.awaitReplacementAdded()).isTrue();
+            assertThat(adapter.search(KnowledgeDomain.ALERT_OPERATIONS, "energy")).isEmpty();
+
+            alertStore.releaseBlockedAdd();
+            move.get(5, TimeUnit.SECONDS);
+            assertThat(adapter.search(KnowledgeDomain.ALERT_OPERATIONS, "energy"))
+                    .extracting(KnowledgeDocument::id)
+                    .containsExactly("KD-MOVE-RACE-001");
+        } finally {
+            alertStore.releaseBlockedAdd();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
     void consumesInjectedKnowledgeSearchFaults() {
         DemoFaultInjector injector = new DemoFaultInjector();
         RagKnowledgeAdapter adapter = new RagKnowledgeAdapter(
@@ -183,5 +220,45 @@ class RagKnowledgeAdapterTest {
         }
 
         @Override public EmbeddingResponse call(EmbeddingRequest request) { throw new UnsupportedOperationException(); }
+    }
+
+    private static final class BlockingAddVectorStore implements VectorStore {
+        private final VectorStore delegate;
+        private final CountDownLatch replacementAdded = new CountDownLatch(1);
+        private final CountDownLatch releaseAdd = new CountDownLatch(1);
+        private volatile boolean blockNextAdd;
+
+        private BlockingAddVectorStore(VectorStore delegate) {
+            this.delegate = delegate;
+        }
+
+        void blockNextAdd() { blockNextAdd = true; }
+
+        boolean awaitReplacementAdded() throws InterruptedException {
+            return replacementAdded.await(5, TimeUnit.SECONDS);
+        }
+
+        void releaseBlockedAdd() { releaseAdd.countDown(); }
+
+        @Override
+        public void add(List<Document> documents) {
+            delegate.add(documents);
+            if (blockNextAdd) {
+                blockNextAdd = false;
+                replacementAdded.countDown();
+                try {
+                    if (!releaseAdd.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("timed out waiting for test release");
+                    }
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("interrupted while blocking vector add", interrupted);
+                }
+            }
+        }
+
+        @Override public void delete(List<String> ids) { delegate.delete(ids); }
+        @Override public void delete(Filter.Expression filterExpression) { delegate.delete(filterExpression); }
+        @Override public List<Document> similaritySearch(SearchRequest request) { return delegate.similaritySearch(request); }
     }
 }

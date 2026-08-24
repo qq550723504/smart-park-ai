@@ -72,7 +72,7 @@ public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
                         .topK(MAX_RESULTS)
                         .similarityThreshold(minSimilarityScore)
                         .build()).stream()
-                .map(this::toMatch)
+                .map(document -> toMatch(domain, document))
                 .filter(Objects::nonNull)
                 .toList();
     }
@@ -118,9 +118,9 @@ public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
         return updated;
     }
 
-    private KnowledgeMatch toMatch(Document document) {
+    private KnowledgeMatch toMatch(KnowledgeDomain domain, Document document) {
         ManagedDocument managed = metadata.get(document.getId());
-        if (managed == null || !managed.active()) return null;
+        if (managed == null || !managed.active() || managed.document().domain() != domain) return null;
         double score = document.getScore() == null ? 0.0 : document.getScore();
         return new KnowledgeMatch(managed.document(), Math.max(0.0, Math.min(1.0, score)));
     }

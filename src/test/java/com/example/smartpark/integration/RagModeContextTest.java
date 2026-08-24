@@ -37,6 +37,8 @@ class RagModeContextTest {
                 .extracting(document -> document.id()).contains("KB-HVAC-001");
         assertThat(knowledgePort.search(KnowledgeDomain.CUSTOMER_SERVICE, "temperature"))
                 .extracting(document -> document.id()).doesNotContain("KB-HVAC-001");
+        assertThat(knowledgePort.search(KnowledgeDomain.CUSTOMER_SERVICE, "energy"))
+                .extracting(document -> document.id()).contains("KB-CUSTOMER-ENERGY-001");
     }
 
     @TestConfiguration(proxyBeanMethods = false)
