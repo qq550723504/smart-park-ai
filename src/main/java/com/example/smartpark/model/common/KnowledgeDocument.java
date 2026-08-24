@@ -14,12 +14,6 @@ public record KnowledgeDocument(
 
     public static final int MAX_CONTENT_LENGTH = 2_000;
 
-    /** @deprecated New documents must declare their domain explicitly. */
-    @Deprecated(forRemoval = false)
-    public KnowledgeDocument(String id, String title, String content, List<String> tags, Instant updatedAt) {
-        this(id, KnowledgeDomain.CUSTOMER_SERVICE, title, content, tags, updatedAt);
-    }
-
     public KnowledgeDocument {
         id = PublicMetadata.requireIdentifier(id, "id");
         domain = Objects.requireNonNull(domain, "domain");

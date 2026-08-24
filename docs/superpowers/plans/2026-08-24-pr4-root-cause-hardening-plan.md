@@ -69,4 +69,3 @@
 - [ ] Run `./mvnw test` and record test count, failures, and skips.
 - [ ] Run `npm.cmd run build` under `ui`.
 - [ ] Review the complete diff for unrelated changes, commit each independently verified slice, push the PR branch, and report CI/review state separately.
-

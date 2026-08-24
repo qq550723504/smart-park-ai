@@ -147,18 +147,20 @@ class RagKnowledgeAdapterTest {
                         KnowledgeDomain.ALERT_OPERATIONS,
                         alertStore),
                 List.of(document("KD-MOVE-RACE-001", "Customer parking", "parking")));
-        ExecutorService executor = Executors.newSingleThreadExecutor();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
             alertStore.blockNextAdd();
             var move = executor.submit(() -> adapter.save(
                     document("KD-MOVE-RACE-001", "Alert energy", "energy", KnowledgeDomain.ALERT_OPERATIONS)));
 
             assertThat(alertStore.awaitReplacementAdded()).isTrue();
-            assertThat(adapter.search(KnowledgeDomain.ALERT_OPERATIONS, "energy")).isEmpty();
+            var search = executor.submit(() -> adapter.search(KnowledgeDomain.ALERT_OPERATIONS, "energy"));
+            Thread.sleep(250);
+            assertThat(search.isDone()).isFalse();
 
             alertStore.releaseBlockedAdd();
             move.get(5, TimeUnit.SECONDS);
-            assertThat(adapter.search(KnowledgeDomain.ALERT_OPERATIONS, "energy"))
+            assertThat(search.get(5, TimeUnit.SECONDS))
                     .extracting(KnowledgeDocument::id)
                     .containsExactly("KD-MOVE-RACE-001");
         } finally {

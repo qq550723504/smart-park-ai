@@ -34,12 +34,12 @@ class KnowledgeDocumentTest {
     @Test
     void rejectsControlCharactersInPublicTitleAtTheDomainBoundary() {
         assertThatThrownBy(() -> new KnowledgeDocument(
-                "KD-INVALID-001", "Parking guide\ninternal", "Body", List.of("parking"), Instant.EPOCH))
+                "KD-INVALID-001", KnowledgeDomain.CUSTOMER_SERVICE, "Parking guide\ninternal", "Body", List.of("parking"), Instant.EPOCH))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("bounded public metadata");
 
         assertThatThrownBy(() -> new KnowledgeDocument(
-                "KD-INVALID-002", "Parking guide\u2029internal", "Body", List.of("parking"), Instant.EPOCH))
+                "KD-INVALID-002", KnowledgeDomain.CUSTOMER_SERVICE, "Parking guide\u2029internal", "Body", List.of("parking"), Instant.EPOCH))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("bounded public metadata");
     }

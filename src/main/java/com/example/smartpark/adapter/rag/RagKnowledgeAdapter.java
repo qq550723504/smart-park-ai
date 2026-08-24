@@ -19,6 +19,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /** Adapter from the application knowledge ports to Spring AI's VectorStore abstraction. */
 public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
@@ -31,6 +33,7 @@ public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
     private final double minSimilarityScore;
     private final DemoFaultInjector faultInjector;
     private final Map<String, ManagedDocument> metadata = new ConcurrentHashMap<>();
+    private final ReadWriteLock indexLock = new ReentrantReadWriteLock();
 
     public RagKnowledgeAdapter(
             Map<KnowledgeDomain, VectorStore> vectorStores,
@@ -73,58 +76,78 @@ public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
 
     @Override
     public List<KnowledgeMatch> rankedSearch(KnowledgeDomain domain, String query) {
-        String normalized = validateQuery(query);
-        if (normalized.isBlank()) return List.of();
-        faultInjector.failIfRequested(DemoFaultInjector.FaultPoint.KNOWLEDGE_SEARCH);
-        return vectorStore(domain).similaritySearch(SearchRequest.builder()
-                        .query(normalized)
-                        .topK(MAX_RESULTS)
-                        .similarityThreshold(minSimilarityScore)
-                        .build()).stream()
-                .map(document -> toMatch(domain, document))
-                .filter(Objects::nonNull)
-                .toList();
+        indexLock.readLock().lock();
+        try {
+            String normalized = validateQuery(query);
+            if (normalized.isBlank()) return List.of();
+            faultInjector.failIfRequested(DemoFaultInjector.FaultPoint.KNOWLEDGE_SEARCH);
+            return vectorStore(domain).similaritySearch(SearchRequest.builder()
+                            .query(normalized)
+                            .topK(MAX_RESULTS)
+                            .similarityThreshold(minSimilarityScore)
+                            .build()).stream()
+                    .map(document -> toMatch(domain, document))
+                    .filter(Objects::nonNull)
+                    .toList();
+        } finally {
+            indexLock.readLock().unlock();
+        }
     }
 
     @Override
     public List<ManagedDocument> list() {
-        return metadata.values().stream()
-                .sorted(Comparator.comparing(item -> item.document().id()))
-                .toList();
+        indexLock.readLock().lock();
+        try {
+            return metadata.values().stream()
+                    .sorted(Comparator.comparing(item -> item.document().id()))
+                    .toList();
+        } finally {
+            indexLock.readLock().unlock();
+        }
     }
 
     @Override
-    public synchronized KnowledgeDocument save(KnowledgeDocument document) {
-        validateDocument(document);
-        Document vectorDocument = toVectorDocument(document);
-        vectorStore(document.domain()).add(List.of(vectorDocument));
-        ManagedDocument previous = metadata.get(document.id());
-        if (previous != null && previous.document().domain() != document.domain()) {
-            try {
-                vectorStore(previous.document().domain()).delete(List.of(document.id()));
-            } catch (RuntimeException failure) {
-                vectorStore(document.domain()).delete(List.of(document.id()));
-                throw failure;
+    public KnowledgeDocument save(KnowledgeDocument document) {
+        indexLock.writeLock().lock();
+        try {
+            validateDocument(document);
+            Document vectorDocument = toVectorDocument(document);
+            vectorStore(document.domain()).add(List.of(vectorDocument));
+            ManagedDocument previous = metadata.get(document.id());
+            if (previous != null && previous.document().domain() != document.domain()) {
+                try {
+                    vectorStore(previous.document().domain()).delete(List.of(document.id()));
+                } catch (RuntimeException failure) {
+                    vectorStore(document.domain()).delete(List.of(document.id()));
+                    throw failure;
+                }
             }
+            metadata.put(document.id(), new ManagedDocument(document, true));
+            return document;
+        } finally {
+            indexLock.writeLock().unlock();
         }
-        metadata.put(document.id(), new ManagedDocument(document, true));
-        return document;
     }
 
     @Override
-    public synchronized ManagedDocument setActive(String documentId, boolean active) {
-        Objects.requireNonNull(documentId, "documentId");
-        ManagedDocument current = metadata.get(documentId);
-        if (current == null) throw new IllegalArgumentException("Unknown knowledge document: " + documentId);
-        if (current.active() == active) return current;
-        if (active) {
-            vectorStore(current.document().domain()).add(List.of(toVectorDocument(current.document())));
-        } else {
-            vectorStore(current.document().domain()).delete(List.of(documentId));
+    public ManagedDocument setActive(String documentId, boolean active) {
+        indexLock.writeLock().lock();
+        try {
+            Objects.requireNonNull(documentId, "documentId");
+            ManagedDocument current = metadata.get(documentId);
+            if (current == null) throw new IllegalArgumentException("Unknown knowledge document: " + documentId);
+            if (current.active() == active) return current;
+            if (active) {
+                vectorStore(current.document().domain()).add(List.of(toVectorDocument(current.document())));
+            } else {
+                vectorStore(current.document().domain()).delete(List.of(documentId));
+            }
+            ManagedDocument updated = new ManagedDocument(current.document(), active);
+            metadata.put(documentId, updated);
+            return updated;
+        } finally {
+            indexLock.writeLock().unlock();
         }
-        ManagedDocument updated = new ManagedDocument(current.document(), active);
-        metadata.put(documentId, updated);
-        return updated;
     }
 
     private KnowledgeMatch toMatch(KnowledgeDomain domain, Document document) {
