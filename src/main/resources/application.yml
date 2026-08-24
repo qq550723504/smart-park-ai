@@ -7,6 +7,27 @@ spring:
       chat:
         options:
           model: qwen-plus
+    mcp:
+      server:
+        enabled: ${smartpark.mcp.enabled}
+        protocol: STATELESS
+        type: SYNC
+        name: smart-park-readonly
+        version: 0.1.0
+        instructions: >-
+          Mock smart-park read-only queries only. No identity data, knowledge body,
+          workflow mutation, or device control.
+        annotation-scanner:
+          enabled: false
+        capabilities:
+          tool: true
+          resource: false
+          prompt: false
+          completion: false
+        streamable-http:
+          mcp-endpoint: /mcp
 smartpark:
   customer:
     minimum-knowledge-score: ${SMARTPARK_CUSTOMER_MINIMUM_KNOWLEDGE_SCORE:0.70}
+  mcp:
+    enabled: ${SMARTPARK_MCP_ENABLED:false}

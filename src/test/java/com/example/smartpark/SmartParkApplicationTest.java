@@ -10,10 +10,17 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.env.Environment;
+import org.springframework.ai.tool.ToolCallbackProvider;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.test.web.servlet.MockMvc;
+
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.assertj.core.api.Assertions.assertThat;
 
+@AutoConfigureMockMvc
 @SpringBootTest(
         properties = {
                 "spring.ai.dashscope.enabled=false",
@@ -26,6 +33,16 @@ class SmartParkApplicationTest {
 
     @Autowired
     private ApplicationContext applicationContext;
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Test
+    void mcpIsDisabledByDefault() throws Exception {
+        assertThat(applicationContext.getBeansOfType(ToolCallbackProvider.class)).isEmpty();
+        mockMvc.perform(post("/mcp").contentType("application/json").content("{}"))
+                .andExpect(status().isNotFound());
+    }
 
     @Test
     void applicationContextLoads() {
