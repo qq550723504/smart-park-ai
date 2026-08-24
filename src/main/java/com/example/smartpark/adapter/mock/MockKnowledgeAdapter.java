@@ -2,8 +2,9 @@ package com.example.smartpark.adapter.mock;
 
 import com.example.smartpark.demo.DemoFaultInjector;
 import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.model.common.KnowledgeDomain;
+import com.example.smartpark.model.common.KnowledgeMatch;
 import com.example.smartpark.port.knowledge.KnowledgeAdminPort;
-import com.example.smartpark.port.knowledge.KnowledgeMatch;
 
 import java.util.List;
 import java.util.Locale;
@@ -37,17 +38,17 @@ public final class MockKnowledgeAdapter implements KnowledgeAdminPort {
     }
 
     @Override
-    public List<KnowledgeDocument> search(String query) {
+    public List<KnowledgeDocument> search(KnowledgeDomain domain, String query) {
         faultInjector.failIfRequested(DemoFaultInjector.FaultPoint.KNOWLEDGE_SEARCH);
-        return dataStore.search(query);
+        return dataStore.search(domain, query);
     }
 
     @Override
-    public List<KnowledgeMatch> rankedSearch(String query) {
-        return search(query).stream()
-                .map(document -> new KnowledgeMatch(document.id(), document.title(), score(document, query)))
+    public List<KnowledgeMatch> rankedSearch(KnowledgeDomain domain, String query) {
+        return search(domain, query).stream()
+                .map(document -> new KnowledgeMatch(document, score(document, query)))
                 .sorted(java.util.Comparator.comparingDouble(KnowledgeMatch::score).reversed()
-                        .thenComparing(KnowledgeMatch::citationId))
+                        .thenComparing(KnowledgeMatch::documentId))
                 .toList();
     }
 

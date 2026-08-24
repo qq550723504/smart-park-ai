@@ -14,15 +14,15 @@ public class OperationsCapabilitiesController {
 
     public OperationsCapabilitiesController(
             @Value("${smartpark.knowledge.mode:mock}") String knowledgeMode,
-            @Value("${smartpark.customer.answer-mode:mock}") String customerAnswerMode) {
-        // RAG and DashScope adapters are not wired in this runtime yet.
-        this.knowledgeMode = safeMode(knowledgeMode, "mock");
-        this.customerAnswerMode = safeMode(customerAnswerMode, "mock");
+            @Value("${smartpark.customer-service.answer-mode:mock}") String customerAnswerMode) {
+        this.knowledgeMode = safeMode(knowledgeMode, "mock", "rag");
+        this.customerAnswerMode = safeMode(customerAnswerMode, "mock", "dashscope");
     }
 
     @GetMapping("/capabilities")
     public Capabilities capabilities() {
-        return new Capabilities(knowledgeMode, customerAnswerMode, "none");
+        return new Capabilities(knowledgeMode, customerAnswerMode,
+                "rag".equals(knowledgeMode) ? "simple-vector-store" : "none");
     }
 
     private static String safeMode(String value, String... allowed) {

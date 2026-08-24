@@ -1,0 +1,1 @@
+For a pump-room leak alert, inspect water accumulation and isolation valves, keep personnel clear of unsafe areas, and notify authorized facilities staff. Do not operate valves or pumps from the knowledge workflow.

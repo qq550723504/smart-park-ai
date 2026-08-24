@@ -1,12 +1,12 @@
 package com.example.smartpark.agent;
 
-final class ModelOutputException extends IllegalStateException {
+public final class ModelOutputException extends IllegalStateException {
 
-    ModelOutputException(String message) {
+    public ModelOutputException(String message) {
         super(message);
     }
 
-    ModelOutputException(String message, Throwable cause) {
+    public ModelOutputException(String message, Throwable cause) {
         super(message, cause);
     }
 }

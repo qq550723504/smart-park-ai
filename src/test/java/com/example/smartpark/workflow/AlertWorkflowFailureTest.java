@@ -158,7 +158,7 @@ class AlertWorkflowFailureTest {
     @Test
     void knowledgeFailurePreservesCollectedParkContextAndStopsBeforeDiagnosis() {
         MockParkFixture park = new MockParkFixture();
-        KnowledgePort failingKnowledge = ignored -> {
+        KnowledgePort failingKnowledge = (domain, ignored) -> {
             throw new IllegalStateException("knowledge providerResponse=private-knowledge-response");
         };
         Fixture fixture = fixture(

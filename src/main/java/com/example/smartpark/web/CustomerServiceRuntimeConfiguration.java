@@ -4,6 +4,7 @@ import com.example.smartpark.audit.AuditTrail;
 import com.example.smartpark.adapter.mock.InMemoryCustomerSessionStore;
 import com.example.smartpark.adapter.mock.InMemoryCustomerTicketAdapter;
 import com.example.smartpark.feedback.FeedbackService;
+import com.example.smartpark.port.customer.CustomerAnswerPort;
 import com.example.smartpark.port.customer.CustomerSessionStore;
 import com.example.smartpark.port.customer.CustomerTicketPort;
 import com.example.smartpark.port.knowledge.KnowledgeAdminPort;
@@ -42,9 +43,11 @@ public class CustomerServiceRuntimeConfiguration {
     CustomerServiceWorkflow customerServiceWorkflow(KnowledgePort knowledgePort,
                                                     CustomerSessionStore sessionStore,
                                                     CustomerTicketPort ticketPort,
+                                                    org.springframework.beans.factory.ObjectProvider<CustomerAnswerPort> answerPort,
                                                     @Value("${smartpark.customer.minimum-knowledge-score:0.70}")
                                                     double minimumKnowledgeScore) {
         return new CustomerServiceWorkflow(knowledgePort, sessionStore, ticketPort,
+                answerPort.getIfAvailable(com.example.smartpark.adapter.mock.MockCustomerAnswerAdapter::new),
                 java.time.Clock.systemUTC(), () -> "cs-" + java.util.UUID.randomUUID(), minimumKnowledgeScore);
     }
 

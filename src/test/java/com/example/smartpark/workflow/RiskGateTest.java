@@ -5,6 +5,7 @@ import com.example.smartpark.model.alert.Alert;
 import com.example.smartpark.model.alert.AlertClassification;
 import com.example.smartpark.model.common.Diagnosis;
 import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.model.common.KnowledgeDomain;
 import com.example.smartpark.model.common.RiskLevel;
 import org.junit.jupiter.api.Test;
 
@@ -133,6 +134,7 @@ class RiskGateTest {
     private static KnowledgeDocument document() {
         return new KnowledgeDocument(
                 "KD-TEST-001",
+                KnowledgeDomain.ALERT_OPERATIONS,
                 "Temperature playbook",
                 "Inspect airflow and filters.",
                 List.of("temperature"),

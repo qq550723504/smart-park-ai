@@ -71,7 +71,7 @@ export function submitFeedback(targetType: 'CUSTOMER_SESSION' | 'ALERT_WORKFLOW'
 export interface OperationsCapabilities {
   knowledgeMode: 'mock' | 'rag'
   customerAnswerMode: 'mock' | 'dashscope'
-  vectorStore: 'none'
+  vectorStore: 'none' | 'simple-vector-store'
 }
 
 export function getOperationsCapabilities() {

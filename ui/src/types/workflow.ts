@@ -14,6 +14,7 @@ export interface OperationsMetrics {
 
 export interface KnowledgeMetadata {
   id: string
+  domain: 'CUSTOMER_SERVICE' | 'ALERT_OPERATIONS'
   title: string
   tags: string[]
   updatedAt: string
@@ -55,15 +56,23 @@ export interface CustomerConversationResponse {
   humanHandoff: boolean
 }
 
+export interface KnowledgeCitation {
+  documentId: string
+  title: string
+  score: number
+}
+
 export interface CustomerServiceResponse {
   sessionId: string
   intent: string
   answer: string
   knowledgeSources: string[]
+  /** Safe retrieval metadata only; optional for compatibility with older backends. */
+  knowledgeCitations?: KnowledgeCitation[]
   needsHuman: boolean
-  ticket: CustomerTicketResponse | null
-  reason: 'SUPPORTED' | 'INSUFFICIENT_EVIDENCE' | 'POLICY_LIMIT' | 'HUMAN_HANDOFF' | 'RETRIEVAL_UNAVAILABLE'
+  reason: 'SUPPORTED' | 'INSUFFICIENT_EVIDENCE' | 'POLICY_LIMIT' | 'RETRIEVAL_UNAVAILABLE'
   citationIds: string[]
+  ticket: CustomerTicketResponse | null
 }
 
 export type WorkflowStatus = 'RUNNING' | 'WAITING_APPROVAL' | 'COMPLETED' | 'REJECTED' | 'FAILED' | 'WORK_ORDER_FAILED'

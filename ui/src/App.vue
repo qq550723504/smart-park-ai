@@ -16,7 +16,7 @@ const capabilities = ref<{ knowledgeMode: string; customerAnswerMode: string; ve
 const capabilityLabels = computed(() => capabilities.value ? {
   knowledge: capabilities.value.knowledgeMode === 'mock' ? 'Mock' : 'RAG',
   customer: capabilities.value.customerAnswerMode === 'mock' ? 'Mock' : 'DashScope',
-  vector: capabilities.value.vectorStore === 'none' ? '无向量库（关键词检索）' : capabilities.value.vectorStore,
+  vector: capabilities.value.vectorStore === 'none' ? '无向量库（关键词检索）' : 'SimpleVectorStore（进程内）',
 } : null)
 onMounted(() => {
   void getOperationsCapabilities()

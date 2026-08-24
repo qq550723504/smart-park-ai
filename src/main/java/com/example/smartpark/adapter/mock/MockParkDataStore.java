@@ -4,6 +4,7 @@ import com.example.smartpark.model.alert.Alert;
 import com.example.smartpark.model.alert.AlertClassification;
 import com.example.smartpark.model.common.Device;
 import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.model.common.KnowledgeDomain;
 import com.example.smartpark.model.common.RiskLevel;
 import com.example.smartpark.model.common.WorkOrder;
 import com.example.smartpark.model.common.WorkOrderStatus;
@@ -69,10 +70,11 @@ public class MockParkDataStore {
         return workOrdersByWorkflowId.computeIfAbsent(workflowId, key -> createWorkOrder(key, alertId, summary));
     }
 
-    List<KnowledgeDocument> search(String query) {
+    List<KnowledgeDocument> search(KnowledgeDomain domain, String query) {
         // 统一规范化查询文本，兼容中文内容和英文标签。
         String normalizedQuery = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
         return knowledgeDocuments.values().stream()
+                .filter(document -> document.domain() == domain)
                 .filter(document -> knowledgeActive.getOrDefault(document.id(), false))
                 .filter(document -> normalizedQuery.isEmpty() || matches(document, normalizedQuery))
                 .sorted((left, right) -> left.id().compareTo(right.id()))
@@ -143,15 +145,15 @@ public class MockParkDataStore {
 
     private void seedKnowledge() {
         // 知识库集中维护诊断所需的处置手册，便于验证检索和提示词组装。
-        putKnowledge(new KnowledgeDocument("KD-OVERHEAT-001", "HVAC overheating playbook", "When HVAC supply temperatures rise, check filters, airflow, and compressor load before escalating.", List.of("overheating", "hvac", "temperature"), KNOWLEDGE_BASE_TIME));
-        putKnowledge(new KnowledgeDocument("KD-LEAK-001", "Water leak response", "Pump rooms and valve closets should be inspected for water accumulation and isolation valve issues.", List.of("leak", "pump", "water"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(1))));
-        putKnowledge(new KnowledgeDocument("KD-POWER-001", "Power emergency runbook", "Stabilize the electrical load, notify facilities, and inspect breaker and UPS conditions immediately.", List.of("power", "emergency", "breaker"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(2))));
-        putKnowledge(new KnowledgeDocument("KD-ENERGY-001", "Energy anomaly response playbook", "For consumption above baseline, compare operating schedules, inspect HVAC and lighting runtime, and verify the meter before creating corrective work.", List.of("energy", "consumption", "baseline", "efficiency"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(3))));
-        putKnowledge(new KnowledgeDocument("KD-ACCESS-001", "Access anomaly response playbook", "For repeated denied access, preserve only approved audit summaries, notify authorized security staff, verify controller health, and require human review before dispatch. Do not expose identity or raw media.", List.of("access", "security", "denied", "entrance"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(4))));
-        putKnowledge(new KnowledgeDocument("KD-PARKING-001", "Visitor parking guide", "Visitor vehicles should complete entrance registration before using the visitor parking area. Opening hours and fees follow the current park notice.", List.of("parking", "visitor", "vehicle", "停车"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(5))));
-        putKnowledge(new KnowledgeDocument("KD-VISITOR-001", "Visitor access guide", "Park contacts should create a visitor appointment before arrival. Gate staff verify the appointment without retaining identity documents in customer-service chat.", List.of("visitor", "appointment", "access", "访客"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(6))));
-        putKnowledge(new KnowledgeDocument("KD-CUSTOMER-ENERGY-001", "Tenant energy service guide", "Customer service can explain public-area energy trends and efficiency guidance. Tenant billing details and equipment controls require authorized staff verification.", List.of("energy", "customer service", "billing", "能耗"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(7))));
-        putKnowledge(new KnowledgeDocument("KD-REPAIR-001", "Facility repair intake guide", "Facility faults should be transferred to a service agent who confirms location and equipment details before dispatching maintenance.", List.of("repair", "maintenance", "facility", "报修"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(8))));
+        putKnowledge(new KnowledgeDocument("KD-OVERHEAT-001", KnowledgeDomain.ALERT_OPERATIONS, "HVAC overheating playbook", "When HVAC supply temperatures rise, check filters, airflow, and compressor load before escalating.", List.of("overheating", "hvac", "temperature"), KNOWLEDGE_BASE_TIME));
+        putKnowledge(new KnowledgeDocument("KD-LEAK-001", KnowledgeDomain.ALERT_OPERATIONS, "Water leak response", "Pump rooms and valve closets should be inspected for water accumulation and isolation valve issues.", List.of("leak", "pump", "water"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(1))));
+        putKnowledge(new KnowledgeDocument("KD-POWER-001", KnowledgeDomain.ALERT_OPERATIONS, "Power emergency runbook", "Stabilize the electrical load, notify facilities, and inspect breaker and UPS conditions immediately.", List.of("power", "emergency", "breaker"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(2))));
+        putKnowledge(new KnowledgeDocument("KD-ENERGY-001", KnowledgeDomain.ALERT_OPERATIONS, "Energy anomaly response playbook", "For consumption above baseline, compare operating schedules, inspect HVAC and lighting runtime, and verify the meter before creating corrective work.", List.of("energy", "consumption", "baseline", "efficiency"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(3))));
+        putKnowledge(new KnowledgeDocument("KD-ACCESS-001", KnowledgeDomain.ALERT_OPERATIONS, "Access anomaly response playbook", "For repeated denied access, preserve only approved audit summaries, notify authorized security staff, verify controller health, and require human review before dispatch. Do not expose identity or raw media.", List.of("access", "security", "denied", "entrance"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(4))));
+        putKnowledge(new KnowledgeDocument("KD-PARKING-001", KnowledgeDomain.CUSTOMER_SERVICE, "Visitor parking guide", "Visitor vehicles should complete entrance registration before using the visitor parking area. Opening hours and fees follow the current park notice.", List.of("parking", "visitor", "vehicle", "停车"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(5))));
+        putKnowledge(new KnowledgeDocument("KD-VISITOR-001", KnowledgeDomain.CUSTOMER_SERVICE, "Visitor access guide", "Park contacts should create a visitor appointment before arrival. Gate staff verify the appointment without retaining identity documents in customer-service chat.", List.of("visitor", "appointment", "access", "访客"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(6))));
+        putKnowledge(new KnowledgeDocument("KD-CUSTOMER-ENERGY-001", KnowledgeDomain.CUSTOMER_SERVICE, "Tenant energy service guide", "Customer service can explain public-area energy trends and efficiency guidance. Tenant billing details and equipment controls require authorized staff verification.", List.of("energy", "customer service", "billing", "能耗"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(7))));
+        putKnowledge(new KnowledgeDocument("KD-REPAIR-001", KnowledgeDomain.CUSTOMER_SERVICE, "Facility repair intake guide", "Facility faults should be transferred to a service agent who confirms location and equipment details before dispatching maintenance.", List.of("repair", "maintenance", "facility", "报修"), KNOWLEDGE_BASE_TIME.plus(Duration.ofDays(8))));
     }
 
     private Device device(String id, String buildingId, String name, String category, String status, int dayOffset) {

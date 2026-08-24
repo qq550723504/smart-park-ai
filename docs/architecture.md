@@ -95,6 +95,8 @@ Mock 适配器当前用于替代真实园区系统。替换为生产系统时，
 
 领域模型负责基本的不变量校验，例如必填字段、枚举值和置信度范围。它不依赖 Spring Web、具体数据库或 Mock 实现。
 
+知识文档必须显式声明 `KnowledgeDomain`；`KnowledgeDocument` 统一校验安全文档 ID、标题、正文长度以及标签数量、单标签长度和标签总长度。标签约束在领域模型边界生效，Web DTO 只做提前反馈，RAG 适配器在拼接 embedding 输入前仍保留存储侧总长度保护。检索结果只使用 `model.common.KnowledgeMatch`，不再提供默认 CUSTOMER_SERVICE 的无领域检索入口，避免调用方绕过领域边界。
+
 ### 3.2 `port`：外部能力边界
 
 端口是应用层依赖的最小接口：
@@ -102,7 +104,7 @@ Mock 适配器当前用于替代真实园区系统。替换为生产系统时，
 - `AlertPort`：查询当前告警和设备告警历史
 - `DevicePort`：查询设备状态和设备信息
 - `EnergyPort`：查询最新能耗读数
-- `KnowledgePort`：按关键词检索知识文档
+- `KnowledgePort`：按 `KnowledgeDomain` 检索知识文档；`rankedSearch` 返回包含文档和相似度分数的内部结果
 - `WorkOrderPort`：按工作流查询工单并创建工单
 - `SecurityPort`：安全事件能力边界，当前主要用于架构和边界验证
 - `CustomerSessionStore`（`port.customer`）：创建、读取和更新客服会话，保存按操作与目标会话隔离的幂等记录，并报告 TTL/容量淘汰
@@ -122,7 +124,13 @@ Mock 数据具备以下特征：
 - 工单按 `workflowId` 幂等创建
 - 能耗读取是只读操作，不会控制真实设备
 
-### 3.4 `agent`：模型调用和结构化输出
+### 3.4 `adapter.rag`：Spring AI 向量检索
+
+启用 `smartpark.knowledge.mode=rag` 后，`RagKnowledgeConfiguration` 为 `CUSTOMER_SERVICE` 与 `ALERT_OPERATIONS` 分别创建 Spring AI `SimpleVectorStore`，并由 `RagKnowledgeAdapter` 将它们适配为带领域参数的 `KnowledgePort` 与 `KnowledgeAdminPort`。种子知识从 `src/main/resources/knowledge/` 加载，新增或停用文档只影响其所属领域的当前进程内索引。
+
+RAG 检索默认最多返回 5 条结果，并使用 `smartpark.knowledge.min-similarity-score`（默认 `0.65`）过滤低相关结果。索引元数据和向量更新由同一读写协调保护：搜索或元数据列表不会读取到跨领域迁移、启停操作的半更新状态；重复 seed ID 在启动建索引前直接失败。索引和会话一样只存在于当前进程；应用重启后会重新加载种子文档。该实现用于学习和 Mock 验证，不是多实例生产存储。
+
+### 3.5 `agent`：模型调用和结构化输出
 
 `AlertTriageAgent` 负责告警分诊，要求模型严格返回：
 
@@ -293,7 +301,7 @@ riskGate
 
 当前 `WorkflowExecutionStore` 使用内存实现，Graph checkpoint 使用 `MemorySaver`。客服支持同一 `sessionId` 下的多轮消息和会话历史。每轮保存用户/助手消息及安全检索轨迹；检索轨迹只保留查询意图、知识文档 ID 和时间，不保留用户原始问题。会话进入人工处理后，自动客服拒绝新的自动回复，但同一幂等请求仍返回请求当时的稳定结果。客服工作流通过 `CustomerSessionStore` 和 `CustomerTicketPort` 访问这些数据，默认 Bean 分别是 `InMemoryCustomerSessionStore` 和 `InMemoryCustomerTicketAdapter`。
 
-客服工作流当前使用有界 TTL 内存会话存储，默认最多 10,000 条、TTL 24 小时；客服请求通过 `Idempotency-Key` 防止进程内重试重复建单，幂等作用域包含 `handle/reply` 操作和 reply 的目标会话。历史请求结果保持不变，当前工单状态通过会话或以 `CustomerTicketPort` 为唯一来源的工单查询获得。会话过期或容量淘汰时，工作流会协调删除对应工单，避免不可达的内存工单。此次重构建立了 `CustomerSessionStore` 与 `CustomerTicketPort` 的替换边界，但没有提供持久化实现，也没有提供真实 Agent 系统；默认 Mock 分类和关键词检索仍是确定性的本地实现。当前实现适合本地学习、演示和测试，不适合直接作为多实例生产部署方案。
+客服工作流当前使用有界 TTL 内存会话存储，默认最多 10,000 条、TTL 24 小时；客服请求通过 `Idempotency-Key` 防止进程内重试重复建单，幂等作用域包含 `handle/reply` 操作和 reply 的目标会话。相同幂等键使用完成结果 reservation 协调，外部检索/回答调用不持有 workflow 实例 monitor；同一 session 的不同请求使用 session 级串行协调，避免多轮消息丢失。回答端口只能返回模型可选择的 `SUPPORTED`、`INSUFFICIENT_EVIDENCE` 或 `POLICY_LIMIT` 原因，`RETRIEVAL_UNAVAILABLE` 由工作流内部保留；工作流在端口边界再次校验该契约。工单创建、会话发布和淘汰清理在同一个客服状态写锁内完成，查询不会看到并删除尚未发布会话的孤儿工单。报修意图不依赖知识检索，检索故障不会覆盖确定的报修确认。历史请求结果保持不变，当前工单状态通过会话或以 `CustomerTicketPort` 为唯一来源的工单查询获得。会话过期或容量淘汰时，工作流会协调删除对应工单，避免不可达的内存工单。此次重构建立了 `CustomerSessionStore` 与 `CustomerTicketPort` 的替换边界，但没有提供持久化实现，也没有提供真实 Agent 系统；默认 Mock 分类和关键词检索仍是确定性的本地实现。当前实现适合本地学习、演示和测试，不适合直接作为多实例生产部署方案。
 
 生产化时应替换：
 
@@ -302,6 +310,7 @@ riskGate
 - 内存事件流为可持久化消息或事件存储
 - 单机幂等校验为跨实例一致的唯一约束或分布式锁
 - 客服内存适配器为持久化会话、工单和跨实例一致的客服处理系统
+- `SimpleVectorStore` 为 PostgreSQL/pgvector、Redis 或其他持久化向量存储，并增加文档切片、批量导入和索引版本管理
 - 确定性的 Mock 分类和关键词检索为经过约束、审计和人工兜底的生产 Agent 系统
 
 ## 6. Web 接口与事件流

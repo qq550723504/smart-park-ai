@@ -4,8 +4,10 @@ import com.example.smartpark.adapter.mock.MockParkFixture;
 import com.example.smartpark.adapter.mock.InMemoryCustomerSessionStore;
 import com.example.smartpark.adapter.mock.InMemoryCustomerTicketAdapter;
 import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.model.common.KnowledgeDomain;
+import com.example.smartpark.model.common.KnowledgeMatch;
+import com.example.smartpark.model.customer.CustomerAnswer;
 import com.example.smartpark.model.customer.CustomerServiceResult;
-import com.example.smartpark.port.knowledge.KnowledgeMatch;
 import com.example.smartpark.port.knowledge.KnowledgePort;
 import org.junit.jupiter.api.Test;
 
@@ -40,7 +42,7 @@ class CustomerServiceWorkflowTest {
         CustomerServiceResult result = thresholded.handle("访客停车怎么收费？");
 
         assertThat(result.needsHuman()).isTrue();
-        assertThat(result.reason()).isEqualTo("INSUFFICIENT_EVIDENCE");
+        assertThat(result.reason()).isEqualTo(CustomerAnswer.Reason.INSUFFICIENT_EVIDENCE);
         assertThat(result.ticket().status()).isEqualTo("WAITING_AGENT");
         assertThat(result.knowledgeSources()).isEmpty();
         assertThat(result.citationIds()).isEmpty();
@@ -55,7 +57,7 @@ class CustomerServiceWorkflowTest {
         CustomerServiceResult result = thresholded.handle("访客停车怎么收费？");
 
         assertThat(result.needsHuman()).isFalse();
-        assertThat(result.reason()).isEqualTo("SUPPORTED");
+        assertThat(result.reason()).isEqualTo(CustomerAnswer.Reason.SUPPORTED);
         assertThat(result.citationIds()).containsExactly("parking-low-score");
     }
 
@@ -66,7 +68,7 @@ class CustomerServiceWorkflowTest {
         CustomerServiceResult result = thresholded.handle("访客停车怎么收费？");
 
         assertThat(result.needsHuman()).isTrue();
-        assertThat(result.reason()).isEqualTo("INSUFFICIENT_EVIDENCE");
+        assertThat(result.reason()).isEqualTo(CustomerAnswer.Reason.INSUFFICIENT_EVIDENCE);
         assertThat(result.citationIds()).isEmpty();
     }
 
@@ -74,15 +76,15 @@ class CustomerServiceWorkflowTest {
     void deduplicatesRankedChunksBeforeBuildingPublicCitationMetadata() {
         KnowledgePort chunked = new KnowledgePort() {
             @Override
-            public java.util.List<KnowledgeDocument> search(String query) {
+            public java.util.List<KnowledgeDocument> search(KnowledgeDomain domain, String query) {
                 return java.util.List.of();
             }
 
             @Override
-            public java.util.List<KnowledgeMatch> rankedSearch(String query) {
+            public java.util.List<KnowledgeMatch> rankedSearch(KnowledgeDomain domain, String query) {
                 return java.util.List.of(
-                        new KnowledgeMatch("KD-PARKING-001", "Visitor parking guide", 0.90),
-                        new KnowledgeMatch("KD-PARKING-001", "Visitor parking guide - chunk 2", 0.80));
+                        new KnowledgeMatch(new KnowledgeDocument("KD-PARKING-001", domain, "Visitor parking guide", "body", java.util.List.of("parking"), Instant.EPOCH), 0.90),
+                        new KnowledgeMatch(new KnowledgeDocument("KD-PARKING-001", domain, "Visitor parking guide - chunk 2", "body", java.util.List.of("parking"), Instant.EPOCH), 0.80));
             }
         };
         CustomerServiceWorkflow deduplicated = new CustomerServiceWorkflow(
@@ -100,7 +102,7 @@ class CustomerServiceWorkflowTest {
     @Test
     void initialKnowledgeSearchFailureTransfersToHumanWithWaitingTicket() {
         String secret = "providerResponse=private-knowledge-body";
-        KnowledgePort failingKnowledge = query -> {
+        KnowledgePort failingKnowledge = (domain, query) -> {
             throw new IllegalStateException(secret);
         };
         CustomerServiceWorkflow failing = new CustomerServiceWorkflow(
@@ -110,7 +112,7 @@ class CustomerServiceWorkflowTest {
         CustomerServiceResult result = failing.handle("访客停车怎么收费？");
 
         assertThat(result.needsHuman()).isTrue();
-        assertThat(result.reason()).isEqualTo("RETRIEVAL_UNAVAILABLE");
+        assertThat(result.reason()).isEqualTo(CustomerAnswer.Reason.RETRIEVAL_UNAVAILABLE);
         assertThat(result.ticket().status()).isEqualTo("WAITING_AGENT");
         assertThat(result.answer()).doesNotContain(secret, "private-knowledge-body");
         assertThat(failing.conversation(result.sessionId()).retrievals()).singleElement()
@@ -124,15 +126,15 @@ class CustomerServiceWorkflowTest {
             private int calls;
 
             @Override
-            public java.util.List<com.example.smartpark.model.common.KnowledgeDocument> search(String query) {
-                if (++calls == 1) return new MockParkFixture().knowledge().search(query);
+            public java.util.List<com.example.smartpark.model.common.KnowledgeDocument> search(KnowledgeDomain domain, String query) {
+                if (++calls == 1) return new MockParkFixture().knowledge().search(domain, query);
                 throw new IllegalStateException(secret);
             }
 
             @Override
-            public java.util.List<KnowledgeMatch> rankedSearch(String query) {
-                return search(query).stream()
-                        .map(document -> new KnowledgeMatch(document.id(), document.title(), 1.0))
+            public java.util.List<KnowledgeMatch> rankedSearch(KnowledgeDomain domain, String query) {
+                return search(domain, query).stream()
+                        .map(document -> new KnowledgeMatch(document, 1.0))
                         .toList();
             }
         };
@@ -146,7 +148,7 @@ class CustomerServiceWorkflowTest {
                 first.sessionId(), "访客如何预约进入园区？", "search-failure-reply");
 
         assertThat(result.needsHuman()).isTrue();
-        assertThat(result.reason()).isEqualTo("RETRIEVAL_UNAVAILABLE");
+        assertThat(result.reason()).isEqualTo(CustomerAnswer.Reason.RETRIEVAL_UNAVAILABLE);
         assertThat(result.ticket().status()).isEqualTo("WAITING_AGENT");
         assertThat(failing.conversation(result.sessionId()).messages())
                 .extracting(CustomerConversation.Message::text)
@@ -160,7 +162,7 @@ class CustomerServiceWorkflowTest {
 
     @Test
     void vectorRetrievalFailureUsesTheSameSafeHandoffMapping() {
-        KnowledgePort vectorStoreFailure = query -> {
+        KnowledgePort vectorStoreFailure = (domain, query) -> {
             throw new RuntimeException("EmbeddingModel timeout: raw provider response");
         };
         CustomerServiceWorkflow failing = new CustomerServiceWorkflow(
@@ -170,7 +172,7 @@ class CustomerServiceWorkflowTest {
 
         CustomerServiceResult result = failing.handle("访客停车怎么收费？");
 
-        assertThat(result.reason()).isEqualTo("RETRIEVAL_UNAVAILABLE");
+        assertThat(result.reason()).isEqualTo(CustomerAnswer.Reason.RETRIEVAL_UNAVAILABLE);
         assertThat(result.needsHuman()).isTrue();
         assertThat(result.answer()).doesNotContain("EmbeddingModel", "raw provider response");
         assertThat(result.ticket()).isNotNull();
@@ -415,13 +417,14 @@ class CustomerServiceWorkflowTest {
             double score, double minimumScore, String sessionId) {
         KnowledgePort knowledge = new KnowledgePort() {
             @Override
-            public java.util.List<KnowledgeDocument> search(String query) {
+            public java.util.List<KnowledgeDocument> search(KnowledgeDomain domain, String query) {
                 return java.util.List.of();
             }
 
             @Override
-            public java.util.List<KnowledgeMatch> rankedSearch(String query) {
-                return java.util.List.of(new KnowledgeMatch("parking-low-score", "Weak parking match", score));
+            public java.util.List<KnowledgeMatch> rankedSearch(KnowledgeDomain domain, String query) {
+                return java.util.List.of(new KnowledgeMatch(new KnowledgeDocument(
+                        "parking-low-score", domain, "Weak parking match", "body", java.util.List.of("parking"), Instant.EPOCH), score));
             }
         };
         Clock clock = Clock.fixed(Instant.parse("2026-08-23T02:00:00Z"), ZoneOffset.UTC);
