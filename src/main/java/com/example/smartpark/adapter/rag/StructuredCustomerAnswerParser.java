@@ -30,13 +30,20 @@ public final class StructuredCustomerAnswerParser {
             if (!root.get("citationIds").isArray()) throw invalid("citationIds must be array");
             boolean needsHuman = root.get("needsHuman").booleanValue();
             CustomerAnswer.Reason reason = CustomerAnswer.Reason.valueOf(root.get("reason").textValue());
+            if (!CustomerAnswerContract.modelReasons().contains(reason)) {
+                throw invalid("reason is not model-selectable");
+            }
             List<String> citations = new java.util.ArrayList<>();
             for (JsonNode citation : root.get("citationIds")) {
                 if (!citation.isTextual() || citation.textValue().isBlank()) throw invalid("citationIds must contain strings");
                 citations.add(citation.textValue());
             }
-            if (!needsHuman && reason == CustomerAnswer.Reason.SUPPORTED && citations.isEmpty()) {
-                throw invalid("supported answers must cite at least one document");
+            if (needsHuman) {
+                if (reason == CustomerAnswer.Reason.SUPPORTED) throw invalid("human transfer cannot be supported");
+                if (!citations.isEmpty()) throw invalid("human transfers must not contain citations");
+            } else {
+                if (reason != CustomerAnswer.Reason.SUPPORTED) throw invalid("non-human answers must be supported");
+                if (citations.isEmpty()) throw invalid("supported answers must cite at least one document");
             }
             if (new HashSet<>(citations).size() != citations.size()) {
                 throw invalid("citationIds must not contain duplicates");

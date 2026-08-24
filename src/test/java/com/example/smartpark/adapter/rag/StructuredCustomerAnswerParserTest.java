@@ -49,4 +49,18 @@ class StructuredCustomerAnswerParserTest {
                 {"answer":"x","needsHuman":false,"reason":"SUPPORTED","citationIds":["KD-PARKING-001","KD-PARKING-001"]}
                 """, evidence)).isInstanceOf(ModelOutputException.class);
     }
+
+    @Test
+    void rejectsWorkflowOnlyRetrievalFailureReasonFromTheModel() {
+        assertThatThrownBy(() -> StructuredCustomerAnswerParser.parse("""
+                {"answer":"检索暂不可用。","needsHuman":true,"reason":"RETRIEVAL_UNAVAILABLE","citationIds":[]}
+                """, evidence)).isInstanceOf(ModelOutputException.class);
+    }
+
+    @Test
+    void rejectsCitationsWhenTheModelTransfersToHuman() {
+        assertThatThrownBy(() -> StructuredCustomerAnswerParser.parse("""
+                {"answer":"需要人工处理。","needsHuman":true,"reason":"POLICY_LIMIT","citationIds":["KD-PARKING-001"]}
+                """, evidence)).isInstanceOf(ModelOutputException.class);
+    }
 }
