@@ -1,4 +1,9 @@
 spring:
+  autoconfigure:
+    # 2.0.0-M1.1 packaging defect: the DashScope autoconfigure jar lists this class in
+    # AutoConfiguration.imports but does not ship it. Excluded until the next release.
+    exclude:
+      - com.alibaba.cloud.ai.autoconfigure.dashscope.DashScopeMultimodalEmbeddingAutoConfiguration
   ai:
     dashscope:
       enabled: ${SPRING_AI_DASHSCOPE_ENABLED:true}
