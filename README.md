@@ -1,200 +1,153 @@
-# 智慧园区告警、能耗、安防与客服示例项目
+# 智慧园区 AI 工作流示例
 
-这是一个面向智慧园区业务场景的 Spring AI Alibaba 示例项目，当前提供告警处置、能耗查询、安防事件查询、园区客服、知识管理以及运营审计能力。运营工作流接收园区告警，执行场景分析、结构化诊断、风险门禁、人工审批、Mock 工单和 SSE 事件；客服流程提供停车、访客通行、公共区域能耗咨询以及设施报修转人工。
+这是一个基于 Spring Boot、Spring AI Alibaba 和 Vue 3 的智慧园区示例项目。它把告警处置、能耗分析、安防事件复核、园区客服、知识管理和运营审计串成可运行的垂直切片。
 
-> 安全边界：当前 Mock 适配器只读取种子数据，并把工单写入内存；它不会检查、切换、重启、隔离或控制任何真实设备。安防场景只有脱敏 Mock 摘要、只读查询工具和通用告警工作流入口，没有真实摄像头、门禁或人员系统接入。`SecurityEvent.evidenceSummary` 只能保存脱敏摘要，不得保存原始视频、图片、人脸特征或身份证等人员原始记录。不要把本示例当作生产控制系统使用。
+项目默认使用内存 Mock 数据，适合本地体验和架构学习。告警工作流可以接入 DashScope `qwen-plus`；客服检索与回答则可以分别在 Mock 和 DashScope/RAG 实现之间切换。
 
-## 环境要求
+> **请先了解安全边界：** 本项目不是生产控制系统。Mock 适配器不会检查、切换、重启、隔离或控制真实设备；安防数据只有脱敏摘要，不包含原始视频、图片、人脸特征或身份证等人员原始记录。项目当前也没有生产级认证、租户隔离或持久化能力。
 
-- Java 17 或更高版本（`pom.xml` 目标版本为 Java 17）
-- 只有在主动运行真实聊天模型时，才需要可访问互联网的 DashScope 账号和 API Key
-- 不要求系统安装 Maven，使用仓库中的 Maven Wrapper 即可
+## 你可以体验什么
 
-默认配置从进程环境变量 `AI_DASHSCOPE_API_KEY` 读取密钥。不要把密钥写入源码、本文档、`.env` 文件、命令行参数或 Shell 历史记录。
-DashScope 自动配置默认开启，也可以通过 `SPRING_AI_DASHSCOPE_ENABLED=false` 显式关闭。默认 URL 是 `https://dashscope.aliyuncs.com`，由 `SPRING_AI_DASHSCOPE_BASE_URL` 覆盖；该 URL 只用于模型客户端，不会启用安防接口，也不会改变 Mock 数据源。需要使用兼容网关时，只修改当前进程的 URL 环境变量，例如：
+| 场景 | 当前实现 |
+| --- | --- |
+| 告警处置 | Spring AI Alibaba `StateGraph`、结构化诊断、风险门禁、人工审批、Mock 工单和 SSE 事件 |
+| 能耗分析 | 只读能耗工具、基线偏差和峰值功率分析 |
+| 安防复核 | 只读安防工具、`REDACTED:` 脱敏摘要和强制人工审批 |
+| 园区客服 | 停车、访客、能耗问答，设施报修与知识不足时转人工 |
+| 知识管理 | 按客服与告警领域隔离的 Mock 检索或进程内向量 RAG |
+| 运营演示 | 角色边界、指标、审计、反馈和一次性故障注入 |
 
-```powershell
-$env:SPRING_AI_DASHSCOPE_BASE_URL = 'https://your-compatible-gateway.example.com'
-```
+## 快速开始
 
-项目配置文件中的 DashScope URL 占位符为 `${SPRING_AI_DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com}`，不要把访问密钥或内部网关地址提交到仓库。
+### 1. 准备环境
 
-## 构建与测试
+- JDK 17 或更高版本
+- Node.js 22（只有运行前端时需要）
+- DashScope API Key（只有体验真实模型能力时需要）
 
-### Windows PowerShell
+后端使用仓库内置的 Maven Wrapper，不需要单独安装 Maven。
 
 ```powershell
 java -version
 .\mvnw.cmd --version
-.\mvnw.cmd test
-.\mvnw.cmd package -DskipTests
+node --version
+npm --version
 ```
 
-下面的方式会在当前 PowerShell 进程中读取密钥，不会将密钥直接写入命令历史：
+macOS/Linux 请将 `.\mvnw.cmd` 替换为 `./mvnw`。
+
+### 2. 启动后端
+
+#### 方式 A：先离线启动（推荐首次运行）
+
+离线模式不需要 API Key，可以体验园区客服、知识管理、运营指标和审计。由于告警工作流依赖聊天模型，离线模式不会注册告警工作流、审批和 SSE 接口。
+
+Windows PowerShell：
+
+```powershell
+$env:SPRING_AI_DASHSCOPE_ENABLED = 'false'
+.\mvnw.cmd spring-boot:run
+```
+
+macOS/Linux：
+
+```bash
+SPRING_AI_DASHSCOPE_ENABLED=false ./mvnw spring-boot:run
+```
+
+后端启动后访问 <http://localhost:8080/api/operations/capabilities>，应看到当前知识检索和客服回答模式。
+
+#### 方式 B：启动完整告警工作流
+
+完整模式会调用 DashScope `qwen-plus`。密钥只应放在当前进程的 `AI_DASHSCOPE_API_KEY` 环境变量中，不要写入源码、`.env`、命令行参数或 Git 历史。
+
+Windows PowerShell：
 
 ```powershell
 $secureDashScopeKey = Read-Host 'DashScope API key' -AsSecureString
 $env:AI_DASHSCOPE_API_KEY = [System.Net.NetworkCredential]::new('', $secureDashScopeKey).Password
+$env:SPRING_AI_DASHSCOPE_ENABLED = 'true'
 .\mvnw.cmd spring-boot:run
 ```
 
-使用 `Ctrl+C` 停止应用后，清理当前进程环境变量：
-
-```powershell
-Remove-Item Env:AI_DASHSCOPE_API_KEY
-Remove-Variable secureDashScopeKey
-```
-
-### macOS/Linux
-
-```bash
-java -version
-./mvnw --version
-./mvnw test
-./mvnw package -DskipTests
-```
-
-在 Bash 兼容 Shell 中读取密钥时不回显，也不写入 Shell 历史：
+macOS/Linux：
 
 ```bash
 read -rsp 'DashScope API key: ' AI_DASHSCOPE_API_KEY && echo
 export AI_DASHSCOPE_API_KEY
+export SPRING_AI_DASHSCOPE_ENABLED=true
 ./mvnw spring-boot:run
 ```
 
-使用 `Ctrl+C` 停止应用后执行：
+### 3. 启动前端
+
+保持后端运行，打开第二个终端：
 
 ```bash
-unset AI_DASHSCOPE_API_KEY
+cd ui
+npm ci
+npm run dev
 ```
 
-启动工作流会调用配置的 `qwen-plus` 聊天模型，因此需要外部模型服务和网络。单元测试与集成测试使用测试替身或禁用 DashScope，不需要真实密钥，也不会调用真实模型。
+访问 <http://localhost:5173>。Vite 会把 `/api` 请求代理到 <http://localhost:8080>。
 
-### 可选的真实 DashScope 连通性验证
+前端支持切换查看者、操作员、审批人、客服坐席和管理员角色。`X-Demo-Role` 只是本地演示授权边界，不是生产认证方案。
 
-默认测试不会访问网络。只有同时设置当前进程的 `AI_DASHSCOPE_API_KEY`，并显式传入 `run.dashscope.smoke=true`，才会执行一次真实 `qwen-plus` 调用：
+### 4. 完成第一次调用
 
-```powershell
-$secureDashScopeKey = Read-Host 'DashScope API key' -AsSecureString
-$env:AI_DASHSCOPE_API_KEY = [System.Net.NetworkCredential]::new('', $secureDashScopeKey).Password
-.\mvnw.cmd -Drun.dashscope.smoke=true -Dtest=DashScopeSmokeTest test
-Remove-Item Env:AI_DASHSCOPE_API_KEY
-Remove-Variable secureDashScopeKey
+离线模式和完整模式都可以调用 Mock 客服：
+
+```bash
+curl -X POST "http://localhost:8080/api/customer-service/sessions" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: first-customer-question" \
+  --data '{"question":"访客停车怎么收费？"}'
 ```
 
-验证内容只检查模型返回非空，不会输出 API Key 或完整模型响应。没有 Key 时，该测试会安全跳过。
+Windows PowerShell 中请使用 `curl.exe`。设施报修问题（例如“`A1 洗手间漏水，需要报修`”）会返回 `needsHuman: true` 并创建内存客服工单。
 
-## 当前能力与 Mock 数据
-
-应用每次启动时都会重置共享 Mock 内存数据，并提供以下四个告警工作流入口：
-
-| 告警 ID | 设备 | 种子风险提示 | 场景说明 |
-| --- | --- | --- | --- |
-| `ALT-TEMP-001` | `DEV-HVAC-001` | `LOW` | 温度告警分诊与 HVAC 知识检索。诊断风险较高、置信度较低或证据不足时仍可能进入审批。 |
-| `ALT-POWER-001` | `DEV-POWER-001` | `HIGH` | 高风险电力告警诊断。执行到风险门禁后必须暂停等待审批。 |
-| `ALT-ENERGY-001` | `DEV-ENERGY-001` | `HIGH` | 建筑能耗高于基线的异常诊断。Agent 可以通过只读能耗工具查询当前值、基线和峰值功率；由于当前种子风险为 `HIGH`，执行到风险门禁后必须等待审批。 |
-| `ALT-ACCESS-001` | `DEV-ACCESS-001` | `HIGH` | 非开放时段连续门禁拒绝事件。Agent 只能通过安防工具查询 `REDACTED:` 脱敏摘要，不会取得人员身份或原始媒体；流程必须等待人工审批。 |
-
-工作流状态、事件、审批和工单都保存在内存中，应用重启后会丢失。
-
-当前能力边界如下：
-
-- **告警（alert）：** `AlertPort`、告警查询工具和通用告警工作流负责告警读取、诊断、风险门禁、人工审批与 Mock 工单。
-- **能耗（energy）：** `EnergyPort`、`EnergyReading` 和 `EnergyQueryTool` 负责只读能耗查询；通用 Graph 会将 `ENERGY` 告警路由到 `energyAnalysis` 节点，生成当前值、基线、偏差比例和峰值需求分析，再进入知识检索和诊断。
-- **安防（security）：** `SecurityEvent`、`SecurityPort`、`MockSecurityAdapter` 和 `SecurityQueryTool` 提供脱敏 Mock 事件的只读查询。通用 Graph 会将 `ACCESS` 告警路由到 `securityReview` 节点，校验事件引用和 `REDACTED:` 摘要后再进入知识检索、诊断和强制人工审批。
-- **客服（customer service）：** `CustomerServiceWorkflow` 通过 `KnowledgePort` 检索停车、访客和能耗知识，并通过配置在 Mock 答复与 DashScope 结构化答复之间切换。报修、知识不足、检索失败、模型失败或引用校验失败时创建 `WAITING_AGENT` 客服工单；工单只保存通用安全摘要，不复制用户问题。会话与工单分别通过 `port.customer.CustomerSessionStore` 和 `port.customer.CustomerTicketPort` 访问，默认实现为 `adapter.mock.InMemoryCustomerSessionStore` 和 `adapter.mock.InMemoryCustomerTicketAdapter`。工单端口是当前工单状态的唯一来源；会话过期或因容量被淘汰时，对应工单会一并删除。`Idempotency-Key` 按 `handle/reply` 操作及 reply 目标会话隔离，重试返回请求当时的稳定结果。对外只返回知识文档 ID、标题和相似度分数，不返回知识正文。
-
-当前客服流程支持通过配置切换检索和回答实现：
-
-```yaml
-smartpark:
-  knowledge:
-    mode: mock # mock 或 rag，默认 mock
-    min-similarity-score: 0.65 # RAG 最低相似度，默认 0.65
-  customer-service:
-    answer-mode: mock # mock 或 dashscope，默认 mock
-```
-
-`mock` 模式完全离线，不需要 API Key。`rag` 模式使用 DashScope `EmbeddingModel` 和 Spring AI `SimpleVectorStore` 进程内向量索引，并为 `CUSTOMER_SERVICE` 与 `ALERT_OPERATIONS` 建立独立索引，只返回相似度不低于 `min-similarity-score` 的结果；`dashscope` 回答模式使用 `ChatClient`，只接收当前问题、确定性意图和长度受限的检索上下文。两者可以独立切换。DashScope 密钥只从 `AI_DASHSCOPE_API_KEY` 环境变量读取。也可以通过 `SMARTPARK_KNOWLEDGE_MIN_SIMILARITY_SCORE` 覆盖阈值。
-
-客服响应中的 `knowledgeCitations` 只包含文档 ID、标题和相似度分数，不包含知识正文；会话检索轨迹也只保存安全查询词、文档 ID 和时间。检索为空、模型失败、输出校验失败、引用未知或报修意图都会转人工并创建 `WAITING_AGENT` 工单。RAG 向量索引为单进程内存生命周期，应用重启后重新加载种子文档。
-
-后续适配器仍必须负责真实身份认证、权限判断、租户/业务策略和原始数据脱敏，不能因为通过该格式校验就接入摄像头、门禁或人员原始数据。
-
-当前安防适配器仅用于本地演示。接入真实系统时，必须在 `SecurityPort` 适配器前增加身份认证、细粒度授权、租户隔离、审计和专用脱敏服务，且不能把摄像头、门禁或人员原始数据接入通用告警模型。
-
-## REST 与 SSE 示例
-
-当前 API 按告警工作流、客服、知识管理、运营与审计、演示故障注入分组。项目没有认证机制，只适合在可信的本地开发环境中运行。下面使用 `curl`；在 Windows PowerShell 中请使用 `curl.exe`。
-
-### 告警工作流
+如果后端使用完整模式，再启动一个告警工作流：
 
 ```bash
 curl -X POST "http://localhost:8080/api/alerts/ALT-TEMP-001/workflows"
 ```
 
-也可以使用 `ALT-POWER-001`、`ALT-ENERGY-001` 或 `ALT-ACCESS-001` 验证必经人工审批的高风险流程。保存响应中的 `workflowId`，供后续请求使用。
-
-#### 查询工作流状态
+保存响应中的 `workflowId`，然后查询状态：
 
 ```bash
 curl "http://localhost:8080/api/workflows/replace-with-workflow-id"
 ```
 
-可能的状态包括：`RUNNING`、`WAITING_APPROVAL`、`COMPLETED`、`REJECTED`、`FAILED` 和 `WORK_ORDER_FAILED`。公开 DTO 会有意对诊断、操作人、工单和错误详情进行安全摘要处理。
+## 运行模式与配置
 
-#### 审批或拒绝暂停的工作流
+项目把模型、知识检索和客服回答拆成三个独立开关：
 
-只有当工作流处于 `WAITING_APPROVAL` 状态时，审批才有效。必填的 `idempotencyKey` 用于保证相同请求重试时返回已有结果，并阻止同一个 key 被用于不同审批内容。
+| 配置项 | 默认值 | 作用 |
+| --- | --- | --- |
+| `SPRING_AI_DASHSCOPE_ENABLED` | `true` | 是否注册依赖 DashScope 的告警工作流和模型组件 |
+| `SMARTPARK_KNOWLEDGE_MODE` | `mock` | `mock` 使用确定性内存检索；`rag` 使用 DashScope Embedding 和进程内 `SimpleVectorStore` |
+| `SMARTPARK_CUSTOMER_SERVICE_ANSWER_MODE` | `mock` | `mock` 使用确定性回答；`dashscope` 使用结构化模型回答 |
+| `SMARTPARK_KNOWLEDGE_MIN_SIMILARITY_SCORE` | `0.65` | RAG 结果最低相似度 |
+| `SMARTPARK_CUSTOMER_MINIMUM_KNOWLEDGE_SCORE` | `0.70` | 客服接受知识结果的最低分数 |
+| `SPRING_AI_DASHSCOPE_BASE_URL` | DashScope 官方地址 | 覆盖模型客户端地址，用于兼容网关 |
+| `AI_DASHSCOPE_API_KEY` | 空 | DashScope 密钥，仅从进程环境变量读取 |
 
-```bash
-curl -X POST "http://localhost:8080/api/workflows/replace-with-workflow-id/approval" -H "Content-Type: application/json" --data '{"decision":"APPROVE","reviewer":"operator-1","comment":"safe to dispatch Mock work order","idempotencyKey":"approval-request-001"}'
+例如，同时启用 RAG 检索和 DashScope 客服回答：
+
+```powershell
+$env:SPRING_AI_DASHSCOPE_ENABLED = 'true'
+$env:SMARTPARK_KNOWLEDGE_MODE = 'rag'
+$env:SMARTPARK_CUSTOMER_SERVICE_ANSWER_MODE = 'dashscope'
+.\mvnw.cmd spring-boot:run
 ```
 
-请求 JSON 格式：
+这两个模式都需要有效的 `AI_DASHSCOPE_API_KEY` 和网络连接。RAG 索引只存在于当前进程中，应用重启后会从种子文档重新建立。
 
-```json
-{
-  "decision": "APPROVE",
-  "reviewer": "operator-1",
-  "comment": "safe to dispatch Mock work order",
-  "idempotencyKey": "approval-request-001"
-}
+如需使用兼容网关，只覆盖当前进程的 URL：
+
+```powershell
+$env:SPRING_AI_DASHSCOPE_BASE_URL = 'https://your-compatible-gateway.example.com'
 ```
-
-`decision` 取值为 `APPROVE` 或 `REJECT`。Mock 审批可能创建内存中的 Mock 工单，但不会授权或控制真实设备。
-
-#### 通过 SSE 订阅工作流事件
-
-```bash
-curl -N -H "Accept: text/event-stream" "http://localhost:8080/api/workflows/replace-with-workflow-id/events"
-```
-
-内存事件发布器会重放指定工作流的事件，并在收到 `COMPLETED` 或 `FAILED` 事件后结束流。SSE 使用脱敏后的公开 DTO，不会暴露内部 Graph 状态。
-
-### 客服
-
-```bash
-curl -X POST "http://localhost:8080/api/customer-service/sessions" \
-  -H "Content-Type: application/json" \
-  --data '{"question":"访客停车怎么收费？"}'
-```
-
-设施报修示例会返回 `needsHuman: true` 和内存客服工单：
-
-```bash
-curl -X POST "http://localhost:8080/api/customer-service/sessions" \
-  -H "Content-Type: application/json" \
-  --data '{"question":"A1 洗手间漏水，需要报修"}'
-```
-
-可通过 `GET /api/customer-service/sessions/{sessionId}` 查询本次会话结果，并通过 `POST /api/customer-service/sessions/{sessionId}/messages` 在同一会话中继续提问。无法识别的追问会继承上一轮意图；会话转人工后停止自动回复。`GET /api/customer-service/sessions/{sessionId}/conversation` 返回消息历史和安全检索轨迹，轨迹只包含检索词和 Mock 文档 ID。客服坐席或管理员可通过 `GET /api/customer-service/tickets` 查看人工工单，并通过 `PATCH /api/customer-service/tickets/{ticketId}` 推进 `WAITING_AGENT`、`ASSIGNED`、`IN_PROGRESS`、`RESOLVED`、`CLOSED` 等状态。当前没有身份认证，请勿输入身份证、手机号等个人敏感信息。
-
-### 知识管理、运营与审计、演示故障注入
-
-前端可切换查看者、操作员、审批人、客服坐席和管理员角色。角色通过 `X-Demo-Role` 请求头演示接口授权边界，它不是生产认证方案。工作流响应会返回风险门禁原因；`GET /api/workflows/{workflowId}/observability` 汇总安全事件、工具调用和失败节点；管理员可以通过 `POST /api/demo/faults` 注入一次性的知识库检索故障，演示失败路径。`GET /api/operations/metrics` 返回工作流、客服会话、人工工单、知识文档、反馈和审计记录数量；管理员可通过 `GET /api/audit` 查看只包含角色、动作、资源 ID、结果和时间的安全审计记录。
-
-管理员可通过 `GET /api/knowledge` 查看带 `domain` 的知识文档元数据，通过 `POST /api/knowledge` 新增必须明确属于 `CUSTOMER_SERVICE` 或 `ALERT_OPERATIONS` 的文档，并通过 `PATCH /api/knowledge/{documentId}/active` 启用或停用文档。公开响应不返回知识正文；停用文档会真实影响对应领域的告警或客服检索，知识不足时进入审批或转人工。客服坐席、审批人或管理员可通过 `POST /api/feedback` 提交枚举化反馈，管理员可通过 `GET /api/feedback` 查看反馈记录。当前不接受自由文本，避免反馈接口成为敏感信息旁路。
 
 ## 只读 MCP 工具生态演示
 
@@ -250,27 +203,136 @@ Remove-Item Env:SMARTPARK_MCP_ENABLED -ErrorAction SilentlyContinue
 Remove-Item Env:SERVER_ADDRESS -ErrorAction SilentlyContinue
 ```
 
-## 技术与场景说明
+## 内置演示数据
 
-| 技术主题 | 代码位置 | 本项目的实现 |
+应用每次启动都会重置共享 Mock 内存数据。以下告警可用于完整模式：
+
+| 告警 ID | 类型 | 风险 | 预期路径 |
+| --- | --- | --- | --- |
+| `ALT-TEMP-001` | HVAC 温度 | `LOW` | 知识检索与诊断；证据不足时仍可能进入审批 |
+| `ALT-POWER-001` | 电力 | `HIGH` | 必须暂停并等待人工审批 |
+| `ALT-ENERGY-001` | 能耗 | `HIGH` | 查询当前值、基线和峰值功率后等待审批 |
+| `ALT-ACCESS-001` | 门禁安防 | `HIGH` | 只读取脱敏摘要并强制人工审批 |
+
+工作流、事件、审批、会话、工单、反馈和审计记录都保存在内存中，应用重启后会丢失。
+
+## 常用 API
+
+| 方法与路径 | 用途 | 备注 |
 | --- | --- | --- |
-| `ChatModel` / `ChatClient` | `com.example.smartpark.agent` | `AlertTriageAgent` 直接调用 `ChatModel`；`AlertDiagnosisAgent` 基于注入的模型构建 `ChatClient`。 |
-| Tool Calling | `com.example.smartpark.tool` 与 `AlertDiagnosisAgent` | 将 `@Tool` 方法转换为回调并传给诊断调用。诊断只接收经过审计的只读回调，工单创建仍由确定性的工作流动作负责。 |
-| 能耗场景 | `EnergyReading`、`EnergyPort`、`EnergyQueryTool`、`energyAnalysis` | Graph 根据告警类型进入能耗专属节点，以当前值、基线、偏差和峰值需求作为诊断证据，再复用公共风险门禁和工单处理。 |
-| 安防场景 | `SecurityEvent`、`SecurityPort`、`SecurityQueryTool`、`securityReview` | Graph 根据告警类型进入安防专属节点，只向诊断提供脱敏事件摘要，再复用公共风险门禁和人工审批；明确禁止原始媒体、身份数据和控制能力。 |
-| 结构化输出 | `AlertTriageAgent`、`AlertDiagnosisAgent`、`PromptCatalog` | Prompt 要求 JSON；Agent 使用 Jackson 解析，拒绝缺失字段和多余字段，校验枚举与范围，再构造类型安全的记录和领域对象。示例没有把校验隐藏在自动输出转换器后面。 |
-| Graph 与状态 | `com.example.smartpark.workflow.AlertWorkflow`、`AlertWorkflowNodes`、`AlertWorkflowState` | 将 Spring AI Alibaba `StateGraph` 编译为有序、条件化的节点，并使用明确的状态键和 reducer。 |
-| 中断与恢复 | `AlertWorkflowNodes.HumanApprovalAction`、`AlertWorkflow.approve` | 高风险或不确定流程产生中断元数据，保存内存执行状态，接收操作人反馈，并恢复同一个 Graph 线程。 |
-| 风险门禁 | `AlertWorkflowNodes.RiskGate` | 高风险、置信度低于阈值或缺少知识证据时进入人工审批，否则可以直接创建 Mock 工单。 |
-| 幂等性 | `ApprovalDecision`、`AlertWorkflow`、`WorkflowExecutionStore`、Mock 适配器 | 审批重试由 `idempotencyKey` 标识；工作流启动和 Mock 工单写入也在内存中保持工作流级别的身份。 |
-| SSE | `WorkflowEventPublisher`、`WorkflowEventController`、`WebDtos.WorkflowEventDto` | 使用 Reactor `Flux` 将可重放的工作流事件转换为脱敏的 Spring `ServerSentEvent`，并在终态事件后关闭。 |
+| `GET /api/operations/capabilities` | 查看当前运行模式 | 无需演示角色 |
+| `POST /api/customer-service/sessions` | 创建客服会话 | 可传 `Idempotency-Key` |
+| `POST /api/customer-service/sessions/{sessionId}/messages` | 继续提问 | 已转人工的会话停止自动回答 |
+| `GET /api/customer-service/sessions/{sessionId}/conversation` | 查看对话与安全检索轨迹 | 不返回知识正文 |
+| `GET /api/customer-service/tickets` | 查看人工工单 | 需要 `CUSTOMER_AGENT` 或 `ADMIN` |
+| `POST /api/alerts/{alertId}/workflows` | 启动告警工作流 | 只在 DashScope 启用时存在 |
+| `GET /api/workflows/{workflowId}` | 查询工作流状态 | 只返回脱敏公开 DTO |
+| `POST /api/workflows/{workflowId}/approval` | 审批或拒绝 | 需要稳定的 `idempotencyKey` |
+| `GET /api/workflows/{workflowId}/events` | 订阅 SSE 事件 | 流程到达终态后关闭 |
+| `GET /api/workflows/{workflowId}/observability` | 查看安全观测摘要 | 不暴露内部 Graph 状态 |
+| `GET /api/knowledge` | 查看知识元数据 | 需要 `ADMIN`，不返回知识正文 |
+| `GET /api/operations/metrics` | 查看运营计数 | 内存数据 |
+| `GET /api/audit` | 查看安全审计记录 | 需要 `ADMIN` |
 
-## 后续建设方向
+高风险工作流进入 `WAITING_APPROVAL` 后，可以提交审批：
 
-这是一个可运行的垂直切片，尚未达到生产级别。以下内容属于后续建设方向，并非当前已经提供的功能：
+```bash
+curl -X POST "http://localhost:8080/api/workflows/replace-with-workflow-id/approval" \
+  -H "Content-Type: application/json" \
+  -H "X-Demo-Role: APPROVER" \
+  --data '{"decision":"APPROVE","reviewer":"operator-1","comment":"safe to dispatch Mock work order","idempotencyKey":"approval-request-001"}'
+```
 
-- **持久化 RAG：** 当前已经提供基于 DashScope EmbeddingModel 和 SimpleVectorStore 的进程内 RAG 学习链路，但索引会在应用重启后重建。后续可替换为 PostgreSQL/pgvector、Redis 或其他持久化向量库，并补充文档切片、批量导入和索引版本管理。
-- **PostgreSQL checkpoint：** Graph 执行、事件、审批、幂等记录和工单都保存在进程内存中。当前没有 PostgreSQL checkpoint 或重启恢复能力。
-- **认证与授权：** 当前演示 HTTP 接口没有生产级身份认证、租户隔离或授权策略；`X-Demo-Role` 只用于本地演示角色边界。
-- **真实适配器：** `AlertPort`、`DevicePort`、`EnergyPort`、`SecurityPort`、`KnowledgePort` 和 `WorkOrderPort` 是扩展边界，当前仅接入内存 Mock 适配器。真实园区 API、智能电表、安防系统、持久化工单和设备控制适配器尚未实现。
-- **生产安防接入：** 当前 `SecurityPort` 只读取固定脱敏种子数据；尚未实现摄像头、门禁、人员系统、认证授权、租户隔离、专用脱敏服务或安防数据持久化。
+`decision` 只能是 `APPROVE` 或 `REJECT`。Mock 审批可能创建内存工单，但不会授权或控制真实设备。
+
+订阅工作流事件：
+
+```bash
+curl -N -H "Accept: text/event-stream" \
+  "http://localhost:8080/api/workflows/replace-with-workflow-id/events"
+```
+
+## 构建与测试
+
+Windows PowerShell：
+
+```powershell
+.\mvnw.cmd test
+.\mvnw.cmd package -DskipTests
+
+Set-Location ui
+npm ci
+npm run build
+```
+
+macOS/Linux：
+
+```bash
+./mvnw test
+./mvnw package -DskipTests
+
+cd ui
+npm ci
+npm run build
+```
+
+默认测试使用测试替身或禁用 DashScope，不需要真实密钥，也不会调用真实模型。
+
+只有显式传入开关时，才执行一次真实 DashScope 连通性测试：
+
+```powershell
+$secureDashScopeKey = Read-Host 'DashScope API key' -AsSecureString
+$env:AI_DASHSCOPE_API_KEY = [System.Net.NetworkCredential]::new('', $secureDashScopeKey).Password
+.\mvnw.cmd -Drun.dashscope.smoke=true -Dtest=DashScopeSmokeTest test
+```
+
+该测试只检查模型返回非空，不输出 API Key 或完整模型响应；没有 Key 时会安全跳过。
+
+## 项目结构
+
+```text
+.
+├─ src/main/java/com/example/smartpark
+│  ├─ model/          领域模型
+│  ├─ port/           外部能力边界
+│  ├─ adapter/mock/   内存 Mock 适配器
+│  ├─ adapter/rag/    DashScope 与向量检索适配器
+│  ├─ agent/          模型调用、Prompt 与结构化输出
+│  ├─ tool/           只读 Agent 工具
+│  ├─ workflow/       告警与客服工作流
+│  └─ web/            REST、SSE 与演示角色边界
+├─ src/test/          单元、集成和架构边界测试
+├─ ui/                Vue 3 工作流控制台
+└─ docs/              架构说明与设计记录
+```
+
+- [详细架构说明](docs/architecture.md)
+- [前端开发说明](ui/README.md)
+- [设计与实施记录](docs/superpowers/)
+
+## 当前边界与生产化方向
+
+- **持久化：** Graph 状态、事件、审批、幂等记录、会话和工单当前都在进程内；生产环境需要持久化 checkpoint 和多实例一致性方案。
+- **认证授权：** `X-Demo-Role` 仅用于本地演示；真实系统必须补充身份认证、细粒度授权和租户隔离。
+- **知识检索：** `SimpleVectorStore` 是进程内实现；生产环境需要持久化向量库、文档切片、批量导入和索引版本管理。
+- **真实系统接入：** 当前 `AlertPort`、`DevicePort`、`EnergyPort`、`SecurityPort`、`KnowledgePort` 和 `WorkOrderPort` 都只连接 Mock 或演示适配器。
+- **安防数据：** 真实安防适配器必须在端口前增加专用脱敏、审计和访问控制，不能把原始媒体或人员身份数据送入通用告警模型。
+
+## 停止与清理
+
+使用 `Ctrl+C` 停止后端和前端。若在 PowerShell 中设置过环境变量，可按需清理：
+
+```powershell
+Remove-Item Env:AI_DASHSCOPE_API_KEY -ErrorAction SilentlyContinue
+Remove-Item Env:SPRING_AI_DASHSCOPE_ENABLED -ErrorAction SilentlyContinue
+Remove-Item Env:SMARTPARK_KNOWLEDGE_MODE -ErrorAction SilentlyContinue
+Remove-Item Env:SMARTPARK_CUSTOMER_SERVICE_ANSWER_MODE -ErrorAction SilentlyContinue
+Remove-Variable secureDashScopeKey -ErrorAction SilentlyContinue
+```
+
+macOS/Linux 可执行：
+
+```bash
+unset AI_DASHSCOPE_API_KEY SPRING_AI_DASHSCOPE_ENABLED
+unset SMARTPARK_KNOWLEDGE_MODE SMARTPARK_CUSTOMER_SERVICE_ANSWER_MODE
+```
