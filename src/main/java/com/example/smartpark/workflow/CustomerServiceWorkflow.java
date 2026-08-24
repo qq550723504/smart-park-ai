@@ -26,6 +26,8 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 
 public final class CustomerServiceWorkflow {
@@ -39,6 +41,8 @@ public final class CustomerServiceWorkflow {
     private final Clock clock;
     private final Supplier<String> sessionIds;
     private final double minimumKnowledgeScore;
+    private final ConcurrentHashMap<String, LockReference> idempotencyLocks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, LockReference> sessionLocks = new ConcurrentHashMap<>();
 
     public CustomerServiceWorkflow(KnowledgePort knowledgePort) {
         this(knowledgePort, new InMemoryCustomerSessionStore(), new InMemoryCustomerTicketAdapter(),
@@ -96,9 +100,14 @@ public final class CustomerServiceWorkflow {
         return handle(question, null);
     }
 
-    public synchronized CustomerServiceResult handle(String question, String idempotencyKey) {
+    public CustomerServiceResult handle(String question, String idempotencyKey) {
         String normalizedQuestion = requireQuestion(question);
         String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
+        return withLock(idempotencyLocks, normalizedKey,
+                () -> handleInternal(normalizedQuestion, normalizedKey));
+    }
+
+    private CustomerServiceResult handleInternal(String normalizedQuestion, String normalizedKey) {
         CustomerSessionStore.IdempotencyScope scope = new CustomerSessionStore.IdempotencyScope(
                 CustomerSessionStore.IdempotencyOperation.HANDLE, null);
         Instant now = Instant.now(clock);
@@ -128,12 +137,19 @@ public final class CustomerServiceWorkflow {
         return result;
     }
 
-    public synchronized CustomerServiceResult reply(String sessionId, String question, String idempotencyKey) {
+    public CustomerServiceResult reply(String sessionId, String question, String idempotencyKey) {
+        String normalizedSessionId = requireSessionId(sessionId);
+        String normalizedQuestion = requireQuestion(question);
+        String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
+        return withLock(sessionLocks, normalizedSessionId,
+                () -> withLock(idempotencyLocks, normalizedKey,
+                        () -> replyInternal(normalizedSessionId, normalizedQuestion, normalizedKey)));
+    }
+
+    private CustomerServiceResult replyInternal(String sessionId, String normalizedQuestion, String normalizedKey) {
         Instant now = Instant.now(clock);
         retireEvictedSessions(now);
         CustomerSessionStore.SessionSnapshot current = requiredSnapshot(sessionId, now);
-        String normalizedQuestion = requireQuestion(question);
-        String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
         CustomerSessionStore.IdempotencyScope scope = new CustomerSessionStore.IdempotencyScope(
                 CustomerSessionStore.IdempotencyOperation.REPLY, sessionId);
         CustomerSessionStore.IdempotencyRecord existing = normalizedKey == null
@@ -339,6 +355,38 @@ public final class CustomerServiceWorkflow {
         String normalized = key.trim();
         if (normalized.length() > 200) throw new CustomerServiceValidationException("Idempotency-Key must not exceed 200 characters");
         return normalized;
+    }
+
+    private static String requireSessionId(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            throw new IllegalArgumentException("sessionId must not be blank");
+        }
+        return sessionId.trim();
+    }
+
+    private static <T> T withLock(ConcurrentHashMap<String, LockReference> locks,
+                                  String key, Supplier<T> action) {
+        if (key == null) return action.get();
+        LockReference reference = locks.compute(key, (ignored, current) -> {
+            LockReference next = current == null ? new LockReference() : current;
+            next.references++;
+            return next;
+        });
+        reference.lock.lock();
+        try {
+            return action.get();
+        } finally {
+            reference.lock.unlock();
+            locks.computeIfPresent(key, (ignored, current) -> {
+                if (current == reference && --current.references == 0) return null;
+                return current;
+            });
+        }
+    }
+
+    private static final class LockReference {
+        private final ReentrantLock lock = new ReentrantLock();
+        private int references;
     }
 
     private static String requireQuestion(String question) {

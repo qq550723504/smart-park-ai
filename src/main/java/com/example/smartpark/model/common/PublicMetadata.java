@@ -1,11 +1,13 @@
 package com.example.smartpark.model.common;
 
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 /** Shared validation for bounded text that is safe to expose as public metadata. */
 public final class PublicMetadata {
 
     public static final int MAX_TITLE_LENGTH = 160;
+    private static final Pattern SAFE_IDENTIFIER = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}");
 
     private PublicMetadata() { }
 
@@ -20,6 +22,13 @@ public final class PublicMetadata {
         Objects.requireNonNull(value, "title");
         if (!isSafeTitle(value)) {
             throw new IllegalArgumentException("title must be bounded public metadata");
+        }
+        return value;
+    }
+
+    public static String requireIdentifier(String value, String fieldName) {
+        if (value == null || !SAFE_IDENTIFIER.matcher(value).matches()) {
+            throw new IllegalArgumentException(fieldName + " must be a safe opaque identifier");
         }
         return value;
     }

@@ -68,6 +68,18 @@ class RagKnowledgeAdapterTest {
     }
 
     @Test
+    void embedsTitlesAndTagsSoTheyRemainSearchableInRagMode() {
+        KnowledgeDocument titled = new KnowledgeDocument(
+                "KD-TITLE-001", KnowledgeDomain.CUSTOMER_SERVICE, "Parking policy", "body only", List.of("visitor"), Instant.EPOCH);
+        RagKnowledgeAdapter adapter = new RagKnowledgeAdapter(
+                stores(new KeywordEmbeddingModel()), List.of(titled));
+
+        assertThat(adapter.search(KnowledgeDomain.CUSTOMER_SERVICE, "parking"))
+                .extracting(KnowledgeDocument::id)
+                .containsExactly("KD-TITLE-001");
+    }
+
+    @Test
     void excludesDocumentsBelowTheConfiguredSimilarityThreshold() {
         RagKnowledgeAdapter adapter = new RagKnowledgeAdapter(
                 stores(new ThresholdEmbeddingModel()),
@@ -198,7 +210,7 @@ class RagKnowledgeAdapterTest {
         @Override public float[] embed(Document document) { return embed(document.getText()); }
 
         @Override public float[] embed(String text) {
-            return switch (text) {
+            return switch (content(text)) {
                 case "query", "high" -> new float[] {1.0f, 0.0f};
                 case "low" -> new float[] {0.4f, 0.9165151f};
                 default -> new float[] {0.0f, 1.0f};
@@ -212,7 +224,7 @@ class RagKnowledgeAdapterTest {
         @Override public float[] embed(Document document) { return embed(document.getText()); }
 
         @Override public float[] embed(String text) {
-            return switch (text) {
+            return switch (content(text)) {
                 case "query", "high" -> new float[] {1.0f, 0.0f};
                 case "active" -> new float[] {0.8f, 0.6f};
                 default -> new float[] {0.0f, 1.0f};
@@ -220,6 +232,12 @@ class RagKnowledgeAdapterTest {
         }
 
         @Override public EmbeddingResponse call(EmbeddingRequest request) { throw new UnsupportedOperationException(); }
+    }
+
+    private static String content(String text) {
+        String marker = "\nContent: ";
+        int contentStart = text.indexOf(marker);
+        return contentStart < 0 ? text : text.substring(contentStart + marker.length());
     }
 
     private static final class BlockingAddVectorStore implements VectorStore {

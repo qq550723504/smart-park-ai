@@ -128,7 +128,8 @@ public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
     private static Document toVectorDocument(KnowledgeDocument document) {
         return Document.builder()
                 .id(document.id())
-                .text(document.content())
+                .text("Title: " + document.title() + "\nTags: " + String.join(", ", document.tags())
+                        + "\nContent: " + document.content())
                 .metadata(Map.of("title", document.title(), "tags", String.join(",", document.tags()),
                         "updatedAt", document.updatedAt().toString()))
                 .build();

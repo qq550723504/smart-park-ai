@@ -6,6 +6,7 @@ import java.util.Objects;
 public record KnowledgeMatch(KnowledgeDocument document, double score) {
     public KnowledgeMatch {
         document = Objects.requireNonNull(document, "document");
+        PublicMetadata.requireIdentifier(document.id(), "documentId");
         if (!Double.isFinite(score) || score < 0.0 || score > 1.0) {
             throw new IllegalArgumentException("score must be between 0 and 1");
         }
