@@ -1,6 +1,8 @@
 # 智慧园区 AI 工作流示例
 
-这是一个基于 Spring Boot、Spring AI Alibaba 和 Vue 3 的智慧园区示例项目。它把告警处置、能耗分析、安防事件复核、园区客服、知识管理和运营审计串成可运行的垂直切片。
+这是一个基于 Spring Boot 4、Spring AI Alibaba 2.0 和 Vue 3 的智慧园区示例项目。它把告警处置、能耗分析、安防事件复核、园区客服、知识管理和运营审计串成可运行的垂直切片。
+
+> **版本与真实链路要求：** 当前基线为 Spring Boot `4.0.0` + Spring AI `2.0.0-M1` + Spring AI Alibaba `2.0.0-M1.1`，属于 milestone 预发布版本。运行时只走在线真实链路，不提供 Mock/离线模型降级路径：体验告警工作流等真实模型能力时必须配置有效的 DashScope API Key。默认自动化测试不访问外网。
 
 项目默认使用内存 Mock 数据，适合本地体验和架构学习。告警工作流可以接入 DashScope `qwen-plus`；客服检索与回答则可以分别在 Mock 和 DashScope/RAG 实现之间切换。
 
