@@ -2,10 +2,15 @@ package com.example.smartpark.workflow;
 
 import com.example.smartpark.adapter.mock.InMemoryCustomerSessionStore;
 import com.example.smartpark.adapter.mock.InMemoryCustomerTicketAdapter;
+import com.example.smartpark.adapter.mock.MockCustomerAnswerAdapter;
 import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.model.common.KnowledgeMatch;
+import com.example.smartpark.model.customer.CustomerAnswer;
+import com.example.smartpark.model.customer.KnowledgeCitation;
 import com.example.smartpark.model.customer.CustomerServiceResult;
 import com.example.smartpark.model.customer.CustomerTicket;
 import com.example.smartpark.model.customer.CustomerTicketStatus;
+import com.example.smartpark.port.customer.CustomerAnswerPort;
 import com.example.smartpark.port.customer.CustomerSessionStore;
 import com.example.smartpark.port.customer.CustomerTicketPort;
 import com.example.smartpark.port.knowledge.KnowledgePort;
@@ -25,12 +30,13 @@ public final class CustomerServiceWorkflow {
     private final KnowledgePort knowledgePort;
     private final CustomerSessionStore sessionStore;
     private final CustomerTicketPort ticketPort;
+    private final CustomerAnswerPort answerPort;
     private final Clock clock;
     private final Supplier<String> sessionIds;
 
     public CustomerServiceWorkflow(KnowledgePort knowledgePort) {
         this(knowledgePort, new InMemoryCustomerSessionStore(), new InMemoryCustomerTicketAdapter(),
-                Clock.systemUTC(), () -> "cs-" + UUID.randomUUID());
+                new MockCustomerAnswerAdapter(), Clock.systemUTC(), () -> "cs-" + UUID.randomUUID());
     }
 
     CustomerServiceWorkflow(KnowledgePort knowledgePort, Clock clock, Supplier<String> sessionIds) {
@@ -40,14 +46,21 @@ public final class CustomerServiceWorkflow {
     CustomerServiceWorkflow(KnowledgePort knowledgePort, Clock clock, Supplier<String> sessionIds,
                             int maxSessions, Duration sessionTtl) {
         this(knowledgePort, new InMemoryCustomerSessionStore(clock, maxSessions, sessionTtl),
-                new InMemoryCustomerTicketAdapter(), clock, sessionIds);
+                new InMemoryCustomerTicketAdapter(), new MockCustomerAnswerAdapter(), clock, sessionIds);
     }
 
     public CustomerServiceWorkflow(KnowledgePort knowledgePort, CustomerSessionStore sessionStore,
                                    CustomerTicketPort ticketPort, Clock clock, Supplier<String> sessionIds) {
+        this(knowledgePort, sessionStore, ticketPort, new MockCustomerAnswerAdapter(), clock, sessionIds);
+    }
+
+    public CustomerServiceWorkflow(KnowledgePort knowledgePort, CustomerSessionStore sessionStore,
+                                   CustomerTicketPort ticketPort, CustomerAnswerPort answerPort,
+                                   Clock clock, Supplier<String> sessionIds) {
         this.knowledgePort = Objects.requireNonNull(knowledgePort, "knowledgePort");
         this.sessionStore = Objects.requireNonNull(sessionStore, "sessionStore");
         this.ticketPort = Objects.requireNonNull(ticketPort, "ticketPort");
+        this.answerPort = Objects.requireNonNull(answerPort, "answerPort");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.sessionIds = Objects.requireNonNull(sessionIds, "sessionIds");
     }
@@ -72,22 +85,14 @@ public final class CustomerServiceWorkflow {
 
         String sessionId = sessionIds.get();
         Intent intent = classify(normalizedQuestion);
-        List<KnowledgeDocument> documents = intent == Intent.GENERAL ? List.of() : knowledgePort.search(intent.query);
-        boolean needsHuman = intent == Intent.REPAIR || intent == Intent.GENERAL || documents.isEmpty();
-        CustomerTicket ticket = needsHuman ? createTicket(sessionId, intent) : null;
-        CustomerServiceResult result = new CustomerServiceResult(
-                sessionId,
-                intent.name(),
-                answer(intent, documents, needsHuman, ticket),
-                documents.stream().map(KnowledgeDocument::title).toList(),
-                needsHuman,
-                ticket);
+        RetrievalOutcome retrieval = retrieve(intent);
+        CustomerServiceResult result = resolve(sessionId, normalizedQuestion, intent, retrieval);
         sessionStore.create(sessionId, result,
                 List.of(
                         new CustomerConversation.Message("USER", normalizedQuestion, now),
                         new CustomerConversation.Message("ASSISTANT", result.answer(), now)),
                 List.of(new CustomerConversation.RetrievalTrace(
-                        intent.query, documents.stream().map(KnowledgeDocument::id).toList(), now)), now);
+                        intent.query, retrieval.matches().stream().map(KnowledgeMatch::documentId).toList(), now)), now);
         retireEvictedSessions(now);
 
         if (normalizedKey != null) {
@@ -114,18 +119,14 @@ public final class CustomerServiceWorkflow {
         }
         Intent classified = classify(normalizedQuestion);
         Intent intent = classified == Intent.GENERAL ? Intent.valueOf(current.result().intent()) : classified;
-        List<KnowledgeDocument> documents = knowledgePort.search(intent.query);
-        boolean needsHuman = intent == Intent.REPAIR || documents.isEmpty();
-        CustomerTicket ticket = needsHuman ? createTicket(sessionId, intent) : null;
-        CustomerServiceResult result = new CustomerServiceResult(
-                sessionId, intent.name(), answer(intent, documents, needsHuman, ticket),
-                documents.stream().map(KnowledgeDocument::title).toList(), needsHuman, ticket);
+        RetrievalOutcome retrieval = retrieve(intent);
+        CustomerServiceResult result = resolve(sessionId, normalizedQuestion, intent, retrieval);
         List<CustomerConversation.Message> messages = new java.util.ArrayList<>(current.messages());
         messages.add(new CustomerConversation.Message("USER", normalizedQuestion, now));
         messages.add(new CustomerConversation.Message("ASSISTANT", result.answer(), now));
         List<CustomerConversation.RetrievalTrace> retrievals = new java.util.ArrayList<>(current.retrievals());
         retrievals.add(new CustomerConversation.RetrievalTrace(
-                intent.query, documents.stream().map(KnowledgeDocument::id).toList(), now));
+                intent.query, retrieval.matches().stream().map(KnowledgeMatch::documentId).toList(), now));
         sessionStore.update(new CustomerSessionStore.SessionSnapshot(
                 sessionId, result, current.createdAt(), messages, retrievals));
         if (normalizedKey != null) {
@@ -193,6 +194,67 @@ public final class CustomerServiceWorkflow {
                 .orElseThrow(() -> new NoSuchElementException("Unknown customer service session: " + sessionId));
     }
 
+    private RetrievalOutcome retrieve(Intent intent) {
+        if (intent == Intent.GENERAL) return RetrievalOutcome.noEvidence();
+        try {
+            return RetrievalOutcome.success(knowledgePort.rankedSearch(intent.query));
+        } catch (RuntimeException failure) {
+            // Embedding and vector-store failures must enter the same safe handoff path.
+            return RetrievalOutcome.retrievalUnavailable();
+        }
+    }
+
+    private CustomerServiceResult resolve(String sessionId, String question, Intent intent, RetrievalOutcome retrieval) {
+        List<KnowledgeMatch> matches = retrieval.matches();
+        boolean needsHuman = intent == Intent.REPAIR || intent == Intent.GENERAL || matches.isEmpty();
+        CustomerTicket ticket = needsHuman ? createTicket(sessionId, intent) : null;
+        CustomerAnswer generated;
+        try {
+            generated = retrieval.unavailable()
+                    ? new CustomerAnswer("当前知识检索暂时不可用，已转人工客服处理。", true, CustomerAnswer.Reason.RETRIEVAL_UNAVAILABLE, List.of())
+                    : needsHuman
+                    ? new CustomerAnswer(intent == Intent.REPAIR ? "已记录设施报修，客服将核实后安排处理。" : "当前知识库没有足够信息，已转人工客服处理。", true,
+                    intent == Intent.REPAIR ? CustomerAnswer.Reason.POLICY_LIMIT : CustomerAnswer.Reason.INSUFFICIENT_EVIDENCE, List.of())
+                    : answerPort.answer(question, intent.name(), matches);
+        } catch (RuntimeException failure) {
+            if (ticket == null) ticket = createTicket(sessionId, intent);
+            generated = new CustomerAnswer("当前无法确认答案，已转人工客服处理。", true, CustomerAnswer.Reason.INSUFFICIENT_EVIDENCE, List.of());
+        }
+        boolean generatedNeedsHuman = generated.needsHuman();
+        if (generatedNeedsHuman != needsHuman) {
+            if (ticket == null) ticket = createTicket(sessionId, intent);
+            generated = generatedNeedsHuman
+                    ? generated
+                    : new CustomerAnswer("当前无法确认答案，已转人工客服处理。", true,
+                    CustomerAnswer.Reason.INSUFFICIENT_EVIDENCE, List.of());
+            needsHuman = true;
+        }
+        List<String> citationIds = needsHuman ? List.of() : generated.citationIds();
+        CustomerAnswer.Reason reason = needsHuman ? generated.reason() : CustomerAnswer.Reason.SUPPORTED;
+        return new CustomerServiceResult(sessionId, intent.name(), generated.answer(),
+                matches.stream().map(KnowledgeMatch::title).toList(),
+                matches.stream().map(match -> new KnowledgeCitation(match.documentId(), match.title(), match.score())).toList(),
+                needsHuman, ticket, reason, citationIds);
+    }
+
+    private record RetrievalOutcome(List<KnowledgeMatch> matches, boolean unavailable) {
+        private RetrievalOutcome {
+            matches = List.copyOf(matches);
+        }
+
+        static RetrievalOutcome success(List<KnowledgeMatch> matches) {
+            return new RetrievalOutcome(matches, false);
+        }
+
+        static RetrievalOutcome noEvidence() {
+            return new RetrievalOutcome(List.of(), false);
+        }
+
+        static RetrievalOutcome retrievalUnavailable() {
+            return new RetrievalOutcome(List.of(), true);
+        }
+    }
+
     private CustomerTicket createTicket(String sessionId, Intent intent) {
         return ticketPort.create(sessionId, intent.name(), intent.safeTicketSummary, Instant.now(clock));
     }
@@ -203,7 +265,8 @@ public final class CustomerServiceWorkflow {
 
     private static CustomerServiceResult withTicket(CustomerServiceResult current, CustomerTicket ticket) {
         return new CustomerServiceResult(
-                current.sessionId(), current.intent(), current.answer(), current.knowledgeSources(), true, ticket);
+                current.sessionId(), current.intent(), current.answer(), current.knowledgeSources(), current.knowledgeCitations(),
+                true, ticket, current.reason(), List.of());
     }
 
     private static CustomerServiceResult replay(CustomerSessionStore.IdempotencyRecord existing,
@@ -225,21 +288,6 @@ public final class CustomerServiceWorkflow {
         if (containsAny(text, "访客", "来访", "通行", "门禁", "预约")) return Intent.VISITOR;
         if (containsAny(text, "能耗", "用电", "电费", "节能")) return Intent.ENERGY;
         return Intent.GENERAL;
-    }
-
-    private static String answer(Intent intent, List<KnowledgeDocument> documents, boolean needsHuman, CustomerTicket ticket) {
-        if (needsHuman) {
-            if (intent == Intent.REPAIR) {
-                return "已记录设施报修并创建客服工单 " + ticket.id() + "。客服将核实位置和设备信息后安排处理。";
-            }
-            return "当前知识库没有足够信息，已创建人工客服工单 " + ticket.id() + "，请等待园区客服处理。";
-        }
-        return switch (intent) {
-            case PARKING -> "访客车辆可在园区入口完成登记后进入访客停车区，具体收费与开放时段请以园区停车指引为准。";
-            case VISITOR -> "访客需由园区联系人提前预约，到访时按门岗指引核验预约信息；客服不会在对话中索取身份证原始资料。";
-            case ENERGY -> "可以查询公共区域的能耗趋势和节能建议；涉及租户账单或设备控制时需要人工核验权限。";
-            default -> throw new IllegalStateException("Unsupported answered intent: " + intent);
-        };
     }
 
     private static boolean containsAny(String text, String... values) {

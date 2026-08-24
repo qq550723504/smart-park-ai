@@ -1,6 +1,7 @@
 package com.example.smartpark.adapter.mock;
 
 import com.example.smartpark.demo.DemoFaultInjector;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -38,6 +39,7 @@ public class MockParkConfiguration {
     }
 
     @Bean
+    @ConditionalOnProperty(name = "smartpark.knowledge.mode", havingValue = "mock", matchIfMissing = true)
     MockKnowledgeAdapter mockKnowledgeAdapter(MockParkDataStore dataStore, DemoFaultInjector faultInjector) {
         return new MockKnowledgeAdapter(dataStore, faultInjector);
     }
@@ -45,5 +47,11 @@ public class MockParkConfiguration {
     @Bean
     MockWorkOrderAdapter mockWorkOrderAdapter(MockParkDataStore dataStore) {
         return new MockWorkOrderAdapter(dataStore);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "smartpark.customer-service.answer-mode", havingValue = "mock", matchIfMissing = true)
+    MockCustomerAnswerAdapter mockCustomerAnswerAdapter() {
+        return new MockCustomerAnswerAdapter();
     }
 }

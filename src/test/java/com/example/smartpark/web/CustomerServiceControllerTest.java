@@ -73,6 +73,24 @@ class CustomerServiceControllerTest {
     }
 
     @Test
+    void responseContainsSafeKnowledgeCitationsWithoutDocumentBody() throws Exception {
+        mockMvc.perform(post("/api/customer-service/sessions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"访客停车怎么收费？\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.knowledgeSources").isArray())
+                .andExpect(jsonPath("$.knowledgeCitations").isArray())
+                .andExpect(jsonPath("$.knowledgeCitations[0].documentId").isString())
+                .andExpect(jsonPath("$.knowledgeCitations[0].title").isString())
+                .andExpect(jsonPath("$.knowledgeCitations[0].score").isNumber())
+                .andExpect(jsonPath("$.reason").value("SUPPORTED"))
+                .andExpect(jsonPath("$.citationIds").isArray())
+                .andExpect(jsonPath("$.citationIds[0]").isString())
+                .andExpect(result -> org.assertj.core.api.Assertions.assertThat(result.getResponse().getContentAsString())
+                        .doesNotContain("Visitor vehicles should complete entrance registration"));
+    }
+
+    @Test
     void repairFollowUpCreatesWaitingAgentTicket() throws Exception {
         String first = mockMvc.perform(post("/api/customer-service/sessions")
                         .contentType(MediaType.APPLICATION_JSON)

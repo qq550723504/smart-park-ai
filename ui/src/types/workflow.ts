@@ -55,12 +55,22 @@ export interface CustomerConversationResponse {
   humanHandoff: boolean
 }
 
+export interface KnowledgeCitation {
+  documentId: string
+  title: string
+  score: number
+}
+
 export interface CustomerServiceResponse {
   sessionId: string
   intent: string
   answer: string
   knowledgeSources: string[]
+  /** Safe retrieval metadata only; optional for compatibility with older backends. */
+  knowledgeCitations?: KnowledgeCitation[]
   needsHuman: boolean
+  reason: 'SUPPORTED' | 'INSUFFICIENT_EVIDENCE' | 'POLICY_LIMIT' | 'RETRIEVAL_UNAVAILABLE'
+  citationIds: string[]
   ticket: CustomerTicketResponse | null
 }
 

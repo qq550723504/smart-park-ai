@@ -40,8 +40,10 @@ public class CustomerServiceRuntimeConfiguration {
     @Bean
     CustomerServiceWorkflow customerServiceWorkflow(KnowledgePort knowledgePort,
                                                     CustomerSessionStore sessionStore,
-                                                    CustomerTicketPort ticketPort) {
+                                                    CustomerTicketPort ticketPort,
+                                                    org.springframework.beans.factory.ObjectProvider<com.example.smartpark.port.customer.CustomerAnswerPort> answerPort) {
         return new CustomerServiceWorkflow(knowledgePort, sessionStore, ticketPort,
+                answerPort.getIfAvailable(com.example.smartpark.adapter.mock.MockCustomerAnswerAdapter::new),
                 java.time.Clock.systemUTC(), () -> "cs-" + java.util.UUID.randomUUID());
     }
 

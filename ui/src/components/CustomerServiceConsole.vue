@@ -70,7 +70,7 @@ onMounted(loadTickets)
   <section class="customer-console">
     <aside class="panel customer-sidebar">
       <div class="section-heading"><div><span class="eyebrow">客服工作台</span><h2>园区客服</h2></div><span class="live-indicator"><i></i>在线</span></div>
-      <div class="service-metrics"><div><strong>4</strong><span>演示意图</span></div><div><strong>模拟</strong><span>知识数据</span></div></div>
+      <div class="service-metrics"><div><strong>4</strong><span>演示意图</span></div><div><strong>安全</strong><span>知识引用</span></div></div>
       <h3>快捷咨询</h3>
       <button v-for="item in suggestions" :key="item" type="button" class="suggestion" @click="ask(item)">{{ item }}</button>
       <div class="privacy-note"><strong>数据边界</strong><span>对话仅使用本地模拟知识。请勿输入身份证、手机号或其他个人敏感信息。</span></div>
@@ -86,6 +86,13 @@ onMounted(loadTickets)
           <div v-if="message.result" class="answer-meta">
             <span>意图 {{ customerIntentLabel(message.result.intent) }}</span>
             <span v-if="message.result.knowledgeSources.length">知识来源 {{ message.result.knowledgeSources.join(' / ') }}</span>
+          </div>
+          <div v-if="message.result?.knowledgeCitations?.length" class="knowledge-citations">
+            <span class="knowledge-citations-label">检索依据</span>
+            <div v-for="citation in message.result.knowledgeCitations" :key="citation.documentId" class="knowledge-citation">
+              <strong>{{ citation.title }}</strong>
+              <small>{{ citation.documentId }} · {{ Math.round(citation.score * 100) }}%</small>
+            </div>
           </div>
           <div v-if="message.result && ['CUSTOMER_AGENT', 'ADMIN'].includes(role)" class="feedback-actions"><button type="button" @click="rate(message.result.sessionId, 'HELPFUL')">有帮助</button><button type="button" @click="rate(message.result.sessionId, 'NOT_HELPFUL')">无帮助</button></div>
           <div v-if="message.result?.ticket" class="ticket-strip">
