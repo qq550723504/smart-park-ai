@@ -131,6 +131,12 @@ curl "http://localhost:8080/api/workflows/replace-with-workflow-id"
 | `SMARTPARK_CUSTOMER_SERVICE_ANSWER_MODE` | `mock` | `mock` 使用确定性回答；`dashscope` 使用结构化模型回答 |
 | `SMARTPARK_KNOWLEDGE_MIN_SIMILARITY_SCORE` | `0.65` | RAG 结果最低相似度 |
 | `SMARTPARK_CUSTOMER_MINIMUM_KNOWLEDGE_SCORE` | `0.70` | 客服接受知识结果的最低分数 |
+| `SMARTPARK_ANALYTICS_ENABLED` | `false` | 是否启用真实只读 PostgreSQL 分析链路 |
+| `SMARTPARK_ANALYTICS_DB_URL` | 空 | 专用分析数据库 JDBC URL；不能复用业务数据库 |
+| `SMARTPARK_ANALYTICS_DB_ADMIN_USER` | 空 | 仅供 Flyway 和演示快照刷新使用的对象所有者账号 |
+| `SMARTPARK_ANALYTICS_DB_ADMIN_PASSWORD` | 空 | 分析数据库对象所有者密码 |
+| `SMARTPARK_ANALYTICS_DB_USER` | 空 | 运行时只读账号，固定使用 `smartpark_analytics_ro` |
+| `SMARTPARK_ANALYTICS_DB_RO_PASSWORD` | 空 | 只读账号密码；Flyway 创建账号与运行时连接必须一致 |
 | `SPRING_AI_DASHSCOPE_BASE_URL` | DashScope 官方地址 | 覆盖模型客户端地址，用于兼容网关 |
 | `AI_DASHSCOPE_API_KEY` | 空 | DashScope 密钥，仅从进程环境变量读取 |
 
@@ -144,6 +150,8 @@ $env:SMARTPARK_CUSTOMER_SERVICE_ANSWER_MODE = 'dashscope'
 ```
 
 这两个模式都需要有效的 `AI_DASHSCOPE_API_KEY` 和网络连接。RAG 索引只存在于当前进程中，应用重启后会从种子文档重新建立。
+
+真实运营分析必须使用独立 PostgreSQL 数据库，不能与业务表或其他应用共库。数据库迁移会撤销该数据库中 `PUBLIC` 的数据库、`public`/`analytics` schema 及对象权限，再仅向 `smartpark_analytics_ro` 授予四个分析视图的 `SELECT` 权限；这是阻断 PostgreSQL 隐式公共权限旁路所必需的安全边界。管理员账号只用于迁移和演示数据刷新，应用查询始终使用只读账号。
 
 如需使用兼容网关，只覆盖当前进程的 URL：
 

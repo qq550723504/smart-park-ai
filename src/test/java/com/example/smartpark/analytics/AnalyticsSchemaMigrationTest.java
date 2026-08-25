@@ -145,6 +145,64 @@ class AnalyticsSchemaMigrationTest {
         assertThat(migration).doesNotContain("TIMESTAMPTZ '2026-08-");
     }
 
+    @Test
+    void v2RemovesInheritedPublicPrivilegesFromExistingReadOnlyRole() throws Exception {
+        try (PostgreSQLContainer<?> upgradeDatabase = new PostgreSQLContainer<>("postgres:16-alpine")
+                .withDatabaseName("analytics_upgrade")) {
+            upgradeDatabase.start();
+            Flyway.configure()
+                    .dataSource(upgradeDatabase.getJdbcUrl(), upgradeDatabase.getUsername(),
+                            upgradeDatabase.getPassword())
+                    .locations("classpath:db/migration")
+                    .placeholders(Map.of("analyticsRoPassword", RO_PASSWORD))
+                    .target(org.flywaydb.core.api.MigrationVersion.fromVersion("1"))
+                    .load()
+                    .migrate();
+
+            try (Connection admin = DriverManager.getConnection(
+                    upgradeDatabase.getJdbcUrl(), upgradeDatabase.getUsername(), upgradeDatabase.getPassword())) {
+                exec(admin, "CREATE TABLE public.public_leak(secret text)");
+                exec(admin, "INSERT INTO public.public_leak VALUES ('must-not-leak')");
+                exec(admin, "GRANT SELECT ON public.public_leak TO PUBLIC");
+            }
+            try (Connection ro = DriverManager.getConnection(
+                    upgradeDatabase.getJdbcUrl(), RO_USER, RO_PASSWORD);
+                 var statement = ro.createStatement();
+                 ResultSet rs = statement.executeQuery("SELECT secret FROM public.public_leak")) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getString(1)).isEqualTo("must-not-leak");
+            }
+
+            Flyway.configure()
+                    .dataSource(upgradeDatabase.getJdbcUrl(), upgradeDatabase.getUsername(),
+                            upgradeDatabase.getPassword())
+                    .locations("classpath:db/migration")
+                    .placeholders(Map.of("analyticsRoPassword", RO_PASSWORD))
+                    .load()
+                    .migrate();
+
+            try (Connection ro = DriverManager.getConnection(
+                    upgradeDatabase.getJdbcUrl(), RO_USER, RO_PASSWORD)) {
+                assertThatThrownBy(() -> exec(ro, "SELECT secret FROM public.public_leak"))
+                        .isInstanceOf(IllegalStateException.class)
+                        .hasMessageContaining("permission denied");
+                assertThatThrownBy(() -> exec(ro, "CREATE TABLE public.evil(id int)"))
+                        .isInstanceOf(IllegalStateException.class)
+                        .hasMessageContaining("permission denied");
+                assertThatThrownBy(() -> exec(ro, "CREATE TABLE analytics.evil(id int)"))
+                        .isInstanceOf(IllegalStateException.class)
+                        .hasMessageContaining("permission denied");
+                assertThatThrownBy(() -> exec(ro, "SELECT * FROM analytics.energy_hourly_raw"))
+                        .isInstanceOf(IllegalStateException.class)
+                        .hasMessageContaining("permission denied");
+                try (var statement = ro.createStatement();
+                     ResultSet rs = statement.executeQuery("SELECT COUNT(*) FROM analytics.v_energy_hourly")) {
+                    assertThat(rs.next()).isTrue();
+                }
+            }
+        }
+    }
+
     private void exec(Connection connection, String sql) {
         try (var statement = connection.createStatement()) {
             statement.execute(sql);
