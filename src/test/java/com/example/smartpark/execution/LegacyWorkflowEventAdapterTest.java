@@ -4,6 +4,8 @@ import com.example.smartpark.execution.model.DisplayPayload;
 import com.example.smartpark.execution.model.ExecutionEvent;
 import com.example.smartpark.execution.model.ExecutionEventType;
 import com.example.smartpark.execution.model.ExecutionScenario;
+import com.example.smartpark.execution.model.ExecutionStage;
+import com.example.smartpark.execution.model.ExecutionStatus;
 import com.example.smartpark.workflow.WorkflowEvent;
 import org.junit.jupiter.api.Test;
 
@@ -72,6 +74,18 @@ class LegacyWorkflowEventAdapterTest {
         List<ExecutionEvent> history = unified.history(LegacyWorkflowEventAdapter.runIdFor(workflowId));
         assertThat(history).extracting(ExecutionEvent::sequence).containsExactly(1L, 2L);
         assertThat(history.get(history.size() - 1).eventType()).isEqualTo(ExecutionEventType.COMPLETED);
+    }
+
+    @Test
+    void rejectedWorkflowCompletionProjectsAsAFailedOutcome() {
+        // "workflow rejected" is a rejected operator intervention; projecting
+        // it as a successful completion would mislead audit consumers.
+        ExecutionEvent projected = adapter.project(
+                legacy(nextWorkflowId(), 1, WorkflowEvent.EventType.COMPLETED, "workflow rejected"));
+
+        assertThat(projected.eventType()).isEqualTo(ExecutionEventType.FAILED);
+        assertThat(projected.status()).isEqualTo(ExecutionStatus.FAILED);
+        assertThat(projected.stage()).isEqualTo(ExecutionStage.FAILURE);
     }
 
     private static String nextWorkflowId() {

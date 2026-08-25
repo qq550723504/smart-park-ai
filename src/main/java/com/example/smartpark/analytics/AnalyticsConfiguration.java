@@ -9,6 +9,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 
+import java.time.Duration;
+
 import com.example.smartpark.analytics.agent.AnalyticsModelClient;
 import com.example.smartpark.analytics.agent.AnalysisSummaryValidator;
 import com.example.smartpark.analytics.agent.LlmAnalyticsModelClient;
@@ -37,6 +39,17 @@ public class AnalyticsConfiguration {
     @Bean
     MetricCatalog metricCatalog() {
         return new MetricCatalog();
+    }
+
+    @Bean(destroyMethod = "shutdown")
+    DemoSnapshotRefresher demoSnapshotRefresher(AnalyticsProperties properties) {
+        properties.validateUsable();
+        var refresher = new DemoSnapshotRefresher(properties.getDatasource().getUrl(),
+                properties.getDatasource().getAdminUsername(),
+                properties.getDatasource().getAdminPassword(),
+                Duration.ofHours(1));
+        refresher.start();
+        return refresher;
     }
 
     @Bean

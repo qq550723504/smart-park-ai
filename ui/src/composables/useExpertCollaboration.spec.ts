@@ -77,6 +77,26 @@ describe('useExpertCollaboration', () => {
     expect(state.run.value?.runId).toBe('run-2')
   })
 
+  it('releases the start controls after polling gives up on a still-running run', async () => {
+    mockedGet.mockResolvedValueOnce(running).mockRejectedValue(new Error('network down'))
+    const state = useExpertCollaboration(10)
+    await state.start('first')
+    await vi.runAllTimersAsync()
+
+    // Retries exhausted while the backend stayed RUNNING: controls must be
+    // released (isRunning false) so the operator can start over.
+    expect(state.isRunning.value).toBe(false)
+
+    mockedGet.mockClear()
+    mockedGet.mockResolvedValueOnce({ ...completed(), runId: 'run-2' })
+    mockedStart.mockResolvedValueOnce({ runId: 'run-2', statusUrl: '', eventsUrl: '' })
+    await state.start('second')
+    await vi.runAllTimersAsync()
+
+    expect(state.run.value?.runId).toBe('run-2')
+    expect(state.isRunning.value).toBe(false)
+  })
+
   it('does not let an older poll overwrite a newer run', async () => {
     let resolveOld!: (value: typeof running) => void
     mockedGet.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve }))

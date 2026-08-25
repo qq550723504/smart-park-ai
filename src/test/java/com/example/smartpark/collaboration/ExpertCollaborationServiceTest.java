@@ -22,6 +22,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ExpertCollaborationServiceTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-08-25T00:00:00Z"), ZoneOffset.UTC);
 
+    @Test void mapsAFailedSynthesisToARunFailureInsteadOfCompletion() throws Exception {
+        var publisher = new InMemoryExecutionEventPublisher();
+        var service = service(publisher, (q) -> plan(), (p, f) ->
+                new Synthesis(FindingStatus.FAILED, "所有专家均失败", List.of(), 0, List.of("experts unavailable")));
+        var run = service.start("energy consumption");
+
+        waitFor(() -> service.get(run.runId()).status() == CollaborationRun.RunStatus.FAILED);
+        assertThat(service.get(run.runId()).synthesis()).isNotNull();
+        assertThat(publisher.history(run.runId())).extracting(e -> e.eventType())
+                .contains(ExecutionEventType.FAILED);
+        assertThat(publisher.history(run.runId())).extracting(e -> e.eventType())
+                .doesNotContain(ExecutionEventType.COMPLETED);
+    }
+
     @Test void runsAsynchronouslyAndPublishesTerminalCompletion() throws Exception {
         var publisher = new InMemoryExecutionEventPublisher();
         var service = service(publisher, (q) -> plan(), (p, findings) ->
@@ -123,7 +137,8 @@ class ExpertCollaborationServiceTest {
                 ExpertDomain.DEVICE, assignment -> new ExpertFinding(ExpertDomain.DEVICE, FindingStatus.SUPPORTED, "device", List.of("device:1"), .8, List.of()),
                 ExpertDomain.SECURITY, assignment -> new ExpertFinding(ExpertDomain.SECURITY, FindingStatus.SUPPORTED, "security", List.of("security:1"), .8, List.of())),
                 Runnable::run);
-        return new ExpertCollaborationService(planner, graph, synthesizer, new CollaborationRunStore(), publisher,
+        return new ExpertCollaborationService(planner, graph, synthesizer,
+                new CollaborationRunStore(Duration.ofMinutes(30), CLOCK), publisher,
                 Executors.newCachedThreadPool(), timeout, CLOCK);
     }
 

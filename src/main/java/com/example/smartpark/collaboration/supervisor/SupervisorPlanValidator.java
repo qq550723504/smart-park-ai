@@ -35,11 +35,28 @@ public final class SupervisorPlanValidator {
         return Set.copyOf(domains);
     }
 
+    private static final Map<String, java.util.regex.Pattern> TOKEN_PATTERNS = new java.util.concurrent.ConcurrentHashMap<>();
+
     private static boolean containsAny(String text, String... terms) {
         for (String term : terms) {
-            if (text.contains(term)) return true;
+            if (isAsciiToken(term)) {
+                // English keywords must match on token boundaries: a raw
+                // substring match makes "outdoor" select the SECURITY domain
+                // via "door" and invalidates otherwise correct plans.
+                if (TOKEN_PATTERNS.computeIfAbsent(term,
+                                ignored -> java.util.regex.Pattern.compile("\\b" + java.util.regex.Pattern.quote(term) + "\\b"))
+                        .matcher(text).find()) {
+                    return true;
+                }
+            } else if (text.contains(term)) {
+                return true;
+            }
         }
         return false;
+    }
+
+    private static boolean isAsciiToken(String term) {
+        return term.matches("[a-z0-9_]+");
     }
 
     public static final class SupervisorPlanValidationException extends IllegalArgumentException {

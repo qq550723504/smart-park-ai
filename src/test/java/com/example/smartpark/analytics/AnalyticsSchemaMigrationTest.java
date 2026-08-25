@@ -103,6 +103,39 @@ class AnalyticsSchemaMigrationTest {
     }
 
     @Test
+    void snapshotRefresherReanchorsAgedDemoSnapshots() throws Exception {
+        // On a persistent database the one-time V1 seeds age out of the rolling
+        // one-day lookback; the refresher must pull them back inside it.
+        migrate();
+        try (var admin = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             var statement = admin.createStatement()) {
+            statement.execute("UPDATE analytics.device_snapshot_raw "
+                    + "SET snapshot_at = now() - INTERVAL '3 days'");
+        }
+
+        var properties = new com.example.smartpark.analytics.AnalyticsProperties();
+        properties.getDatasource().setUrl(POSTGRES.getJdbcUrl());
+        properties.getDatasource().setAdminUsername(POSTGRES.getUsername());
+        properties.getDatasource().setAdminPassword(POSTGRES.getPassword());
+        new com.example.smartpark.analytics.DemoSnapshotRefresher(
+                properties.getDatasource().getUrl(),
+                properties.getDatasource().getAdminUsername(),
+                properties.getDatasource().getAdminPassword(),
+                java.time.Duration.ofHours(1)).refreshOnce();
+
+        try (var ro = DriverManager.getConnection(POSTGRES.getJdbcUrl(), RO_USER, RO_PASSWORD);
+             var statement = ro.createStatement();
+             ResultSet rs = statement.executeQuery(
+                     "SELECT MIN(snapshot_at), now() FROM analytics.v_device_snapshot")) {
+            assertThat(rs.next()).isTrue();
+            var oldest = rs.getObject(1, java.time.OffsetDateTime.class);
+            var reference = rs.getObject(2, java.time.OffsetDateTime.class);
+            assertThat(oldest).isAfter(reference.minus(java.time.Duration.ofHours(24)));
+        }
+    }
+
+    @Test
     void demoEnergySeedUsesARecentRelativeDateAnchor() throws Exception {
         String migration = new String(new ClassPathResource(
                 "db/migration/V1__analytics_readonly_schema.sql").getInputStream().readAllBytes(),

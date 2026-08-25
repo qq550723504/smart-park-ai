@@ -268,6 +268,7 @@ public final class SqlPlanGuard {
                 throw reject("指标目录包含无法解析的聚合表达式 " + metric.expression());
             }
         }
+        Set<String> groupedColumns = groupedColumns(resultQuery);
         Set<String> projected = new LinkedHashSet<>();
         List<String> invalidProjections = new ArrayList<>();
         for (var item : resultQuery.getSelectItems()) {
@@ -276,8 +277,15 @@ public final class SqlPlanGuard {
             projected.add(canonical);
             if (metricExpressions.contains(canonical)) continue;
             if (expression instanceof Column column) {
-                if (!allowedDimensions(plan).contains(column.getUnquotedColumnName().toLowerCase(Locale.ROOT))) {
+                String name = column.getUnquotedColumnName().toLowerCase(Locale.ROOT);
+                if (!allowedDimensions(plan).contains(name)) {
                     throw reject("查询选择了未获指标目录批准的维度 " + column.getUnquotedColumnName());
+                }
+                // A projected non-aggregate dimension must be grouped, otherwise
+                // PostgreSQL rejects the query during EXPLAIN and the analysis
+                // dies as ANALYSIS_ABORTED instead of a repairable rejection.
+                if (!groupedColumns.contains(name)) {
+                    throw reject("投影的维度 " + column.getUnquotedColumnName() + " 必须出现在 GROUP BY 中");
                 }
                 continue;
             }
@@ -302,6 +310,20 @@ public final class SqlPlanGuard {
                 }
             }
         }
+    }
+
+    private static Set<String> groupedColumns(PlainSelect resultQuery) {
+        Set<String> grouped = new LinkedHashSet<>();
+        if (resultQuery.getGroupBy() != null) {
+            var groupBy = resultQuery.getGroupBy().getGroupByExpressionList();
+            for (int i = 0; i < groupBy.size(); i++) {
+                Expression expression = (Expression) groupBy.get(i);
+                if (expression instanceof Column column) {
+                    grouped.add(column.getUnquotedColumnName().toLowerCase(Locale.ROOT));
+                }
+            }
+        }
+        return grouped;
     }
 
     private static Expression parseExpression(String expression) throws UnsafeSqlException {

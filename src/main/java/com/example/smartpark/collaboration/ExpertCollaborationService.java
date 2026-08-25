@@ -97,8 +97,24 @@ public final class ExpertCollaborationService {
             List<com.example.smartpark.collaboration.model.ExpertFinding> findings, Synthesis synthesis) {
         CollaborationRun current = store.get(id);
         if (current.status() != CollaborationRun.RunStatus.RUNNING) return;
+        // A synthesis that reports FAILED is a failed collaboration: storing it
+        // as COMPLETED would present a rejected outcome as success to clients.
+        if (synthesis.status() == com.example.smartpark.collaboration.model.FindingStatus.FAILED) {
+            failIfRunningWithSynthesis(id, plan, findings, synthesis);
+            return;
+        }
         store.save(new CollaborationRun(id, question, CollaborationRun.RunStatus.COMPLETED, plan, findings, synthesis, null, Instant.now(clock)));
         publish(id, "Supervisor", ExecutionStage.COMPLETION, ExecutionEventType.COMPLETED, ExecutionStatus.SUCCEEDED, "Expert collaboration completed");
+    }
+
+    private synchronized void failIfRunningWithSynthesis(UUID id, SupervisorPlan plan,
+            List<com.example.smartpark.collaboration.model.ExpertFinding> findings, Synthesis synthesis) {
+        CollaborationRun current = store.get(id);
+        if (current.status() != CollaborationRun.RunStatus.RUNNING) return;
+        store.save(new CollaborationRun(id, current.question(), CollaborationRun.RunStatus.FAILED,
+                plan, findings, synthesis, synthesis.conclusion(), Instant.now(clock)));
+        publish(id, "Supervisor", ExecutionStage.FAILURE, ExecutionEventType.FAILED,
+                ExecutionStatus.FAILED, "Expert collaboration failed: " + synthesis.conclusion());
     }
 
     private synchronized boolean failIfRunning(UUID id, String message) {

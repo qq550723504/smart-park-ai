@@ -24,6 +24,8 @@ public class LegacyWorkflowEventAdapter {
         this.publisher = publisher;
     }
 
+    private static final String REJECTED_SUMMARY = "workflow rejected";
+
     /** Deterministic workflowId → runId mapping so both traces address the same run. */
     public static UUID runIdFor(String workflowId) {
         return UUID.nameUUIDFromBytes(
@@ -31,6 +33,8 @@ public class LegacyWorkflowEventAdapter {
     }
 
     public ExecutionEvent project(WorkflowEvent legacy) {
+        boolean rejectedCompletion = legacy.eventType() == WorkflowEvent.EventType.COMPLETED
+                && REJECTED_SUMMARY.equals(legacy.redactedSummary());
         return publisher.publish(new ExecutionEvent(
                 UUID.randomUUID(),
                 runIdFor(legacy.workflowId()),
@@ -38,9 +42,9 @@ public class LegacyWorkflowEventAdapter {
                 legacy.timestamp(),
                 ExecutionScenario.ALERT_WORKFLOW,
                 actorFor(legacy),
-                stageFor(legacy),
-                eventTypeFor(legacy.eventType()),
-                statusFor(legacy),
+                stageFor(legacy, rejectedCompletion),
+                eventTypeFor(legacy.eventType(), rejectedCompletion),
+                statusFor(legacy, rejectedCompletion),
                 legacy.redactedSummary(),
                 payloadFor(legacy)));
     }
@@ -49,7 +53,10 @@ public class LegacyWorkflowEventAdapter {
         return legacy.eventType() == WorkflowEvent.EventType.TOOL_CALLED ? "tool" : "alert workflow";
     }
 
-    private static ExecutionStage stageFor(WorkflowEvent legacy) {
+    private static ExecutionStage stageFor(WorkflowEvent legacy, boolean rejectedCompletion) {
+        if (rejectedCompletion) {
+            return ExecutionStage.FAILURE;
+        }
         return switch (legacy.eventType()) {
             case STARTED -> ExecutionStage.INITIALIZATION;
             case NODE_STARTED, NODE_COMPLETED, TOOL_CALLED -> ExecutionStage.TOOL_EXECUTION;
@@ -59,7 +66,12 @@ public class LegacyWorkflowEventAdapter {
         };
     }
 
-    private static ExecutionEventType eventTypeFor(WorkflowEvent.EventType type) {
+    private static ExecutionEventType eventTypeFor(WorkflowEvent.EventType type, boolean rejectedCompletion) {
+        if (type == WorkflowEvent.EventType.COMPLETED && rejectedCompletion) {
+            // A rejected operator intervention is a failed outcome in the
+            // unified contract — never a successful completion.
+            return ExecutionEventType.FAILED;
+        }
         return switch (type) {
             case STARTED -> ExecutionEventType.RUN_STARTED;
             case NODE_STARTED -> ExecutionEventType.NODE_STARTED;
@@ -72,7 +84,11 @@ public class LegacyWorkflowEventAdapter {
         };
     }
 
-    private static com.example.smartpark.execution.model.ExecutionStatus statusFor(WorkflowEvent legacy) {
+    private static com.example.smartpark.execution.model.ExecutionStatus statusFor(WorkflowEvent legacy,
+                                                                                boolean rejectedCompletion) {
+        if (rejectedCompletion) {
+            return com.example.smartpark.execution.model.ExecutionStatus.FAILED;
+        }
         return switch (legacy.eventType()) {
             case FAILED -> com.example.smartpark.execution.model.ExecutionStatus.FAILED;
             case COMPLETED -> com.example.smartpark.execution.model.ExecutionStatus.SUCCEEDED;

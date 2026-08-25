@@ -240,6 +240,21 @@ class SqlPlanGuardTest {
                 .hasMessageContaining("lineage");
     }
 
+    @Test
+    void rejectsProjectedDimensionsMissingFromGroupBy() throws UnsafeSqlException {
+        // A projected non-aggregate dimension without a matching GROUP BY makes
+        // PostgreSQL reject the query at EXPLAIN time as ANALYSIS_ABORTED;
+        // the guard must catch it as a repairable rejection instead.
+        QueryPlan plan = plan("energy_kwh");
+        ValidatedSql sql = SqlAstGuard.validate("""
+                SELECT building_id, SUM(kwh) FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs LIMIT 100""");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("GROUP BY");
+    }
+
     private QueryPlan plan(String metricName) {
         MetricDefinition metric = catalog.findByName(metricName).orElseThrow();
         return new QueryPlan("test", List.of(metric), List.copyOf(metric.allowedDimensions()), Map.of(),

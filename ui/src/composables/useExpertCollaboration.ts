@@ -5,6 +5,9 @@ import type { CollaborationRun } from '../types/collaboration'
 export function useExpertCollaboration(pollIntervalMs = 500) {
   const run = ref<CollaborationRun | null>(null)
   const loading = ref(false)
+  // Set when polling gave up while the backend may still be RUNNING; the UI
+  // uses it to release the start controls instead of stranding the operator.
+  const pollAbandoned = ref(false)
   const error = ref('')
   let pollTimer: ReturnType<typeof setTimeout> | null = null
   let generation = 0
@@ -12,7 +15,7 @@ export function useExpertCollaboration(pollIntervalMs = 500) {
   const MAX_CONSECUTIVE_FAILURES = 5
   let consecutiveFailures = 0
 
-  const isRunning = computed(() => run.value?.status === 'RUNNING')
+  const isRunning = computed(() => run.value?.status === 'RUNNING' && !pollAbandoned.value)
   const isTerminal = computed(() => Boolean(run.value && run.value.status !== 'RUNNING'))
 
   function stopPolling() {
@@ -39,6 +42,9 @@ export function useExpertCollaboration(pollIntervalMs = 500) {
         error.value = cause instanceof Error ? cause.message : '专家协作状态同步失败'
         pollTimer = setTimeout(() => void poll(runId, currentGeneration), backoff)
       } else {
+        // Retries exhausted while the backend may still be RUNNING: release the
+        // start controls so the user is not permanently stranded.
+        pollAbandoned.value = true
         error.value = cause instanceof Error ? cause.message : '专家协作状态同步失败，已停止重试'
       }
     }
@@ -52,6 +58,7 @@ export function useExpertCollaboration(pollIntervalMs = 500) {
     loading.value = true
     error.value = ''
     run.value = null
+    pollAbandoned.value = false
     // A fresh collaboration gets its own poll retry budget; a previous run
     // that exhausted the retries must not consume it.
     consecutiveFailures = 0
@@ -74,6 +81,7 @@ export function useExpertCollaboration(pollIntervalMs = 500) {
     error.value = ''
     loading.value = false
     consecutiveFailures = 0
+    pollAbandoned.value = false
   }
 
   onBeforeUnmount(reset)

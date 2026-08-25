@@ -51,7 +51,9 @@ smartpark:
     datasource:
       url: ${SMARTPARK_ANALYTICS_DB_URL:}
       username: ${SMARTPARK_ANALYTICS_DB_USER:}
-      password: ${SMARTPARK_ANALYTICS_DB_PASSWORD:}
+      # The runtime connects through the read-only role, so its password must
+      # resolve to the same credential Flyway used when creating that role.
+      password: ${SMARTPARK_ANALYTICS_DB_RO_PASSWORD:${SMARTPARK_ANALYTICS_DB_PASSWORD:}}
       admin-username: ${SMARTPARK_ANALYTICS_DB_ADMIN_USER:}
       admin-password: ${SMARTPARK_ANALYTICS_DB_ADMIN_PASSWORD:}
   collaboration:
