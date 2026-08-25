@@ -43,16 +43,18 @@ public final class ExpertCollaborationService {
         CollaborationRun run = store.save(new CollaborationRun(id, question.trim(), CollaborationRun.RunStatus.RUNNING,
                 null, List.of(), null, null, Instant.now(clock)));
         publish(id, "Supervisor", ExecutionStage.INITIALIZATION, ExecutionEventType.RUN_STARTED, ExecutionStatus.RUNNING, "Expert collaboration started");
-        CompletableFuture<?> task = CompletableFuture.runAsync(() -> execute(id, question.trim()), runExecutor);
-        task.orTimeout(runTimeout.toMillis(), TimeUnit.MILLISECONDS)
-                .exceptionally(ex -> {
-                    failIfRunning(id, "collaboration run timed out or failed");
-                    // orTimeout completes only the wrapper; cancel(true) actually
-                    // interrupts the runAsync task so a hung call frees its thread
-                    // in the fixed-size executor instead of occupying it forever.
-                    task.cancel(true);
-                    return null;
-                });
+        FutureTask<Void> task = new FutureTask<>(() -> {
+            execute(id, question.trim());
+            return null;
+        });
+        try {
+            runExecutor.execute(task);
+        } catch (RejectedExecutionException rejected) {
+            failIfRunning(id, "collaboration run could not be scheduled");
+            throw rejected;
+        }
+        CompletableFuture.delayedExecutor(runTimeout.toMillis(), TimeUnit.MILLISECONDS)
+                .execute(() -> timeoutIfRunning(id, task));
         return run;
     }
 
@@ -62,17 +64,33 @@ public final class ExpertCollaborationService {
         try {
             publish(id, "Supervisor", ExecutionStage.PLANNING, ExecutionEventType.NODE_STARTED, ExecutionStatus.RUNNING, "Selecting expert domains");
             SupervisorPlan plan = planner.plan(question);
-            store.save(new CollaborationRun(id, question, CollaborationRun.RunStatus.RUNNING, plan, List.of(), null, null, Instant.now(clock)));
+            if (!savePlanIfRunning(id, question, plan)) return;
             publish(id, "Supervisor", ExecutionStage.PLANNING, ExecutionEventType.EXPERT_HANDOFF, ExecutionStatus.RUNNING, "Selected " + plan.selectedDomains());
             var findings = graph.execute(plan, id);
             // Persist completed expert work immediately: if synthesis later
             // hangs, times out or throws, the failure path keeps the partial
             // findings instead of discarding them with an empty list.
-            store.save(new CollaborationRun(id, question, CollaborationRun.RunStatus.RUNNING, plan,
-                    findings, null, null, Instant.now(clock)));
+            if (!saveFindingsIfRunning(id, question, plan, findings)) return;
             Synthesis synthesis = synthesizer.synthesize(plan, findings);
             completeIfRunning(id, question, plan, findings, synthesis);
         } catch (Exception ex) { failIfRunning(id, "expert collaboration failed"); }
+    }
+
+    private synchronized boolean savePlanIfRunning(UUID id, String question, SupervisorPlan plan) {
+        CollaborationRun current = store.get(id);
+        if (current.status() != CollaborationRun.RunStatus.RUNNING) return false;
+        store.save(new CollaborationRun(id, question, CollaborationRun.RunStatus.RUNNING,
+                plan, List.of(), null, null, Instant.now(clock)));
+        return true;
+    }
+
+    private synchronized boolean saveFindingsIfRunning(UUID id, String question, SupervisorPlan plan,
+            List<com.example.smartpark.collaboration.model.ExpertFinding> findings) {
+        CollaborationRun current = store.get(id);
+        if (current.status() != CollaborationRun.RunStatus.RUNNING) return false;
+        store.save(new CollaborationRun(id, question, CollaborationRun.RunStatus.RUNNING,
+                plan, findings, null, null, Instant.now(clock)));
+        return true;
     }
 
     private synchronized void completeIfRunning(UUID id, String question, SupervisorPlan plan,
@@ -83,12 +101,22 @@ public final class ExpertCollaborationService {
         publish(id, "Supervisor", ExecutionStage.COMPLETION, ExecutionEventType.COMPLETED, ExecutionStatus.SUCCEEDED, "Expert collaboration completed");
     }
 
-    private synchronized void failIfRunning(UUID id, String message) {
+    private synchronized boolean failIfRunning(UUID id, String message) {
         CollaborationRun current = store.get(id);
-        if (current.status() != CollaborationRun.RunStatus.RUNNING) return;
+        if (current.status() != CollaborationRun.RunStatus.RUNNING) return false;
         store.save(new CollaborationRun(id, current.question(), CollaborationRun.RunStatus.FAILED, current.plan(), current.findings(), null, message, Instant.now(clock)));
         try { publish(id, "Supervisor", ExecutionStage.FAILURE, ExecutionEventType.FAILED, ExecutionStatus.FAILED, message); }
         catch (IllegalStateException ignored) { }
+        return true;
+    }
+
+    private synchronized void timeoutIfRunning(UUID id, FutureTask<?> task) {
+        if (task.isDone()) return;
+        // Persist the terminal state before interrupting. A dependency that
+        // ignores interruption can then return only into guarded no-op writes.
+        if (failIfRunning(id, "collaboration run timed out or failed")) {
+            task.cancel(true);
+        }
     }
 
     private void publish(UUID id, String actor, ExecutionStage stage, ExecutionEventType type, ExecutionStatus status, String summary) {

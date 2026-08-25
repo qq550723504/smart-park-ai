@@ -13,6 +13,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executors;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -34,7 +37,8 @@ class ExpertCollaborationServiceTest {
         var publisher = new InMemoryExecutionEventPublisher();
         var service = service(publisher, (q) -> { throw new IllegalStateException("planner"); }, (p, f) -> null);
         var run = service.start("energy consumption");
-        waitFor(() -> service.get(run.runId()).status() == CollaborationRun.RunStatus.FAILED);
+        waitFor(() -> publisher.history(run.runId()).stream()
+                .anyMatch(event -> event.eventType() == ExecutionEventType.FAILED));
         assertThat(publisher.history(run.runId())).extracting(e -> e.eventType())
                 .containsExactly(ExecutionEventType.RUN_STARTED, ExecutionEventType.NODE_STARTED, ExecutionEventType.FAILED);
     }
@@ -79,6 +83,31 @@ class ExpertCollaborationServiceTest {
         var run = service.start("energy consumption");
         waitFor(() -> service.get(run.runId()).status() == CollaborationRun.RunStatus.FAILED);
         assertThat(publisher.history(run.runId())).last().extracting(e -> e.eventType()).isEqualTo(ExecutionEventType.FAILED);
+    }
+
+    @Test void overallTimeoutInterruptsTheUnderlyingRunTask() throws Exception {
+        var publisher = new InMemoryExecutionEventPublisher();
+        CountDownLatch plannerStarted = new CountDownLatch(1);
+        CountDownLatch blockPlanner = new CountDownLatch(1);
+        AtomicBoolean interrupted = new AtomicBoolean();
+        var service = service(publisher, question -> {
+            plannerStarted.countDown();
+            try {
+                blockPlanner.await();
+            } catch (InterruptedException timeoutCancellation) {
+                interrupted.set(true);
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("planner interrupted", timeoutCancellation);
+            }
+            return plan();
+        }, (plan, findings) -> null, Duration.ofMillis(30));
+
+        var run = service.start("energy consumption");
+        assertThat(plannerStarted.await(1, TimeUnit.SECONDS)).isTrue();
+        waitFor(() -> service.get(run.runId()).status() == CollaborationRun.RunStatus.FAILED);
+
+        waitFor(interrupted::get);
+        assertThat(service.get(run.runId()).status()).isEqualTo(CollaborationRun.RunStatus.FAILED);
     }
 
 
