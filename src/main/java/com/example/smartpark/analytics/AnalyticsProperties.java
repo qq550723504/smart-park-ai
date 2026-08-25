@@ -46,7 +46,12 @@ public class AnalyticsProperties {
     public long getMaxResultBytes() { return maxResultBytes; }
     public void setMaxResultBytes(long maxResultBytes) { this.maxResultBytes = maxResultBytes; }
     public double getMaxPlanCost() { return maxPlanCost; }
-    public void setMaxPlanCost(double maxPlanCost) { this.maxPlanCost = maxPlanCost; }
+    public void setMaxPlanCost(double maxPlanCost) {
+        if (!Double.isFinite(maxPlanCost) || maxPlanCost <= 0) {
+            throw new IllegalArgumentException("max-plan-cost must be finite and positive");
+        }
+        this.maxPlanCost = maxPlanCost;
+    }
     public Datasource getDatasource() { return datasource; }
 
     public static class Datasource {

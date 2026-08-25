@@ -73,6 +73,7 @@ export interface OperationsCapabilities {
   customerAnswerMode: 'mock' | 'dashscope'
   vectorStore: 'none' | 'simple-vector-store'
   analyticsEnabled: boolean
+  collaborationEnabled: boolean
 }
 
 export function getOperationsCapabilities() {

@@ -16,6 +16,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -69,6 +70,33 @@ class ExpertCollaborationGraphTest {
                     .containsExactly(ExpertDomain.ENERGY, ExpertDomain.DEVICE);
             assertThat(findings.get(0).status()).isEqualTo(FindingStatus.FAILED);
             assertThat(findings.get(1).status()).isEqualTo(FindingStatus.SUPPORTED);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test void interruptsTimedOutExpertInvocation() {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicBoolean interrupted = new AtomicBoolean();
+        try {
+            EnumMap<ExpertDomain, ExpertCollaborationGraph.Expert> experts = new EnumMap<>(ExpertDomain.class);
+            experts.put(ExpertDomain.ENERGY, assignment -> {
+                try {
+                    Thread.sleep(5000);
+                } catch (InterruptedException ex) {
+                    interrupted.set(true);
+                    Thread.currentThread().interrupt();
+                }
+                return finding(ExpertDomain.ENERGY);
+            });
+            experts.put(ExpertDomain.DEVICE, assignment -> finding(ExpertDomain.DEVICE));
+            experts.put(ExpertDomain.SECURITY, assignment -> finding(ExpertDomain.SECURITY));
+
+            var graph = new ExpertCollaborationGraph(experts, executor, Duration.ofMillis(50));
+            var findings = graph.execute(plan(ExpertDomain.ENERGY));
+
+            assertThat(findings.get(0).status()).isEqualTo(FindingStatus.FAILED);
+            assertThat(interrupted).isTrue();
         } finally {
             executor.shutdownNow();
         }

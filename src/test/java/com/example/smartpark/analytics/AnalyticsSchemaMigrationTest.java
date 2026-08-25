@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.springframework.core.io.ClassPathResource;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -82,6 +83,16 @@ class AnalyticsSchemaMigrationTest {
                 assertThat(rs.getInt(1)).isGreaterThan(0);
             }
         }
+    }
+
+    @Test
+    void demoEnergySeedUsesARecentRelativeDateAnchor() throws Exception {
+        String migration = new String(new ClassPathResource(
+                "db/migration/V1__analytics_readonly_schema.sql").getInputStream().readAllBytes(),
+                java.nio.charset.StandardCharsets.UTF_8);
+
+        assertThat(migration).contains("CURRENT_DATE");
+        assertThat(migration).doesNotContain("TIMESTAMPTZ '2026-08-");
     }
 
     private void exec(Connection connection, String sql) {

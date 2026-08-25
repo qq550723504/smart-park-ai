@@ -19,7 +19,7 @@ final class OperationsAnalysisDtos {
         if (record.summary() != null && !record.summary().isBlank()) {
             dto.put("summary", record.summary());
         }
-        if (record.rowCount() > 0) {
+        if ("COMPLETED".equals(record.status())) {
             dto.put("rowCount", record.rowCount());
             dto.put("truncated", record.truncated());
         }

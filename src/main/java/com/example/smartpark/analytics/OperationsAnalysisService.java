@@ -16,10 +16,9 @@ import java.time.Instant;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 /**
  * Run lifecycle for natural-language operations analysis: start, ambiguity
@@ -45,6 +44,8 @@ public class OperationsAnalysisService {
     private final Clock clock;
     private final AnalysisRunStore store = new AnalysisRunStore();
     private final ExecutionEventPublisher events;
+    private final Object lifecycleLock = new Object();
+    private UUID activeRunId;
 
     /** Pending ambiguity per run: one candidate metric set per clarification question. */
     private final java.util.concurrent.ConcurrentHashMap<UUID, List<java.util.Set<String>>> pendingClarifications
@@ -82,12 +83,15 @@ public class OperationsAnalysisService {
 
     public AnalysisRunStore.RunRecord start(String question) {
         requireValidQuestion(question);
-        ensureNoActiveRun();
         UUID runId = UUID.randomUUID();
-        store.put(new RecordBuilder(runId, question).running());
-        // The 202 response must return immediately: schedule the blocking graph
-        // execution on the analytics executor and hand back the RUNNING record.
-        CompletableFuture.runAsync(() -> execute(runId, question, null), executor);
+        synchronized (lifecycleLock) {
+            if (activeRunId != null) {
+                throw new IllegalStateException("已有正在进行的分析，请等待完成后再启动");
+            }
+            activeRunId = runId;
+            store.put(new RecordBuilder(runId, question, clock).running());
+        }
+        launch(runId, question, null);
         return store.get(runId);
     }
 
@@ -106,8 +110,7 @@ public class OperationsAnalysisService {
                 current.question(), safeSelections.stream().map(MetricSelection::metric).toList(), List.of());
         store.put(rerunningRecord(runId));
         pendingClarifications.remove(runId);
-        CompletableFuture.runAsync(
-                () -> execute(runId, current.question() + "（已明确指标: " + pinnedTerms + "）", pinned), executor);
+        launch(runId, current.question() + "（已明确指标: " + pinnedTerms + "）", pinned);
         return store.get(runId);
     }
 
@@ -119,12 +122,6 @@ public class OperationsAnalysisService {
         }
         if (question.length() > MAX_QUESTION_LENGTH) {
             throw new IllegalArgumentException("分析问题长度不能超过 " + MAX_QUESTION_LENGTH);
-        }
-    }
-
-    private void ensureNoActiveRun() {
-        if (store.existsActive()) {
-            throw new IllegalStateException("已有正在进行的分析，请等待完成后再启动");
         }
     }
 
@@ -151,39 +148,50 @@ public class OperationsAnalysisService {
         }
     }
 
-    private AnalysisRunStore.RunRecord execute(UUID runId, String question,
-                                               AnalyticsModelClient.QuestionUnderstanding pinned) {
-        long start = System.currentTimeMillis();
-        // FutureTask (not CompletableFuture): cancel(true) actually interrupts
-        // the graph thread, so a hung model or query call cannot keep holding
-        // one of the two analytics executor threads after the deadline.
-        var task = new java.util.concurrent.FutureTask<>(
-                () -> runner.execute(runId, question, pinned));
-        executor.execute(task);
+    private void launch(UUID runId, String question,
+                        AnalyticsModelClient.QuestionUnderstanding pinned) {
+        long startedAt = System.currentTimeMillis();
+        FutureTask<OperationsAnalysisGraph.AnalysisRunResult> task = new FutureTask<>(
+                () -> runner.execute(runId, question, pinned)) {
+            @Override
+            protected void done() {
+                completeTask(runId, question, startedAt, this);
+            }
+        };
         try {
-            OperationsAnalysisGraph.AnalysisRunResult outcome = task.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
-            return persistOutcome(runId, question, outcome, System.currentTimeMillis() - start);
-        } catch (TimeoutException timedOut) {
-            return terminate(runId, question, "ANALYSIS_TIMEOUT", System.currentTimeMillis() - start, task);
+            // The graph runs directly on the configured executor. Submitting an
+            // inner task and waiting on it would deadlock a bounded executor.
+            executor.execute(task);
+        } catch (RuntimeException rejected) {
+            persistFailure(runId, question, "ANALYSIS_ABORTED", System.currentTimeMillis() - startedAt);
+            throw rejected;
+        }
+        java.util.concurrent.CompletableFuture.delayedExecutor(timeout.toMillis(), TimeUnit.MILLISECONDS)
+                .execute(() -> task.cancel(true));
+    }
+
+    private void completeTask(UUID runId, String question, long startedAt,
+                              FutureTask<OperationsAnalysisGraph.AnalysisRunResult> task) {
+        long durationMs = System.currentTimeMillis() - startedAt;
+        if (task.isCancelled()) {
+            terminate(runId, question, "ANALYSIS_TIMEOUT", durationMs);
+            return;
+        }
+        try {
+            persistOutcome(runId, question, task.get(), durationMs);
+        } catch (java.util.concurrent.ExecutionException failedExecution) {
+            persistFailure(runId, question, "ANALYSIS_ABORTED", durationMs);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-            task.cancel(true);
-            return terminate(runId, question, "ANALYSIS_INTERRUPTED", System.currentTimeMillis() - start, null);
-        } catch (java.util.concurrent.ExecutionException failedExecution) {
-            return persistFailure(runId, question, "ANALYSIS_ABORTED",
-                    System.currentTimeMillis() - start);
+            persistFailure(runId, question, "ANALYSIS_INTERRUPTED", durationMs);
         } catch (java.util.concurrent.CancellationException cancelled) {
-            // Timeout path already persisted and terminated the trace.
-            return store.get(runId);
+            terminate(runId, question, "ANALYSIS_TIMEOUT", durationMs);
         }
     }
 
     /** Cancels the work, persists the failure and closes the execution trace with FAILED. */
     private AnalysisRunStore.RunRecord terminate(UUID runId, String question, String stage,
-                                                 long durationMs, java.util.concurrent.FutureTask<?> task) {
-        if (task != null) {
-            task.cancel(true);
-        }
+                                                 long durationMs) {
         AnalysisRunStore.RunRecord record = persistFailure(runId, question, stage, durationMs);
         if (events != null) {
             try {
@@ -232,6 +240,9 @@ public class OperationsAnalysisService {
             }
         };
         store.put(record);
+        if (!"NEEDS_CLARIFICATION".equals(record.status())) {
+            releaseActive(runId);
+        }
         return record;
     }
 
@@ -240,7 +251,16 @@ public class OperationsAnalysisService {
         var record = new AnalysisRunStore.RunRecord(runId, question, "FAILED", List.of(),
                 "", 0, false, durationMs, stage, Instant.now(clock), List.of(), List.of());
         store.put(record);
+        releaseActive(runId);
         return record;
+    }
+
+    private void releaseActive(UUID runId) {
+        synchronized (lifecycleLock) {
+            if (runId.equals(activeRunId)) {
+                activeRunId = null;
+            }
+        }
     }
 
     private AnalysisRunStore.RunRecord rerunningRecord(UUID runId) {
@@ -253,14 +273,17 @@ public class OperationsAnalysisService {
         private final UUID runId;
         private final String question;
 
-        RecordBuilder(UUID runId, String question) {
+        private final Clock clock;
+
+        RecordBuilder(UUID runId, String question, Clock clock) {
             this.runId = runId;
             this.question = question;
+            this.clock = clock;
         }
 
         AnalysisRunStore.RunRecord running() {
             return new AnalysisRunStore.RunRecord(runId, question, "RUNNING",
-                    List.of(), "", 0, false, 0, null, Instant.now(Clock.systemUTC()), List.of(), List.of());
+                    List.of(), "", 0, false, 0, null, Instant.now(clock), List.of(), List.of());
         }
     }
 }

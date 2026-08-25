@@ -128,6 +128,23 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
+    void resumedRunPublishesResumedInsteadOfASecondRunStarted() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of()),
+                List.of(GOOD_SQL),
+                new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("total"), "", "kWh"),
+                "共 3 行结果。");
+        UUID runId = UUID.randomUUID();
+
+        graph.run(runId, "上周能耗", new AnalyticsModelClient.QuestionUnderstanding(
+                "上周能耗", List.of("能耗"), List.of()));
+
+        assertThat(publisher.history(runId).get(0).eventType()).isEqualTo(ExecutionEventType.RESUMED);
+        assertThat(publisher.history(runId).stream()
+                .filter(event -> event.eventType() == ExecutionEventType.RUN_STARTED)).isEmpty();
+    }
+
+    @Test
     void unknownMetricTermAlsoRequiresClarification() {
         modelClient.reset(
                 new AnalyticsModelClient.QuestionUnderstanding("客户满意度", List.of("客户满意度"), List.of()),

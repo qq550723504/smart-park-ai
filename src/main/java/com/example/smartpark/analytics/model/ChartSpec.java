@@ -56,11 +56,44 @@ public record ChartSpec(
                 || xField == null || !result.columnNames().contains(xField)
                 || yFields == null || yFields.isEmpty()
                 || !result.columnNames().containsAll(yFields)
+                || (type != ChartType.TABLE && !numericYFields(yFields, result))
                 || (seriesField != null && !seriesField.isBlank() && !result.columnNames().contains(seriesField))) {
             throw new IllegalArgumentException("chart proposal references unknown result columns");
         }
         String resolvedSeries = seriesField == null || seriesField.isBlank() ? "-" : seriesField;
         return new ChartSpec(type, title.strip(), xField, yFields, resolvedSeries, unit == null ? "" : unit);
+    }
+
+    private static boolean numericYFields(List<String> yFields, TabularResult result) {
+        return yFields.stream().allMatch(field -> {
+            int index = result.columnNames().indexOf(field);
+            boolean hasValue = false;
+            for (List<Object> row : result.rows()) {
+                Object value = row.get(index);
+                if (value == null) {
+                    continue;
+                }
+                hasValue = true;
+                if (!isNumeric(value)) {
+                    return false;
+                }
+            }
+            return hasValue;
+        });
+    }
+
+    private static boolean isNumeric(Object value) {
+        if (value instanceof Number number) {
+            return Double.isFinite(number.doubleValue());
+        }
+        if (value instanceof CharSequence text) {
+            try {
+                return Double.isFinite(Double.parseDouble(text.toString().strip()));
+            } catch (NumberFormatException ignored) {
+                return false;
+            }
+        }
+        return false;
     }
 
     private static ChartSpec tableFallback(String title, TabularResult result) {

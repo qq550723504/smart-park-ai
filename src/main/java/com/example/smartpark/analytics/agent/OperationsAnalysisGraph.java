@@ -58,6 +58,7 @@ public class OperationsAnalysisGraph {
     private final ExecutionEventPublisher publisher;
     private final AnalysisSummaryValidator summaryValidator;
     private final Clock clock;
+    private final Duration executionTimeout;
     private final CompiledGraph compiled;
     private final ConcurrentHashMap<UUID, RunContext> contexts = new ConcurrentHashMap<>();
 
@@ -121,6 +122,18 @@ public class OperationsAnalysisGraph {
                                    ExecutionEventPublisher publisher,
                                    AnalysisSummaryValidator summaryValidator,
                                    Clock clock) {
+        this(catalog, modelClient, costGate, executionGate, publisher, summaryValidator, clock,
+                Duration.ofSeconds(60));
+    }
+
+    public OperationsAnalysisGraph(MetricCatalog catalog,
+                                   AnalyticsModelClient modelClient,
+                                   CostGate costGate,
+                                   ExecutionGate executionGate,
+                                   ExecutionEventPublisher publisher,
+                                   AnalysisSummaryValidator summaryValidator,
+                                   Clock clock,
+                                   Duration executionTimeout) {
         this.catalog = catalog;
         this.modelClient = modelClient;
         this.costGate = costGate;
@@ -128,6 +141,10 @@ public class OperationsAnalysisGraph {
         this.publisher = publisher == null ? new InMemoryExecutionEventPublisher() : publisher;
         this.summaryValidator = summaryValidator;
         this.clock = clock;
+        if (executionTimeout == null || executionTimeout.isZero() || executionTimeout.isNegative()) {
+            throw new IllegalArgumentException("executionTimeout must be positive");
+        }
+        this.executionTimeout = executionTimeout;
         try {
             this.compiled = build();
         } catch (Exception exception) {
@@ -220,13 +237,17 @@ public class OperationsAnalysisGraph {
         RunContext ctx = new RunContext();
         ctx.pinnedUnderstanding = pinnedUnderstanding;
         contexts.put(runId, ctx);
-        publish(ctx, runId, ExecutionStage.UNDERSTANDING, ExecutionEventType.RUN_STARTED,
-                ExecutionStatus.RUNNING, "运营分析已启动: " + strip(question), null);
+        ExecutionEventType lifecycleEvent = pinnedUnderstanding == null
+                ? ExecutionEventType.RUN_STARTED : ExecutionEventType.RESUMED;
+        publish(ctx, runId, ExecutionStage.UNDERSTANDING, lifecycleEvent,
+                ExecutionStatus.RUNNING,
+                pinnedUnderstanding == null ? "运营分析已启动: " + strip(question) : "澄清已提交，继续运营分析",
+                null);
         try {
             Flux.from(compiled.stream(Map.of(
                             STATE_QUESTION, question,
                             STATE_RUN_ID, runId.toString())))
-                    .blockLast(Duration.ofSeconds(60));
+                    .blockLast(executionTimeout);
         } catch (RuntimeException exception) {
             ctx.status = "FAILED";
             ctx.failureStage = "ANALYSIS_ABORTED";

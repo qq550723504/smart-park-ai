@@ -7,6 +7,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Configuration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Configuration contract: the analytics capability only exists when explicitly
@@ -79,5 +80,17 @@ class AnalyticsPropertiesTest {
         });
         runner.withPropertyValues(FULL_DATASOURCE)
                 .run(context -> assertThat(context).hasBean("metricCatalog"));
+    }
+
+    @Test
+    void rejectsNonFiniteOrNonPositivePlanCost() {
+        AnalyticsProperties properties = new AnalyticsProperties();
+
+        assertThatThrownBy(() -> properties.setMaxPlanCost(Double.NaN))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> properties.setMaxPlanCost(Double.POSITIVE_INFINITY))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> properties.setMaxPlanCost(0))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 }

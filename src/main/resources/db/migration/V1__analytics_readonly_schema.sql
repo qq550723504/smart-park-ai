@@ -51,9 +51,10 @@ INSERT INTO analytics.energy_hourly_raw (building_id, meter_id, reading_at, kwh,
 SELECT
     'B' || b,
     'MTR-' || b || '-' || m,
-    -- TIMESTAMPTZ honors the +08 offset; a plain TIMESTAMP literal would be
-    -- re-interpreted in the migration session timezone and shift every row.
-    TIMESTAMPTZ '2026-08-20 00:00:00+08' + make_interval(hours => (d * 24 + h)),
+    -- Anchor facts to the current park date so the runtime-relative lookback
+    -- continues to include the demo rows after the deployment day.
+    ((CURRENT_DATE - 4)::timestamp AT TIME ZONE 'Asia/Shanghai')
+        + make_interval(hours => (d * 24 + h)),
     CASE WHEN h >= 22 OR h < 6 THEN 4.5 + d + b ELSE 18.0 + d * 2 + b END + m,
     15.0 + b * 2,
     CASE WHEN h BETWEEN 9 AND 19 THEN 42.0 + b * 3 ELSE 12.0 + b END
@@ -64,32 +65,32 @@ FROM generate_series(1, 3) AS b,
 ON CONFLICT DO NOTHING;
 
 INSERT INTO analytics.alert_fact_raw (alert_id, building_id, device_id, category, risk_level, occurred_at, status) VALUES
-    ('ALT-TEMP-001', 'B1', 'AC-B1-07', 'TEMPERATURE', 'HIGH',   TIMESTAMPTZ '2026-08-22 09:15:00+08', 'OPEN'),
-    ('ALT-PWR-002',  'B1', 'PWR-B1-02', 'POWER',      'LOW',    TIMESTAMPTZ '2026-08-22 14:40:00+08', 'RESOLVED'),
-    ('ALT-HUM-003',  'B2', 'HUM-B2-11', 'HUMIDITY',   'MEDIUM', TIMESTAMPTZ '2026-08-23 03:05:00+08', 'OPEN'),
-    ('ALT-DOOR-004', 'B2', 'DR-B2-01',  'ACCESS',     'HIGH',   TIMESTAMPTZ '2026-08-23 22:30:00+08', 'OPEN'),
-    ('ALT-TEMP-005', 'B3', 'AC-B3-03',  'TEMPERATURE', 'LOW',   TIMESTAMPTZ '2026-08-24 11:20:00+08', 'RESOLVED')
+    ('ALT-TEMP-001', 'B1', 'AC-B1-07', 'TEMPERATURE', 'HIGH',   (((CURRENT_DATE - 3)::timestamp + TIME '09:15') AT TIME ZONE 'Asia/Shanghai'), 'OPEN'),
+    ('ALT-PWR-002',  'B1', 'PWR-B1-02', 'POWER',      'LOW',    (((CURRENT_DATE - 3)::timestamp + TIME '14:40') AT TIME ZONE 'Asia/Shanghai'), 'RESOLVED'),
+    ('ALT-HUM-003',  'B2', 'HUM-B2-11', 'HUMIDITY',   'MEDIUM', (((CURRENT_DATE - 2)::timestamp + TIME '03:05') AT TIME ZONE 'Asia/Shanghai'), 'OPEN'),
+    ('ALT-DOOR-004', 'B2', 'DR-B2-01',  'ACCESS',     'HIGH',   (((CURRENT_DATE - 2)::timestamp + TIME '22:30') AT TIME ZONE 'Asia/Shanghai'), 'OPEN'),
+    ('ALT-TEMP-005', 'B3', 'AC-B3-03',  'TEMPERATURE', 'LOW',   (((CURRENT_DATE - 1)::timestamp + TIME '11:20') AT TIME ZONE 'Asia/Shanghai'), 'RESOLVED')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO analytics.device_snapshot_raw (device_id, building_id, device_type, status, snapshot_at) VALUES
-    ('AC-B1-07',  'B1', 'HVAC',       'ONLINE',       TIMESTAMPTZ '2026-08-24 08:00:00+08'),
-    ('PWR-B1-02', 'B1', 'POWER_METER','ONLINE',       TIMESTAMPTZ '2026-08-24 08:00:00+08'),
-    ('LFT-B1-01', 'B1', 'ELEVATOR',   'OFFLINE',      TIMESTAMPTZ '2026-08-24 08:00:00+08'),
-    ('HUM-B2-11', 'B2', 'HVAC',       'DEGRADED',     TIMESTAMPTZ '2026-08-24 08:00:00+08'),
-    ('DR-B2-01',  'B2', 'ACCESS',     'ONLINE',       TIMESTAMPTZ '2026-08-24 08:00:00+08'),
-    ('AC-B3-03',  'B3', 'HVAC',       'OFFLINE',      TIMESTAMPTZ '2026-08-24 08:00:00+08'),
-    ('CAM-B3-05', 'B3', 'CAMERA',     'ONLINE',       TIMESTAMPTZ '2026-08-24 08:00:00+08')
+    ('AC-B1-07',  'B1', 'HVAC',       'ONLINE',       (((CURRENT_DATE - 1)::timestamp + TIME '08:00') AT TIME ZONE 'Asia/Shanghai')),
+    ('PWR-B1-02', 'B1', 'POWER_METER','ONLINE',       (((CURRENT_DATE - 1)::timestamp + TIME '08:00') AT TIME ZONE 'Asia/Shanghai')),
+    ('LFT-B1-01', 'B1', 'ELEVATOR',   'OFFLINE',      (((CURRENT_DATE - 1)::timestamp + TIME '08:00') AT TIME ZONE 'Asia/Shanghai')),
+    ('HUM-B2-11', 'B2', 'HVAC',       'DEGRADED',     (((CURRENT_DATE - 1)::timestamp + TIME '08:00') AT TIME ZONE 'Asia/Shanghai')),
+    ('DR-B2-01',  'B2', 'ACCESS',     'ONLINE',       (((CURRENT_DATE - 1)::timestamp + TIME '08:00') AT TIME ZONE 'Asia/Shanghai')),
+    ('AC-B3-03',  'B3', 'HVAC',       'OFFLINE',      (((CURRENT_DATE - 1)::timestamp + TIME '08:00') AT TIME ZONE 'Asia/Shanghai')),
+    ('CAM-B3-05', 'B3', 'CAMERA',     'ONLINE',       (((CURRENT_DATE - 1)::timestamp + TIME '08:00') AT TIME ZONE 'Asia/Shanghai'))
 ON CONFLICT DO NOTHING;
 
 INSERT INTO analytics.parking_daily_raw (stat_date, parking_zone, entries, peak_occupancy, capacity) VALUES
-    (DATE '2026-08-21', 'ZONE-A', 812, 340, 400),
-    (DATE '2026-08-21', 'ZONE-B', 455, 180, 250),
-    (DATE '2026-08-22', 'ZONE-A', 876, 388, 400),
-    (DATE '2026-08-22', 'ZONE-B', 462, 205, 250),
-    (DATE '2026-08-23', 'ZONE-A', 901, 397, 400),
-    (DATE '2026-08-23', 'ZONE-B', 470, 214, 250),
-    (DATE '2026-08-24', 'ZONE-A', 604, 266, 400),
-    (DATE '2026-08-24', 'ZONE-B', 310, 141, 250)
+    (CURRENT_DATE - 4, 'ZONE-A', 812, 340, 400),
+    (CURRENT_DATE - 4, 'ZONE-B', 455, 180, 250),
+    (CURRENT_DATE - 3, 'ZONE-A', 876, 388, 400),
+    (CURRENT_DATE - 3, 'ZONE-B', 462, 205, 250),
+    (CURRENT_DATE - 2, 'ZONE-A', 901, 397, 400),
+    (CURRENT_DATE - 2, 'ZONE-B', 470, 214, 250),
+    (CURRENT_DATE - 1, 'ZONE-A', 604, 266, 400),
+    (CURRENT_DATE - 1, 'ZONE-B', 310, 141, 250)
 ON CONFLICT DO NOTHING;
 
 -- Whitelisted analysis views; owners keep full control, ro role gets SELECT.

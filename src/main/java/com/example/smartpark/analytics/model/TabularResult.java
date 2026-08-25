@@ -2,6 +2,8 @@ package com.example.smartpark.analytics.model;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.ArrayList;
+import java.util.Collections;
 
 /**
  * Safe tabular output of an executed analysis query: column labels, bounded
@@ -16,7 +18,7 @@ public record TabularResult(
     public TabularResult {
         columnNames = List.copyOf(Objects.requireNonNull(columnNames, "columnNames"));
         rows = Objects.requireNonNull(rows, "rows").stream()
-                .map(row -> (List<Object>) List.copyOf(Objects.requireNonNull(row, "row")))
+                .map(row -> Collections.unmodifiableList(new ArrayList<>(Objects.requireNonNull(row, "row"))))
                 .toList();
     }
 

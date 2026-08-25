@@ -22,8 +22,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.FutureTask;
 
 /** Dynamic fan-out runtime. Only selected experts receive work and selected branches execute concurrently. */
 public final class ExpertCollaborationGraph {
@@ -64,21 +64,37 @@ public final class ExpertCollaborationGraph {
 
     /** Runs the fan-out for one collaboration run; runId enables live branch handoff tracing. */
     public List<ExpertFinding> execute(SupervisorPlan plan, UUID runId) {
-        List<CompletableFuture<ExpertFinding>> futures = plan.selectedDomains().stream()
+        List<BranchTask> tasks = plan.selectedDomains().stream()
                 .map(domain -> {
                     publishBranchHandoff(runId, domain, "supervisor -> " + domain.name().toLowerCase(), null);
-                    return CompletableFuture.supplyAsync(() -> invoke(domain, plan.assignments().get(domain)), executor)
-                            .orTimeout(expertTimeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS)
-                            .exceptionally(error -> failed(domain, "expert timed out or failed"));
+                    FutureTask<ExpertFinding> task = new FutureTask<>(
+                            () -> invoke(domain, plan.assignments().get(domain)));
+                    executor.execute(task);
+                    return new BranchTask(domain, task);
                 })
                 .toList();
-        List<ExpertFinding> findings = futures.stream().map(CompletableFuture::join)
+        List<ExpertFinding> findings = tasks.stream().map(this::await)
                 .sorted(Comparator.comparing(ExpertFinding::domain)).toList();
         for (ExpertFinding finding : findings) {
             publishBranchHandoff(runId, finding.domain(),
                     finding.domain().name().toLowerCase() + " -> supervisor", finding.status().name());
         }
         return findings;
+    }
+
+    private ExpertFinding await(BranchTask branch) {
+        try {
+            return branch.task().get(expertTimeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException timeout) {
+            branch.task().cancel(true);
+            return failed(branch.domain(), "expert timed out or failed");
+        } catch (InterruptedException interrupted) {
+            branch.task().cancel(true);
+            Thread.currentThread().interrupt();
+            return failed(branch.domain(), "expert execution interrupted");
+        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.CancellationException failure) {
+            return failed(branch.domain(), "expert timed out or failed");
+        }
     }
 
     /** Typed branch-level handoff trace so the panel can render per-expert progress. */
@@ -108,6 +124,8 @@ public final class ExpertCollaborationGraph {
             return failed(domain, "failed to analyze expert assignment");
         }
     }
+
+    private record BranchTask(ExpertDomain domain, FutureTask<ExpertFinding> task) { }
 
     @FunctionalInterface
     public interface Expert {

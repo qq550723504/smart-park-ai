@@ -11,6 +11,8 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -47,6 +49,25 @@ class OperationsAnalysisServiceTest {
         }, directExecutor());
         var paused = serializingService.start("进行中的问题");
         assertThat(paused.status()).isEqualTo("NEEDS_CLARIFICATION");
+        assertThatThrownBy(() -> serializingService.start("并发问题"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("已有正在进行的分析");
+    }
+
+    @Test
+    void runsGraphOnTheConfiguredExecutorWithoutNestedSubmissionDeadlock() {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            OperationsAnalysisService service = service(
+                    (runId, question, pinned) -> completed(runId), executor, java.time.Duration.ofMillis(500));
+
+            var run = service.start("单线程执行");
+
+            awaitTerminal(() -> "COMPLETED".equals(service.get(run.runId()).status()));
+            assertThat(service.get(run.runId()).status()).isEqualTo("COMPLETED");
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     @Test
@@ -124,7 +145,7 @@ class OperationsAnalysisServiceTest {
     }
 
     @Test
-    void concurrentRunsAreIsolatedByRunId() {
+    void terminalRunsCanBeStartedAgainAfterThePreviousRunReleasesItsSlot() {
         OperationsAnalysisService service = service(
                 (runId, question, pinned) -> completed(runId), directExecutor());
         var runA = service.start("问题 A");

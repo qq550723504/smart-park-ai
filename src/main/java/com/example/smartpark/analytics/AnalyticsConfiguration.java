@@ -99,11 +99,13 @@ public class AnalyticsConfiguration {
                                                     QueryCostGuard queryCostGuard,
                                                     ReadOnlyQueryExecutor readOnlyQueryExecutor,
                                                     com.example.smartpark.execution.ExecutionEventPublisher publisher,
-                                                    Clock analyticsClock) {
+                                                    Clock analyticsClock,
+                                                    AnalyticsProperties properties) {
         OperationsAnalysisGraph.CostGate costGate =
                 (sql, parameters) -> queryCostGuard.estimatedCost(sql.sql(), parameters);
         return new OperationsAnalysisGraph(metricCatalog, analyticsModelClient, costGate,
-                readOnlyQueryExecutor::execute, publisher, new AnalysisSummaryValidator(), analyticsClock);
+                readOnlyQueryExecutor::execute, publisher, new AnalysisSummaryValidator(), analyticsClock,
+                properties.getAnalysisTimeout());
     }
 
     @Bean
