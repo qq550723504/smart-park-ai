@@ -20,7 +20,9 @@ public class AnalysisRunStore {
             boolean truncated,
             long durationMs,
             String failureStage,
-            Instant createdAt) {}
+            Instant createdAt,
+            List<String> columns,
+            List<List<Object>> rows) {}
 
     private final Map<UUID, RunRecord> runs = new ConcurrentHashMap<>();
 

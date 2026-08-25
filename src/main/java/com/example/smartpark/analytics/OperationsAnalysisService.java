@@ -149,14 +149,16 @@ public class OperationsAnalysisService {
                     List.of(), outcome.summary() == null ? "" : outcome.summary(),
                     outcome.result() == null ? 0 : outcome.result().rowCount(),
                     outcome.result() != null && outcome.result().truncated(),
-                    durationMs, null, Instant.now(clock));
+                    durationMs, null, Instant.now(clock),
+                    outcome.result() == null ? List.of() : outcome.result().columnNames(),
+                    outcome.result() == null ? List.of() : outcome.result().rows());
             case NEEDS_CLARIFICATION -> new AnalysisRunStore.RunRecord(runId, question, "NEEDS_CLARIFICATION",
                     List.copyOf(outcome.clarificationQuestions()), "", 0, false, durationMs, null,
-                    Instant.now(clock));
+                    Instant.now(clock), List.of(), List.of());
             case FAILED -> new AnalysisRunStore.RunRecord(runId, question, "FAILED",
                     List.of(), "", 0, false, durationMs,
                     outcome.failureStage() == null ? "UNKNOWN" : outcome.failureStage(),
-                    Instant.now(clock));
+                    Instant.now(clock), List.of(), List.of());
         };
         store.put(record);
         return record;
@@ -165,7 +167,7 @@ public class OperationsAnalysisService {
     private AnalysisRunStore.RunRecord persistFailure(UUID runId, String question,
                                                       String stage, long durationMs) {
         var record = new AnalysisRunStore.RunRecord(runId, question, "FAILED", List.of(),
-                "", 0, false, durationMs, stage, Instant.now(clock));
+                "", 0, false, durationMs, stage, Instant.now(clock), List.of(), List.of());
         store.put(record);
         return record;
     }
@@ -173,7 +175,7 @@ public class OperationsAnalysisService {
     private AnalysisRunStore.RunRecord rerunningRecord(UUID runId) {
         var previous = get(runId);
         return new AnalysisRunStore.RunRecord(runId, previous.question(), "RUNNING",
-                List.of(), "", 0, false, 0, null, Instant.now(clock));
+                List.of(), "", 0, false, 0, null, Instant.now(clock), List.of(), List.of());
     }
 
     private static final class RecordBuilder {
@@ -187,7 +189,7 @@ public class OperationsAnalysisService {
 
         AnalysisRunStore.RunRecord running() {
             return new AnalysisRunStore.RunRecord(runId, question, "RUNNING",
-                    List.of(), "", 0, false, 0, null, Instant.now(Clock.systemUTC()));
+                    List.of(), "", 0, false, 0, null, Instant.now(Clock.systemUTC()), List.of(), List.of());
         }
     }
 }

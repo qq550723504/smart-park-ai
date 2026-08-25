@@ -23,6 +23,10 @@ final class OperationsAnalysisDtos {
             dto.put("rowCount", record.rowCount());
             dto.put("truncated", record.truncated());
         }
+        if (!record.columns().isEmpty()) {
+            dto.put("columns", record.columns());
+            dto.put("rows", record.rows());
+        }
         if (record.failureStage() != null) {
             dto.put("failureStage", record.failureStage());
         }
