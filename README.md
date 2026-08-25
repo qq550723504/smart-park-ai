@@ -132,12 +132,12 @@ curl "http://localhost:8080/api/workflows/replace-with-workflow-id"
 | `SMARTPARK_KNOWLEDGE_MIN_SIMILARITY_SCORE` | `0.65` | RAG 结果最低相似度 |
 | `SMARTPARK_CUSTOMER_MINIMUM_KNOWLEDGE_SCORE` | `0.70` | 客服接受知识结果的最低分数 |
 | `SMARTPARK_ANALYTICS_ENABLED` | `false` | 是否启用真实只读 PostgreSQL 分析链路 |
-| `SMARTPARK_ANALYTICS_DEMO_SNAPSHOT_REFRESH_ENABLED` | `false` | 仅在持久化演示库中刷新 V1 的 7 条设备夹具；真实数据必须保持关闭 |
+| `SMARTPARK_ANALYTICS_DEMO_DATA_REFRESH_ENABLED` | `false` | 仅在持久化演示库中把 V1 的时间窗口夹具（能耗、告警、设备快照、停车）重新锚定到当前时间；真实数据必须保持关闭 |
 | `SMARTPARK_ANALYTICS_DB_URL` | 空 | 专用分析数据库 JDBC URL；不能复用业务数据库 |
 | `SMARTPARK_ANALYTICS_DB_ADMIN_USER` | 空 | 仅供 Flyway 和演示快照刷新使用的对象所有者账号 |
 | `SMARTPARK_ANALYTICS_DB_ADMIN_PASSWORD` | 空 | 分析数据库对象所有者密码 |
 | `SMARTPARK_ANALYTICS_DB_USER` | 空 | 运行时只读账号，固定使用 `smartpark_analytics_ro` |
-| `SMARTPARK_ANALYTICS_DB_RO_PASSWORD` | 空 | 只读账号密码；Flyway 创建账号与运行时连接必须一致 |
+| `SMARTPARK_ANALYTICS_DB_RO_PASSWORD` | 空 | 只读账号密码；Flyway 创建账号与运行时连接必须一致。含单引号的密码会被安全转义后再嵌入迁移 SQL |
 | `SPRING_AI_DASHSCOPE_BASE_URL` | DashScope 官方地址 | 覆盖模型客户端地址，用于兼容网关 |
 | `AI_DASHSCOPE_API_KEY` | 空 | DashScope 密钥，仅从进程环境变量读取 |
 

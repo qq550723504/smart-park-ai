@@ -56,9 +56,10 @@ class OperationsAnalysisGraphTest {
         Flyway.configure()
                 .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/migration")
-                .placeholders(Map.of("analyticsRoPassword", "test-ro-pass"))
                 .load()
                 .migrate();
+        com.example.smartpark.analytics.AnalyticsRoleCredentials.sync(
+                postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword(), "test-ro-pass");
 
         var dataSource = new SimpleDriverDataSource();
         dataSource.setDriverClass(org.postgresql.Driver.class);

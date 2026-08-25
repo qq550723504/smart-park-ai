@@ -42,10 +42,10 @@ public class AnalyticsConfiguration {
     }
 
     @Bean(destroyMethod = "shutdown")
-    @ConditionalOnProperty(name = "smartpark.analytics.demo-snapshot-refresh-enabled", havingValue = "true")
-    DemoSnapshotRefresher demoSnapshotRefresher(AnalyticsProperties properties) {
+    @ConditionalOnProperty(name = "smartpark.analytics.demo-data-refresh-enabled", havingValue = "true")
+    DemoDataRefresher demoDataRefresher(AnalyticsProperties properties) {
         properties.validateUsable();
-        var refresher = new DemoSnapshotRefresher(properties.getDatasource().getUrl(),
+        var refresher = new DemoDataRefresher(properties.getDatasource().getUrl(),
                 properties.getDatasource().getAdminUsername(),
                 properties.getDatasource().getAdminPassword(),
                 Duration.ofHours(1));
@@ -61,6 +61,27 @@ public class AnalyticsConfiguration {
     @Bean(destroyMethod = "shutdown")
     ExecutorService analyticsExecutor() {
         return Executors.newFixedThreadPool(2);
+    }
+
+    @Bean
+    org.springframework.boot.ApplicationRunner analyticsRolePasswordProvisioner(
+            AnalyticsProperties properties) {
+        // Binds the configured read-only credential to the role created
+        // password-less by V1 — via the single audited quoting point, never
+        // through migration SQL interpolation. Runs at application startup;
+        // failure is logged but non-fatal so boot robustness is unchanged
+        // (mismatched credentials still surface on the first analysis query).
+        return args -> {
+            try {
+                AnalyticsRoleCredentials.sync(properties.getDatasource().getUrl(),
+                        properties.getDatasource().getAdminUsername(),
+                        properties.getDatasource().getAdminPassword(),
+                        properties.getDatasource().getPassword());
+            } catch (RuntimeException provisioningFailure) {
+                org.slf4j.LoggerFactory.getLogger(AnalyticsConfiguration.class)
+                        .warn("分析只读账号密码同步失败: {}", provisioningFailure.getMessage());
+            }
+        };
     }
 
     @Bean

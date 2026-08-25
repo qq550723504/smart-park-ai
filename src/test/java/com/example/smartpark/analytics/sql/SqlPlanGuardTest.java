@@ -228,10 +228,9 @@ class SqlPlanGuardTest {
                 SELECT building_id, SUM(kwh) FROM analytics.v_energy_hourly
                 WHERE hour_ts >= :fromTs AND hour_ts < :toTs
                 GROUP BY building_id ORDER BY building_id LIMIT 100""",
-                """
-                SELECT building_id, SUM(kwh) FROM analytics.v_energy_hourly
-                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
-                GROUP BY building_id LIMIT 100 OFFSET 1""",
+                // (trailing OFFSET is already rejected one stage earlier, by
+                // SqlAstGuard, because jsqlparser drops it from the AST —
+                // see SqlAstGuardTest.rejectsTrailingOffsetAtTheRepairableValidationStage)
                 """
                 SELECT building_id, SUM(kwh) FROM analytics.v_energy_hourly
                 WHERE hour_ts >= :fromTs AND hour_ts < :toTs

@@ -557,7 +557,7 @@ public class OperationsAnalysisGraph {
         } catch (RuntimeException modelFailure) {
             // degrade below
         }
-        ctx.chart = ChartSpec.fromProposal(proposal, ctx.result);
+        ctx.chart = ChartSpec.fromProposal(proposal, ctx.result, unitByColumn(ctx.plan));
         // The chart payload travels on the dedicated CHART_SPECIFIED event type
         // defined by the public execution contract; the frontend captures it there.
         publish(ctx, runId, ExecutionStage.RENDERING, ExecutionEventType.CHART_SPECIFIED,
@@ -586,6 +586,19 @@ public class OperationsAnalysisGraph {
     }
 
     // ---- helpers -----------------------------------------------------------
+
+    /**
+     * Column→catalog-unit map derived from the executed plan. Chart unit
+     * labels must come from these metric definitions, never from the model's
+     * proposal — one wrong label would misread kWh as a percentage.
+     */
+    private static Map<String, String> unitByColumn(QueryPlan plan) {
+        Map<String, String> unitByColumn = new java.util.LinkedHashMap<>();
+        for (var metric : plan.metrics()) {
+            unitByColumn.putIfAbsent(metric.name().toLowerCase(java.util.Locale.ROOT), metric.unit());
+        }
+        return unitByColumn;
+    }
 
     private boolean needsClarification(OverAllState state) {
         UUID runId = runId(state);

@@ -29,10 +29,39 @@ class ExpertFindingValidatorTest {
         assertThat(validated.confidence()).isZero();
     }
 
-    @Test void acceptsFailureWithoutEvidence() {
+    @Test void sanitizesAFailedFindingWithoutObservedEvidence() {
         ExpertFinding finding = new ExpertFinding(ExpertDomain.DEVICE, FindingStatus.FAILED,
-                "failed to query device", java.util.List.of(), 0, java.util.List.of("retry"));
-        assertThat(validator.validate(finding, Set.of())).isEqualTo(finding);
+                "设备查询超时", java.util.List.of(), 0, java.util.List.of("retry"));
+        ExpertFinding validated = validator.validate(finding, Set.of());
+        // The status is preserved (including localized reasons being accepted),
+        // but the free-form conclusion is replaced by a fixed public-safe
+        // message: no unobserved claim reaches ExpertCard.vue.
+        assertThat(validated.status()).isEqualTo(FindingStatus.FAILED);
+        assertThat(validated.evidenceRefs()).isEmpty();
+        assertThat(validated.conclusion())
+                .doesNotContain("设备查询超时")
+                .contains("专家执行失败");
+    }
+
+    @Test void clearsInventedReferencesOnAnInsufficientEvidenceFinding() {
+        ExpertFinding finding = new ExpertFinding(ExpertDomain.ENERGY, FindingStatus.INSUFFICIENT_EVIDENCE,
+                "tool:energy:99 shows a spike", java.util.List.of("tool:energy:99"), 0, java.util.List.of());
+        ExpertFinding validated = validator.validate(finding, Set.of("tool:energy:1"));
+        assertThat(validated.evidenceRefs()).isEmpty();
+        assertThat(validated.conclusion()).doesNotContain("spike");
+        assertThat(validated.conclusion()).contains("证据不足");
+    }
+
+    @Test void keepsOnlyVerifiedReferencesAndGroundsTheirRendering() {
+        EvidenceLedger ledger = new EvidenceLedger();
+        ledger.record("tool:device:1", "{\"deviceId\":\"D1\",\"status\":\"OFFLINE\"}");
+        ExpertFinding finding = new ExpertFinding(ExpertDomain.DEVICE, FindingStatus.INSUFFICIENT_EVIDENCE,
+                "invented tool:device:2 contradicts tool:device:1",
+                java.util.List.of("tool:device:1", "tool:device:2"), 0,java.util.List.of());
+        ExpertFinding validated = validator.validateWithObservations(
+                finding, ledger.snapshotObservations());
+        assertThat(validated.evidenceRefs()).containsExactly("tool:device:1");
+        assertThat(validated.conclusion()).contains("tool:device:1").doesNotContain("invented");
     }
 
     @Test void acceptsPerEntityStatusClaimsAcrossCitedResults() {

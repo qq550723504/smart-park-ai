@@ -138,10 +138,17 @@ SELECT
 FROM analytics.parking_daily_raw;
 
 -- Read-only application role: login account with SELECT on the four views only.
+-- The role is created WITHOUT a password on purpose: interpolating a secret
+-- into migration SQL cannot be escaped safely at substitution time (Flyway
+-- replaces placeholders before PostgreSQL parses the script, so an apostrophe
+-- in a quoted literal breaks the migration). The application binds its
+-- configured runtime credential to ALTER ROLE through a JDBC parameter at
+-- startup (AnalyticsRoleCredentials), so no secret ever passes through SQL
+-- text interpolation.
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'smartpark_analytics_ro') THEN
-        EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', 'smartpark_analytics_ro', '${analyticsRoPassword}');
+        EXECUTE format('CREATE ROLE %I LOGIN', 'smartpark_analytics_ro');
     END IF;
     EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), 'smartpark_analytics_ro');
 END

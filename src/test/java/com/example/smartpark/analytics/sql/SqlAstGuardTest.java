@@ -52,9 +52,20 @@ class SqlAstGuardTest {
                 .isInstanceOf(UnsafeSqlException.class);
     }
 
+    @Test
+    void rejectsTrailingOffsetAtTheRepairableValidationStage() {
+        // jsqlparser drops a trailing OFFSET from its AST, so the structural
+        // gates cannot see it. The guard must reject the raw shape here — at
+        // the stage that still routes to the model's SQL-repair attempt —
+        // instead of failing terminally inside the executor.
+        assertThatThrownBy(() -> SqlAstGuard.validate(
+                "SELECT building_id, kwh FROM analytics.v_energy_hourly LIMIT 100 OFFSET 0"))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("OFFSET");
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
-            // SELECT INTO materializes data outside the view boundary
             "SELECT alert_id INTO analytics.evil FROM analytics.v_alert_fact LIMIT 5",
             // multi statement smuggling
             "SELECT 1; DROP TABLE analytics.v_alert_fact",

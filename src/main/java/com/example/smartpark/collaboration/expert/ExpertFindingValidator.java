@@ -62,7 +62,29 @@ public final class ExpertFindingValidator {
             return new ExpertFinding(finding.domain(), finding.status(),
                     groundedConclusion(refs, observed), refs, finding.confidence(), finding.nextChecks());
         }
-        return finding;
+        // INSUFFICIENT_EVIDENCE and FAILED findings face the same disclosure
+        // boundary: a model response can invent tool:* references it never
+        // received and free-form factual prose that no observation backs, yet
+        // ExpertCard.vue renders both as evidence and conclusion. Keep only
+        // references that were actually observed in this invocation, and let
+        // the conclusion be exactly the grounded rendering of those verified
+        // observations (or a fixed public-safe status message when none are).
+        List<String> verifiedRefs = refs.stream()
+                .filter(observed::containsKey)
+                .toList();
+        String conclusion = verifiedRefs.isEmpty()
+                ? publicStatusMessage(finding.status())
+                : groundedConclusion(verifiedRefs, observed);
+        return new ExpertFinding(finding.domain(), finding.status(),
+                conclusion, verifiedRefs, finding.confidence(), finding.nextChecks());
+    }
+
+    private static String publicStatusMessage(FindingStatus status) {
+        return switch (status) {
+            case FAILED -> "专家执行失败，原始输出不可公开验证，已隐藏。";
+            case INSUFFICIENT_EVIDENCE -> "证据不足：未能从本次调用观察到的工具结果中得出结论。";
+            default -> "结论不可公开验证。";
+        };
     }
 
     private ExpertFinding insufficientEvidence(ExpertFinding finding) {

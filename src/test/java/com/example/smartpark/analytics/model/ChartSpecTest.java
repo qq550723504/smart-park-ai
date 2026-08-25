@@ -112,4 +112,42 @@ class ChartSpecTest {
         assertThat(new ChartSpec(ChartSpec.ChartType.TABLE, "t", "building_id",
                 List.of(), "-", "").yFields()).isEmpty();
     }
+
+    @Test
+    void derivesUnitFromPlannedMetricsInsteadOfTrustingTheProposal() {
+        // The model proposed "%" but the planned metric is kWh: the catalog
+        // definition wins, so the trace cannot misread energy as a percentage.
+        ChartSpec spec = ChartSpec.fromProposal(new ChartSpec.Proposal(
+                "LINE", "能耗", "building_id", List.of("total_kwh"), "", "%"), result,
+                java.util.Map.of("total_kwh", "kWh"));
+
+        assertThat(spec.type()).isEqualTo(ChartSpec.ChartType.LINE);
+        assertThat(spec.unit()).isEqualTo("kWh");
+    }
+
+    @Test
+    void mixedMetricUnitsDegradeToTable() {
+        TabularResult mixed = new TabularResult(
+                List.of("building_id", "total_kwh", "deviation_pct"),
+                List.of(List.of("B1", "100", "5.2")), false, 1);
+
+        ChartSpec spec = ChartSpec.fromProposal(new ChartSpec.Proposal(
+                "LINE", "混合单位", "building_id", List.of("total_kwh", "deviation_pct"), "", ""),
+                mixed, java.util.Map.of("total_kwh", "kWh", "deviation_pct", "%"));
+
+        // One axis label cannot represent both kWh and % values.
+        assertThat(spec.type()).isEqualTo(ChartSpec.ChartType.TABLE);
+        assertThat(spec.unit()).isEmpty();
+    }
+
+    @Test
+    void chartYFieldWithoutAPlannedMetricUnitDegradesToTable() {
+        ChartSpec spec = ChartSpec.fromProposal(new ChartSpec.Proposal(
+                "LINE", "无单位", "building_id", List.of("ghost_metric"), "", "kWh"),
+                new TabularResult(List.of("building_id", "ghost_metric"),
+                        List.of(List.of("B1", "7")), false, 1),
+                java.util.Map.of("other_column", "kWh"));
+
+        assertThat(spec.type()).isEqualTo(ChartSpec.ChartType.TABLE);
+    }
 }

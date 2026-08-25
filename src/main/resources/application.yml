@@ -1,13 +1,13 @@
 spring:
   flyway:
     # Analytics owns the only DataSource; migrations run with the admin
-    # (object-owner) account and supply the read-only role password placeholder.
+    # (object-owner) account. The read-only role is created password-less by
+    # V1; AnalyticsRoleCredentials binds its runtime credential via JDBC
+    # parameter at startup — no password placeholder exists in migration SQL.
     enabled: ${smartpark.analytics.enabled:false}
     url: ${SMARTPARK_ANALYTICS_DB_URL:}
     user: ${SMARTPARK_ANALYTICS_DB_ADMIN_USER:}
     password: ${SMARTPARK_ANALYTICS_DB_ADMIN_PASSWORD:}
-    placeholders:
-      analyticsRoPassword: ${SMARTPARK_ANALYTICS_DB_RO_PASSWORD:${SMARTPARK_ANALYTICS_DB_PASSWORD:}}
   autoconfigure:
     # 2.0.0-M1.1 packaging defect: the DashScope autoconfigure jar lists this class in
     # AutoConfiguration.imports but does not ship it. Excluded until the next release.
@@ -43,9 +43,9 @@ spring:
 smartpark:
   analytics:
     enabled: ${SMARTPARK_ANALYTICS_ENABLED:false}
-    # Mutates timestamps of the seven V1 demo device fixtures only. Keep off
-    # for real datasets; enable explicitly only for a persistent demo database.
-    demo-snapshot-refresh-enabled: ${SMARTPARK_ANALYTICS_DEMO_SNAPSHOT_REFRESH_ENABLED:false}
+    # Re-anchors the time-windowed V1 demo fixtures (energy, alerts, device
+    # snapshots, parking) on persistent demo databases. Keep off for real data.
+    demo-data-refresh-enabled: ${SMARTPARK_ANALYTICS_DEMO_DATA_REFRESH_ENABLED:false}
     statement-timeout: 3s
     analysis-timeout: 60s
     max-rows: 500

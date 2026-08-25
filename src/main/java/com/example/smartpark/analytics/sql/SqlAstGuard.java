@@ -73,6 +73,15 @@ public final class SqlAstGuard {
         if (sql.contains(";")) {
             throw reject("检测到多语句边界，已拒绝执行");
         }
+        // The single raw-text check in this guard: JSqlParser silently drops a
+        // trailing OFFSET from its parsed AST, so such shapes would pass every
+        // structural gate below and only fail at execution time — after the
+        // repairable SQL-validation stage is gone. Detect it here so the model
+        // can remove the clause during its one repair attempt.
+        if (java.util.regex.Pattern.compile("(?i)\\blimit\\s+\\d+\\s+offset\\s+\\d+$")
+                .matcher(sql.strip()).find()) {
+            throw reject("当前 QueryPlan 不支持 OFFSET 结果变换，请在修复时移除 OFFSET 子句");
+        }
 
         Statement statement;
         try {

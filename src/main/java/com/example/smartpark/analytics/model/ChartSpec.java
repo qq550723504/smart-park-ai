@@ -34,24 +34,42 @@ public record ChartSpec(
                            String seriesField, String unit) {}
 
     /**
-     * Validates the model's chart proposal against real result columns. Any
-     * mismatch degrades gracefully to a plain TABLE of the same columns —
-     * never to a fabricated chart.
+     * Direct-construction variant without metric metadata; the proposal's
+     * own unit string is kept verbatim.
      */
     public static ChartSpec fromProposal(Proposal proposal, TabularResult result) {
+        return fromProposal(proposal, result, java.util.Map.<String, String>of());
+    }
+
+    /**
+     * Validates the model's chart proposal against real result columns and
+     * the plan's metric definitions. Any mismatch degrades gracefully to a
+     * plain TABLE of the same columns — never to a fabricated chart.
+     *
+     * @param unitByColumn case-insensitive result-column → catalog-unit map
+     *        derived from the executed query plan; when non-empty, chart unit
+     *        labels always come from these definitions instead of trusting the
+     *        model-proposed unit, and charts mixing different units degrade
+     *        to TABLE because one axis label cannot represent them all.
+     */
+    public static ChartSpec fromProposal(Proposal proposal, TabularResult result,
+                                         java.util.Map<String, String> unitByColumn) {
         Objects.requireNonNull(result, "result");
+        Objects.requireNonNullElse(unitByColumn, java.util.Map.<String, String>of());
         String type = proposal == null || proposal.type() == null ? "" : proposal.type().trim();
         try {
             ChartType chartType = ChartType.valueOf(type.toUpperCase(java.util.Locale.ROOT));
             return build(chartType, proposal.title(), proposal.xField(), proposal.yFields(),
-                    proposal.seriesField(), proposal.unit(), result);
+                    proposal.seriesField(), proposal.unit(), result,
+                    Objects.requireNonNullElse(unitByColumn, java.util.Map.<String, String>of()));
         } catch (IllegalArgumentException invalidTypeOrShape) {
             return tableFallback(proposal == null ? null : proposal.title(), result);
         }
     }
 
     private static ChartSpec build(ChartType type, String title, String xField, List<String> yFields,
-                                   String seriesField, String unit, TabularResult result) {
+                                   String seriesField, String unit, TabularResult result,
+                                   java.util.Map<String, String> unitByColumn) {
         if (title == null || title.isBlank()
                 || xField == null || !result.columnNames().contains(xField)
                 || yFields == null || yFields.isEmpty()
@@ -62,7 +80,8 @@ public record ChartSpec(
         }
         String resolvedSeries = seriesField == null || seriesField.isBlank() ? "-" : seriesField;
         requireUniqueCoordinates(type, xField, resolvedSeries, result);
-        return new ChartSpec(type, title.strip(), xField, yFields, resolvedSeries, unit == null ? "" : unit);
+        return new ChartSpec(type, title.strip(), xField, yFields, resolvedSeries,
+                resolveUnit(type, yFields, unit, unitByColumn));
     }
 
     /**
@@ -117,6 +136,31 @@ public record ChartSpec(
             }
         }
         return false;
+    }
+
+    /**
+     * Units are derived from the plan's metric definitions, never trusted
+     * from the model's proposal: a wrong label would misread kWh values as
+     * percentages (or vice versa) in the execution trace. Without metric
+     * metadata the legacy proposal unit is kept verbatim.
+     */
+    private static String resolveUnit(ChartType type, List<String> yFields, String proposedUnit,
+                                      java.util.Map<String, String> unitByColumn) {
+        if (type == ChartType.TABLE || unitByColumn.isEmpty()) {
+            return proposedUnit == null ? "" : proposedUnit;
+        }
+        java.util.Set<String> units = new java.util.LinkedHashSet<>();
+        for (String field : yFields) {
+            String unit = unitByColumn.get(field.toLowerCase(java.util.Locale.ROOT));
+            if (unit == null || unit.isBlank()) {
+                throw new IllegalArgumentException("chart y-field has no planned metric unit: " + field);
+            }
+            units.add(unit);
+        }
+        if (units.size() != 1) {
+            throw new IllegalArgumentException("chart mixes metrics of different units: " + units);
+        }
+        return units.iterator().next();
     }
 
     private static ChartSpec tableFallback(String title, TabularResult result) {
