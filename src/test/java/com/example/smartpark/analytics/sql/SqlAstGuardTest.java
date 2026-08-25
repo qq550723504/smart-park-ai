@@ -8,6 +8,7 @@ import com.example.smartpark.analytics.model.ValidatedSql;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SqlAstGuardTest {
@@ -122,5 +123,22 @@ class SqlAstGuardTest {
         ValidatedSql validated = SqlAstGuard.validate(
                 "SELECT building_id FROM analytics.v_energy_hourly WHERE hour_ts >= :fromHour AND hour_ts < :toHour LIMIT 10");
         assertThat(validated.namedParameters()).isEqualTo(List.of("fromHour", "toHour"));
+    }
+
+    @Test
+    void rejectsSingleQuotedIdentifierThatOnlyLooksQualified() {
+        assertThatThrownBy(() -> SqlAstGuard.validate("""
+                SELECT SUM(kwh) FROM "analytics.v_energy_hourly"
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs LIMIT 100"""))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("白名单");
+    }
+
+    @Test
+    void acceptsSeparatelyQuotedSchemaAndViewComponents() {
+        assertThatCode(() -> SqlAstGuard.validate("""
+                SELECT SUM(kwh) FROM "analytics"."v_energy_hourly"
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs LIMIT 100"""))
+                .doesNotThrowAnyException();
     }
 }

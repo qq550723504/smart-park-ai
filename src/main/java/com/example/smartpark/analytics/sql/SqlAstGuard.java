@@ -28,7 +28,6 @@ import net.sf.jsqlparser.statement.select.Select;
 import net.sf.jsqlparser.statement.select.SelectVisitor;
 import net.sf.jsqlparser.statement.select.SetOperationList;
 import net.sf.jsqlparser.statement.select.WithItem;
-import net.sf.jsqlparser.util.TablesNamesFinder;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -43,11 +42,11 @@ import java.util.Set;
  */
 public final class SqlAstGuard {
 
-    private static final Set<String> ALLOWED_TABLES = Set.of(
-            "analytics.v_energy_hourly",
-            "analytics.v_alert_fact",
-            "analytics.v_device_snapshot",
-            "analytics.v_parking_daily");
+    private static final Set<SqlRelationName> ALLOWED_TABLES = Set.of(
+            SqlRelationName.parseCatalogName("analytics.v_energy_hourly"),
+            SqlRelationName.parseCatalogName("analytics.v_alert_fact"),
+            SqlRelationName.parseCatalogName("analytics.v_device_snapshot"),
+            SqlRelationName.parseCatalogName("analytics.v_parking_daily"));
 
     private static final Set<String> ALLOWED_FUNCTIONS = Set.of(
             "count", "sum", "avg", "min", "max", "round", "coalesce", "nullif",
@@ -101,23 +100,7 @@ public final class SqlAstGuard {
             }
         }
         // Table whitelist: every referenced relation must be an analytics view.
-        Set<String> cteAliases = new LinkedHashSet<>();
-        for (WithItem<?> withItem : withItems(select)) {
-            if (withItem.getAliasName() != null) {
-                cteAliases.add(normalizeIdentifier(withItem.getAliasName()));
-            }
-        }
-        Set<String> tables = new LinkedHashSet<>();
-        TablesNamesFinder<Void> finder = new TablesNamesFinder<>();
-        for (String name : finder.getTables(statement)) {
-            tables.add(normalizeIdentifier(name));
-        }
-        tables.removeAll(cteAliases);
-        for (String table : tables) {
-            if (!ALLOWED_TABLES.contains(table)) {
-                throw reject("引用了白名单之外的表或视图");
-            }
-        }
+        validateRelations(select, plainSelects);
 
         // Function allow-list, bound-parameter-only time values. Every
         // clause that carries expressions (select items, WHERE, JOIN ON,
@@ -230,8 +213,40 @@ public final class SqlAstGuard {
     }
 
 
-    private static String normalizeIdentifier(String name) {
-        return name.replace("`", "").replace("\"", "").toLowerCase(Locale.ROOT);
+    private static void validateRelations(Select select, List<PlainSelect> plainSelects)
+            throws UnsafeSqlException {
+        Set<String> cteAliases = new LinkedHashSet<>();
+        try {
+            for (WithItem<?> withItem : withItems(select)) {
+                if (withItem.getAliasName() != null) {
+                    cteAliases.add(SqlRelationName.component(withItem.getAliasName()));
+                }
+            }
+            for (PlainSelect plain : plainSelects) {
+                validateRelation(plain.getFromItem(), cteAliases);
+                if (plain.getJoins() != null) {
+                    for (var join : plain.getJoins()) {
+                        validateRelation(join.getRightItem(), cteAliases);
+                    }
+                }
+            }
+        } catch (IllegalArgumentException malformedIdentifier) {
+            throw reject("引用了不受支持的 PostgreSQL 标识符");
+        }
+    }
+
+    private static void validateRelation(Object fromItem, Set<String> cteAliases)
+            throws UnsafeSqlException {
+        if (!(fromItem instanceof Table table)) {
+            return;
+        }
+        SqlRelationName relation = SqlRelationName.from(table);
+        if (!relation.isQualified() && cteAliases.contains(relation.relation())) {
+            return;
+        }
+        if (!ALLOWED_TABLES.contains(relation)) {
+            throw reject("引用了白名单之外的表或视图");
+        }
     }
 
     private static UnsafeSqlException reject(String safeReason) {

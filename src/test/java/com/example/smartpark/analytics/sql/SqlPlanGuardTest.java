@@ -182,6 +182,22 @@ class SqlPlanGuardTest {
     }
 
     @Test
+    void rejectsRepeatedOccurrenceOfThePlannedFactView() throws UnsafeSqlException {
+        QueryPlan plan = plan("energy_kwh");
+        ValidatedSql sql = SqlAstGuard.validate("""
+                SELECT e.building_id, SUM(e.kwh)
+                FROM analytics.v_energy_hourly e
+                JOIN analytics.v_energy_hourly duplicate
+                  ON duplicate.building_id = e.building_id
+                WHERE e.hour_ts >= :fromTs AND e.hour_ts < :toTs
+                GROUP BY e.building_id LIMIT 100""");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("occurrence");
+    }
+
+    @Test
     void rejectsMultiViewPlanWhenSeparateCtesStillExposeRawFactRows() throws UnsafeSqlException {
         MetricDefinition energy = catalog.findByName("energy_kwh").orElseThrow();
         MetricDefinition alerts = catalog.findByName("alert_count").orElseThrow();

@@ -57,12 +57,13 @@ public final class SqlPlanGuard {
         PlainSelect resultQuery = resultQuery(select);
         List<Branch> branches = consumedBranches(select, resultQuery);
         validateSourceGrain(plan);
+        validateSourceOccurrences(branches, plan);
         validateMetricPredicateScopes(plan);
         validateConsumedBranchLineage(resultQuery, branches, plan);
 
         for (MetricDefinition metric : plan.metrics()) {
             List<Branch> sourceBranches = branches.stream()
-                    .filter(branch -> branch.tables().contains(normalizeIdentifier(metric.sourceView())))
+                    .filter(branch -> branch.tables().contains(SqlRelationName.parseCatalogName(metric.sourceView())))
                     .toList();
             if (sourceBranches.isEmpty()) {
                 throw reject("查询缺少计划要求的数据视图 " + metric.sourceView());
@@ -95,11 +96,29 @@ public final class SqlPlanGuard {
      */
     private static void validateSourceGrain(QueryPlan plan) throws UnsafeSqlException {
         long sourceViews = plan.metrics().stream()
-                .map(metric -> normalizeIdentifier(metric.sourceView()))
+                .map(metric -> SqlRelationName.parseCatalogName(metric.sourceView()))
                 .distinct()
                 .count();
         if (sourceViews > 1) {
             throw reject("多事实视图查询缺少可验证的 source grain，禁止合并原始事实行");
+        }
+    }
+
+    private static void validateSourceOccurrences(List<Branch> branches, QueryPlan plan)
+            throws UnsafeSqlException {
+        Set<SqlRelationName> planned = plan.metrics().stream()
+                .map(metric -> SqlRelationName.parseCatalogName(metric.sourceView()))
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        List<SqlRelationName> physicalOccurrences = branches.stream()
+                .flatMap(branch -> branch.tables().stream())
+                .filter(SqlRelationName::isQualified)
+                .toList();
+        if (physicalOccurrences.size() != 1 || !planned.contains(physicalOccurrences.get(0))) {
+            List<String> requiredViews = plan.metrics().stream()
+                    .map(MetricDefinition::sourceView)
+                    .distinct()
+                    .toList();
+            throw reject("查询的物理 source occurrence 必须与单事实计划完全一致: " + requiredViews);
         }
     }
 
@@ -114,7 +133,7 @@ public final class SqlPlanGuard {
         for (MetricDefinition metric : plan.metrics()) {
             String condition = metric.condition() == null
                     ? "<none>" : canonical(parseCondition(metric.condition()));
-            conditionsByView.computeIfAbsent(normalizeIdentifier(metric.sourceView()), ignored -> new HashSet<>())
+            conditionsByView.computeIfAbsent(metric.sourceView().toLowerCase(Locale.ROOT), ignored -> new HashSet<>())
                     .add(condition);
         }
         if (conditionsByView.values().stream().anyMatch(conditions -> conditions.size() > 1)) {
@@ -198,7 +217,7 @@ public final class SqlPlanGuard {
         Map<String, WithItem<?>> ctes = new HashMap<>();
         if (root.getWithItemsList() != null) {
             for (WithItem<?> item : root.getWithItemsList()) {
-                ctes.put(normalizeIdentifier(item.getAliasName()), item);
+                ctes.put(SqlRelationName.component(item.getAliasName()), item);
             }
         }
         List<Branch> branches = new ArrayList<>();
@@ -231,9 +250,10 @@ public final class SqlPlanGuard {
                                 Map<String, WithItem<?>> ctes, Set<String> usedCtes,
                                 Deque<PendingBranch> pending) {
         if (fromItem instanceof Table table) {
-            String name = normalizeIdentifier(table.getFullyQualifiedName());
-            WithItem<?> cte = ctes.get(name);
-            if (cte != null && usedCtes.add(name)) {
+            SqlRelationName relation = SqlRelationName.from(table);
+            String alias = relation.isQualified() ? "" : relation.relation();
+            WithItem<?> cte = ctes.get(alias);
+            if (cte != null && usedCtes.add(alias)) {
                 pending.addLast(new PendingBranch(cte.getSelect(), inheritedTerms));
             }
         } else if (fromItem instanceof ParenthesedSelect nested) {
@@ -241,22 +261,22 @@ public final class SqlPlanGuard {
         }
     }
 
-    private static Set<String> sourceTables(PlainSelect plain) {
-        Set<String> tables = new LinkedHashSet<>();
+    private static List<SqlRelationName> sourceTables(PlainSelect plain) {
+        List<SqlRelationName> tables = new ArrayList<>();
         addSourceTable(plain.getFromItem(), tables);
         if (plain.getJoins() != null) {
             for (var join : plain.getJoins()) addSourceTable(join.getRightItem(), tables);
         }
-        return Set.copyOf(tables);
+        return List.copyOf(tables);
     }
 
-    private static void addSourceTable(Object item, Set<String> tables) {
-        if (item instanceof Table table) tables.add(normalizeIdentifier(table.getFullyQualifiedName()));
+    private static void addSourceTable(Object item, List<SqlRelationName> tables) {
+        if (item instanceof Table table) tables.add(SqlRelationName.from(table));
     }
 
     private record PendingBranch(Select select, List<Expression> inheritedTerms) { }
 
-    private record Branch(PlainSelect select, List<Expression> terms, Set<String> tables) { }
+    private record Branch(PlainSelect select, List<Expression> terms, List<SqlRelationName> tables) { }
 
     private static void validateProjection(PlainSelect resultQuery, QueryPlan plan)
             throws UnsafeSqlException {
@@ -456,10 +476,6 @@ public final class SqlPlanGuard {
             value = parenthesized.get(0);
         }
         return value;
-    }
-
-    private static String normalizeIdentifier(String name) {
-        return name == null ? "" : name.replace("`", "").replace("\"", "").toLowerCase(Locale.ROOT);
     }
 
     private static UnsafeSqlException reject(String message) {
