@@ -4,7 +4,9 @@ import com.example.smartpark.analytics.model.ChartSpec;
 import com.example.smartpark.analytics.model.QueryPlan;
 import com.example.smartpark.analytics.model.TabularResult;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Structured boundary to the language model. Implementations must parse the
@@ -25,7 +27,14 @@ public interface AnalyticsModelClient {
     record QuestionUnderstanding(
             String normalizedQuestion,
             List<String> metricTerms,
-            List<String> clarificationQuestions) {
+            List<String> clarificationQuestions,
+            RequestedTimeRange requestedTimeRange) {
+
+        public QuestionUnderstanding(String normalizedQuestion,
+                                     List<String> metricTerms,
+                                     List<String> clarificationQuestions) {
+            this(normalizedQuestion, metricTerms, clarificationQuestions, null);
+        }
 
         public QuestionUnderstanding {
             normalizedQuestion = normalizedQuestion == null ? "" : normalizedQuestion.strip();
@@ -35,6 +44,17 @@ public interface AnalyticsModelClient {
 
         public boolean needsClarification() {
             return !clarificationQuestions.isEmpty();
+        }
+    }
+
+    record RequestedTimeRange(Instant fromInclusive, Instant toExclusive) {
+
+        public RequestedTimeRange {
+            Objects.requireNonNull(fromInclusive, "fromInclusive");
+            Objects.requireNonNull(toExclusive, "toExclusive");
+            if (!fromInclusive.isBefore(toExclusive)) {
+                throw new IllegalArgumentException("fromInclusive must be before toExclusive");
+            }
         }
     }
 

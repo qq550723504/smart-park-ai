@@ -15,6 +15,7 @@ import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 import javax.sql.DataSource;
+import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -46,6 +47,7 @@ class OperationsAnalysisGraphTest {
     private ScriptedModelClient modelClient;
     private OperationsAnalysisGraph graph;
     private InMemoryExecutionEventPublisher publisher;
+    private Map<String, Object> lastExecutionParameters;
 
     @BeforeAll
     void startContainerAndBuildGraph() {
@@ -71,10 +73,13 @@ class OperationsAnalysisGraphTest {
                 modelClient,
                 (sql, parameters) -> new com.example.smartpark.analytics.sql.QueryCostGuard(
                         new NamedParameterJdbcTemplate(dataSource)).estimatedCost(sql.sql(), parameters),
-                (sql, parameters) -> new com.example.smartpark.analytics.sql.ReadOnlyQueryExecutor(dataSource,
-                        new com.example.smartpark.analytics.sql.ReadOnlyQueryExecutor.QueryLimits(
-                                Duration.ofSeconds(3), 500, 1024L * 1024L, 1_000_000))
-                        .execute(sql, parameters),
+                (sql, parameters) -> {
+                    lastExecutionParameters = Map.copyOf(parameters);
+                    return new com.example.smartpark.analytics.sql.ReadOnlyQueryExecutor(dataSource,
+                            new com.example.smartpark.analytics.sql.ReadOnlyQueryExecutor.QueryLimits(
+                                    Duration.ofSeconds(3), 500, 1024L * 1024L, 1_000_000))
+                            .execute(sql, parameters);
+                },
                 publisher,
                 new AnalysisSummaryValidator(),
                 Clock.fixed(Instant.parse("2026-08-24T00:00:00Z"), ZoneOffset.UTC));
@@ -112,6 +117,42 @@ class OperationsAnalysisGraphTest {
         assertThat(startedStages).containsExactly(
                 "理解问题", "解析指标与维度", "召回白名单 Schema", "构建查询计划", "生成 SQL",
                 "AST 安全校验", "EXPLAIN 成本检查", "只读执行查询", "生成图表规格", "基于结果总结");
+    }
+
+    @Test
+    void carriesRequestedTimeRangeIntoPlanAndBoundParameters() {
+        Instant from = Instant.parse("2026-07-25T00:00:00Z");
+        Instant to = Instant.parse("2026-08-24T00:00:00Z");
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding(
+                        "过去30天各楼宇能耗", List.of("能耗"), List.of(),
+                        new AnalyticsModelClient.RequestedTimeRange(from, to)),
+                List.of(GOOD_SQL),
+                new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("total"), "", "kWh"),
+                "共 3 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "过去30天各楼宇能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().timeRange())
+                .isEqualTo(new com.example.smartpark.analytics.model.QueryPlan.TimeRange(from, to));
+        assertThat(lastExecutionParameters)
+                .containsEntry("fromTs", Timestamp.from(from))
+                .containsEntry("toTs", Timestamp.from(to));
+    }
+
+    @Test
+    void usesMetricDefaultLookbackWhenQuestionHasNoRequestedTimeRange() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("能耗", List.of("能耗"), List.of()),
+                List.of(GOOD_SQL), null, "共 3 行结果。");
+
+        graph.run(UUID.randomUUID(), "能耗");
+
+        assertThat(modelClient.lastPlan().timeRange())
+                .isEqualTo(new com.example.smartpark.analytics.model.QueryPlan.TimeRange(
+                        Instant.parse("2026-08-17T00:00:00Z"),
+                        Instant.parse("2026-08-24T00:00:00Z")));
     }
 
     @Test
@@ -224,6 +265,7 @@ class OperationsAnalysisGraphTest {
         private String conclusion;
         private int generateSqlCalls;
         private String lastRejectionReason = "";
+        private com.example.smartpark.analytics.model.QueryPlan lastPlan;
 
         void reset(QuestionUnderstanding understanding, List<String> sqlDrafts,
                    ChartSpec.Proposal chartProposal, String conclusion) {
@@ -233,6 +275,7 @@ class OperationsAnalysisGraphTest {
             this.conclusion = conclusion;
             this.generateSqlCalls = 0;
             this.lastRejectionReason = "";
+            this.lastPlan = null;
         }
 
         int generateSqlInvocations() {
@@ -243,6 +286,10 @@ class OperationsAnalysisGraphTest {
             return lastRejectionReason;
         }
 
+        com.example.smartpark.analytics.model.QueryPlan lastPlan() {
+            return lastPlan;
+        }
+
         @Override
         public QuestionUnderstanding understandQuestion(String question) {
             return understanding;
@@ -251,6 +298,7 @@ class OperationsAnalysisGraphTest {
         @Override
         public String generateSql(SqlGenerationRequest request) {
             generateSqlCalls++;
+            lastPlan = request.plan();
             lastRejectionReason = request.rejectionReason() == null ? "" : request.rejectionReason();
             return sqlDrafts.poll();
         }

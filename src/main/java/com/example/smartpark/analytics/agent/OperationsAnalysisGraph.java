@@ -377,18 +377,22 @@ public class OperationsAnalysisGraph {
         nodeStarted(ctx, runId, ExecutionStage.PLANNING, "构建查询计划");
         Instant now = Instant.now(clock);
         int lookbackDays = ctx.metrics.stream().mapToInt(m -> m.defaultLookbackDays()).max().orElse(7);
+        AnalyticsModelClient.RequestedTimeRange requested = ctx.understanding.requestedTimeRange();
+        QueryPlan.TimeRange timeRange = requested == null
+                ? new QueryPlan.TimeRange(now.minus(Duration.ofDays(lookbackDays)), now)
+                : new QueryPlan.TimeRange(requested.fromInclusive(), requested.toExclusive());
         ctx.plan = new QueryPlan(
                 ctx.understanding.normalizedQuestion(),
                 ctx.metrics,
                 ctx.metrics.stream().flatMap(m -> m.allowedDimensions().stream()).distinct().toList(),
                 Map.of(),
-                new QueryPlan.TimeRange(now.minus(Duration.ofDays(lookbackDays)), now),
+                timeRange,
                 200);
         // One shared binding set for both gates: :fromTs/:toTs are the only
         // supported time boundaries and travel as bound parameters end to end.
         ctx.parameters = Map.of(
-                "fromTs", java.sql.Timestamp.from(now.minus(Duration.ofDays(lookbackDays))),
-                "toTs", java.sql.Timestamp.from(now));
+                "fromTs", java.sql.Timestamp.from(ctx.plan.timeRange().from()),
+                "toTs", java.sql.Timestamp.from(ctx.plan.timeRange().to()));
         nodeCompleted(ctx, runId, ExecutionStage.PLANNING, "查询计划就绪", null);
         return Map.of();
     }

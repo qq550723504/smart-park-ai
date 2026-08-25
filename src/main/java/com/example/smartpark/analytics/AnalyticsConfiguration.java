@@ -85,12 +85,13 @@ public class AnalyticsConfiguration {
 
     @Bean
     AnalyticsModelClient llmAnalyticsModelClient(ObjectProvider<ChatModel> chatModelProvider,
-                                                 MetricCatalog metricCatalog) {
+                                                 MetricCatalog metricCatalog,
+                                                 Clock analyticsClock) {
         ChatModel chatModel = chatModelProvider.getIfAvailable();
         if (chatModel == null) {
             throw new IllegalStateException("smartpark.analytics.enabled=true 需要可用的 ChatModel");
         }
-        return new LlmAnalyticsModelClient(chatModel, metricCatalog);
+        return new LlmAnalyticsModelClient(chatModel, metricCatalog, analyticsClock);
     }
 
     @Bean

@@ -13,6 +13,9 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -29,10 +32,16 @@ public class LlmAnalyticsModelClient implements AnalyticsModelClient {
 
     private final ChatModel chatModel;
     private final MetricCatalog catalog;
+    private final Clock clock;
 
     public LlmAnalyticsModelClient(ChatModel chatModel, MetricCatalog catalog) {
+        this(chatModel, catalog, Clock.systemUTC());
+    }
+
+    public LlmAnalyticsModelClient(ChatModel chatModel, MetricCatalog catalog, Clock clock) {
         this.chatModel = chatModel;
         this.catalog = catalog;
+        this.clock = clock;
     }
 
     @Override
@@ -41,15 +50,20 @@ public class LlmAnalyticsModelClient implements AnalyticsModelClient {
                 + catalog.all().stream()
                         .map(metric -> metric.name() + "(" + metric.displayName() + ")")
                         .collect(Collectors.joining(", "));
+        Instant now = Instant.now(clock);
         String system = """
                 你是园区运营分析的理解模块。只输出 JSON 对象，字段:
-                normalizedQuestion (字符串), metricTerms (name 数组), clarificationQuestions (字符串数组)。
-                """ + catalogHint;
+                normalizedQuestion (字符串), metricTerms (name 数组), clarificationQuestions (字符串数组),
+                requestedTimeRange (没有时间要求时为 null；否则为对象，包含 ISO-8601 UTC 字段
+                fromInclusive 与 toExclusive)。所有相对时间都以当前时刻和园区时区解释。
+                当前时刻: %s；园区时区: Asia/Shanghai；园区当地时间: %s。
+                """.formatted(now, now.atZone(ZoneId.of("Asia/Shanghai"))) + catalogHint;
         JsonNode json = parseJson(call(system, question));
         return new QuestionUnderstanding(
                 text(json, "normalizedQuestion"),
                 stringList(json, "metricTerms"),
-                stringList(json, "clarificationQuestions"));
+                stringList(json, "clarificationQuestions"),
+                requestedTimeRange(json));
     }
 
     @Override
@@ -147,6 +161,26 @@ public class LlmAnalyticsModelClient implements AnalyticsModelClient {
             node.forEach(item -> values.add(item.asText()));
         }
         return values;
+    }
+
+    private static RequestedTimeRange requestedTimeRange(JsonNode json) {
+        JsonNode node = json.get("requestedTimeRange");
+        if (node == null || node.isNull()) {
+            return null;
+        }
+        if (!node.isObject()) {
+            throw new IllegalStateException("requestedTimeRange must be an object or null");
+        }
+        String from = text(node, "fromInclusive");
+        String to = text(node, "toExclusive");
+        if (from.isBlank() || to.isBlank()) {
+            throw new IllegalStateException("requestedTimeRange requires fromInclusive and toExclusive");
+        }
+        try {
+            return new RequestedTimeRange(Instant.parse(from), Instant.parse(to));
+        } catch (RuntimeException invalidRange) {
+            throw new IllegalStateException("requestedTimeRange is invalid", invalidRange);
+        }
     }
 
     private static String sampleRows(TabularResult result) {
