@@ -65,7 +65,7 @@ public class DemoDataRefresher {
 
     public void start() {
         executor.scheduleWithFixedDelay(this::refreshSafely,
-                interval.toMillis(), interval.toMillis(), TimeUnit.MILLISECONDS);
+                0, interval.toMillis(), TimeUnit.MILLISECONDS);
     }
 
     public void shutdown() {

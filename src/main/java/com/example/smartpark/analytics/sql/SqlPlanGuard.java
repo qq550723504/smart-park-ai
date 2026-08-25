@@ -250,6 +250,12 @@ public final class SqlPlanGuard {
         if (plain.getFetch() != null) {
             throw reject("当前 QueryPlan 不支持 FETCH 结果变换");
         }
+        if (select.getForClause() != null
+                || select.getForMode() != null
+                || select.getForUpdateTable() != null
+                || select.isSkipLocked()) {
+            throw reject("查询禁止使用锁定子句");
+        }
         return plain;
     }
 

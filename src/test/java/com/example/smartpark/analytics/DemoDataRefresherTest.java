@@ -10,11 +10,30 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class DemoDataRefresherTest {
+
+    @Test
+    void startsRefreshingImmediatelyWhenEnabled() throws Exception {
+        CountDownLatch opened = new CountDownLatch(1);
+        Connection connection = connection(new ArrayList<>(), new AtomicBoolean(),
+                new AtomicBoolean(), null);
+        DemoDataRefresher refresher = new DemoDataRefresher(() -> {
+            opened.countDown();
+            return connection;
+        }, Duration.ofHours(1));
+        try {
+            refresher.start();
+            assertThat(opened.await(2, TimeUnit.SECONDS)).isTrue();
+        } finally {
+            refresher.shutdown();
+        }
+    }
 
     @Test
     void refreshUsesExactEnergyFixtureKeysAndCommitsAllChangesTogether() throws Exception {

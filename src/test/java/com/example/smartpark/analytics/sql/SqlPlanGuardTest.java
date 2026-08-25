@@ -29,6 +29,19 @@ class SqlPlanGuardTest {
     }
 
     @Test
+    void rejectsPostgresLockingClausesBeforeExecution() throws UnsafeSqlException {
+        QueryPlan plan = plan("energy_kwh", List.of("building_id"));
+        ValidatedSql sql = SqlAstGuard.validate("""
+                SELECT building_id, SUM(kwh) AS energy_kwh FROM analytics.v_energy_hourly
+                WHERE :fromTs <= hour_ts AND :toTs > hour_ts
+                GROUP BY building_id LIMIT 100 FOR UPDATE""");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("锁定");
+    }
+
+    @Test
     void rejectsTimeParametersUsedOnlyInTautologies() throws UnsafeSqlException {
         QueryPlan plan = plan("energy_kwh", List.of("building_id"));
         ValidatedSql sql = SqlAstGuard.validate("""
