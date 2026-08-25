@@ -16,6 +16,11 @@ import java.util.Set;
 /** Enforces that supported findings are derived from results observed during this invocation. */
 public final class ExpertFindingValidator {
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final List<String> SUPPORTED_NEXT_CHECKS = List.of();
+    private static final List<String> INSUFFICIENT_EVIDENCE_NEXT_CHECKS =
+            List.of("repeat the domain tool lookup");
+    private static final List<String> FAILED_NEXT_CHECKS =
+            List.of("retry the domain tool lookup");
 
     public ExpertFinding validate(ExpertFinding finding, Set<String> observedEvidenceRefs) {
         Objects.requireNonNull(finding, "finding");
@@ -54,13 +59,13 @@ public final class ExpertFindingValidator {
             if (!supportedClaim) {
                 return new ExpertFinding(finding.domain(), FindingStatus.INSUFFICIENT_EVIDENCE,
                         "Insufficient evidence: the finding is not supported by the cited tool results.",
-                        List.of(), 0, List.of("repeat the domain tool lookup"));
+                        List.of(), 0, INSUFFICIENT_EVIDENCE_NEXT_CHECKS);
             }
             // Free-form model prose cannot be validated generically. Replace it
             // with an exact, deterministic rendering of the cited observations
             // so no uncited quantitative or qualitative claim reaches synthesis.
             return new ExpertFinding(finding.domain(), finding.status(),
-                    groundedConclusion(refs, observed), refs, finding.confidence(), finding.nextChecks());
+                    groundedConclusion(refs, observed), refs, finding.confidence(), SUPPORTED_NEXT_CHECKS);
         }
         // INSUFFICIENT_EVIDENCE and FAILED findings face the same disclosure
         // boundary: a model response can invent tool:* references it never
@@ -76,7 +81,19 @@ public final class ExpertFindingValidator {
                 ? publicStatusMessage(finding.status())
                 : groundedConclusion(verifiedRefs, observed);
         return new ExpertFinding(finding.domain(), finding.status(),
-                conclusion, verifiedRefs, finding.confidence(), finding.nextChecks());
+                conclusion, verifiedRefs, finding.confidence(), publicNextChecks(finding.status()));
+    }
+
+    /**
+     * Follow-up checks are rendered by the public collaboration UI. They must
+     * therefore be a server-owned, bounded contract rather than model prose.
+     */
+    private static List<String> publicNextChecks(FindingStatus status) {
+        return switch (status) {
+            case SUPPORTED -> SUPPORTED_NEXT_CHECKS;
+            case INSUFFICIENT_EVIDENCE -> INSUFFICIENT_EVIDENCE_NEXT_CHECKS;
+            case FAILED -> FAILED_NEXT_CHECKS;
+        };
     }
 
     private static String publicStatusMessage(FindingStatus status) {

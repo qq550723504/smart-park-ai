@@ -41,6 +41,8 @@ class ExpertFindingValidatorTest {
         assertThat(validated.conclusion())
                 .doesNotContain("设备查询超时")
                 .contains("专家执行失败");
+        assertThat(validated.nextChecks())
+                .containsExactly("retry the domain tool lookup");
     }
 
     @Test void clearsInventedReferencesOnAnInsufficientEvidenceFinding() {
@@ -165,6 +167,23 @@ class ExpertFindingValidatorTest {
         assertThat(validated.conclusion())
                 .contains("KD-1", "Energy playbook", "energy")
                 .doesNotContain("content", "INTERNAL SECRET BODY");
+    }
+
+    @Test void redactsModelAuthoredFollowUpChecksFromPublicFinding() {
+        ExpertFinding finding = new ExpertFinding(ExpertDomain.ENERGY, FindingStatus.SUPPORTED,
+                "knowledge is available", java.util.List.of("tool:searchParkKnowledge#abc"), .9,
+                java.util.List.of("INTERNAL SECRET BODY", "call an internal endpoint"));
+        EvidenceLedger ledger = new EvidenceLedger();
+        ledger.record("tool:searchParkKnowledge#abc", """
+                {"query":"energy","documents":[{"id":"KD-1","title":"Energy playbook",
+                "content":"INTERNAL SECRET BODY"}]}
+                """);
+
+        ExpertFinding validated = validator.validateWithObservations(
+                finding, ledger.snapshotObservations());
+
+        assertThat(validated.nextChecks()).isEmpty();
+        assertThat(validated.conclusion()).doesNotContain("INTERNAL SECRET BODY");
     }
 
     @Test void downgradesSuccessfulTransportThatReturnedAnErrorObservation() {
