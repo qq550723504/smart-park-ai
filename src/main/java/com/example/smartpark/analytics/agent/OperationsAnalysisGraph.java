@@ -414,7 +414,7 @@ public class OperationsAnalysisGraph {
         nodeStarted(ctx, runId, ExecutionStage.SQL_VALIDATION, "AST 安全校验");
         try {
             ctx.validatedSql = SqlAstGuardAccess.validate(ctx.sqlDraft);
-            enforcePlan(ctx);
+            com.example.smartpark.analytics.sql.SqlPlanGuard.validate(ctx.validatedSql, ctx.plan);
             for (String name : ctx.validatedSql.namedParameters()) {
                 if (!ctx.parameters.containsKey(name)) {
                     throw new UnsafeSqlException("SQL_POLICY_REJECTED",
@@ -429,36 +429,6 @@ public class OperationsAnalysisGraph {
             handleSqlRejection(ctx, runId, "validateSqlAst", rejection.getMessage());
         }
         return Map.of();
-    }
-
-    /**
-     * The generation prompt is advisory; this gate is binding. Every accepted
-     * query must bind the planned time range (:fromTs/:toTs), touch each
-     * selected metric's whitelisted view, and carry each metric's fixed
-     * condition — otherwise an all-time or wrong-metric query could slip
-     * through on a plausible-looking model answer.
-     */
-    private void enforcePlan(RunContext ctx) throws UnsafeSqlException {
-        if (!ctx.validatedSql.namedParameters().contains("fromTs")
-                || !ctx.validatedSql.namedParameters().contains("toTs")) {
-            throw new UnsafeSqlException("SQL_POLICY_REJECTED",
-                    "查询必须使用 :fromTs 与 :toTs 绑定计划时间范围");
-        }
-        String normalized = normalize(ctx.sqlDraft);
-        for (var metric : ctx.metrics) {
-            if (!normalized.contains(normalize(metric.sourceView()))) {
-                throw new UnsafeSqlException("SQL_POLICY_REJECTED",
-                        "查询缺少计划要求的数据视图 " + metric.sourceView());
-            }
-            if (metric.condition() != null && !normalized.contains(normalize(metric.condition()))) {
-                throw new UnsafeSqlException("SQL_POLICY_REJECTED",
-                        "查询缺少指标的固定条件，请按口径过滤");
-            }
-        }
-    }
-
-    private static String normalize(String value) {
-        return value == null ? "" : value.replaceAll("[\\s'\"]", "").toLowerCase(java.util.Locale.ROOT);
     }
 
     Map<String, Object> explainAndCheckCost(OverAllState state) {

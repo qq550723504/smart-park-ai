@@ -22,13 +22,13 @@ public class MetricCatalog {
                 java.util.Set.of("能耗", "用电量", "电量"),
                 "kWh", "analytics.v_energy_hourly",
                 java.util.Set.of("building_id", "meter_id", "hour_ts"),
-                "SUM(kwh)", 7));
+                "SUM(kwh)", "hour_ts", 7, null));
         register(new MetricDefinition(
                 "night_energy_kwh", "夜间能耗（22:00–06:00）",
                 java.util.Set.of("夜间用电量", "夜间能耗", "夜间电量"),
                 "kWh", "analytics.v_energy_hourly",
                 java.util.Set.of("building_id", "meter_id", "hour_ts"),
-                "SUM(kwh)", 7,
+                "SUM(kwh)", "hour_ts", 7,
                 "(EXTRACT(HOUR FROM hour_ts AT TIME ZONE 'Asia/Shanghai') >= 22 OR "
                         + "EXTRACT(HOUR FROM hour_ts AT TIME ZONE 'Asia/Shanghai') < 6)"));
         register(new MetricDefinition(
@@ -36,37 +36,38 @@ public class MetricCatalog {
                 java.util.Set.of("能耗偏差", "基线偏差"),
                 "%", "analytics.v_energy_hourly",
                 java.util.Set.of("building_id", "meter_id", "hour_ts"),
-                "ROUND((SUM(kwh) - SUM(baseline_kwh)) * 100.0 / NULLIF(SUM(baseline_kwh), 0), 2)", 7));
+                "ROUND((SUM(kwh) - SUM(baseline_kwh)) * 100.0 / NULLIF(SUM(baseline_kwh), 0), 2)",
+                "hour_ts", 7, null));
         register(new MetricDefinition(
                 "alert_count", "告警数量",
                 java.util.Set.of("告警数量", "告警数", "告警"),
                 "条", "analytics.v_alert_fact",
                 java.util.Set.of("building_id", "category", "risk_level", "status", "occurred_at"),
-                "COUNT(*)", 7));
+                "COUNT(*)", "occurred_at", 7, null));
         register(new MetricDefinition(
                 "high_risk_alert_count", "高风险告警数量",
                 java.util.Set.of("高风险告警数", "高风险告警数量", "告警"),
                 "条", "analytics.v_alert_fact",
                 java.util.Set.of("building_id", "category", "occurred_at"),
-                "COUNT(*)", 7, "risk_level = 'HIGH'"));
+                "COUNT(*)", "occurred_at", 7, "risk_level = 'HIGH'"));
         register(new MetricDefinition(
                 "device_offline_count", "离线设备数量",
                 java.util.Set.of("离线设备", "设备离线数"),
                 "台", "analytics.v_device_snapshot",
-                java.util.Set.of("building_id", "device_type"),
-                "COUNT(*)", 1, "status = 'OFFLINE'"));
+                java.util.Set.of("building_id", "device_type", "snapshot_at"),
+                "COUNT(*)", "snapshot_at", 1, "status = 'OFFLINE'"));
         register(new MetricDefinition(
                 "parking_entries", "停车进场量",
                 java.util.Set.of("停车进场量", "进场车辆数"),
                 "辆", "analytics.v_parking_daily",
                 java.util.Set.of("stat_date", "parking_zone"),
-                "SUM(entries)", 7));
+                "SUM(entries)", "stat_date", 7, null));
         register(new MetricDefinition(
                 "parking_utilization_pct", "停车利用率",
                 java.util.Set.of("停车利用率", "车位利用率"),
                 "%", "analytics.v_parking_daily",
                 java.util.Set.of("stat_date", "parking_zone"),
-                "AVG(utilization_pct)", 7));
+                "AVG(utilization_pct)", "stat_date", 7, null));
     }
 
     private void register(MetricDefinition definition) {

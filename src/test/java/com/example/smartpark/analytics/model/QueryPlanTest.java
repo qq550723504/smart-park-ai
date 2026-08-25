@@ -16,7 +16,7 @@ class QueryPlanTest {
 
     private MetricDefinition metric(String name) {
         return new MetricDefinition(name, name, java.util.Set.of("别名"), "kWh",
-                "analytics.v_energy_hourly", java.util.Set.of("building_id"), "SUM(kwh)", 7);
+                "analytics.v_energy_hourly", java.util.Set.of("building_id", "hour_ts"), "SUM(kwh)", 7);
     }
 
     @Test

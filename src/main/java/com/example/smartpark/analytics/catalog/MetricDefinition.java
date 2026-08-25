@@ -12,6 +12,7 @@ public record MetricDefinition(
         String sourceView,
         Set<String> allowedDimensions,
         String expression,
+        String timeColumn,
         int defaultLookbackDays,
         String condition) {
 
@@ -23,6 +24,10 @@ public record MetricDefinition(
         sourceView = requireNonBlank(sourceView, "sourceView");
         allowedDimensions = Set.copyOf(Objects.requireNonNull(allowedDimensions, "allowedDimensions"));
         expression = requireNonBlank(expression, "expression");
+        timeColumn = requireNonBlank(timeColumn, "timeColumn");
+        if (!allowedDimensions.contains(timeColumn)) {
+            throw new IllegalArgumentException("timeColumn must be an allowed dimension");
+        }
         if (defaultLookbackDays < 1 || defaultLookbackDays > 90) {
             throw new IllegalArgumentException("defaultLookbackDays must be 1..90");
         }
@@ -32,7 +37,16 @@ public record MetricDefinition(
     public MetricDefinition(String name, String displayName, Set<String> aliases, String unit,
                             String sourceView, Set<String> allowedDimensions,
                             String expression, int defaultLookbackDays) {
-        this(name, displayName, aliases, unit, sourceView, allowedDimensions, expression, defaultLookbackDays, null);
+        this(name, displayName, aliases, unit, sourceView, allowedDimensions, expression,
+                inferTimeColumn(allowedDimensions), defaultLookbackDays, null);
+    }
+
+    /** Compatibility constructor for definitions that carry a fixed condition. */
+    public MetricDefinition(String name, String displayName, Set<String> aliases, String unit,
+                            String sourceView, Set<String> allowedDimensions,
+                            String expression, int defaultLookbackDays, String condition) {
+        this(name, displayName, aliases, unit, sourceView, allowedDimensions, expression,
+                inferTimeColumn(allowedDimensions), defaultLookbackDays, condition);
     }
 
     private static String requireNonBlank(String value, String field) {
@@ -40,5 +54,13 @@ public record MetricDefinition(
             throw new IllegalArgumentException(field + " must not be blank");
         }
         return value;
+    }
+
+    private static String inferTimeColumn(Set<String> allowedDimensions) {
+        Set<String> dimensions = Objects.requireNonNull(allowedDimensions, "allowedDimensions");
+        return java.util.List.of("hour_ts", "occurred_at", "snapshot_at", "stat_date").stream()
+                .filter(dimensions::contains)
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("metric requires a time dimension"));
     }
 }
