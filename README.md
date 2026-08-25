@@ -132,6 +132,7 @@ curl "http://localhost:8080/api/workflows/replace-with-workflow-id"
 | `SMARTPARK_KNOWLEDGE_MIN_SIMILARITY_SCORE` | `0.65` | RAG 结果最低相似度 |
 | `SMARTPARK_CUSTOMER_MINIMUM_KNOWLEDGE_SCORE` | `0.70` | 客服接受知识结果的最低分数 |
 | `SMARTPARK_ANALYTICS_ENABLED` | `false` | 是否启用真实只读 PostgreSQL 分析链路 |
+| `SMARTPARK_ANALYTICS_DEMO_SNAPSHOT_REFRESH_ENABLED` | `false` | 仅在持久化演示库中刷新 V1 的 7 条设备夹具；真实数据必须保持关闭 |
 | `SMARTPARK_ANALYTICS_DB_URL` | 空 | 专用分析数据库 JDBC URL；不能复用业务数据库 |
 | `SMARTPARK_ANALYTICS_DB_ADMIN_USER` | 空 | 仅供 Flyway 和演示快照刷新使用的对象所有者账号 |
 | `SMARTPARK_ANALYTICS_DB_ADMIN_PASSWORD` | 空 | 分析数据库对象所有者密码 |

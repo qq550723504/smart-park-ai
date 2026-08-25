@@ -94,7 +94,9 @@ class AnalyticsSchemaMigrationTest {
         try (var ro = DriverManager.getConnection(POSTGRES.getJdbcUrl(), RO_USER, RO_PASSWORD);
              var statement = ro.createStatement();
              ResultSet rs = statement.executeQuery(
-                     "SELECT MIN(snapshot_at), MAX(snapshot_at), now() FROM analytics.v_device_snapshot")) {
+                     "SELECT MIN(snapshot_at), MAX(snapshot_at), now() FROM analytics.v_device_snapshot "
+                             + "WHERE device_id IN ('AC-B1-07', 'PWR-B1-02', 'LFT-B1-01', "
+                             + "'HUM-B2-11', 'DR-B2-01', 'AC-B3-03', 'CAM-B3-05')")) {
             assertThat(rs.next()).isTrue();
             var oldest = rs.getObject(1, java.time.OffsetDateTime.class);
             var reference = rs.getObject(3, java.time.OffsetDateTime.class);
@@ -105,13 +107,18 @@ class AnalyticsSchemaMigrationTest {
     @Test
     void snapshotRefresherReanchorsAgedDemoSnapshots() throws Exception {
         // On a persistent database the one-time V1 seeds age out of the rolling
-        // one-day lookback; the refresher must pull them back inside it.
+        // one-day lookback; the opt-in demo refresher may pull only those
+        // named fixtures back inside it and must never rewrite real snapshots.
         migrate();
         try (var admin = DriverManager.getConnection(
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
              var statement = admin.createStatement()) {
             statement.execute("UPDATE analytics.device_snapshot_raw "
                     + "SET snapshot_at = now() - INTERVAL '3 days'");
+            statement.execute("INSERT INTO analytics.device_snapshot_raw "
+                    + "(device_id, building_id, device_type, status, snapshot_at) VALUES "
+                    + "('REAL-DEVICE-001', 'REAL', 'HVAC', 'OFFLINE', now() - INTERVAL '3 days') "
+                    + "ON CONFLICT (device_id) DO UPDATE SET snapshot_at = EXCLUDED.snapshot_at");
         }
 
         var properties = new com.example.smartpark.analytics.AnalyticsProperties();
@@ -124,14 +131,25 @@ class AnalyticsSchemaMigrationTest {
                 properties.getDatasource().getAdminPassword(),
                 java.time.Duration.ofHours(1)).refreshOnce();
 
-        try (var ro = DriverManager.getConnection(POSTGRES.getJdbcUrl(), RO_USER, RO_PASSWORD);
-             var statement = ro.createStatement();
-             ResultSet rs = statement.executeQuery(
-                     "SELECT MIN(snapshot_at), now() FROM analytics.v_device_snapshot")) {
-            assertThat(rs.next()).isTrue();
-            var oldest = rs.getObject(1, java.time.OffsetDateTime.class);
-            var reference = rs.getObject(2, java.time.OffsetDateTime.class);
-            assertThat(oldest).isAfter(reference.minus(java.time.Duration.ofHours(24)));
+        try (var ro = DriverManager.getConnection(POSTGRES.getJdbcUrl(), RO_USER, RO_PASSWORD)) {
+            try (var statement = ro.createStatement();
+                 ResultSet rs = statement.executeQuery(
+                         "SELECT MIN(snapshot_at), now() FROM analytics.v_device_snapshot "
+                                 + "WHERE device_id <> 'REAL-DEVICE-001'")) {
+                assertThat(rs.next()).isTrue();
+                var oldestDemo = rs.getObject(1, java.time.OffsetDateTime.class);
+                var reference = rs.getObject(2, java.time.OffsetDateTime.class);
+                assertThat(oldestDemo).isAfter(reference.minus(java.time.Duration.ofHours(24)));
+            }
+            try (var statement = ro.createStatement();
+                 ResultSet rs = statement.executeQuery(
+                         "SELECT snapshot_at, now() FROM analytics.v_device_snapshot "
+                                 + "WHERE device_id = 'REAL-DEVICE-001'")) {
+                assertThat(rs.next()).isTrue();
+                var realSnapshot = rs.getObject(1, java.time.OffsetDateTime.class);
+                var reference = rs.getObject(2, java.time.OffsetDateTime.class);
+                assertThat(realSnapshot).isBefore(reference.minus(java.time.Duration.ofHours(48)));
+            }
         }
     }
 

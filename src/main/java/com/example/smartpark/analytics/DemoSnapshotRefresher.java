@@ -17,7 +17,8 @@ import java.util.concurrent.TimeUnit;
  * database the seeded rows leave that window after roughly 22 hours and are
  * never refreshed by Flyway's one-time migration. This refresher periodically
  * re-anchors the demo snapshots to the current instant so the documented demo
- * analyses keep returning rows. It only ever touches demo fixture timestamps.
+ * analyses keep returning rows. Registration is explicitly opt-in and the
+ * update is additionally restricted to the fixture identifiers from V1.
  */
 public class DemoSnapshotRefresher {
 
@@ -61,13 +62,15 @@ public class DemoSnapshotRefresher {
         }
     }
 
-    /** Re-anchors any device snapshot that has aged out of the one-day lookback. */
+    /** Re-anchors only the seven V1 demo fixtures that aged out of the lookback. */
     void refreshOnce() throws SQLException {
         try (var connection = DriverManager.getConnection(url, username, password);
              var statement = connection.createStatement()) {
             statement.executeUpdate(
                     "UPDATE analytics.device_snapshot_raw SET snapshot_at = now() - INTERVAL '2 hours' "
-                            + "WHERE snapshot_at < now() - INTERVAL '2 hours'");
+                            + "WHERE snapshot_at < now() - INTERVAL '2 hours' "
+                            + "AND device_id IN ('AC-B1-07', 'PWR-B1-02', 'LFT-B1-01', "
+                            + "'HUM-B2-11', 'DR-B2-01', 'AC-B3-03', 'CAM-B3-05')");
         }
     }
 }

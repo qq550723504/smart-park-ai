@@ -43,6 +43,9 @@ spring:
 smartpark:
   analytics:
     enabled: ${SMARTPARK_ANALYTICS_ENABLED:false}
+    # Mutates timestamps of the seven V1 demo device fixtures only. Keep off
+    # for real datasets; enable explicitly only for a persistent demo database.
+    demo-snapshot-refresh-enabled: ${SMARTPARK_ANALYTICS_DEMO_SNAPSHOT_REFRESH_ENABLED:false}
     statement-timeout: 3s
     analysis-timeout: 60s
     max-rows: 500

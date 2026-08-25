@@ -42,6 +42,7 @@ public class AnalyticsConfiguration {
     }
 
     @Bean(destroyMethod = "shutdown")
+    @ConditionalOnProperty(name = "smartpark.analytics.demo-snapshot-refresh-enabled", havingValue = "true")
     DemoSnapshotRefresher demoSnapshotRefresher(AnalyticsProperties properties) {
         properties.validateUsable();
         var refresher = new DemoSnapshotRefresher(properties.getDatasource().getUrl(),

@@ -60,7 +60,15 @@ class AnalyticsPropertiesTest {
                     assertThat(context).hasBean("readOnlyQueryExecutor");
                     assertThat(context).hasBean("operationsAnalysisGraph");
                     assertThat(context).hasBean("operationsAnalysisService");
+                    assertThat(context).doesNotHaveBean(DemoSnapshotRefresher.class);
                 });
+    }
+
+    @Test
+    void demoSnapshotRefreshRequiresExplicitOptIn() {
+        runner.withPropertyValues(FULL_DATASOURCE)
+                .withPropertyValues("smartpark.analytics.demo-snapshot-refresh-enabled=true")
+                .run(context -> assertThat(context).hasSingleBean(DemoSnapshotRefresher.class));
     }
 
     @Test
