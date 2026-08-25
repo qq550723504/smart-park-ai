@@ -24,8 +24,19 @@ class SupervisorPlanValidatorTest {
         assertThat(validator.expectedDomains("check the door access logs"))
                 .isEqualTo(Set.of(ExpertDomain.SECURITY));
         assertThat(validator.expectedDomains("能耗和告警情况"))
-                .isEqualTo(Set.of(ExpertDomain.ENERGY, ExpertDomain.SECURITY));
+                .isEqualTo(Set.of(ExpertDomain.ENERGY));
         assertThat(validator.expectedDomains("device offline alarm"))
-                .isEqualTo(Set.of(ExpertDomain.DEVICE, ExpertDomain.SECURITY));
+                .isEqualTo(Set.of(ExpertDomain.DEVICE));
+    }
+
+    @Test
+    void genericDeviceAlertQuestionsDoNotRequireTheSecurityExpert() {
+        // 冷机离线告警 is a device alert; requiring SECURITY would dispatch an
+        // expert whose only tool looks up security events.
+        assertThat(validator.expectedDomains("冷机离线告警为什么发生"))
+                .isEqualTo(Set.of(ExpertDomain.DEVICE));
+        // Security-specific alert phrases still select SECURITY.
+        assertThat(validator.expectedDomains("安防告警有多少条"))
+                .isEqualTo(Set.of(ExpertDomain.SECURITY));
     }
 }

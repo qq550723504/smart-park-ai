@@ -59,6 +59,23 @@ public final class ExpertFindingValidator {
         StatusClaim claim = StatusClaim.from(finding.conclusion());
         if (claim == StatusClaim.NONE) return true;
 
+        // Bind each claimed status to its own cited entity: "D1 offline while
+        // D2 online" is valid even though one global enum contradicts one of
+        // the two observations. Entities are the device identifiers that also
+        // appear in the cited results.
+        Map<String, Set<String>> statusesByEntity = statusesByEntity(refs, observed);
+        Map<String, StatusClaim> entityClaims = entityClaims(finding.conclusion(), statusesByEntity.keySet());
+        if (!entityClaims.isEmpty()) {
+            for (var entry : entityClaims.entrySet()) {
+                Set<String> actual = statusesByEntity.get(entry.getKey());
+                if (actual == null || actual.isEmpty() || !actual.stream().allMatch(entry.getValue()::matches)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // No per-entity binding was possible — keep the conservative global check.
         boolean foundStatus = false;
         for (String ref : refs) {
             for (String status : statuses(observed.get(ref).result())) {
@@ -67,6 +84,63 @@ public final class ExpertFindingValidator {
             }
         }
         return foundStatus;
+    }
+
+    /** Maps each device identifier found in cited results to its observed status values. */
+    private Map<String, Set<String>> statusesByEntity(List<String> refs,
+                                                      Map<String, EvidenceLedger.Observation> observed) {
+        Map<String, Set<String>> byEntity = new java.util.LinkedHashMap<>();
+        for (String ref : refs) {
+            try {
+                JsonNode root = JSON.readTree(observed.get(ref).result());
+                collectEntityStatuses(root, byEntity);
+            } catch (Exception ignored) {
+                // Non-JSON results cannot establish entity-bound claims.
+            }
+        }
+        return byEntity;
+    }
+
+    private void collectEntityStatuses(JsonNode node, Map<String, Set<String>> byEntity) {
+        if (node == null) return;
+        if (node.isObject()) {
+            String entityId = null;
+            String status = null;
+            var fields = node.fields();
+            while (fields.hasNext()) {
+                var entry = fields.next();
+                String key = entry.getKey().toLowerCase(Locale.ROOT);
+                JsonNode value = entry.getValue();
+                if (("deviceid".equals(key) || "device_id".equals(key)) && value.isTextual()) {
+                    entityId = value.asText().trim();
+                } else if ("status".equals(key) && value.isTextual()) {
+                    status = value.asText().trim().toUpperCase(Locale.ROOT);
+                }
+                collectEntityStatuses(value, byEntity);
+            }
+            if (entityId != null && status != null && !status.isBlank()) {
+                byEntity.computeIfAbsent(entityId, ignored -> new java.util.LinkedHashSet<>()).add(status);
+            }
+        } else if (node.isArray()) {
+            node.forEach(value -> collectEntityStatuses(value, byEntity));
+        }
+    }
+
+    /**
+     * Extracts per-entity status claims: each clause of the conclusion that
+     * names a known entity and carries a status keyword yields entity→claim.
+     */
+    private Map<String, StatusClaim> entityClaims(String conclusion, Set<String> entities) {
+        Map<String, StatusClaim> claims = new java.util.LinkedHashMap<>();
+        for (String clause : conclusion.split("；|;|。|\\n|，|,|while|而")) {
+            String normalized = clause.toLowerCase(Locale.ROOT);
+            for (String entity : entities) {
+                if (!normalized.contains(entity.toLowerCase(Locale.ROOT))) continue;
+                StatusClaim claim = StatusClaim.from(clause);
+                if (claim != StatusClaim.NONE) claims.putIfAbsent(entity, claim);
+            }
+        }
+        return claims;
     }
 
     private static boolean isUsableObservation(EvidenceLedger.Observation observation) {

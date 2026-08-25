@@ -29,7 +29,12 @@ public final class SupervisorPlanValidator {
         if (containsAny(text, "device", "offline", "hvac", "equipment", "冷机", "设备", "离线")) {
             domains.add(ExpertDomain.DEVICE);
         }
-        if (containsAny(text, "security", "access", "door", "alarm", "门禁", "安防", "告警")) {
+        // Generic alert words (告警/alarm) must NOT route to SECURITY: ordinary
+        // device-alert questions would otherwise demand the security expert,
+        // whose only tool looks up security events. Only security-specific
+        // alert phrases select this domain.
+        if (containsAny(text, "security", "access", "door", "intrusion",
+                "security alarm", "access alarm", "门禁", "安防", "安防告警", "门禁告警", "入侵告警", "安全告警")) {
             domains.add(ExpertDomain.SECURITY);
         }
         return Set.copyOf(domains);

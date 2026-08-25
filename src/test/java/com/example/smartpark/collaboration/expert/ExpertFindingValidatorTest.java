@@ -35,6 +35,47 @@ class ExpertFindingValidatorTest {
         assertThat(validator.validate(finding, Set.of())).isEqualTo(finding);
     }
 
+    @Test void acceptsPerEntityStatusClaimsAcrossCitedResults() {
+        // "D1 offline while D2 online" cites two lookups with different
+        // statuses; one global enum must not reject this valid conclusion.
+        ExpertFinding finding = new ExpertFinding(ExpertDomain.DEVICE, FindingStatus.SUPPORTED,
+                "D1 is offline while D2 is online", java.util.List.of("tool:device:1", "tool:device:2"),
+                .9, java.util.List.of());
+        EvidenceLedger ledger = new EvidenceLedger();
+        ledger.record("tool:device:1", "{\"deviceId\":\"D1\",\"status\":\"OFFLINE\"}");
+        ledger.record("tool:device:2", "{\"deviceId\":\"D2\",\"status\":\"ONLINE\"}");
+
+        ExpertFinding validated = validator.validateWithObservations(finding, ledger.snapshotObservations());
+
+        assertThat(validated.status()).isEqualTo(FindingStatus.SUPPORTED);
+    }
+
+    @Test void rejectsAStatusClaimBoundToTheWrongEntity() {
+        ExpertFinding finding = new ExpertFinding(ExpertDomain.DEVICE, FindingStatus.SUPPORTED,
+                "D1 is offline while D2 is offline", java.util.List.of("tool:device:1", "tool:device:2"),
+                .9, java.util.List.of());
+        EvidenceLedger ledger = new EvidenceLedger();
+        ledger.record("tool:device:1", "{\"deviceId\":\"D1\",\"status\":\"OFFLINE\"}");
+        ledger.record("tool:device:2", "{\"deviceId\":\"D2\",\"status\":\"ONLINE\"}");
+
+        assertThat(validator.validateWithObservations(finding, ledger.snapshotObservations()).status())
+                .isEqualTo(FindingStatus.INSUFFICIENT_EVIDENCE);
+    }
+
+    @Test void stillRejectsAGlobalClaimContradictedByAnyObservation() {
+        // Without identifiable entities in the conclusion, the conservative
+        // global check stays in force.
+        ExpertFinding finding = new ExpertFinding(ExpertDomain.DEVICE, FindingStatus.SUPPORTED,
+                "device is offline", java.util.List.of("tool:device:1", "tool:device:2"), .9,
+                java.util.List.of());
+        EvidenceLedger ledger = new EvidenceLedger();
+        ledger.record("tool:device:1", "{\"deviceId\":\"D1\",\"status\":\"OFFLINE\"}");
+        ledger.record("tool:device:2", "{\"deviceId\":\"D2\",\"status\":\"ONLINE\"}");
+
+        assertThat(validator.validateWithObservations(finding, ledger.snapshotObservations()).status())
+                .isEqualTo(FindingStatus.INSUFFICIENT_EVIDENCE);
+    }
+
     @Test void downgradesFindingThatContradictsTheStructuredToolResult() {
         ExpertFinding finding = new ExpertFinding(ExpertDomain.DEVICE, FindingStatus.SUPPORTED,
                 "device is offline", java.util.List.of("tool:device:1"), .9, java.util.List.of());
