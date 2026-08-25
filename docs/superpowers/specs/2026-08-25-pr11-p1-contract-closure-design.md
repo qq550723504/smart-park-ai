@@ -4,15 +4,17 @@
 
 - Date: 2026-08-25
 - Approved in chat: yes
-- Target: the six P1 review threads created against commit `f5b36f51b5`
+- Target: the six P1 review threads created against commit `f5b36f51b5`, plus
+  the later demo-snapshot data-integrity P1 discovered during final re-fetch
 - Baseline: commit `5281da6`, after the independent P2 round-4 fixes
 
-This slice closes three trust boundaries that currently validate only subsets of
+This slice closes four trust boundaries that currently validate only subsets of
 their intended contracts:
 
 1. generated SQL versus the approved `QueryPlan`;
 2. generated summaries versus verified rows or expert findings;
 3. the analytics database login versus the dedicated-database privilege model.
+4. demo-fixture maintenance versus real analytics source data.
 
 It does not implement the remaining P2 comments, add a general-purpose query
 compiler, introduce arbitrary joins, or turn the demo runtime into a
@@ -56,6 +58,13 @@ those inherited privileges.
 
 V1 may already have been applied, so modifying it is not a valid upgrade path.
 The correction must be a new versioned migration.
+
+### 2.4 Demo maintenance has no provenance boundary
+
+`DemoSnapshotRefresher` is registered whenever analytics is enabled and updates
+every snapshot older than two hours. It cannot distinguish the seven V1 demo
+fixtures from real device snapshots, so a presentation aid mutates production
+facts and makes stale devices appear current.
 
 ## 3. Chosen architecture
 
@@ -163,6 +172,14 @@ The README and configuration comments state that the analytics URL must point
 to a dedicated database. Shared-database compatibility is deliberately
 removed: PostgreSQL has no per-role `DENY` that can override `PUBLIC` grants.
 
+### 3.6 Explicit demo-fixture refresh boundary
+
+The refresher is absent by default and requires an explicit demo-only
+configuration flag. Even when enabled, its update is restricted to the seven
+stable device identifiers seeded by V1. This creates two independent gates:
+real analytics environments do not register the mutating job, and a mistaken
+opt-in cannot rewrite unrelated device rows.
+
 ## 4. Data flow
 
 ```text
@@ -215,6 +232,9 @@ Each production change starts with a focused test that fails on baseline
    - proves a table granted to `PUBLIC` is not readable by the analytics login;
    - proves the login still cannot create objects and can read only approved
      views.
+6. `AnalyticsPropertiesTest` and `AnalyticsSchemaMigrationTest`
+   - prove the refresher is absent by default and requires explicit opt-in;
+   - prove an aged non-fixture snapshot remains unchanged after a demo refresh.
 
 Final verification:
 
@@ -229,7 +249,8 @@ git diff --check
 
 ## 7. Acceptance criteria
 
-- All six P1 counterexamples are red on `5281da6` and green after the fix.
+- All seven P1 counterexamples are red on their preceding implementation and
+  green after the fix.
 - SQL execution is impossible unless the full supported query shape matches the
   plan; no lossy identifier or occurrence normalization remains.
 - Nonnumeric dimension values are grounded to figures from the same real row.
@@ -237,5 +258,5 @@ git diff --check
 - An upgraded dedicated analytics database removes inherited `PUBLIC`
   privileges from the runtime login without rewriting V1.
 - Public REST/SSE DTOs remain compatible.
-- The six original GitHub threads receive technical replies and are resolved
+- The seven GitHub threads receive technical replies and are resolved
   only after local and remote verification.

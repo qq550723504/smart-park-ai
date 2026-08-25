@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Close the six P1 findings created against `f5b36f51b5` by making SQL, result-summary, expert-synthesis, and database privilege contracts complete and lossless.
+**Goal:** Close the original six P1 findings plus the later demo-snapshot data-integrity P1 by making SQL, result-summary, expert-synthesis, database privilege, and demo-fixture contracts complete and lossless.
 
 **Architecture:** Reuse JSqlParser to extract structural relation and query-shape evidence, then compare the full supported shape to `QueryPlan`. Ground summaries in actual dimension columns and rows, derive synthesis completeness from every validated supported finding, and add a forward-only Flyway V2 migration that enforces the already-approved dedicated analytics database boundary.
 
@@ -316,10 +316,26 @@ git commit -m "fix: harden analytics database privileges"
 
 ---
 
-### Task 5: Full verification and GitHub review closure
+### Task 5: Isolate demo snapshot maintenance from real data
 
 **Files:**
-- Verify all files changed by Tasks 1-4.
+- Modify: `src/main/java/com/example/smartpark/analytics/AnalyticsConfiguration.java`
+- Modify: `src/main/java/com/example/smartpark/analytics/DemoSnapshotRefresher.java`
+- Modify: `src/main/resources/application.yml`
+- Modify: `src/test/java/com/example/smartpark/analytics/AnalyticsPropertiesTest.java`
+- Modify: `src/test/java/com/example/smartpark/analytics/AnalyticsSchemaMigrationTest.java`
+- Modify: `README.md`
+
+- [ ] **Step 1: Prove the current job mutates a real aged row and is registered by default**
+- [ ] **Step 2: Require explicit demo opt-in and restrict updates to the seven V1 fixture IDs**
+- [ ] **Step 3: Verify focused configuration and PostgreSQL tests, then commit**
+
+---
+
+### Task 6: Full verification and GitHub review closure
+
+**Files:**
+- Verify all files changed by Tasks 1-5.
 - No unrelated production edits.
 
 **Interfaces:**
@@ -342,7 +358,7 @@ Record exact backend test totals, frontend test totals, build warnings, skipped 
 
 - [ ] **Step 2: Re-fetch all PR review threads**
 
-Use GitHub GraphQL `reviewThreads(first:100)` and confirm the six targeted thread IDs are still current and unresolved. Re-evaluate any newly added P1 before pushing; do not resolve outdated or unrelated comments by assumption.
+Use GitHub GraphQL `reviewThreads(first:100)` and confirm the seven targeted thread IDs are still current and unresolved. Re-evaluate any newly added P1 before pushing; do not resolve outdated or unrelated comments by assumption.
 
 - [ ] **Step 3: Push the explicit branch tip**
 
@@ -352,7 +368,7 @@ Push local HEAD to `origin/codex/smart-park-p1` without force:
 git push origin HEAD:codex/smart-park-p1
 ```
 
-- [ ] **Step 4: Reply and resolve the six original threads**
+- [ ] **Step 4: Reply and resolve the seven P1 threads**
 
 Reply inside each original review thread with the root contract changed and the focused test that proves it. Resolve only after the push succeeds and GitHub shows the target commit.
 
