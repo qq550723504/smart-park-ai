@@ -15,6 +15,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.Duration;
 import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -150,8 +151,20 @@ public class OperationsAnalysisService {
                         ? null : pending.understanding().requestedTimeRange();
                 List<String> requestedDimensions = pending.understanding() == null
                         ? List.of() : pending.understanding().requestedDimensions();
+                LinkedHashSet<String> metricTerms = new LinkedHashSet<>();
+                if (pending.understanding() != null) {
+                    for (String term : pending.understanding().metricTerms()) {
+                        var resolution = catalog.resolve(term);
+                        if (resolution instanceof com.example.smartpark.analytics.catalog.MetricResolution.Resolved resolved) {
+                            metricTerms.add(resolved.metric().name());
+                        }
+                    }
+                }
+                safeSelections.stream().map(MetricSelection::metric).forEach(metricTerms::add);
+                String normalizedQuestion = pending.understanding() == null
+                        ? current.question() : pending.understanding().normalizedQuestion();
                 pinned = new AnalyticsModelClient.QuestionUnderstanding(
-                        current.question(), safeSelections.stream().map(MetricSelection::metric).toList(),
+                        normalizedQuestion, List.copyOf(metricTerms),
                         List.of(), requestedTimeRange, requestedDimensions);
                 store.put(rerunningRecord(runId));
                 pendingClarifications.remove(runId);

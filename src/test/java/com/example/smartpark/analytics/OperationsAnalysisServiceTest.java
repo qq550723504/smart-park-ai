@@ -124,6 +124,28 @@ class OperationsAnalysisServiceTest {
         assertThat(pinned.get().requestedDimensions()).containsExactly("building_id");
     }
 
+    @Test
+    void clarificationResumePreservesMetricsThatWereAlreadyResolved() {
+        var partialUnderstanding = new AnalyticsModelClient.QuestionUnderstanding(
+                "能耗和告警", List.of("energy_kwh", "告警"), List.of(), null, List.of("building_id"));
+        OperationsAnalysisGraph.AnalysisRunResult clarification = new OperationsAnalysisGraph.AnalysisRunResult(
+                UUID.randomUUID(), OperationsAnalysisGraph.RunOutcome.NEEDS_CLARIFICATION,
+                List.of("请明确告警口径"), List.of(List.of("alert_count", "high_risk_alert_count")),
+                null, null, null, partialUnderstanding, null);
+        AtomicReference<AnalyticsModelClient.QuestionUnderstanding> pinned = new AtomicReference<>();
+        OperationsAnalysisService service = service((runId, question, pinnedUnderstanding) -> {
+            if (pinnedUnderstanding == null) return clarification;
+            pinned.set(pinnedUnderstanding);
+            return completed(runId);
+        }, directExecutor());
+
+        var paused = service.start("能耗和告警");
+        service.submitClarification(paused.runId(),
+                List.of(new MetricSelection("告警", "alert_count")));
+
+        assertThat(pinned.get().metricTerms()).containsExactly("energy_kwh", "alert_count");
+    }
+
     private static AnalyticsModelClient.QuestionUnderstanding requestedUnderstanding(
             AnalyticsModelClient.RequestedTimeRange requested) {
         return new AnalyticsModelClient.QuestionUnderstanding("昨天的告警", List.of("告警"),

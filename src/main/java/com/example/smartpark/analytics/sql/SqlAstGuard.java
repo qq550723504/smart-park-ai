@@ -237,8 +237,11 @@ public final class SqlAstGuard {
 
     private static void validateRelation(Object fromItem, Set<String> cteAliases)
             throws UnsafeSqlException {
-        if (!(fromItem instanceof Table table)) {
+        if (fromItem == null || fromItem instanceof net.sf.jsqlparser.statement.select.ParenthesedSelect) {
             return;
+        }
+        if (!(fromItem instanceof Table table)) {
+            throw reject("FROM/JOIN 只允许白名单表或已校验子查询，禁止表值函数");
         }
         SqlRelationName relation = SqlRelationName.from(table);
         if (!relation.isQualified() && cteAliases.contains(relation.relation())) {

@@ -141,4 +141,16 @@ class SqlAstGuardTest {
                 WHERE hour_ts >= :fromTs AND hour_ts < :toTs LIMIT 100"""))
                 .doesNotThrowAnyException();
     }
+
+    @Test
+    void rejectsTableValuedFunctionsInFromItems() {
+        assertThatThrownBy(() -> SqlAstGuard.validate("""
+                SELECT e.building_id, SUM(e.kwh)
+                FROM analytics.v_energy_hourly e
+                CROSS JOIN generate_series(1, 2) multiplier
+                WHERE e.hour_ts >= :fromTs AND e.hour_ts < :toTs
+                GROUP BY e.building_id LIMIT 100"""))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("FROM");
+    }
 }
