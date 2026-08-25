@@ -38,7 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class OperationsAnalysisGraphTest {
 
     private static final String GOOD_SQL = """
-            SELECT building_id, SUM(kwh) AS total FROM analytics.v_energy_hourly
+            SELECT building_id, SUM(kwh) AS energy_kwh FROM analytics.v_energy_hourly
             WHERE hour_ts >= :fromTs AND hour_ts < :toTs
             GROUP BY building_id ORDER BY building_id LIMIT 100""";
     private static final String LIMIT_LESS_SQL = "SELECT building_id, kwh FROM analytics.v_energy_hourly";
@@ -98,7 +98,7 @@ class OperationsAnalysisGraphTest {
                 new AnalyticsModelClient.QuestionUnderstanding("上周各楼宇能耗对比", List.of("能耗"), List.of(),
                         null, List.of("building_id")),
                 List.of(GOOD_SQL),
-                new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("total"), "", "kWh"),
+                new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("energy_kwh"), "", "kWh"),
                 "共 3 行结果。");
         UUID runId = UUID.randomUUID();
 
@@ -129,7 +129,7 @@ class OperationsAnalysisGraphTest {
                         "过去30天各楼宇能耗", List.of("能耗"), List.of(),
                         new AnalyticsModelClient.RequestedTimeRange(from, to), List.of("building_id")),
                 List.of(GOOD_SQL),
-                new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("total"), "", "kWh"),
+                new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("energy_kwh"), "", "kWh"),
                 "共 3 行结果。");
 
         var outcome = graph.run(UUID.randomUUID(), "过去30天各楼宇能耗");
@@ -149,7 +149,7 @@ class OperationsAnalysisGraphTest {
                         "过去30天各楼宇能耗", List.of("能耗"), List.of(), null,
                         List.of("building_id")),
                 List.of(GOOD_SQL),
-                new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("total"), "", "kWh"),
+                new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("energy_kwh"), "", "kWh"),
                 "共 3 行结果。");
 
         var outcome = graph.run(UUID.randomUUID(), "过去30天各楼宇能耗");
@@ -178,7 +178,7 @@ class OperationsAnalysisGraphTest {
                 new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of(),
                         null, List.of("building_id")),
                 List.of(GOOD_SQL),
-                new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("total"), "", "kWh"),
+                new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("energy_kwh"), "", "kWh"),
                 "共 3 行结果。");
         UUID runId = UUID.randomUUID();
 
@@ -254,14 +254,14 @@ class OperationsAnalysisGraphTest {
         // The plan pins the row bound; a model answer with LIMIT 500 widens it
         // and must be rejected with a repairable reason.
         String limit500 = """
-                SELECT building_id, SUM(kwh) AS total FROM analytics.v_energy_hourly
+                SELECT building_id, SUM(kwh) AS energy_kwh FROM analytics.v_energy_hourly
                 WHERE hour_ts >= :fromTs AND hour_ts < :toTs
                 GROUP BY building_id ORDER BY building_id LIMIT 500""";
         modelClient.reset(
                 new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of(),
                         null, List.of("building_id")),
                 List.of(limit500, GOOD_SQL),
-                new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("total"), "", "kWh"),
+                new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("energy_kwh"), "", "kWh"),
                 "共 3 行结果。");
 
         var outcome = graph.run(UUID.randomUUID(), "上周能耗");
@@ -290,7 +290,7 @@ class OperationsAnalysisGraphTest {
                 new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of(),
                         null, List.of("building_id")),
                 List.of(GOOD_SQL),
-                new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("total"), "", "kWh"),
+                new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("energy_kwh"), "", "kWh"),
                 "共 3 行结果。");
         UUID runId = UUID.randomUUID();
 
@@ -370,7 +370,7 @@ class OperationsAnalysisGraphTest {
                 new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of(),
                         null, List.of("building_id")),
                 List.of(GOOD_SQL),
-                new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("total"), "", "kWh"),
+                new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("energy_kwh"), "", "kWh"),
                 "总计高达 99999.99 kWh，环比上升 37%。");
 
         var outcome = graph.run(UUID.randomUUID(), "上周能耗");

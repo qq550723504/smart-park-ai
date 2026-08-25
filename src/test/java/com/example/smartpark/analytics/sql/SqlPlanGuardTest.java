@@ -99,7 +99,7 @@ class SqlPlanGuardTest {
 
         assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
                 .isInstanceOf(UnsafeSqlException.class)
-                .hasMessageContaining("SUM(kwh)");
+                .hasMessageContaining("指标投影");
     }
 
     @Test
@@ -194,7 +194,79 @@ class SqlPlanGuardTest {
 
         assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
                 .isInstanceOf(UnsafeSqlException.class)
-                .hasMessageContaining("occurrence");
+                .hasMessageContaining("JOIN");
+    }
+
+    @Test
+    void rejectsRepeatedCteReferenceThatMultipliesTheFactRows() throws UnsafeSqlException {
+        QueryPlan plan = plan("energy_kwh", List.of("building_id"));
+        ValidatedSql sql = SqlAstGuard.validate("""
+                WITH recent AS (
+                    SELECT building_id, hour_ts, kwh FROM analytics.v_energy_hourly
+                )
+                SELECT a.building_id, SUM(a.kwh)
+                FROM recent a JOIN recent b ON a.building_id = b.building_id
+                WHERE a.hour_ts >= :fromTs AND a.hour_ts < :toTs
+                GROUP BY a.building_id LIMIT 100""");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("JOIN");
+    }
+
+    @Test
+    void rejectsHavingPredicateAbsentFromThePlan() throws UnsafeSqlException {
+        QueryPlan plan = plan("energy_kwh", List.of("building_id"));
+        ValidatedSql sql = SqlAstGuard.validate("""
+                SELECT building_id, SUM(kwh) FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                GROUP BY building_id HAVING SUM(kwh) > 100 LIMIT 100""");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("HAVING");
+    }
+
+    @Test
+    void rejectsDuplicateMetricProjection() throws UnsafeSqlException {
+        QueryPlan plan = plan("energy_kwh", List.of("building_id"));
+        ValidatedSql sql = SqlAstGuard.validate("""
+                SELECT building_id, SUM(kwh), SUM(kwh) AS energy_kwh
+                FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                GROUP BY building_id LIMIT 100""");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("投影");
+    }
+
+    @Test
+    void rejectsProjectionAliasesThatChangePlanOutputIdentity() throws UnsafeSqlException {
+        QueryPlan plan = plan("energy_kwh", List.of("building_id"));
+        ValidatedSql sql = SqlAstGuard.validate("""
+                SELECT building_id AS wrong_name, SUM(kwh) AS arbitrary
+                FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                GROUP BY building_id LIMIT 100""");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("别名");
+    }
+
+    @Test
+    void rejectsMetricAliasThatIsNotThePlanMetricName() throws UnsafeSqlException {
+        QueryPlan plan = plan("energy_kwh", List.of("building_id"));
+        ValidatedSql sql = SqlAstGuard.validate("""
+                SELECT building_id, SUM(kwh) AS arbitrary
+                FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                GROUP BY building_id LIMIT 100""");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("别名");
     }
 
     @Test

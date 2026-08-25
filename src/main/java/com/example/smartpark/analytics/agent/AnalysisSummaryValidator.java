@@ -59,20 +59,64 @@ public class AnalysisSummaryValidator {
         Set<String> knownDimensions = rowFacts.stream()
                 .flatMap(row -> row.dimensionValues().stream())
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-        for (String clause : conclusion.split("(?:[，,；;。！？?\\n]+|(?<!\\d)[.!](?!\\d))")) {
-            Set<String> dimensions = knownDimensions.stream()
-                    .filter(value -> containsDimensionValue(clause, value))
-                    .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-            java.util.regex.Matcher figureMatcher = NUMBER.matcher(clause);
-            Set<String> figures = new LinkedHashSet<>();
-            while (figureMatcher.find()) figures.add(normalize(figureMatcher.group()));
-            if (dimensions.isEmpty() || figures.isEmpty()) continue;
-            boolean supportedByOneRow = rowFacts.stream().anyMatch(row ->
-                    row.dimensionValues().containsAll(dimensions) && row.figures().containsAll(figures));
-            if (!supportedByOneRow) {
-                throw new IllegalArgumentException("结论中的实体与数字对应关系不受结果行支持: " + clause.strip());
+        List<Mention> mentions = new ArrayList<>();
+        for (String dimension : knownDimensions) {
+            java.util.regex.Matcher matcher = dimensionPattern(dimension).matcher(conclusion.toLowerCase(Locale.ROOT));
+            while (matcher.find()) {
+                mentions.add(new Mention(matcher.start(), matcher.end(), dimension, true));
             }
         }
+        java.util.regex.Matcher figureMatcher = NUMBER.matcher(conclusion);
+        while (figureMatcher.find()) {
+            boolean overlapsDimension = mentions.stream().anyMatch(mention ->
+                    figureMatcher.start() < mention.end() && figureMatcher.end() > mention.start());
+            String figure = normalize(figureMatcher.group());
+            if (!overlapsDimension && !isMetadataFigure(conclusion, figureMatcher.start(),
+                    figureMatcher.end(), figure, result)) {
+                mentions.add(new Mention(figureMatcher.start(), figureMatcher.end(), figure, false));
+            }
+        }
+        mentions.sort(java.util.Comparator.comparingInt(Mention::start)
+                .thenComparing(mention -> mention.dimension() ? 0 : 1));
+
+        Set<String> dimensions = new LinkedHashSet<>();
+        Set<String> figures = new LinkedHashSet<>();
+        for (Mention mention : mentions) {
+            if (mention.dimension()) {
+                if (!figures.isEmpty()) {
+                    validateRowGroup(dimensions, figures, rowFacts);
+                    dimensions.clear();
+                    figures.clear();
+                }
+                dimensions.add(mention.value());
+            } else {
+                if (dimensions.isEmpty()) {
+                    throw new IllegalArgumentException("结论中的数字缺少可验证的维度对应关系: " + mention.value());
+                }
+                figures.add(mention.value());
+            }
+        }
+        if (!figures.isEmpty()) validateRowGroup(dimensions, figures, rowFacts);
+    }
+
+    private void validateRowGroup(Set<String> dimensions, Set<String> figures, List<RowFact> rowFacts) {
+        boolean supportedByOneRow = rowFacts.stream().anyMatch(row ->
+                row.dimensionValues().containsAll(dimensions) && row.figures().containsAll(figures));
+        if (!supportedByOneRow) {
+            throw new IllegalArgumentException(
+                    "结论中的实体与数字对应关系不受结果行支持: " + dimensions + " -> " + figures);
+        }
+    }
+
+    private boolean isMetadataFigure(String conclusion, int start, int end,
+                                     String figure, TabularResult result) {
+        int contextEnd = Math.min(conclusion.length(), end + 12);
+        String context = conclusion.substring(end, contextEnd).toLowerCase(Locale.ROOT);
+        boolean rowCount = figure.equals(String.valueOf(result.rowCount()))
+                && context.matches("^\\s*(?:个)?(?:行|rows?\\b).*");
+        boolean columnCount = figure.equals(String.valueOf(result.columnNames().size()))
+                && context.matches("^\\s*(?:个)?(?:列|columns?\\b).*");
+        return rowCount || columnCount;
     }
 
     private List<RowFact> rowFacts(QueryPlan plan, TabularResult result) {
@@ -116,19 +160,18 @@ public class AnalysisSummaryValidator {
         return List.copyOf(facts);
     }
 
-    private boolean containsDimensionValue(String clause, String normalizedValue) {
-        String lowered = clause.toLowerCase(Locale.ROOT);
+    private java.util.regex.Pattern dimensionPattern(String normalizedValue) {
         if (normalizedValue.matches("[a-z0-9_-]+")) {
             return java.util.regex.Pattern.compile(
-                            "(?<![a-z0-9_-])" + java.util.regex.Pattern.quote(normalizedValue)
-                                    + "(?![a-z0-9_-])")
-                    .matcher(lowered)
-                    .find();
+                    "(?<![a-z0-9_-])" + java.util.regex.Pattern.quote(normalizedValue)
+                            + "(?![a-z0-9_-])");
         }
-        return lowered.contains(normalizedValue);
+        return java.util.regex.Pattern.compile(java.util.regex.Pattern.quote(normalizedValue));
     }
 
     private record RowFact(Set<String> dimensionValues, Set<String> figures) { }
+
+    private record Mention(int start, int end, String value, boolean dimension) { }
 
     private List<String> supportedFigures(TabularResult result) {
         List<String> figures = new ArrayList<>();

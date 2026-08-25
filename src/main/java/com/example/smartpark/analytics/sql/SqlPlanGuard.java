@@ -56,8 +56,8 @@ public final class SqlPlanGuard {
         }
 
         PlainSelect resultQuery = resultQuery(select);
-        List<Branch> branches = consumedBranches(select, resultQuery);
         validateSourceGrain(plan);
+        List<Branch> branches = consumedBranches(select, resultQuery);
         validateSourceOccurrences(branches, plan);
         validateMetricPredicateScopes(plan);
         validateConsumedBranchLineage(resultQuery, branches, plan);
@@ -279,6 +279,12 @@ public final class SqlPlanGuard {
             PlainSelect plain = current.select() instanceof ParenthesedSelect parenthesed
                     ? resultQuery(parenthesed.getSelect()) : (PlainSelect) current.select();
             if (!expanded.add(current.select())) continue;
+            if (plain.getJoins() != null && !plain.getJoins().isEmpty()) {
+                throw reject("当前单事实 QueryPlan 不支持 JOIN");
+            }
+            if (plain.getHaving() != null) {
+                throw reject("当前 QueryPlan 不支持 HAVING 结果谓词");
+            }
             List<Expression> terms = new ArrayList<>(current.inheritedTerms());
             flattenAnd(plain.getWhere(), terms);
             branches.add(new Branch(plain, List.copyOf(terms), sourceTables(plain)));
@@ -329,23 +335,40 @@ public final class SqlPlanGuard {
 
     private static void validateProjection(PlainSelect resultQuery, QueryPlan plan)
             throws UnsafeSqlException {
-        Set<String> metricExpressions = new LinkedHashSet<>();
+        Map<String, List<String>> metricNamesByExpression = new HashMap<>();
         for (MetricDefinition metric : plan.metrics()) {
             try {
-                metricExpressions.add(canonicalProjection(CCJSqlParserUtil.parseExpression(metric.expression())));
+                String expression = canonicalProjection(CCJSqlParserUtil.parseExpression(metric.expression()));
+                metricNamesByExpression.computeIfAbsent(expression, ignored -> new ArrayList<>())
+                        .add(metric.name().toLowerCase(Locale.ROOT));
             } catch (Exception exception) {
                 throw reject("指标目录包含无法解析的聚合表达式 " + metric.expression());
             }
         }
         Set<String> groupedColumns = groupedColumns(resultQuery, plan);
-        Set<String> projected = new LinkedHashSet<>();
+        Map<String, Integer> projectedMetricCounts = new HashMap<>();
+        Set<String> usedMetricAliases = new LinkedHashSet<>();
         Set<String> projectedDimensions = new LinkedHashSet<>();
         List<String> invalidProjections = new ArrayList<>();
         for (var item : resultQuery.getSelectItems()) {
             Expression expression = item.getExpression();
             String canonical = canonicalProjection(expression);
-            projected.add(canonical);
-            if (metricExpressions.contains(canonical)) continue;
+            List<String> metricNames = metricNamesByExpression.get(canonical);
+            if (metricNames != null) {
+                projectedMetricCounts.merge(canonical, 1, Integer::sum);
+                if (item.getAlias() != null) {
+                    String alias = item.getAlias().getUnquotedName().toLowerCase(Locale.ROOT);
+                    if (!metricNames.contains(alias)) {
+                        throw reject("指标投影别名必须保持计划输出身份: " + alias);
+                    }
+                    if (!usedMetricAliases.add(alias)) {
+                        throw reject("查询重复使用了指标投影别名 " + alias);
+                    }
+                } else if (metricNames.size() > 1) {
+                    throw reject("同表达式指标必须使用计划指标名作为投影别名");
+                }
+                continue;
+            }
             if (expression instanceof Column column) {
                 String name = column.getUnquotedColumnName().toLowerCase(Locale.ROOT);
                 if (!allowedDimensions(plan).contains(name)) {
@@ -360,14 +383,22 @@ public final class SqlPlanGuard {
                 if (!projectedDimensions.add(name)) {
                     throw reject("查询重复投影了维度 " + name);
                 }
+                if (item.getAlias() != null
+                        && !item.getAlias().getUnquotedName().equalsIgnoreCase(name)) {
+                    throw reject("维度投影别名必须保持计划输出身份: " + name);
+                }
                 continue;
             }
             invalidProjections.add(expression.toString());
         }
-        for (MetricDefinition metric : plan.metrics()) {
-            String expected = canonicalProjection(parseExpression(metric.expression()));
-            if (!projected.contains(expected)) {
-                throw reject("指标 " + metric.name() + " 必须投影目录表达式 " + metric.expression());
+        for (Map.Entry<String, List<String>> expected : metricNamesByExpression.entrySet()) {
+            int actualCount = projectedMetricCounts.getOrDefault(expected.getKey(), 0);
+            if (actualCount != expected.getValue().size()) {
+                throw reject("指标投影必须与计划完全一致: " + expected.getValue());
+            }
+            if (expected.getValue().size() > 1
+                    && !usedMetricAliases.containsAll(expected.getValue())) {
+                throw reject("同表达式指标投影别名缺少计划指标: " + expected.getValue());
             }
         }
         if (!invalidProjections.isEmpty()) {

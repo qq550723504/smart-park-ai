@@ -95,6 +95,7 @@ public class LlmAnalyticsModelClient implements AnalyticsModelClient {
                 2. 时间边界只能用命名参数 :fromTs（含）与 :toTs（不含），禁止任何日期字面量。
                 3. 必须带 LIMIT 子句且上限不超过 %d。
                 4. 单条语句，无注释、无分号、禁止 DML/DDL。
+                5. 维度列不得改名；聚合表达式如使用别名，必须使用对应指标 name。
                 """.formatted(maxRows);
     }
 
@@ -121,7 +122,8 @@ public class LlmAnalyticsModelClient implements AnalyticsModelClient {
     public String summarize(SummaryContext context) {
         return call("""
                 你是园区运营分析总结器。只依据给定的真实查询结果写结论，
-                不允许出现结果之外的数字或百分比。用中文，两句话以内。""",
+                不允许出现结果之外的数字或百分比。每个数据数字前必须先写出对应的结果维度值。
+                用中文，两句话以内。""",
                 summaryFacts(context));
     }
 

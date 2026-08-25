@@ -76,5 +76,29 @@ class AnalysisSummaryValidatorTest {
                 "HIGH 有 20 条，LOW 有 10 条。", riskPlan, riskResult))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("对应");
+        assertThatThrownBy(() -> validator.validate(
+                "HIGH, has 20. LOW, has 10.", riskPlan, riskResult))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("对应");
+    }
+
+    @Test
+    void doesNotMistakeADataFigureForMetadataWhenItEqualsTheRowCount() {
+        QueryPlan riskPlan = new QueryPlan("按风险等级统计告警",
+                List.of(new com.example.smartpark.analytics.catalog.MetricDefinition(
+                        "alert_count", "告警数量", java.util.Set.of("告警"), "条",
+                        "analytics.v_alert_fact", java.util.Set.of("risk_level", "occurred_at"),
+                        "COUNT(*)", "occurred_at", 7, null)),
+                List.of("risk_level"), Map.of(), plan.timeRange(), 100);
+        TabularResult riskResult = new TabularResult(
+                List.of("risk_level", "alert_count"),
+                List.of(List.of("HIGH", 2), List.of("LOW", 20)), false, 12);
+
+        assertThat(new AnalysisSummaryValidator().validate(
+                "HIGH 有 2 条，共返回 2 行数据。", riskPlan, riskResult)).isNotBlank();
+        assertThatThrownBy(() -> new AnalysisSummaryValidator().validate(
+                "LOW 有 2 条，共返回 2 行数据。", riskPlan, riskResult))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("对应");
     }
 }
