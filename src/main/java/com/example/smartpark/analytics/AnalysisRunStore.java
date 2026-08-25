@@ -71,6 +71,11 @@ public class AnalysisRunStore {
         return runs.get(runId);
     }
 
+    /** Removes a run that was registered before a non-production executor rejected admission. */
+    public void remove(UUID runId) {
+        runs.remove(runId);
+    }
+
     public boolean existsActive() {
         evictExpiredTerminalRuns(clock.instant());
         return runs.values().stream()

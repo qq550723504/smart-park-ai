@@ -53,10 +53,12 @@ public class AnalysisSummaryValidator {
             }
         }
         List<String> supported = supportedFigures(result);
+        List<Span> temporalSpans = temporalDimensionSpans(conclusion, plan, result);
         java.util.regex.Matcher matcher = NUMBER.matcher(conclusion);
         List<String> unsupported = new ArrayList<>();
         boolean hasFigure = false;
         while (matcher.find()) {
+            if (contains(temporalSpans, matcher.start(), matcher.end())) continue;
             hasFigure = true;
             String figure = normalize(matcher.group());
             if (!supported.contains(figure)) {
@@ -69,13 +71,14 @@ public class AnalysisSummaryValidator {
         if (!unsupported.isEmpty()) {
             throw new IllegalArgumentException("结论包含结果数据不支持的数字: " + unsupported);
         }
-        validateDimensionFigureRelationships(conclusion, plan, result);
+        validateDimensionFigureRelationships(conclusion, plan, result, temporalSpans);
         return conclusion.strip();
     }
 
     private void validateDimensionFigureRelationships(String conclusion,
                                                       QueryPlan plan,
-                                                      TabularResult result) {
+                                                      TabularResult result,
+                                                      List<Span> temporalSpans) {
         List<RowFact> rowFacts = rowFacts(plan, result);
         if (rowFacts.isEmpty()) return;
         Set<String> knownDimensions = rowFacts.stream()
@@ -93,6 +96,7 @@ public class AnalysisSummaryValidator {
         }
         java.util.regex.Matcher figureMatcher = NUMBER.matcher(conclusion);
         while (figureMatcher.find()) {
+            if (contains(temporalSpans, figureMatcher.start(), figureMatcher.end())) continue;
             String figure = normalize(figureMatcher.group());
             mentions.add(new Mention(figureMatcher.start(), figureMatcher.end(), figure,
                     knownDimensions.contains(figure), true));
@@ -244,6 +248,59 @@ public class AnalysisSummaryValidator {
         return rowCount || columnCount;
     }
 
+    /**
+     * Date and timestamp dimensions are composite values. Their year/month/day
+     * digits must not enter the numeric grounding set as independent business
+     * figures, otherwise a valid sentence such as "2026-08-24 的进场量为 812"
+     * is rejected before row binding can run.
+     */
+    private List<Span> temporalDimensionSpans(String conclusion, QueryPlan plan, TabularResult result) {
+        List<Span> spans = new ArrayList<>();
+        for (String dimension : plan.dimensions()) {
+            if (!isTemporalDimension(dimension)) continue;
+            int column = -1;
+            for (int index = 0; index < result.columnNames().size(); index++) {
+                if (result.columnNames().get(index).equalsIgnoreCase(dimension)) {
+                    column = index;
+                    break;
+                }
+            }
+            if (column < 0) continue;
+            for (List<Object> row : result.rows()) {
+                if (column >= row.size() || row.get(column) == null) continue;
+                String value = row.get(column).toString().strip();
+                if (value.isBlank()) continue;
+                addMatches(spans, conclusion, value);
+                // Timestamp renderings often differ between JDBC and the
+                // model (space vs T, or omitted time); the validated date
+                // prefix still identifies the same temporal dimension value.
+                if (value.length() >= 10 && value.substring(4, 5).equals("-")
+                        && value.substring(7, 8).equals("-")) {
+                    addMatches(spans, conclusion, value.substring(0, 10));
+                }
+            }
+        }
+        return List.copyOf(spans);
+    }
+
+    private void addMatches(List<Span> spans, String text, String value) {
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile(java.util.regex.Pattern.quote(value), java.util.regex.Pattern.CASE_INSENSITIVE)
+                .matcher(text);
+        while (matcher.find()) spans.add(new Span(matcher.start(), matcher.end()));
+    }
+
+    private boolean isTemporalDimension(String dimension) {
+        String normalized = dimension.toLowerCase(Locale.ROOT);
+        return normalized.equals("stat_date") || normalized.equals("hour_ts")
+                || normalized.endsWith("_date") || normalized.endsWith("_at")
+                || normalized.endsWith("_ts");
+    }
+
+    private boolean contains(List<Span> spans, int start, int end) {
+        return spans.stream().anyMatch(span -> start >= span.start() && end <= span.end());
+    }
+
     private int metadataSegmentStart(String text, int before) {
         for (int index = before - 1; index >= 0; index--) {
             if (isMetadataDelimiter(text, index)) return index + 1;
@@ -338,6 +395,8 @@ public class AnalysisSummaryValidator {
 
     private record Mention(int start, int end, String value,
                            boolean dimensionCandidate, boolean numeric) { }
+
+    private record Span(int start, int end) { }
 
     private List<String> supportedFigures(TabularResult result) {
         List<String> figures = new ArrayList<>();

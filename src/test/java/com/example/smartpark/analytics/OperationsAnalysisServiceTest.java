@@ -19,6 +19,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -221,6 +222,40 @@ class OperationsAnalysisServiceTest {
         assertThat(publisher.history(run.runId())).extracting(
                         com.example.smartpark.execution.model.ExecutionEvent::eventType)
                 .containsExactly(com.example.smartpark.execution.model.ExecutionEventType.RUN_STARTED);
+    }
+
+    @Test
+    void rejectsOverloadBeforePersistingAnUnreachableRunOrTrace() {
+        AtomicBoolean reject = new AtomicBoolean(true);
+        var published = new java.util.ArrayList<com.example.smartpark.execution.model.ExecutionEvent>();
+        var publisher = new com.example.smartpark.execution.InMemoryExecutionEventPublisher() {
+            @Override
+            public com.example.smartpark.execution.model.ExecutionEvent publish(
+                    com.example.smartpark.execution.model.ExecutionEvent event) {
+                published.add(event);
+                return super.publish(event);
+            }
+
+            @Override
+            public void remove(UUID runId) {
+                super.remove(runId);
+                published.clear();
+            }
+        };
+        Executor admission = command -> {
+            if (reject.get()) throw new java.util.concurrent.RejectedExecutionException("queue full");
+            command.run();
+        };
+        OperationsAnalysisService service = new OperationsAnalysisService(new MetricCatalog(),
+                (id, question, pinned) -> completed(id), admission, DEFAULT_TIMEOUT,
+                Clock.fixed(NOW, ZoneOffset.UTC), publisher);
+
+        assertThatThrownBy(() -> service.start("过载问题"))
+                .isInstanceOf(java.util.concurrent.RejectedExecutionException.class);
+        assertThat(published).isEmpty();
+
+        reject.set(false);
+        assertThat(service.start("恢复后问题").status()).isEqualTo("COMPLETED");
     }
 
     @Test

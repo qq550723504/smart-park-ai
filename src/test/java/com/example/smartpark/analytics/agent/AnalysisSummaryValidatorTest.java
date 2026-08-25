@@ -51,6 +51,22 @@ class AnalysisSummaryValidatorTest {
     }
 
     @Test
+    void treatsTemporalDimensionValuesAsDimensionsInsteadOfFigures() {
+        var parking = new com.example.smartpark.analytics.catalog.MetricDefinition(
+                "parking_entries", "停车进场量", java.util.Set.of("停车"), "次",
+                "analytics.v_parking_daily", java.util.Set.of("stat_date", "parking_zone"),
+                "SUM(entries)", "stat_date", 7, null);
+        QueryPlan datePlan = new QueryPlan("按日期统计停车进场量", List.of(parking),
+                List.of("stat_date"), Map.of(), plan.timeRange(), 100);
+        TabularResult dateResult = new TabularResult(
+                List.of("stat_date", "parking_entries"),
+                List.of(List.of("2026-08-24", 812)), false, 8);
+
+        assertThat(new AnalysisSummaryValidator().validate(
+                "2026-08-24 的停车进场量为 812。", datePlan, dateResult)).isNotBlank();
+    }
+
+    @Test
     void rejectsEmptyConclusion() {
         assertThatThrownBy(() -> new AnalysisSummaryValidator().validate("  ", plan, result))
                 .isInstanceOf(IllegalArgumentException.class);

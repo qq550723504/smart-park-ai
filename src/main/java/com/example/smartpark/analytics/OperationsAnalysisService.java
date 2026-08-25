@@ -20,8 +20,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executor;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Run lifecycle for natural-language operations analysis: start, ambiguity
@@ -55,6 +59,8 @@ public class OperationsAnalysisService {
 
     /** Pending ambiguity per run: one candidate metric set per clarification question. */
     private final Map<UUID, PendingClarification> pendingClarifications = new java.util.HashMap<>();
+    /** Prevents two callers from reserving the same paused run before admission completes. */
+    private final Set<UUID> admittingClarifications = new java.util.HashSet<>();
 
     public OperationsAnalysisService(MetricCatalog catalog,
                                      GraphRunner runner,
@@ -118,10 +124,18 @@ public class OperationsAnalysisService {
                 throw new IllegalStateException("已有正在进行的分析，请等待完成后再启动");
             }
             activeRunId = runId;
-            store.put(new RecordBuilder(runId, question, clock).running());
         }
         publishExpiredClarification(expired);
-        launch(runId, question, null, false);
+        try {
+            launch(runId, question, null, false,
+                    () -> store.put(new RecordBuilder(runId, question, clock).running()),
+                    () -> { }, true);
+        } catch (RuntimeException rejected) {
+            synchronized (lifecycleLock) {
+                releaseActiveLocked(runId);
+            }
+            throw rejected;
+        }
         return store.get(runId);
     }
 
@@ -131,6 +145,7 @@ public class OperationsAnalysisService {
         AnalysisRunStore.RunRecord expired;
         AnalyticsModelClient.QuestionUnderstanding pinned = null;
         String pinnedTerms = "";
+        PendingClarification pendingForRollback = null;
         synchronized (lifecycleLock) {
             expired = expireAbandonedClarificationLocked(Instant.now(clock));
             current = store.get(runId);
@@ -142,7 +157,11 @@ public class OperationsAnalysisService {
                     throw new IllegalStateException("该运行不处于待澄清状态");
                 }
                 PendingClarification pending = pendingClarifications.get(runId);
+                pendingForRollback = pending;
                 validateAgainstPendingClarification(pending, safeSelections);
+                if (!admittingClarifications.add(runId)) {
+                    throw new IllegalStateException("该运行正在提交澄清，请勿重复提交");
+                }
                 pinnedTerms = safeSelections.stream()
                         .map(MetricSelection::metric)
                         .reduce((a, b) -> a + ", " + b)
@@ -172,15 +191,25 @@ public class OperationsAnalysisService {
                 // getter here would perform lazy clarification expiry again;
                 // a clock crossing the deadline during resume could therefore
                 // replace the validated RUNNING transition with a timeout.
-                store.put(rerunningRecord(current));
-                pendingClarifications.remove(runId);
             }
         }
         publishExpiredClarification(expired);
         if (pinned == null) {
             throw new IllegalStateException("该运行的澄清等待已超时");
         }
-        launch(runId, current.question() + "（已明确指标: " + pinnedTerms + "）", pinned, true);
+        AnalysisRunStore.RunRecord rerunning = rerunningRecord(current);
+        PendingClarification rollbackPending = pendingForRollback;
+        launch(runId, current.question() + "（已明确指标: " + pinnedTerms + "）", pinned, true,
+                () -> {
+                    store.put(rerunning);
+                    pendingClarifications.remove(runId);
+                    admittingClarifications.remove(runId);
+                },
+                () -> {
+                    store.put(current);
+                    pendingClarifications.put(runId, rollbackPending);
+                    admittingClarifications.remove(runId);
+                }, false);
         return store.get(runId);
     }
 
@@ -219,29 +248,124 @@ public class OperationsAnalysisService {
     }
 
     private void launch(UUID runId, String question,
-                        AnalyticsModelClient.QuestionUnderstanding pinned, boolean resumed) {
+                        AnalyticsModelClient.QuestionUnderstanding pinned, boolean resumed,
+                        Runnable registration, Runnable rollback, boolean removeRunOnReject) {
+        if (executor instanceof ThreadPoolExecutor) {
+            launchWithAdmissionGate(runId, question, pinned, resumed, registration, rollback);
+            return;
+        }
+        launchWithCleanupFallback(runId, question, pinned, resumed, registration, rollback, removeRunOnReject);
+    }
+
+    /**
+     * Production analyticsExecutor is a bounded ThreadPoolExecutor. Its
+     * admission task waits behind the executor boundary, so rejection happens
+     * before a run record or trace is created.
+     */
+    private void launchWithAdmissionGate(UUID runId, String question,
+                                         AnalyticsModelClient.QuestionUnderstanding pinned,
+                                         boolean resumed, Runnable registration, Runnable rollback) {
         long startedAt = System.currentTimeMillis();
-        // Register the live trace synchronously — before the queued task can
-        // expose any events — so /executions/{runId}/events always resolves
-        // immediately after the run ID is handed out.
-        registerTrace(runId, resumed);
+        CountDownLatch registered = new CountDownLatch(1);
+        AtomicBoolean registeredSuccessfully = new AtomicBoolean();
+        AtomicReference<RuntimeException> registrationFailure = new AtomicReference<>();
         FutureTask<OperationsAnalysisGraph.AnalysisRunResult> task = new FutureTask<>(
-                () -> runner.execute(runId, question, pinned)) {
+                () -> {
+                    try {
+                        // Admission is decided by executor.execute before any
+                        // run record or trace is published. The latch also
+                        // keeps direct/synchronous test executors compatible.
+                        registerTrace(runId, resumed);
+                        registration.run();
+                        registeredSuccessfully.set(true);
+                    } catch (RuntimeException failure) {
+                        registrationFailure.set(failure);
+                    } finally {
+                        registered.countDown();
+                    }
+                    RuntimeException failure = registrationFailure.get();
+                    if (failure != null) throw failure;
+                    return runner.execute(runId, question, pinned);
+                }) {
             @Override
             protected void done() {
-                completeTask(runId, question, startedAt, this);
+                if (registeredSuccessfully.get()) {
+                    completeTask(runId, question, startedAt, this);
+                }
             }
         };
         try {
-            // The graph runs directly on the configured executor. Submitting an
-            // inner task and waiting on it would deadlock a bounded executor.
             executor.execute(task);
         } catch (RuntimeException rejected) {
-            persistFailure(runId, question, "ANALYSIS_ABORTED", System.currentTimeMillis() - startedAt);
+            task.cancel(false);
+            rollback.run();
+            throw rejected;
+        }
+        try {
+            registered.await();
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            task.cancel(true);
+            throw new IllegalStateException("analysis admission interrupted", interrupted);
+        }
+        RuntimeException failure = registrationFailure.get();
+        if (failure != null) {
+            rollback.run();
+            throw failure;
+        }
+        java.util.concurrent.CompletableFuture.delayedExecutor(timeout.toMillis(), TimeUnit.MILLISECONDS)
+                .execute(() -> task.cancel(true));
+    }
+
+    /**
+     * Executor is intentionally injected as the small test seam and may be a
+     * synchronous or non-running implementation. Preserve that contract while
+     * removing every rejected run/trace immediately, so no unreachable state
+     * survives even outside the production executor type.
+     */
+    private void launchWithCleanupFallback(UUID runId, String question,
+                                           AnalyticsModelClient.QuestionUnderstanding pinned,
+                                           boolean resumed, Runnable registration,
+                                           Runnable rollback, boolean removeRunOnReject) {
+        long startedAt = System.currentTimeMillis();
+        registerTrace(runId, resumed);
+        registration.run();
+        AtomicBoolean taskStarted = new AtomicBoolean();
+        FutureTask<OperationsAnalysisGraph.AnalysisRunResult> task = new FutureTask<>(
+                () -> {
+                    taskStarted.set(true);
+                    return runner.execute(runId, question, pinned);
+                }) {
+            @Override
+            protected void done() {
+                if (taskStarted.get()) completeTask(runId, question, startedAt, this);
+            }
+        };
+        try {
+            executor.execute(task);
+        } catch (RuntimeException rejected) {
+            task.cancel(false);
+            rollback.run();
+            closeRejectedTrace(runId);
+            if (removeRunOnReject) store.remove(runId);
             throw rejected;
         }
         java.util.concurrent.CompletableFuture.delayedExecutor(timeout.toMillis(), TimeUnit.MILLISECONDS)
                 .execute(() -> task.cancel(true));
+    }
+
+    private void closeRejectedTrace(UUID runId) {
+        if (events == null || events.history(runId).isEmpty()) return;
+        try {
+            events.publish(new ExecutionEvent(UUID.randomUUID(), runId, 0, Instant.now(clock),
+                    ExecutionScenario.OPERATIONS_ANALYSIS, "analytics", ExecutionStage.FAILURE,
+                    ExecutionEventType.FAILED, ExecutionStatus.FAILED, "分析未获准执行，未创建运行记录",
+                    DisplayPayload.error(ExecutionStage.FAILURE, "ANALYSIS_REJECTED", true,
+                            "系统繁忙，请稍后重试")));
+            events.remove(runId);
+        } catch (IllegalStateException alreadyClosed) {
+            // Cleanup is best effort after admission rejection.
+        }
     }
 
     private void completeTask(UUID runId, String question, long startedAt,
