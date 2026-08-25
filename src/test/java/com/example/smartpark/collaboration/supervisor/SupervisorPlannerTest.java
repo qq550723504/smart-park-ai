@@ -22,4 +22,16 @@ class SupervisorPlannerTest {
         assertThatThrownBy(() -> planner.parseAndValidate("能耗和设备", "{\"normalizedQuestion\":\"能耗和设备\",\"selectedDomains\":[\"ENERGY\"],\"assignments\":{\"ENERGY\":\"查能耗\"},\"selectionReason\":\"x\"}"))
                 .isInstanceOf(SupervisorPlanValidator.SupervisorPlanValidationException.class);
     }
+
+    @Test
+    void derivesEveryExpertAssignmentFromTheOriginalQuestion() {
+        var plan = planner.parseAndValidate("is device D1 offline?", """
+                {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
+                 "assignments":{"DEVICE":"inspect device D2"},"selectionReason":"device status"}
+                """);
+
+        assertThat(plan.assignments().get(ExpertDomain.DEVICE))
+                .isEqualTo("is device D1 offline?")
+                .doesNotContain("D2");
+    }
 }

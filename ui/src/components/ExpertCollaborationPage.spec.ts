@@ -60,7 +60,7 @@ describe('ExpertCollaborationPage', () => {
     })
     await wrapper.find('input[aria-label="专家协作问题"]').setValue('q')
     await wrapper.find('.collaboration-presets button').trigger('click')
-    expect((wrapper.find('input[aria-label="专家协作问题"]').element as HTMLInputElement).value).toContain('夜间能耗')
+    expect((wrapper.find('input[aria-label="专家协作问题"]').element as HTMLInputElement).value).toContain('DEV-ENERGY-001')
     await wrapper.find('form').trigger('submit')
     await new Promise((resolve) => setTimeout(resolve, 10))
 
@@ -73,6 +73,31 @@ describe('ExpertCollaborationPage', () => {
     expect(wrapper.text()).toContain('EnergyExpert')
     expect(wrapper.text()).toContain('Energy expert completed')
     expect(polls).toBeGreaterThan(0)
+    wrapper.unmount()
+  })
+
+  it('ships only presets whose exact identifiers exist in the mock expert tools', () => {
+    const wrapper = mount(ExpertCollaborationPage, {
+      props: { trace: traceStub() },
+      global: {
+        stubs: {
+          'el-tag': { template: '<span><slot /></span>' },
+          'el-input': { props: ['modelValue'], template: '<input :value="modelValue" />' },
+          'el-button': { template: '<button><slot /></button>' },
+        },
+      },
+    })
+
+    const input = (wrapper.find('input[aria-label="专家协作问题"]').element as HTMLInputElement).value
+    const presets = wrapper.findAll('.collaboration-presets button').map((button) => button.text())
+    expect(input).toContain('DEV-ENERGY-001')
+    expect(input).toContain('DEV-POWER-001')
+    expect(input).toContain('SEC-ACCESS-001')
+    expect(presets).toEqual([
+      '电表 DEV-ENERGY-001 当前能耗是否高于基线',
+      '设备 DEV-HVAC-001 当前状态如何，是否存在关联告警',
+      '电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联',
+    ])
     wrapper.unmount()
   })
 })

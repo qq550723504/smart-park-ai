@@ -7,11 +7,11 @@ import type { ExpertDomain } from '../types/collaboration'
 import type { ExecutionTrace } from '../composables/useExecutionTrace'
 
 const props = defineProps<{ trace: ExecutionTrace }>()
-const question = ref('综合判断 B1 楼宇能耗异常是否与设备故障或安防事件有关')
+const question = ref('电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联')
 const presets = [
-  'A2 夜间能耗升高的原因是什么',
-  '冷机离线是否影响当前楼宇运行',
-  'A2 夜间能耗升高且门禁告警、冷机离线，是否有关联',
+  '电表 DEV-ENERGY-001 当前能耗是否高于基线',
+  '设备 DEV-HVAC-001 当前状态如何，是否存在关联告警',
+  '电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联',
 ]
 const { run, loading, error, isRunning, start } = useExpertCollaboration()
 const domainLabels: Record<ExpertDomain, string> = { ENERGY: '能耗专家', DEVICE: '设备专家', SECURITY: '安防专家' }
@@ -38,7 +38,7 @@ function timeLabel(timestamp: string) { return new Date(timestamp).toLocaleTimeS
       <div class="collaboration-primary">
         <section class="panel collaboration-question">
           <div class="section-heading"><div><span class="eyebrow">问题输入</span><h2>发起一次专家会诊</h2></div><el-tag :type="isRunning ? 'warning' : run?.status === 'COMPLETED' ? 'success' : 'info'" effect="plain" round>{{ statusLabel(run?.status) }}</el-tag></div>
-          <form class="collaboration-form" @submit.prevent="submit"><el-input v-model="question" aria-label="专家协作问题" :disabled="loading || isRunning" placeholder="描述需要跨领域判断的问题" /><el-button type="primary" native-type="submit" :loading="loading" :disabled="isRunning">开始协作</el-button></form>
+          <form class="collaboration-form" @submit.prevent="submit"><el-input v-model="question" aria-label="专家协作问题" :disabled="loading || isRunning" placeholder="请包含可查询的 DEV-… 或 SEC-… 标识" /><el-button type="primary" native-type="submit" :loading="loading" :disabled="isRunning">开始协作</el-button></form>
           <div class="collaboration-presets" aria-label="预置问题"><button v-for="preset in presets" :key="preset" type="button" :disabled="loading || isRunning" @click="selectPreset(preset)">{{ preset }}</button></div>
           <p v-if="error" class="collaboration-error">{{ error }}</p>
           <div v-if="run?.plan" class="plan-summary"><span>主管拆解</span><strong>{{ run.plan.selectionReason }}</strong><small>{{ run.plan.normalizedQuestion }}</small></div>

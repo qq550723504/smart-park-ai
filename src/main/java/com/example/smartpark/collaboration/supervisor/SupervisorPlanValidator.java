@@ -17,6 +17,11 @@ public final class SupervisorPlanValidator {
         if (!plan.selectedDomains().equals(expected)) {
             throw new SupervisorPlanValidationException("selectedDomains do not cover the question: expected " + expected);
         }
+        if (plan.assignments().values().stream()
+                .anyMatch(assignment -> !assignment.equals(plan.normalizedQuestion()))) {
+            throw new SupervisorPlanValidationException(
+                    "assignment must preserve the exact normalized question and entity scope");
+        }
         return plan;
     }
 

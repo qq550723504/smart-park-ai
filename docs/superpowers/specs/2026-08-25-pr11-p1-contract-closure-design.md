@@ -4,10 +4,11 @@
 
 - Date: 2026-08-25
 - Approved in chat: yes
-- Target: all ten P1 review threads current on 2026-08-25: the seven query,
+- Target: all thirteen P1 review threads current on 2026-08-25: the seven query,
   summary, synthesis, privilege, and identifier contract findings; the later
   demo-snapshot integrity finding; the table-valued `FROM` bypass; and the
-  clarification-resume metric-loss finding
+  clarification-resume metric-loss finding; plus the second-page findings for
+  expert assignment scope, resolvable demo questions, and lineage row changes
 - Baseline: commit `5281da6`, after the independent P2 round-4 fixes
 
 This slice closes four trust boundaries that currently validate only subsets of
@@ -19,6 +20,8 @@ their intended contracts:
 4. demo-fixture maintenance versus real analytics source data.
 5. clarification selections versus the canonical metrics already resolved
    from the original question.
+6. supervisor-generated assignments and UI demo questions versus the exact
+   entity identifiers the expert tools can query.
 
 It does not implement the remaining P2 comments, add a general-purpose query
 compiler, introduce arbitrary joins, or turn the demo runtime into a
@@ -192,6 +195,20 @@ stable device identifiers seeded by V1. This creates two independent gates:
 real analytics environments do not register the mutating job, and a mistaken
 opt-in cannot rewrite unrelated device rows.
 
+### 3.7 Server-owned expert scope and resolvable demo inputs
+
+The model may select required expert domains and explain the selection, but it
+does not own entity scope. The server assigns every selected expert the exact
+normalized user question; model-generated assignment text is discarded, and
+the validator enforces this invariant. Thus an assignment cannot replace `D1`
+with `D2` or omit another concrete identifier.
+
+The shipped default and presets use identifiers that exist in the same mock
+tool fixtures (`DEV-ENERGY-001`, `DEV-POWER-001`, `DEV-HVAC-001`, and
+`SEC-ACCESS-001`). The UI also states the exact-ID input requirement. General
+entity discovery remains a separate capability; the demo no longer advertises
+questions its current tools cannot resolve.
+
 ## 4. Data flow
 
 ```text
@@ -254,6 +271,10 @@ Each production change starts with a focused test that fails on baseline
    - reject table-valued relations, scalar subqueries, CTE/subquery cardinality
      changes, result ordering/offsets, non-exact limits, alias/projection
      ambiguity, metadata collisions, and complete numeric spellings.
+9. `SupervisorPlannerTest`, `SupervisorPlanValidatorTest`, and
+   `ExpertCollaborationPage.spec.ts`
+   - prove model assignment text cannot replace original entities;
+   - prove every shipped demo question contains valid seeded tool identifiers.
 
 Final verification:
 
@@ -268,7 +289,7 @@ git diff --check
 
 ## 7. Acceptance criteria
 
-- All ten GitHub P1 counterexamples are red on their preceding implementation and
+- All thirteen GitHub P1 counterexamples are red on their preceding implementation and
   green after the fix.
 - SQL execution is impossible unless the full supported query shape matches the
   plan; no lossy identifier or occurrence normalization remains.
@@ -277,5 +298,5 @@ git diff --check
 - An upgraded dedicated analytics database removes inherited `PUBLIC`
   privileges from the runtime login without rewriting V1.
 - Public REST/SSE DTOs remain compatible.
-- The ten GitHub threads receive technical replies and are resolved
+- The thirteen GitHub threads receive technical replies and are resolved
   only after local and remote verification.

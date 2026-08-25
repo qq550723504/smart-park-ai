@@ -3,9 +3,11 @@ package com.example.smartpark.collaboration.supervisor;
 import com.example.smartpark.collaboration.model.ExpertDomain;
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SupervisorPlanValidatorTest {
 
@@ -38,5 +40,16 @@ class SupervisorPlanValidatorTest {
         // Security-specific alert phrases still select SECURITY.
         assertThat(validator.expectedDomains("安防告警有多少条"))
                 .isEqualTo(Set.of(ExpertDomain.SECURITY));
+    }
+
+    @Test
+    void rejectsAssignmentsThatReplaceTheOriginalQuestionScope() {
+        var plan = new com.example.smartpark.collaboration.model.SupervisorPlan(
+                "is device D1 offline?", Set.of(ExpertDomain.DEVICE),
+                Map.of(ExpertDomain.DEVICE, "inspect device D2"), "device status");
+
+        assertThatThrownBy(() -> validator.validate(plan))
+                .isInstanceOf(SupervisorPlanValidator.SupervisorPlanValidationException.class)
+                .hasMessageContaining("assignment");
     }
 }

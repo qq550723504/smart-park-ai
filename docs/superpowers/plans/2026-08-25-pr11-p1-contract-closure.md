@@ -2,9 +2,10 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Close all ten current P1 findings by making SQL, result-summary,
+**Goal:** Close all thirteen current P1 findings by making SQL, result-summary,
 expert-synthesis, database privilege, demo-fixture, and clarification-resume
-contracts complete and lossless.
+contracts complete and lossless, and by making expert entity scope and shipped
+demo questions server-verifiable.
 
 **Architecture:** Reuse JSqlParser to extract structural relation and query-shape evidence, then compare the full supported shape to `QueryPlan`. Ground summaries in actual dimension columns and rows, derive synthesis completeness from every validated supported finding, and add a forward-only Flyway V2 migration that enforces the already-approved dedicated analytics database boundary.
 
@@ -342,7 +343,7 @@ git commit -m "fix: harden analytics database privileges"
 
 **Interfaces:**
 - Consumes: the four independently committed fixes.
-- Produces: pushed PR head, technical replies in all ten P1 threads, resolved threads, and separately reported CI state.
+- Produces: pushed PR head, technical replies in all thirteen P1 threads, resolved threads, and separately reported CI state.
 
 - [ ] **Step 1: Run full local verification**
 
@@ -360,7 +361,10 @@ Record exact backend test totals, frontend test totals, build warnings, skipped 
 
 - [ ] **Step 2: Re-fetch all PR review threads**
 
-Use GitHub GraphQL `reviewThreads(first:100)` and confirm the ten targeted thread IDs are still current and unresolved. Re-evaluate any newly added P1 before pushing; do not resolve outdated or unrelated comments by assumption.
+Paginate GitHub GraphQL `reviewThreads(first:100, after:...)` to exhaustion and
+confirm the thirteen targeted thread IDs are current. Re-evaluate any newly
+added P1 before pushing; do not resolve outdated or unrelated comments by
+assumption.
 
 - [ ] **Step 3: Push the explicit branch tip**
 
@@ -370,7 +374,7 @@ Push local HEAD to `origin/codex/smart-park-p1` without force:
 git push origin HEAD:codex/smart-park-p1
 ```
 
-- [ ] **Step 4: Reply and resolve the ten P1 threads**
+- [ ] **Step 4: Reply and resolve the thirteen P1 threads**
 
 Reply inside each original review thread with the root contract changed and the focused test that proves it. Resolve only after the push succeeds and GitHub shows the target commit.
 

@@ -30,6 +30,7 @@ public final class SupervisorPlanner {
         if (!root.has("normalizedQuestion") || !root.has("selectionReason") || selected == null || assignments == null) {
             throw new ModelOutputException("planner response is missing required fields");
         }
+        requireText(root, "normalizedQuestion");
         EnumSet<ExpertDomain> domains = EnumSet.noneOf(ExpertDomain.class);
         if (!selected.isArray()) throw new ModelOutputException("selectedDomains must be an array");
         for (JsonNode value : selected) {
@@ -44,12 +45,18 @@ public final class SupervisorPlanner {
             try { assignmentMap.put(ExpertDomain.valueOf(field.getKey().toUpperCase()), field.getValue().asText()); }
             catch (Exception ex) { throw new ModelOutputException("unknown assignment domain: " + field.getKey()); }
         }
-        SupervisorPlan plan = new SupervisorPlan(
-                requireText(root, "normalizedQuestion"), domains, assignmentMap,
-                requireText(root, "selectionReason"));
-        if (!plan.normalizedQuestion().equals(normalizedQuestion)) {
-            plan = new SupervisorPlan(normalizedQuestion, plan.selectedDomains(), plan.assignments(), plan.selectionReason());
+        if (!assignmentMap.keySet().equals(domains)) {
+            throw new ModelOutputException("assignments must exactly cover selectedDomains");
         }
+        // The model may choose domains and explain that choice, but it does not
+        // own entity scope. Every expert receives the exact user question so a
+        // generated assignment cannot replace D1 with D2 or drop another
+        // concrete identifier.
+        EnumMap<ExpertDomain, String> canonicalAssignments = new EnumMap<>(ExpertDomain.class);
+        domains.forEach(domain -> canonicalAssignments.put(domain, normalizedQuestion));
+        SupervisorPlan plan = new SupervisorPlan(
+                normalizedQuestion, domains, canonicalAssignments,
+                requireText(root, "selectionReason"));
         return validator.validate(plan);
     }
 
