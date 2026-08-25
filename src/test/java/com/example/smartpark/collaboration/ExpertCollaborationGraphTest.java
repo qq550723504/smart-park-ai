@@ -1,0 +1,81 @@
+package com.example.smartpark.collaboration;
+
+import com.example.smartpark.collaboration.model.ExpertDomain;
+import com.example.smartpark.collaboration.model.ExpertFinding;
+import com.example.smartpark.collaboration.model.FindingStatus;
+import com.example.smartpark.collaboration.model.SupervisorPlan;
+import org.junit.jupiter.api.Test;
+
+import java.util.EnumMap;
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class ExpertCollaborationGraphTest {
+    @Test void dispatchesOnlySelectedExperts() {
+        Map<ExpertDomain, Integer> calls = new ConcurrentHashMap<>();
+        ExpertCollaborationGraph graph = graph(calls, (domain, assignment) -> finding(domain));
+        SupervisorPlan plan = plan(ExpertDomain.ENERGY);
+        List<ExpertFinding> findings = graph.execute(plan);
+        assertThat(findings).extracting(ExpertFinding::domain).containsExactly(ExpertDomain.ENERGY);
+        assertThat(calls).containsEntry(ExpertDomain.ENERGY, 1).doesNotContainKeys(ExpertDomain.DEVICE, ExpertDomain.SECURITY);
+    }
+
+    @Test void executesSelectedExpertsConcurrentlyAndSortsResults() throws Exception {
+        CountDownLatch entered = new CountDownLatch(3);
+        CountDownLatch release = new CountDownLatch(1);
+        Map<ExpertDomain, Integer> calls = new ConcurrentHashMap<>();
+        ExpertCollaborationGraph graph = graph(calls, (domain, assignment) -> {
+            entered.countDown();
+            try { release.await(2, TimeUnit.SECONDS); } catch (InterruptedException ex) { Thread.currentThread().interrupt(); }
+            return finding(domain);
+        });
+        ExecutorService caller = Executors.newSingleThreadExecutor();
+        var result = caller.submit(() -> graph.execute(plan(ExpertDomain.SECURITY, ExpertDomain.ENERGY, ExpertDomain.DEVICE)));
+        assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+        release.countDown();
+        assertThat(result.get(2, TimeUnit.SECONDS)).extracting(ExpertFinding::domain)
+                .containsExactly(ExpertDomain.ENERGY, ExpertDomain.DEVICE, ExpertDomain.SECURITY);
+        caller.shutdownNow();
+    }
+
+    @Test void retainsSuccessfulFindingsWhenOneExpertFails() {
+        Map<ExpertDomain, Integer> calls = new ConcurrentHashMap<>();
+        ExpertCollaborationGraph graph = graph(calls, (domain, assignment) -> {
+            if (assignment.equals("fail")) throw new IllegalStateException("boom");
+            return finding(domain);
+        });
+        SupervisorPlan plan = new SupervisorPlan("cross", EnumSet.of(ExpertDomain.ENERGY, ExpertDomain.DEVICE),
+                Map.of(ExpertDomain.ENERGY, "ok", ExpertDomain.DEVICE, "fail"), "cross");
+        assertThat(graph.execute(plan)).extracting(ExpertFinding::status)
+                .containsExactly(FindingStatus.SUPPORTED, FindingStatus.FAILED);
+    }
+
+    private static ExpertCollaborationGraph graph(Map<ExpertDomain, Integer> calls, java.util.function.BiFunction<ExpertDomain, String, ExpertFinding> fn) {
+        EnumMap<ExpertDomain, ExpertCollaborationGraph.Expert> experts = new EnumMap<>(ExpertDomain.class);
+        for (ExpertDomain domain : ExpertDomain.values()) {
+            experts.put(domain, assignment -> {
+                calls.merge(domain, 1, Integer::sum);
+                return fn.apply(domain, assignment);
+            });
+        }
+        return new ExpertCollaborationGraph(experts, Executors.newFixedThreadPool(3));
+    }
+
+    private static SupervisorPlan plan(ExpertDomain... domains) {
+        EnumMap<ExpertDomain, String> assignments = new EnumMap<>(ExpertDomain.class);
+        for (ExpertDomain domain : domains) assignments.put(domain, domain.name().toLowerCase());
+        return new SupervisorPlan("question", EnumSet.of(domains[0], domains), assignments, "test");
+    }
+
+    private static ExpertFinding finding(ExpertDomain domain) {
+        return new ExpertFinding(domain, FindingStatus.SUPPORTED, "finding", List.of("tool:1"), .5, List.of());
+    }
+}
