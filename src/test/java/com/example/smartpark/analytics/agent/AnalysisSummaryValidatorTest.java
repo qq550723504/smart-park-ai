@@ -17,7 +17,7 @@ class AnalysisSummaryValidatorTest {
     private final QueryPlan plan = new QueryPlan("上周能耗",
             List.of(new com.example.smartpark.analytics.catalog.MetricDefinition(
                     "energy_kwh", "能耗", java.util.Set.of("能耗"), "kWh",
-                    "analytics.v_energy_hourly", java.util.Set.of("building_id"), "SUM(kwh)", 7)),
+                    "analytics.v_energy_hourly", java.util.Set.of("building_id", "hour_ts"), "SUM(kwh)", 7)),
             List.of("building_id"), Map.of(),
             new QueryPlan.TimeRange(Instant.parse("2026-08-17T00:00:00Z"), Instant.parse("2026-08-24T00:00:00Z")),
             100);
