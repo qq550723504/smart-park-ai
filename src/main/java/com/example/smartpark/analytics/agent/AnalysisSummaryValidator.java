@@ -4,11 +4,9 @@ import com.example.smartpark.analytics.model.QueryPlan;
 import com.example.smartpark.analytics.model.TabularResult;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -21,10 +19,6 @@ public class AnalysisSummaryValidator {
     // Digits inside identifiers (B1, MTR-2) are not figures; require non-alphanumeric context.
     private static final java.util.regex.Pattern NUMBER = java.util.regex.Pattern.compile(
             "(?<![A-Za-z0-9])-?[0-9]+(?:\\.[0-9]+)?(?![0-9A-Za-z])");
-
-    /** Identifiers that contain a digit (B2, MTR-1) name real entities and must exist in the result. */
-    private static final java.util.regex.Pattern DIGIT_IDENTIFIER = java.util.regex.Pattern.compile(
-            "(?<![A-Za-z0-9])[A-Za-z][A-Za-z0-9]*[0-9][A-Za-z0-9-]*");
 
     /** Comparative or trend claims cannot be verified from a static result table; they are refused. */
     private static final List<String> UNVERIFIABLE_CLAIMS = List.of(
@@ -41,19 +35,7 @@ public class AnalysisSummaryValidator {
                 throw new IllegalArgumentException("结论包含无法从结果表验证的趋势性描述: " + claim);
             }
         }
-        List<String> supportedValues = supportedValues(result);
-        java.util.regex.Matcher identifiers = DIGIT_IDENTIFIER.matcher(conclusion);
-        List<String> unknownEntities = new ArrayList<>();
-        while (identifiers.find()) {
-            String entity = identifiers.group();
-            if (supportedValues.stream().noneMatch(value -> value.contains(entity))) {
-                unknownEntities.add(entity);
-            }
-        }
-        if (!unknownEntities.isEmpty()) {
-            throw new IllegalArgumentException("结论包含结果数据中不存在的实体: " + unknownEntities);
-        }
-        validateEntityFigureRelationships(conclusion, result);
+        validateDimensionFigureRelationships(conclusion, plan, result);
         List<String> supported = supportedFigures(result);
         java.util.regex.Matcher matcher = NUMBER.matcher(conclusion);
         List<String> unsupported = new ArrayList<>();
@@ -69,65 +51,84 @@ public class AnalysisSummaryValidator {
         return conclusion.strip();
     }
 
-    private void validateEntityFigureRelationships(String conclusion, TabularResult result) {
-        Map<String, Set<String>> figuresByEntity = figuresByEntity(result);
-        if (figuresByEntity.isEmpty()) return;
+    private void validateDimensionFigureRelationships(String conclusion,
+                                                      QueryPlan plan,
+                                                      TabularResult result) {
+        List<RowFact> rowFacts = rowFacts(plan, result);
+        if (rowFacts.isEmpty()) return;
+        Set<String> knownDimensions = rowFacts.stream()
+                .flatMap(row -> row.dimensionValues().stream())
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
         for (String clause : conclusion.split("(?:[，,；;。！？?\\n]+|(?<!\\d)[.!](?!\\d))")) {
-            LinkedHashSet<String> entities = new LinkedHashSet<>();
-            java.util.regex.Matcher entityMatcher = DIGIT_IDENTIFIER.matcher(clause);
-            while (entityMatcher.find()) {
-                String normalized = entityMatcher.group().toLowerCase(Locale.ROOT);
-                if (figuresByEntity.containsKey(normalized)) entities.add(normalized);
-            }
+            Set<String> dimensions = knownDimensions.stream()
+                    .filter(value -> containsDimensionValue(clause, value))
+                    .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
             java.util.regex.Matcher figureMatcher = NUMBER.matcher(clause);
-            List<String> figures = new ArrayList<>();
+            Set<String> figures = new LinkedHashSet<>();
             while (figureMatcher.find()) figures.add(normalize(figureMatcher.group()));
-            if (entities.isEmpty() || figures.isEmpty()) continue;
-            if (entities.size() != 1) {
-                throw new IllegalArgumentException("结论中的实体与数字对应关系不明确: " + clause.strip());
-            }
-            String entity = entities.iterator().next();
-            if (!figuresByEntity.get(entity).containsAll(figures)) {
+            if (dimensions.isEmpty() || figures.isEmpty()) continue;
+            boolean supportedByOneRow = rowFacts.stream().anyMatch(row ->
+                    row.dimensionValues().containsAll(dimensions) && row.figures().containsAll(figures));
+            if (!supportedByOneRow) {
                 throw new IllegalArgumentException("结论中的实体与数字对应关系不受结果行支持: " + clause.strip());
             }
         }
     }
 
-    private Map<String, Set<String>> figuresByEntity(TabularResult result) {
-        Map<String, Set<String>> relationships = new LinkedHashMap<>();
-        for (List<Object> row : result.rows()) {
-            Set<String> entities = new LinkedHashSet<>();
-            Set<String> figures = new LinkedHashSet<>();
-            for (Object value : row) {
-                if (value == null) continue;
-                java.util.regex.Matcher entityMatcher = DIGIT_IDENTIFIER.matcher(value.toString());
-                while (entityMatcher.find()) {
-                    entities.add(entityMatcher.group().toLowerCase(Locale.ROOT));
+    private List<RowFact> rowFacts(QueryPlan plan, TabularResult result) {
+        List<Integer> dimensionIndexes = new ArrayList<>();
+        for (String dimension : plan.dimensions()) {
+            int index = -1;
+            for (int candidate = 0; candidate < result.columnNames().size(); candidate++) {
+                if (result.columnNames().get(candidate).equalsIgnoreCase(dimension)) {
+                    index = candidate;
+                    break;
                 }
+            }
+            if (index < 0) {
+                throw new IllegalArgumentException("查询结果缺少计划维度列: " + dimension);
+            }
+            dimensionIndexes.add(index);
+        }
+        if (dimensionIndexes.isEmpty()) return List.of();
+
+        List<RowFact> facts = new ArrayList<>();
+        for (List<Object> row : result.rows()) {
+            Set<String> dimensions = new LinkedHashSet<>();
+            Set<String> figures = new LinkedHashSet<>();
+            for (int index : dimensionIndexes) {
+                if (index < row.size() && row.get(index) != null) {
+                    dimensions.add(row.get(index).toString().strip().toLowerCase(Locale.ROOT));
+                }
+            }
+            for (int index = 0; index < row.size(); index++) {
+                if (dimensionIndexes.contains(index)) continue;
+                Object value = row.get(index);
+                if (value == null) continue;
                 if (value instanceof Number number) {
                     figures.add(normalize(stripTrailingZeros(number)));
                 } else if (NUMBER.matcher(value.toString()).matches()) {
                     figures.add(normalize(value.toString()));
                 }
             }
-            for (String entity : entities) {
-                relationships.computeIfAbsent(entity, ignored -> new LinkedHashSet<>()).addAll(figures);
-            }
+            facts.add(new RowFact(Set.copyOf(dimensions), Set.copyOf(figures)));
         }
-        return relationships;
+        return List.copyOf(facts);
     }
 
-    private List<String> supportedValues(TabularResult result) {
-        List<String> values = new ArrayList<>(result.columnNames());
-        for (List<Object> row : result.rows()) {
-            for (Object value : row) {
-                if (value != null) {
-                    values.add(value.toString());
-                }
-            }
+    private boolean containsDimensionValue(String clause, String normalizedValue) {
+        String lowered = clause.toLowerCase(Locale.ROOT);
+        if (normalizedValue.matches("[a-z0-9_-]+")) {
+            return java.util.regex.Pattern.compile(
+                            "(?<![a-z0-9_-])" + java.util.regex.Pattern.quote(normalizedValue)
+                                    + "(?![a-z0-9_-])")
+                    .matcher(lowered)
+                    .find();
         }
-        return values;
+        return lowered.contains(normalizedValue);
     }
+
+    private record RowFact(Set<String> dimensionValues, Set<String> figures) { }
 
     private List<String> supportedFigures(TabularResult result) {
         List<String> figures = new ArrayList<>();

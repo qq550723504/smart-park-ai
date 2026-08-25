@@ -50,6 +50,20 @@ class SupervisorSynthesisTest {
 
         assertThat(result.conclusion())
                 .isEqualTo("MTR-2 consumption is 18.5 above baseline；device D-2 is offline");
+        assertThat(result.evidenceRefs()).containsExactlyInAnyOrder("energy:MTR-2", "device:D-2");
+    }
+
+    @Test
+    void rejectsOmissionOfAnySupportedFinding() {
+        ExpertFinding device = new ExpertFinding(ExpertDomain.DEVICE, FindingStatus.SUPPORTED,
+                "device D-2 is offline", List.of("device:D-2"), .7, List.of());
+
+        assertThatThrownBy(() -> synthesizer.parseAndValidate("""
+                {"status":"SUPPORTED","selectedDomains":["ENERGY"],
+                 "evidenceRefs":["energy:MTR-2"],"confidence":0.7,"uncertainties":[]}
+                """, plan(), List.of(supported(), device)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("all SUPPORTED");
     }
 
     @Test

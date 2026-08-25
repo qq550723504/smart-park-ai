@@ -56,4 +56,25 @@ class AnalysisSummaryValidatorTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("对应");
     }
+
+    @Test
+    void bindsFiguresToNonnumericDimensionValuesFromActualRows() {
+        QueryPlan riskPlan = new QueryPlan("按风险等级统计告警",
+                List.of(new com.example.smartpark.analytics.catalog.MetricDefinition(
+                        "alert_count", "告警数量", java.util.Set.of("告警"), "条",
+                        "analytics.v_alert_fact", java.util.Set.of("risk_level", "occurred_at"),
+                        "COUNT(*)", "occurred_at", 7, null)),
+                List.of("risk_level"), Map.of(), plan.timeRange(), 100);
+        TabularResult riskResult = new TabularResult(
+                List.of("risk_level", "alert_count"),
+                List.of(List.of("HIGH", 10), List.of("LOW", 20)), false, 12);
+
+        AnalysisSummaryValidator validator = new AnalysisSummaryValidator();
+        assertThat(validator.validate("HIGH 有 10 条，LOW 有 20 条。", riskPlan, riskResult))
+                .isNotBlank();
+        assertThatThrownBy(() -> validator.validate(
+                "HIGH 有 20 条，LOW 有 10 条。", riskPlan, riskResult))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("对应");
+    }
 }

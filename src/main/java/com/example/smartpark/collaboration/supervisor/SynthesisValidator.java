@@ -21,12 +21,24 @@ public final class SynthesisValidator {
         List<ExpertFinding> safeFindings = List.copyOf(findings);
         Set<ExpertDomain> safeSelection = Set.copyOf(selectedDomains);
         Map<ExpertDomain, ExpertFinding> byDomain = indexByDomain(safeFindings);
+        Set<ExpertDomain> supportedDomains = safeFindings.stream()
+                .filter(finding -> finding.status() == FindingStatus.SUPPORTED)
+                .map(ExpertFinding::domain)
+                .collect(Collectors.toSet());
 
         if (synthesis.status() == FindingStatus.SUPPORTED && safeSelection.isEmpty()) {
             throw new IllegalArgumentException("supported synthesis requires a selected SUPPORTED finding");
         }
         if (synthesis.status() != FindingStatus.SUPPORTED && !safeSelection.isEmpty()) {
             throw new IllegalArgumentException("non-supported synthesis cannot select findings");
+        }
+        if (synthesis.status() == FindingStatus.SUPPORTED && !safeSelection.equals(supportedDomains)) {
+            throw new IllegalArgumentException(
+                    "synthesis selected findings must include all SUPPORTED findings");
+        }
+        if (synthesis.status() != FindingStatus.SUPPORTED && !supportedDomains.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "synthesis must be SUPPORTED when any SUPPORTED finding exists");
         }
         for (ExpertDomain domain : safeSelection) {
             ExpertFinding finding = byDomain.get(domain);
@@ -39,8 +51,10 @@ public final class SynthesisValidator {
                 .map(byDomain::get)
                 .flatMap(finding -> finding.evidenceRefs().stream())
                 .collect(Collectors.toSet());
-        if (!allowedRefs.containsAll(synthesis.evidenceRefs())) {
-            throw new IllegalArgumentException("synthesis evidence must come from selected findings");
+        Set<String> actualRefs = Set.copyOf(synthesis.evidenceRefs());
+        if (!allowedRefs.equals(actualRefs)) {
+            throw new IllegalArgumentException(
+                    "synthesis evidence must exactly cover all selected findings");
         }
         if (synthesis.status() == FindingStatus.SUPPORTED && synthesis.evidenceRefs().isEmpty()) {
             throw new IllegalArgumentException("supported synthesis must cite selected findings");
