@@ -35,6 +35,8 @@ public class AnalysisRunStore {
             long durationMs,
             String failureStage,
             Instant createdAt,
+            /** Last lifecycle-transition time; terminal retention is measured from this. */
+            Instant updatedAt,
             List<String> columns,
             List<List<Object>> rows) {}
 
@@ -79,7 +81,7 @@ public class AnalysisRunStore {
         for (var entry : runs.entrySet()) {
             RunRecord record = entry.getValue();
             if (isTerminal(record.status())
-                    && !record.createdAt().plus(terminalRetention).isAfter(now)) {
+                    && !record.updatedAt().plus(terminalRetention).isAfter(now)) {
                 // A concurrent put of the same id re-registers itself; the map
                 // entry removed here is always a stale terminal snapshot.
                 runs.remove(entry.getKey(), record);

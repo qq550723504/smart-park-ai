@@ -61,7 +61,30 @@ public record ChartSpec(
             throw new IllegalArgumentException("chart proposal references unknown result columns");
         }
         String resolvedSeries = seriesField == null || seriesField.isBlank() ? "-" : seriesField;
+        requireUniqueCoordinates(type, xField, resolvedSeries, result);
         return new ChartSpec(type, title.strip(), xField, yFields, resolvedSeries, unit == null ? "" : unit);
+    }
+
+    /**
+     * The renderer keeps one point per (x, series) coordinate; duplicate
+     * coordinates would silently overwrite all but the last row even though
+     * the table still shows them. Such proposals degrade to TABLE instead.
+     */
+    private static void requireUniqueCoordinates(ChartType type, String xField,
+                                                 String resolvedSeries, TabularResult result) {
+        if (type == ChartType.TABLE) {
+            return;
+        }
+        int xIndex = result.columnNames().indexOf(xField);
+        int seriesIndex = "-".equals(resolvedSeries) ? -1 : result.columnNames().indexOf(resolvedSeries);
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (List<Object> row : result.rows()) {
+            String key = String.valueOf(row.get(xIndex)) + "\u0000"
+                    + (seriesIndex < 0 ? "" : String.valueOf(row.get(seriesIndex)));
+            if (!seen.add(key)) {
+                throw new IllegalArgumentException("duplicate chart coordinate: " + key);
+            }
+        }
     }
 
     private static boolean numericYFields(List<String> yFields, TabularResult result) {

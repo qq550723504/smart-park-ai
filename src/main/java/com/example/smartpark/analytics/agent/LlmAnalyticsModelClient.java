@@ -77,20 +77,25 @@ public class LlmAnalyticsModelClient implements AnalyticsModelClient {
                         + ", 聚合 " + metric.expression()
                         + (metric.condition() == null ? "" : ", 固定条件 " + metric.condition()))
                 .collect(Collectors.joining("\n"));
-        String system = """
-                你是园区只读分析 SQL 生成器。根据指标定义生成一条 PostgreSQL SELECT。
-                硬性要求:
-                1. 只允许查询给定白名单视图。
-                2. 时间边界只能用命名参数 :fromTs（含）与 :toTs（不含），禁止任何日期字面量。
-                3. 必须带 LIMIT 子句且上限不超过 %d。
-                4. 单条语句，无注释、无分号、禁止 DML/DDL。
-                """.formatted(500);
+        String system = sqlSystemPrompt(plan.limit());
         if (request.rejectionReason() != null && !request.rejectionReason().isBlank()) {
             system = system + "\n上一次生成被拒绝，必须修复该问题: " + request.rejectionReason();
         }
         String user = "问题: " + plan.question() + "\n时间范围: :fromTs ~ :toTs\n指标:\n" + metricDescriptions
                 + "\nSchema:\n" + request.schemaDescription();
         return stripCodeFences(call(system, user));
+    }
+
+    /** The advertised row bound comes from the plan — never a hard-coded wider value. */
+    static String sqlSystemPrompt(int maxRows) {
+        return """
+                你是园区只读分析 SQL 生成器。根据指标定义生成一条 PostgreSQL SELECT。
+                硬性要求:
+                1. 只允许查询给定白名单视图。
+                2. 时间边界只能用命名参数 :fromTs（含）与 :toTs（不含），禁止任何日期字面量。
+                3. 必须带 LIMIT 子句且上限不超过 %d。
+                4. 单条语句，无注释、无分号、禁止 DML/DDL。
+                """.formatted(maxRows);
     }
 
     @Override

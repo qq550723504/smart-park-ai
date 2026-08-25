@@ -59,6 +59,51 @@ class ChartSpecTest {
     }
 
     @Test
+    void duplicateXCoordinatesDegradeToTableInsteadOfSilentlyOverwriting() {
+        // Two rows share the same x coordinate; a LINE/BAR chart would keep
+        // only the last value for it and silently drop the other.
+        TabularResult duplicated = new TabularResult(
+                List.of("building_id", "total_kwh"),
+                List.of(List.of("B1", "100"), List.of("B1", "200")),
+                false, 10);
+
+        ChartSpec spec = ChartSpec.fromProposal(new ChartSpec.Proposal(
+                "LINE", "重复坐标", "building_id", List.of("total_kwh"), "", "kWh"), duplicated);
+
+        assertThat(spec.type()).isEqualTo(ChartSpec.ChartType.TABLE);
+    }
+
+    @Test
+    void duplicateXAndSeriesCoordinatesDegradeToTable() {
+        // Same (xField, seriesField) pair appearing twice must not collapse to
+        // the last-written point.
+        TabularResult grouped = new TabularResult(
+                List.of("building_id", "meter_id", "total_kwh"),
+                List.of(List.of("B1", "M1", "100"), List.of("B2", "M2", "200"),
+                        List.of("B1", "M1", "300")),
+                false, 10);
+
+        ChartSpec spec = ChartSpec.fromProposal(new ChartSpec.Proposal(
+                "BAR", "重复系列坐标", "building_id", List.of("total_kwh"), "meter_id", "kWh"), grouped);
+
+        assertThat(spec.type()).isEqualTo(ChartSpec.ChartType.TABLE);
+    }
+
+    @Test
+    void uniqueCoordinatesStillChart() {
+        TabularResult grouped = new TabularResult(
+                List.of("building_id", "meter_id", "total_kwh"),
+                List.of(List.of("B1", "M1", "100"), List.of("B2", "M2", "200")),
+                false, 10);
+
+        ChartSpec spec = ChartSpec.fromProposal(new ChartSpec.Proposal(
+                "BAR", "正常图表", "building_id", List.of("total_kwh"), "meter_id", "kWh"), grouped);
+
+        assertThat(spec.type()).isEqualTo(ChartSpec.ChartType.BAR);
+        assertThat(spec.seriesField()).isEqualTo("meter_id");
+    }
+
+    @Test
     void nonLineBarChartsRequireAtLeastOneYField() {
         assertThatThrownBy(() -> new ChartSpec(ChartSpec.ChartType.BAR, "t", "x",
                 List.of(), "-", ""))

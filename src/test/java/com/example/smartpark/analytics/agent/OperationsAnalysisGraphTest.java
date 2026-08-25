@@ -250,6 +250,28 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
+    void repairsGeneratedSqlWhoseRowLimitExceedsThePlanLimit() {
+        // The plan pins the row bound; a model answer with LIMIT 500 widens it
+        // and must be rejected with a repairable reason.
+        String limit500 = """
+                SELECT building_id, SUM(kwh) AS total FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                GROUP BY building_id ORDER BY building_id LIMIT 500""";
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of(),
+                        null, List.of("building_id")),
+                List.of(limit500, GOOD_SQL),
+                new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("total"), "", "kWh"),
+                "共 3 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "上周能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastRejectionReason()).contains("行数上限");
+        assertThat(modelClient.generateSqlInvocations()).isEqualTo(2);
+    }
+
+    @Test
     void ambiguousMetricTermPausesRunAsClarificationWithoutTouchingDatabase() {
         modelClient.reset(
                 new AnalyticsModelClient.QuestionUnderstanding("告警情况", List.of("告警"), List.of()),

@@ -59,4 +59,13 @@ class LlmAnalyticsModelClientTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("requestedTimeRange");
     }
+
+    @Test
+    void sqlPromptAdvertisesThePlanRowLimit() {
+        String prompt = LlmAnalyticsModelClient.sqlSystemPrompt(200);
+
+        assertThat(prompt).contains("LIMIT");
+        assertThat(prompt).contains("200");
+        assertThat(prompt).doesNotContain("500");
+    }
 }

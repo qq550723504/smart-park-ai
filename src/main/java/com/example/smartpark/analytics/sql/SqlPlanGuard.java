@@ -44,6 +44,11 @@ public final class SqlPlanGuard {
     }
 
     public static void validate(ValidatedSql validatedSql, QueryPlan plan) throws UnsafeSqlException {
+        // The plan pins the row bound; a wider declared LIMIT would widen what
+        // QueryPlan explicitly says downstream stages cannot widen.
+        if (validatedSql.maxRows() > plan.limit()) {
+            throw reject("LIMIT 超过计划的行数上限 " + plan.limit());
+        }
         Statement statement = parse(validatedSql.sql());
         if (!(statement instanceof Select select)) {
             throw reject("查询计划只能应用于 SELECT");

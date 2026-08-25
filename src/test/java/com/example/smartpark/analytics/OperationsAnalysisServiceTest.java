@@ -143,6 +143,30 @@ class OperationsAnalysisServiceTest {
     }
 
     @Test
+    void preservesOriginalCreationTimestampAcrossLifecycleTransitions() {
+        // createdAt must always reflect when start() created the run — never
+        // the time of a later transition (clarification, resume, terminal).
+        MutableClock clock = new MutableClock(NOW);
+        OperationsAnalysisService service = new OperationsAnalysisService(new MetricCatalog(),
+                (runId, question, pinnedUnderstanding) -> {
+                    clock.advance(Duration.ofMinutes(1));
+                    if (pinnedUnderstanding == null) return clarifying(runId);
+                    return completed(runId);
+                }, directExecutor(), DEFAULT_TIMEOUT, Duration.ofMinutes(5), clock, null);
+
+        var paused = service.start("告警情况");
+        assertThat(paused.createdAt()).isEqualTo(NOW);
+
+        clock.advance(Duration.ofMinutes(2));
+        var resumed = service.submitClarification(paused.runId(),
+                List.of(new MetricSelection("告警", "energy_kwh")));
+
+        assertThat(resumed.status()).isEqualTo("COMPLETED");
+        assertThat(resumed.createdAt()).as("creation time survives transitions").isEqualTo(NOW);
+        assertThat(resumed.updatedAt()).isAfter(NOW);
+    }
+
+    @Test
     void unknownMetricInClarificationIsRejectedByCatalog() {
         OperationsAnalysisService service = service(
                 (runId, question, pinned) -> clarifying(runId), directExecutor());
