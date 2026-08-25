@@ -13,7 +13,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-/** Enforces that a model can only cite evidence observed during this invocation. */
+/** Enforces that supported findings are derived from results observed during this invocation. */
 public final class ExpertFindingValidator {
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -35,11 +35,21 @@ public final class ExpertFindingValidator {
                         EvidenceLedger.Observation::ref, value -> value, (left, right) -> right));
         List<String> refs = finding.evidenceRefs();
         boolean validRefs = !refs.isEmpty() && new HashSet<>(observed.keySet()).containsAll(refs);
-        boolean supportedClaim = validRefs && claimMatchesToolResults(finding, refs, observed);
-        if (finding.status() == FindingStatus.SUPPORTED && !supportedClaim) {
-            return new ExpertFinding(finding.domain(), FindingStatus.INSUFFICIENT_EVIDENCE,
-                    "Insufficient evidence: the finding is not supported by the cited tool results.", List.of(), 0,
-                    List.of("repeat the domain tool lookup"));
+        if (finding.status() == FindingStatus.SUPPORTED) {
+            boolean usableResults = validRefs && refs.stream()
+                    .map(observed::get)
+                    .allMatch(ExpertFindingValidator::isUsableObservation);
+            boolean supportedClaim = usableResults && claimMatchesToolResults(finding, refs, observed);
+            if (!supportedClaim) {
+                return new ExpertFinding(finding.domain(), FindingStatus.INSUFFICIENT_EVIDENCE,
+                        "Insufficient evidence: the finding is not supported by the cited tool results.",
+                        List.of(), 0, List.of("repeat the domain tool lookup"));
+            }
+            // Free-form model prose cannot be validated generically. Replace it
+            // with an exact, deterministic rendering of the cited observations
+            // so no uncited quantitative or qualitative claim reaches synthesis.
+            return new ExpertFinding(finding.domain(), finding.status(),
+                    groundedConclusion(refs, observed), refs, finding.confidence(), finding.nextChecks());
         }
         return finding;
     }
@@ -57,6 +67,64 @@ public final class ExpertFindingValidator {
             }
         }
         return foundStatus;
+    }
+
+    private static boolean isUsableObservation(EvidenceLedger.Observation observation) {
+        if (observation == null || observation.result().isBlank()) return false;
+        String raw = observation.result().strip();
+        try {
+            JsonNode root = JSON.readTree(raw);
+            return root != null && !root.isNull() && !root.isMissingNode() && !containsError(root);
+        } catch (Exception notJson) {
+            String lowered = raw.toLowerCase(Locale.ROOT);
+            return !(lowered.startsWith("error") || lowered.startsWith("failed")
+                    || lowered.startsWith("failure") || lowered.startsWith("错误")
+                    || lowered.startsWith("失败"));
+        }
+    }
+
+    private static boolean containsError(JsonNode node) {
+        if (node.isObject()) {
+            var fields = node.fields();
+            while (fields.hasNext()) {
+                var field = fields.next();
+                String key = field.getKey().toLowerCase(Locale.ROOT);
+                JsonNode value = field.getValue();
+                if (("error".equals(key) || "errors".equals(key)) && hasErrorValue(value)) return true;
+                if ("success".equals(key) && value.isBoolean() && !value.booleanValue()) return true;
+                if ("status".equals(key) && value.isTextual()
+                        && Set.of("ERROR", "FAILED", "FAILURE").contains(
+                                value.asText().strip().toUpperCase(Locale.ROOT))) return true;
+                if (containsError(value)) return true;
+            }
+        } else if (node.isArray()) {
+            for (JsonNode value : node) if (containsError(value)) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasErrorValue(JsonNode value) {
+        if (value == null || value.isNull() || value.isMissingNode()) return false;
+        if (value.isArray() || value.isObject()) return !value.isEmpty();
+        if (value.isTextual()) return !value.asText().isBlank();
+        if (value.isBoolean()) return value.booleanValue();
+        return true;
+    }
+
+    private static String groundedConclusion(List<String> refs,
+                                             Map<String, EvidenceLedger.Observation> observed) {
+        return refs.stream()
+                .map(ref -> "已验证工具结果[" + ref + "]: " + canonicalResult(observed.get(ref).result()))
+                .collect(java.util.stream.Collectors.joining("；"));
+    }
+
+    private static String canonicalResult(String result) {
+        String raw = result.strip();
+        try {
+            return JSON.writeValueAsString(JSON.readTree(raw));
+        } catch (Exception notJson) {
+            return raw;
+        }
     }
 
     private static Set<String> statuses(String result) {

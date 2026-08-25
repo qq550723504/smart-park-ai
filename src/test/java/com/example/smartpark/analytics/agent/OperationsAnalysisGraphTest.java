@@ -214,6 +214,16 @@ class OperationsAnalysisGraphTest {
                 .filter(event -> event.eventType() == ExecutionEventType.SQL_REJECTED))
                 .as("the rejected draft must surface as SQL_REJECTED before the repair")
                 .hasSize(1);
+        assertThat(publisher.history(runId).stream()
+                .filter(event -> event.eventType() == ExecutionEventType.SQL_GENERATED)
+                .map(ExecutionEvent::displayPayload))
+                .allMatch(payload -> payload instanceof com.example.smartpark.execution.model.DisplayPayload.TextPayload)
+                .noneMatch(payload -> payload.toString().contains(LIMIT_LESS_SQL));
+        assertThat(publisher.history(runId).stream()
+                .filter(event -> event.eventType() == ExecutionEventType.SQL_VALIDATED)
+                .map(ExecutionEvent::displayPayload))
+                .anyMatch(payload -> payload instanceof com.example.smartpark.execution.model.DisplayPayload.SqlPayload sql
+                        && GOOD_SQL.equals(sql.safeSql()));
     }
 
     @Test

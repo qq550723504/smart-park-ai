@@ -446,11 +446,12 @@ public class OperationsAnalysisGraph {
                 ctx.plan, ctx.schemaDescription, ctx.rejectionReason));
         ctx.rejectionReason = null;
         nodeCompleted(ctx, runId, ExecutionStage.ANALYSIS, "SQL 草案生成", null);
-        // The declared SQL_GENERATED event carries the draft for consumers that
-        // subscribe to the named lifecycle events rather than generic nodes.
+        // A model draft is untrusted until both AST and plan validation pass.
+        // Publish only a lifecycle marker here; SQL text first enters the event
+        // stream in SQL_VALIDATED below.
         publish(ctx, runId, ExecutionStage.ANALYSIS, ExecutionEventType.SQL_GENERATED,
                 ExecutionStatus.RUNNING, "SQL 草案已生成",
-                new DisplayPayload.SqlPayload(ctx.sqlDraft, List.of(), "DRAFT"));
+                DisplayPayload.text("SQL 草案已生成，等待安全校验", false));
         return Map.of();
     }
 

@@ -13,10 +13,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ExpertFindingValidatorTest {
     private final ExpertFindingValidator validator = new ExpertFindingValidator();
 
-    @Test void preservesSupportedFindingWhenEveryReferenceWasObserved() {
+    @Test void downgradesSupportedFindingWhenOnlyAReferenceButNoResultWasObserved() {
         ExpertFinding finding = new ExpertFinding(ExpertDomain.ENERGY, FindingStatus.SUPPORTED,
                 "consumption is above baseline", java.util.List.of("tool:energy:1"), .8, java.util.List.of());
-        assertThat(validator.validate(finding, Set.of("tool:energy:1"))).isEqualTo(finding);
+        assertThat(validator.validate(finding, Set.of("tool:energy:1")).status())
+                .isEqualTo(FindingStatus.INSUFFICIENT_EVIDENCE);
     }
 
     @Test void downgradesAFabricatedReferenceWithoutInventingEvidence() {
@@ -45,5 +46,40 @@ class ExpertFindingValidatorTest {
         assertThat(validated.status()).isEqualTo(FindingStatus.INSUFFICIENT_EVIDENCE);
         assertThat(validated.evidenceRefs()).isEmpty();
         assertThat(validated.confidence()).isZero();
+    }
+
+    @Test void replacesModelQuantitativeClaimsWithTheCitedStructuredResult() {
+        ExpertFinding finding = new ExpertFinding(ExpertDomain.ENERGY, FindingStatus.SUPPORTED,
+                "consumption is 9999 kWh and baseline is 1 kWh",
+                java.util.List.of("tool:energy:1"), .9, java.util.List.of());
+        EvidenceLedger ledger = new EvidenceLedger();
+        ledger.record("tool:energy:1", "{\"consumptionKwh\":120,\"baselineKwh\":100}");
+
+        ExpertFinding validated = validator.validateWithObservations(finding, ledger.snapshotObservations());
+
+        assertThat(validated.status()).isEqualTo(FindingStatus.SUPPORTED);
+        assertThat(validated.conclusion())
+                .contains("tool:energy:1", "\"consumptionKwh\":120", "\"baselineKwh\":100")
+                .doesNotContain("9999");
+    }
+
+    @Test void downgradesSuccessfulTransportThatReturnedAnErrorObservation() {
+        ExpertFinding finding = new ExpertFinding(ExpertDomain.DEVICE, FindingStatus.SUPPORTED,
+                "device is offline", java.util.List.of("tool:device:1"), .9, java.util.List.of());
+        EvidenceLedger ledger = new EvidenceLedger();
+        ledger.record("tool:device:1", "{\"error\":\"unknown device\"}");
+
+        assertThat(validator.validateWithObservations(finding, ledger.snapshotObservations()).status())
+                .isEqualTo(FindingStatus.INSUFFICIENT_EVIDENCE);
+    }
+
+    @Test void acceptsAnExplicitlyEmptyErrorsCollection() {
+        ExpertFinding finding = new ExpertFinding(ExpertDomain.ENERGY, FindingStatus.SUPPORTED,
+                "consumption is available", java.util.List.of("tool:energy:1"), .9, java.util.List.of());
+        EvidenceLedger ledger = new EvidenceLedger();
+        ledger.record("tool:energy:1", "{\"success\":true,\"errors\":[],\"consumptionKwh\":120}");
+
+        assertThat(validator.validateWithObservations(finding, ledger.snapshotObservations()).status())
+                .isEqualTo(FindingStatus.SUPPORTED);
     }
 }
