@@ -61,7 +61,7 @@ SPRING_AI_DASHSCOPE_ENABLED=false ./mvnw spring-boot:run
 
 #### 方式 B：启动完整告警工作流
 
-完整模式会调用 DashScope `qwen-plus`。密钥只应放在当前进程的 `AI_DASHSCOPE_API_KEY` 环境变量中，不要写入源码、`.env`、命令行参数或 Git 历史。
+完整模式会调用 DashScope `qwen-plus`。密钥只应通过当前进程的 `AI_DASHSCOPE_API_KEY` 环境变量传入，不要写入源码、`.env`、命令行参数或 Git 历史。
 
 Windows PowerShell：
 
@@ -124,11 +124,10 @@ curl "http://localhost:8080/api/workflows/replace-with-workflow-id"
 
 以下 Compose 配置仅用于本地演示，默认使用 Mock/离线能力，不需要 API Key。它不提供生产级认证、租户隔离或密钥管理；`X-Demo-Role` 仅是演示授权边界，不能作为生产认证方案。
 
-先从安全的示例文件创建本地环境文件，再启动默认栈：
+直接启动默认栈：
 
 ```powershell
-Copy-Item .env.example .env
-docker compose up --build
+docker compose --env-file .env.example up --build
 ```
 
 默认栈启动 backend、frontend 和 analytics PostgreSQL 容器。前端入口为 <http://localhost:5173>；容器内 Vite 会把 `/api` 代理到 backend，因此可用 <http://localhost:5173/api/operations/capabilities> 查看当前能力。默认模式下 backend 暴露的同一 capabilities endpoint 也可直接通过 <http://localhost:8080/api/operations/capabilities> 访问。
@@ -147,7 +146,7 @@ docker compose down
 
 analytics 使用独立 PostgreSQL 数据库；运行时查询角色固定为只读的 `smartpark_analytics_ro`，管理员角色只用于迁移和演示数据刷新。不要把真实值写进 README、源码或 Git 历史。
 
-在 `.env` 中填写以下三个必需变量后，显式加载 analytics 覆盖文件和 profile：
+在本地未跟踪且已被 `.gitignore` 排除的 `.env` 中填写以下三个必需变量，仅供本地演示，绝不提交；然后显式加载 analytics 覆盖文件和 profile：
 
 | 变量 | 用途 |
 | --- | --- |
