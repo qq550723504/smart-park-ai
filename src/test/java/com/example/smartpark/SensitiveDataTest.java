@@ -253,6 +253,15 @@ class SensitiveDataTest {
     }
 
     @Test
+    void repositoryPatternsDoNotTreatTheNextLineVariableNameAsASecretValue() {
+        List<Pattern> patterns = forbiddenSecretPatterns();
+        String keyName = "AI_" + "DASHSCOPE_API_KEY";
+
+        assertThat(matchesAny(keyName + "=\nNEXT_VARIABLE_NAME=enabled", patterns)).isFalse();
+        assertThat(matchesAny(keyName + "=private-value-123", patterns)).isTrue();
+    }
+
+    @Test
     void scannerDetectsCredentialAssignmentsInUtf8AndUtf16WithAndWithoutBom(@TempDir Path directory)
             throws Exception {
         String keyName = "AI_" + "DASHSCOPE_API_KEY";
@@ -447,7 +456,7 @@ class SensitiveDataTest {
                 Pattern.compile("\\b" + "sk" + "-[A-Za-z0-9_-]{12,}"),
                 Pattern.compile("(?i)\\b" + "Bearer" + "\\s+[A-Za-z0-9._~+/=-]{12,}"),
                 Pattern.compile("(?im)^\\s*(?:\\$env:)?" + dashScopeKey
-                        + "\\s*(?:=|:)\\s*(?!['\"]?(?:\\$\\{|<|$))['\"]?[A-Za-z0-9_./+-]{8,}"),
+                        + "[^\\S\\r\\n]*(?:=|:)[^\\S\\r\\n]*(?!['\"]?(?:\\$\\{|<|$))['\"]?[A-Za-z0-9_./+-]{8,}"),
                 Pattern.compile("\\bAKIA[A-Z0-9]{16}\\b"),
                 Pattern.compile("\\bAIza[A-Za-z0-9_-]{20,}\\b"),
                 Pattern.compile("\\bghp_[A-Za-z0-9]{20,}\\b"));
