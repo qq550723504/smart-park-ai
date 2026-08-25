@@ -16,7 +16,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -75,16 +74,16 @@ class ExpertCollaborationGraphTest {
         }
     }
 
-    @Test void interruptsTimedOutExpertInvocation() {
+    @Test void interruptsTimedOutExpertInvocation() throws InterruptedException {
         ExecutorService executor = Executors.newSingleThreadExecutor();
-        AtomicBoolean interrupted = new AtomicBoolean();
+        CountDownLatch interrupted = new CountDownLatch(1);
         try {
             EnumMap<ExpertDomain, ExpertCollaborationGraph.Expert> experts = new EnumMap<>(ExpertDomain.class);
             experts.put(ExpertDomain.ENERGY, assignment -> {
                 try {
                     Thread.sleep(5000);
                 } catch (InterruptedException ex) {
-                    interrupted.set(true);
+                    interrupted.countDown();
                     Thread.currentThread().interrupt();
                 }
                 return finding(ExpertDomain.ENERGY);
@@ -96,7 +95,7 @@ class ExpertCollaborationGraphTest {
             var findings = graph.execute(plan(ExpertDomain.ENERGY));
 
             assertThat(findings.get(0).status()).isEqualTo(FindingStatus.FAILED);
-            assertThat(interrupted).isTrue();
+            assertThat(interrupted.await(1, TimeUnit.SECONDS)).isTrue();
         } finally {
             executor.shutdownNow();
         }
