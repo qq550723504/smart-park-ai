@@ -15,6 +15,8 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.FutureTask;
@@ -41,6 +43,7 @@ public class OperationsAnalysisService {
     private final GraphRunner runner;
     private final Executor executor;
     private final Duration timeout;
+    private final Duration clarificationTimeout;
     private final Clock clock;
     private final AnalysisRunStore store = new AnalysisRunStore();
     private final ExecutionEventPublisher events;
@@ -48,8 +51,7 @@ public class OperationsAnalysisService {
     private UUID activeRunId;
 
     /** Pending ambiguity per run: one candidate metric set per clarification question. */
-    private final java.util.concurrent.ConcurrentHashMap<UUID, List<java.util.Set<String>>> pendingClarifications
-            = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<UUID, PendingClarification> pendingClarifications = new java.util.HashMap<>();
 
     public OperationsAnalysisService(MetricCatalog catalog,
                                      GraphRunner runner,
@@ -65,10 +67,24 @@ public class OperationsAnalysisService {
                                      Duration timeout,
                                      Clock clock,
                                      ExecutionEventPublisher events) {
+        this(catalog, runner, analyticsExecutor, timeout, Duration.ofMinutes(5), clock, events);
+    }
+
+    public OperationsAnalysisService(MetricCatalog catalog,
+                                     GraphRunner runner,
+                                     Executor analyticsExecutor,
+                                     Duration timeout,
+                                     Duration clarificationTimeout,
+                                     Clock clock,
+                                     ExecutionEventPublisher events) {
         this.catalog = catalog;
         this.runner = runner;
         this.executor = analyticsExecutor;
         this.timeout = timeout;
+        if (clarificationTimeout == null || clarificationTimeout.isZero() || clarificationTimeout.isNegative()) {
+            throw new IllegalArgumentException("clarificationTimeout must be positive");
+        }
+        this.clarificationTimeout = clarificationTimeout;
         this.clock = clock;
         this.events = events;
     }
@@ -84,32 +100,52 @@ public class OperationsAnalysisService {
     public AnalysisRunStore.RunRecord start(String question) {
         requireValidQuestion(question);
         UUID runId = UUID.randomUUID();
+        AnalysisRunStore.RunRecord expired;
         synchronized (lifecycleLock) {
+            expired = expireAbandonedClarificationLocked(Instant.now(clock));
             if (activeRunId != null) {
                 throw new IllegalStateException("已有正在进行的分析，请等待完成后再启动");
             }
             activeRunId = runId;
             store.put(new RecordBuilder(runId, question, clock).running());
         }
+        publishExpiredClarification(expired);
         launch(runId, question, null);
         return store.get(runId);
     }
 
     public AnalysisRunStore.RunRecord submitClarification(UUID runId, List<MetricSelection> selections) {
-        var current = get(runId);
-        if (!"NEEDS_CLARIFICATION".equals(current.status())) {
-            throw new IllegalStateException("该运行不处于待澄清状态");
-        }
         List<MetricSelection> safeSelections = validateSelections(selections);
-        validateAgainstPendingClarification(runId, safeSelections);
-        String pinnedTerms = safeSelections.stream()
-                .map(MetricSelection::metric)
-                .reduce((a, b) -> a + ", " + b)
-                .orElse("");
-        var pinned = new AnalyticsModelClient.QuestionUnderstanding(
-                current.question(), safeSelections.stream().map(MetricSelection::metric).toList(), List.of());
-        store.put(rerunningRecord(runId));
-        pendingClarifications.remove(runId);
+        AnalysisRunStore.RunRecord current;
+        AnalysisRunStore.RunRecord expired;
+        AnalyticsModelClient.QuestionUnderstanding pinned = null;
+        String pinnedTerms = "";
+        synchronized (lifecycleLock) {
+            expired = expireAbandonedClarificationLocked(Instant.now(clock));
+            current = store.get(runId);
+            if (expired == null || !runId.equals(expired.runId())) {
+                if (current == null) {
+                    throw new java.util.NoSuchElementException("Unknown analysis run: " + runId);
+                }
+                if (!"NEEDS_CLARIFICATION".equals(current.status())) {
+                    throw new IllegalStateException("该运行不处于待澄清状态");
+                }
+                PendingClarification pending = pendingClarifications.get(runId);
+                validateAgainstPendingClarification(pending, safeSelections);
+                pinnedTerms = safeSelections.stream()
+                        .map(MetricSelection::metric)
+                        .reduce((a, b) -> a + ", " + b)
+                        .orElse("");
+                pinned = new AnalyticsModelClient.QuestionUnderstanding(
+                        current.question(), safeSelections.stream().map(MetricSelection::metric).toList(), List.of());
+                store.put(rerunningRecord(runId));
+                pendingClarifications.remove(runId);
+            }
+        }
+        publishExpiredClarification(expired);
+        if (pinned == null) {
+            throw new IllegalStateException("该运行的澄清等待已超时");
+        }
         launch(runId, current.question() + "（已明确指标: " + pinnedTerms + "）", pinned);
         return store.get(runId);
     }
@@ -136,13 +172,13 @@ public class OperationsAnalysisService {
         return List.copyOf(selections);
     }
 
-    private void validateAgainstPendingClarification(UUID runId, List<MetricSelection> selections) {
-        var pending = pendingClarifications.get(runId);
-        if (pending == null || pending.size() != selections.size()) {
+    private void validateAgainstPendingClarification(PendingClarification pending,
+                                                     List<MetricSelection> selections) {
+        if (pending == null || pending.candidates().size() != selections.size()) {
             throw new IllegalArgumentException("澄清选择数量与待澄清问题不一致");
         }
         for (int i = 0; i < selections.size(); i++) {
-            if (!pending.get(i).contains(selections.get(i).metric())) {
+            if (!pending.candidates().get(i).contains(selections.get(i).metric())) {
                 throw new IllegalArgumentException("第 " + (i + 1) + " 个选择的指标不在该问题的候选范围内");
             }
         }
@@ -210,56 +246,88 @@ public class OperationsAnalysisService {
     private AnalysisRunStore.RunRecord persistOutcome(UUID runId, String question,
                                                       OperationsAnalysisGraph.AnalysisRunResult outcome,
                                                       long durationMs) {
-        // A timed-out run was already marked FAILED; late completions never overwrite terminal states.
-        var existing = store.get(runId);
-        if (existing != null && ("FAILED".equals(existing.status()) || "COMPLETED".equals(existing.status()))) {
-            return existing;
-        }
-        AnalysisRunStore.RunRecord record = switch (outcome.outcome()) {
-            case COMPLETED -> new AnalysisRunStore.RunRecord(runId, question, "COMPLETED",
-                    List.of(), outcome.summary() == null ? "" : outcome.summary(),
-                    outcome.result() == null ? 0 : outcome.result().rowCount(),
-                    outcome.result() != null && outcome.result().truncated(),
-                    durationMs, null, Instant.now(clock),
-                    outcome.result() == null ? List.of() : outcome.result().columnNames(),
-                    outcome.result() == null ? List.of() : outcome.result().rows());
-            case NEEDS_CLARIFICATION -> {
-                pendingClarifications.put(runId, outcome.clarificationOptions().stream()
-                        .map(java.util.Set::copyOf)
-                        .toList());
-                yield new AnalysisRunStore.RunRecord(runId, question, "NEEDS_CLARIFICATION",
-                        List.copyOf(outcome.clarificationQuestions()), "", 0, false, durationMs, null,
-                        Instant.now(clock), List.of(), List.of());
+        synchronized (lifecycleLock) {
+            // A timed-out run was already marked FAILED; late completions never overwrite terminal states.
+            var existing = store.get(runId);
+            if (existing != null && ("FAILED".equals(existing.status()) || "COMPLETED".equals(existing.status()))) {
+                return existing;
             }
-            case FAILED -> {
-                pendingClarifications.remove(runId);
-                yield new AnalysisRunStore.RunRecord(runId, question, "FAILED",
-                        List.of(), "", 0, false, durationMs,
-                        outcome.failureStage() == null ? "UNKNOWN" : outcome.failureStage(),
-                        Instant.now(clock), List.of(), List.of());
+            Instant now = Instant.now(clock);
+            AnalysisRunStore.RunRecord record = switch (outcome.outcome()) {
+                case COMPLETED -> new AnalysisRunStore.RunRecord(runId, question, "COMPLETED",
+                        List.of(), outcome.summary() == null ? "" : outcome.summary(),
+                        outcome.result() == null ? 0 : outcome.result().rowCount(),
+                        outcome.result() != null && outcome.result().truncated(),
+                        durationMs, null, now,
+                        outcome.result() == null ? List.of() : outcome.result().columnNames(),
+                        outcome.result() == null ? List.of() : outcome.result().rows());
+                case NEEDS_CLARIFICATION -> {
+                    pendingClarifications.put(runId, new PendingClarification(
+                            List.copyOf(outcome.clarificationQuestions()),
+                            outcome.clarificationOptions().stream().map(Set::copyOf).toList(),
+                            now.plus(clarificationTimeout)));
+                    yield new AnalysisRunStore.RunRecord(runId, question, "NEEDS_CLARIFICATION",
+                            List.copyOf(outcome.clarificationQuestions()), "", 0, false, durationMs, null,
+                            now, List.of(), List.of());
+                }
+                case FAILED -> {
+                    pendingClarifications.remove(runId);
+                    yield new AnalysisRunStore.RunRecord(runId, question, "FAILED",
+                            List.of(), "", 0, false, durationMs,
+                            outcome.failureStage() == null ? "UNKNOWN" : outcome.failureStage(),
+                            now, List.of(), List.of());
+                }
+            };
+            store.put(record);
+            if (!"NEEDS_CLARIFICATION".equals(record.status())) {
+                releaseActiveLocked(runId);
             }
-        };
-        store.put(record);
-        if (!"NEEDS_CLARIFICATION".equals(record.status())) {
-            releaseActive(runId);
+            return record;
         }
-        return record;
     }
 
     private AnalysisRunStore.RunRecord persistFailure(UUID runId, String question,
                                                       String stage, long durationMs) {
-        var record = new AnalysisRunStore.RunRecord(runId, question, "FAILED", List.of(),
-                "", 0, false, durationMs, stage, Instant.now(clock), List.of(), List.of());
-        store.put(record);
-        releaseActive(runId);
-        return record;
+        synchronized (lifecycleLock) {
+            var record = new AnalysisRunStore.RunRecord(runId, question, "FAILED", List.of(),
+                    "", 0, false, durationMs, stage, Instant.now(clock), List.of(), List.of());
+            store.put(record);
+            pendingClarifications.remove(runId);
+            releaseActiveLocked(runId);
+            return record;
+        }
     }
 
-    private void releaseActive(UUID runId) {
-        synchronized (lifecycleLock) {
-            if (runId.equals(activeRunId)) {
-                activeRunId = null;
-            }
+    private void releaseActiveLocked(UUID runId) {
+        if (runId.equals(activeRunId)) {
+            activeRunId = null;
+        }
+    }
+
+    private AnalysisRunStore.RunRecord expireAbandonedClarificationLocked(Instant now) {
+        if (activeRunId == null) return null;
+        PendingClarification pending = pendingClarifications.get(activeRunId);
+        if (pending == null || now.isBefore(pending.expiresAt())) return null;
+        AnalysisRunStore.RunRecord previous = store.get(activeRunId);
+        AnalysisRunStore.RunRecord expired = new AnalysisRunStore.RunRecord(
+                previous.runId(), previous.question(), "FAILED", List.of(), "", 0, false,
+                previous.durationMs(), "CLARIFICATION_TIMEOUT", now, List.of(), List.of());
+        store.put(expired);
+        pendingClarifications.remove(activeRunId);
+        activeRunId = null;
+        return expired;
+    }
+
+    private void publishExpiredClarification(AnalysisRunStore.RunRecord expired) {
+        if (expired == null || events == null) return;
+        try {
+            events.publish(new ExecutionEvent(UUID.randomUUID(), expired.runId(), 0, Instant.now(clock),
+                    ExecutionScenario.OPERATIONS_ANALYSIS, "analytics", ExecutionStage.FAILURE,
+                    ExecutionEventType.FAILED, ExecutionStatus.FAILED, "澄清等待超时，已终止",
+                    DisplayPayload.error(ExecutionStage.FAILURE, "CLARIFICATION_TIMEOUT", true,
+                            "澄清等待超过时间上限，请重新发起分析")));
+        } catch (IllegalStateException alreadyClosed) {
+            // Another terminal path won before the lazy expiry was observed.
         }
     }
 
@@ -284,6 +352,15 @@ public class OperationsAnalysisService {
         AnalysisRunStore.RunRecord running() {
             return new AnalysisRunStore.RunRecord(runId, question, "RUNNING",
                     List.of(), "", 0, false, 0, null, Instant.now(clock), List.of(), List.of());
+        }
+    }
+
+    private record PendingClarification(List<String> questions,
+                                        List<Set<String>> candidates,
+                                        Instant expiresAt) {
+        PendingClarification {
+            questions = List.copyOf(questions);
+            candidates = candidates.stream().map(Set::copyOf).toList();
         }
     }
 }

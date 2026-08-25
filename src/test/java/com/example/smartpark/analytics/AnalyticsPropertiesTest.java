@@ -53,6 +53,7 @@ class AnalyticsPropertiesTest {
                     assertThat(properties.getMaxRows()).isEqualTo(500);
                     assertThat(properties.getMaxResultBytes()).isEqualTo(1024L * 1024L);
                     assertThat(properties.getStatementTimeout()).isEqualTo(java.time.Duration.ofSeconds(3));
+                    assertThat(properties.getClarificationTimeout()).isEqualTo(java.time.Duration.ofMinutes(5));
                     // The full runtime is wired: both gates, the graph and the service.
                     assertThat(context).hasBean("analyticsDataSource");
                     assertThat(context).hasBean("queryCostGuard");
@@ -92,5 +93,17 @@ class AnalyticsPropertiesTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> properties.setMaxPlanCost(0))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void rejectsNonPositiveClarificationTimeout() {
+        AnalyticsProperties properties = new AnalyticsProperties();
+
+        assertThatThrownBy(() -> properties.setClarificationTimeout(java.time.Duration.ZERO))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("clarification-timeout");
+        assertThatThrownBy(() -> properties.setClarificationTimeout(java.time.Duration.ofSeconds(-1)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("clarification-timeout");
     }
 }

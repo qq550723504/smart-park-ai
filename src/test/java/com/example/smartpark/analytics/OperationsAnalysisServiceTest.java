@@ -6,13 +6,19 @@ import com.example.smartpark.analytics.agent.OperationsAnalysisGraph;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -158,6 +164,75 @@ class OperationsAnalysisServiceTest {
         assertThat(service.get(runB.runId()).status()).isEqualTo("COMPLETED");
     }
 
+    @Test
+    void concurrentClarificationsResumeThePausedRunExactlyOnce() throws Exception {
+        int callers = 8;
+        CountDownLatch allValidated = new CountDownLatch(callers);
+        MetricCatalog slowCatalog = new MetricCatalog() {
+            @Override
+            public Optional<com.example.smartpark.analytics.catalog.MetricDefinition> findByName(String name) {
+                allValidated.countDown();
+                try {
+                    assertThat(allValidated.await(2, TimeUnit.SECONDS)).isTrue();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(interrupted);
+                }
+                return super.findByName(name);
+            }
+        };
+        AtomicInteger resumeCalls = new AtomicInteger();
+        OperationsAnalysisService service = new OperationsAnalysisService(slowCatalog,
+                (runId, question, pinned) -> {
+                    if (pinned == null) return clarifying(runId);
+                    resumeCalls.incrementAndGet();
+                    return completed(runId);
+                }, directExecutor(), DEFAULT_TIMEOUT, Clock.fixed(NOW, ZoneOffset.UTC));
+        var paused = service.start("告警情况");
+
+        ExecutorService callersExecutor = Executors.newFixedThreadPool(callers);
+        try {
+            CountDownLatch start = new CountDownLatch(1);
+            var attempts = java.util.stream.IntStream.range(0, callers)
+                    .mapToObj(ignored -> callersExecutor.submit(() -> {
+                        start.await();
+                        try {
+                            service.submitClarification(paused.runId(),
+                                    List.of(new MetricSelection("告警", "energy_kwh")));
+                            return true;
+                        } catch (IllegalStateException | IllegalArgumentException rejected) {
+                            return false;
+                        }
+                    })).toList();
+            start.countDown();
+
+            long successes = 0;
+            for (var attempt : attempts) {
+                if (attempt.get(3, TimeUnit.SECONDS)) successes++;
+            }
+            assertThat(successes).isEqualTo(1);
+            assertThat(resumeCalls).hasValue(1);
+        } finally {
+            callersExecutor.shutdownNow();
+        }
+    }
+
+    @Test
+    void expiredClarificationReleasesTheOnlyActiveSlot() {
+        MutableClock clock = new MutableClock(NOW);
+        OperationsAnalysisService service = new OperationsAnalysisService(new MetricCatalog(),
+                (runId, question, pinned) -> clarifying(runId), directExecutor(),
+                DEFAULT_TIMEOUT, Duration.ofMinutes(5), clock, null);
+        var abandoned = service.start("需要澄清的旧问题");
+
+        clock.advance(Duration.ofMinutes(6));
+        var replacement = service.start("新的分析问题");
+
+        assertThat(service.get(abandoned.runId()).status()).isEqualTo("FAILED");
+        assertThat(service.get(abandoned.runId()).failureStage()).isEqualTo("CLARIFICATION_TIMEOUT");
+        assertThat(replacement.runId()).isNotEqualTo(abandoned.runId());
+    }
+
     // ---- fixtures ----------------------------------------------------------
 
     private static final java.time.Duration DEFAULT_TIMEOUT = java.time.Duration.ofSeconds(30);
@@ -201,5 +276,21 @@ class OperationsAnalysisServiceTest {
         return new OperationsAnalysisGraph.AnalysisRunResult(runId,
                 OperationsAnalysisGraph.RunOutcome.NEEDS_CLARIFICATION,
                 List.of("请明确指标口径"), List.of(List.of("energy_kwh")), null, null, null, null);
+    }
+
+    private static final class MutableClock extends Clock {
+        private Instant instant;
+
+        private MutableClock(Instant instant) {
+            this.instant = instant;
+        }
+
+        void advance(Duration duration) {
+            instant = instant.plus(duration);
+        }
+
+        @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+        @Override public Clock withZone(ZoneId zone) { return this; }
+        @Override public Instant instant() { return instant; }
     }
 }

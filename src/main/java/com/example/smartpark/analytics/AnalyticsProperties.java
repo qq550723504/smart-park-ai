@@ -14,6 +14,7 @@ public class AnalyticsProperties {
     private boolean enabled;
     private Duration statementTimeout = Duration.ofSeconds(3);
     private Duration analysisTimeout = Duration.ofSeconds(60);
+    private Duration clarificationTimeout = Duration.ofMinutes(5);
     private int maxRows = 500;
     private long maxResultBytes = 1024L * 1024L;
     private double maxPlanCost = 1_000_000.0;
@@ -41,6 +42,13 @@ public class AnalyticsProperties {
     public void setStatementTimeout(Duration statementTimeout) { this.statementTimeout = statementTimeout; }
     public Duration getAnalysisTimeout() { return analysisTimeout; }
     public void setAnalysisTimeout(Duration analysisTimeout) { this.analysisTimeout = analysisTimeout; }
+    public Duration getClarificationTimeout() { return clarificationTimeout; }
+    public void setClarificationTimeout(Duration clarificationTimeout) {
+        if (clarificationTimeout == null || clarificationTimeout.isZero() || clarificationTimeout.isNegative()) {
+            throw new IllegalArgumentException("clarification-timeout must be positive");
+        }
+        this.clarificationTimeout = clarificationTimeout;
+    }
     public int getMaxRows() { return maxRows; }
     public void setMaxRows(int maxRows) { this.maxRows = maxRows; }
     public long getMaxResultBytes() { return maxResultBytes; }
