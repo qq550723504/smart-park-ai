@@ -270,6 +270,21 @@ public final class SqlAstGuard {
         }
 
         @Override
+        public <S> Void visit(net.sf.jsqlparser.statement.select.ParenthesedSelect select, S context) {
+            // Relation validation covers FROM/JOIN items. This visitor closes
+            // expression positions such as ORDER BY, WHERE and projections,
+            // where a scalar subquery could otherwise reach an unapproved table.
+            throw new IllegalStateException("表达式子查询被拒绝");
+        }
+
+        @Override
+        public <S> Void visit(Select select, S context) {
+            // JSqlParser dispatches a scalar ParenthesedSelect through the
+            // generic Select overload when it is used as an Expression.
+            throw new IllegalStateException("表达式子查询被拒绝");
+        }
+
+        @Override
         public <S> Void visit(JdbcNamedParameter parameter, S context) {
             namedParameters.add(parameter.getName());
             return super.visit(parameter, context);

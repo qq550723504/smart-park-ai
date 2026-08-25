@@ -4,8 +4,10 @@
 
 - Date: 2026-08-25
 - Approved in chat: yes
-- Target: the six P1 review threads created against commit `f5b36f51b5`, plus
-  the later demo-snapshot data-integrity P1 discovered during final re-fetch
+- Target: all ten P1 review threads current on 2026-08-25: the seven query,
+  summary, synthesis, privilege, and identifier contract findings; the later
+  demo-snapshot integrity finding; the table-valued `FROM` bypass; and the
+  clarification-resume metric-loss finding
 - Baseline: commit `5281da6`, after the independent P2 round-4 fixes
 
 This slice closes four trust boundaries that currently validate only subsets of
@@ -15,6 +17,8 @@ their intended contracts:
 2. generated summaries versus verified rows or expert findings;
 3. the analytics database login versus the dedicated-database privilege model.
 4. demo-fixture maintenance versus real analytics source data.
+5. clarification selections versus the canonical metrics already resolved
+   from the original question.
 
 It does not implement the remaining P2 comments, add a general-purpose query
 compiler, introduce arbitrary joins, or turn the demo runtime into a
@@ -112,10 +116,14 @@ ordinary dimension predicate is rejected fail-closed. This slice does not infer
 filters from question text: adding typed filter extraction is a separate
 product capability and must not be invented inside a security validator.
 
-The guard rejects duplicate required predicates, unconsumed predicates, JOIN
-predicates, and repeated physical source occurrences. A future join-capable
-plan must carry an explicit source-grain/cardinality proof before joins can be
-accepted.
+The current plan cannot describe or prove arbitrary relational transformations.
+The guard therefore accepts only a single direct `SELECT` over one whitelisted
+fact view and rejects CTEs, subqueries, joins, `HAVING`, `DISTINCT`, ordering,
+offset/fetch, and a `LIMIT` different from the plan. It also rejects duplicate
+required predicates, unconsumed predicates, table-valued `FROM` items, and
+repeated physical source occurrences. A future richer plan must carry explicit
+source-grain, cardinality, ordering, and pagination contracts before those
+forms can be accepted.
 
 ### 3.3 Row-aware analysis summary grounding
 
@@ -126,12 +134,16 @@ case-insensitive column name. Build row facts from the actual result schema:
 dimension tuple -> numeric values in the same row
 ```
 
-For each conclusion clause:
+For each conclusion fact, in textual order:
 
 - recognize actual dimension values using escaped token-aware matching;
 - find rows compatible with all mentioned dimension values;
 - require every numeric figure in that clause to belong to a compatible row;
-- reject ambiguous multi-entity clauses and unsupported pairings.
+- classify numeric dimension tokens before later numeric figures;
+- reject ambiguous multi-entity clauses and unsupported pairings;
+- recognize scientific notation, unit suffixes, and Unicode minus signs;
+- exempt row/column counts only in independent metadata clauses without an
+  active result dimension.
 
 This removes `DIGIT_IDENTIFIER` as the source of entity truth. Existing global
 checks for unsupported numbers, row counts, and unverifiable trend language
@@ -235,6 +247,13 @@ Each production change starts with a focused test that fails on baseline
 6. `AnalyticsPropertiesTest` and `AnalyticsSchemaMigrationTest`
    - prove the refresher is absent by default and requires explicit opt-in;
    - prove an aged non-fixture snapshot remains unchanged after a demo refresh.
+7. `OperationsAnalysisServiceTest`
+   - proves clarification resumes retain canonical metrics already resolved
+     from the original question and add only selected unresolved metrics.
+8. SQL and summary adversarial regression tests
+   - reject table-valued relations, scalar subqueries, CTE/subquery cardinality
+     changes, result ordering/offsets, non-exact limits, alias/projection
+     ambiguity, metadata collisions, and complete numeric spellings.
 
 Final verification:
 
@@ -249,7 +268,7 @@ git diff --check
 
 ## 7. Acceptance criteria
 
-- All seven P1 counterexamples are red on their preceding implementation and
+- All ten GitHub P1 counterexamples are red on their preceding implementation and
   green after the fix.
 - SQL execution is impossible unless the full supported query shape matches the
   plan; no lossy identifier or occurrence normalization remains.
@@ -258,5 +277,5 @@ git diff --check
 - An upgraded dedicated analytics database removes inherited `PUBLIC`
   privileges from the runtime login without rewriting V1.
 - Public REST/SSE DTOs remain compatible.
-- The seven GitHub threads receive technical replies and are resolved
+- The ten GitHub threads receive technical replies and are resolved
   only after local and remote verification.

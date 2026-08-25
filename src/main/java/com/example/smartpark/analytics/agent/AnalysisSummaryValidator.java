@@ -3,6 +3,7 @@ package com.example.smartpark.analytics.agent;
 import com.example.smartpark.analytics.model.QueryPlan;
 import com.example.smartpark.analytics.model.TabularResult;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -16,9 +17,13 @@ import java.util.Set;
  */
 public class AnalysisSummaryValidator {
 
-    // Digits inside identifiers (B1, MTR-2) are not figures; require non-alphanumeric context.
+    // Do not extract digits from identifiers such as B1/MTR-2. A unit suffix is
+    // intentionally allowed (10kWh), and scientific notation / Unicode minus
+    // are normalized before comparison with result cells.
     private static final java.util.regex.Pattern NUMBER = java.util.regex.Pattern.compile(
-            "(?<![A-Za-z0-9])-?[0-9]+(?:\\.[0-9]+)?(?![0-9A-Za-z])");
+            "(?<![\\p{L}\\p{N}_\\-−－‐‑‒–—―﹣])[\\-−－‐‑‒–—―﹣]?"
+                    + "(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)"
+                    + "(?:[eE][+\\-−－‐‑‒–—―﹣]?[0-9]+)?");
 
     /** Comparative or trend claims cannot be verified from a static result table; they are refused. */
     private static final List<String> UNVERIFIABLE_CLAIMS = List.of(
@@ -35,7 +40,6 @@ public class AnalysisSummaryValidator {
                 throw new IllegalArgumentException("结论包含无法从结果表验证的趋势性描述: " + claim);
             }
         }
-        validateDimensionFigureRelationships(conclusion, plan, result);
         List<String> supported = supportedFigures(result);
         java.util.regex.Matcher matcher = NUMBER.matcher(conclusion);
         List<String> unsupported = new ArrayList<>();
@@ -48,6 +52,7 @@ public class AnalysisSummaryValidator {
         if (!unsupported.isEmpty()) {
             throw new IllegalArgumentException("结论包含结果数据不支持的数字: " + unsupported);
         }
+        validateDimensionFigureRelationships(conclusion, plan, result);
         return conclusion.strip();
     }
 
@@ -61,40 +66,50 @@ public class AnalysisSummaryValidator {
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
         List<Mention> mentions = new ArrayList<>();
         for (String dimension : knownDimensions) {
+            if (NUMBER.matcher(dimension).matches()) continue;
             java.util.regex.Matcher matcher = dimensionPattern(dimension).matcher(conclusion.toLowerCase(Locale.ROOT));
             while (matcher.find()) {
-                mentions.add(new Mention(matcher.start(), matcher.end(), dimension, true));
+                mentions.add(new Mention(matcher.start(), matcher.end(), dimension, true, false));
             }
         }
         java.util.regex.Matcher figureMatcher = NUMBER.matcher(conclusion);
         while (figureMatcher.find()) {
-            boolean overlapsDimension = mentions.stream().anyMatch(mention ->
-                    figureMatcher.start() < mention.end() && figureMatcher.end() > mention.start());
             String figure = normalize(figureMatcher.group());
-            if (!overlapsDimension && !isMetadataFigure(conclusion, figureMatcher.start(),
-                    figureMatcher.end(), figure, result)) {
-                mentions.add(new Mention(figureMatcher.start(), figureMatcher.end(), figure, false));
-            }
+            mentions.add(new Mention(figureMatcher.start(), figureMatcher.end(), figure,
+                    knownDimensions.contains(figure), true));
         }
         mentions.sort(java.util.Comparator.comparingInt(Mention::start)
-                .thenComparing(mention -> mention.dimension() ? 0 : 1));
+                .thenComparing(mention -> mention.numeric() ? 1 : 0));
 
         Set<String> dimensions = new LinkedHashSet<>();
         Set<String> figures = new LinkedHashSet<>();
         for (Mention mention : mentions) {
-            if (mention.dimension()) {
+            if (!mention.numeric()) {
                 if (!figures.isEmpty()) {
                     validateRowGroup(dimensions, figures, rowFacts);
                     dimensions.clear();
                     figures.clear();
                 }
                 dimensions.add(mention.value());
-            } else {
-                if (dimensions.isEmpty()) {
-                    throw new IllegalArgumentException("结论中的数字缺少可验证的维度对应关系: " + mention.value());
-                }
-                figures.add(mention.value());
+                continue;
             }
+
+            if (mention.dimensionCandidate() && (dimensions.isEmpty() || !figures.isEmpty())) {
+                if (!figures.isEmpty()) {
+                    validateRowGroup(dimensions, figures, rowFacts);
+                    dimensions.clear();
+                    figures.clear();
+                }
+                dimensions.add(mention.value());
+                continue;
+            }
+            if (isMetadataFigure(conclusion, mention, result)) {
+                continue;
+            }
+            if (dimensions.isEmpty()) {
+                throw new IllegalArgumentException("结论中的数字缺少可验证的维度对应关系: " + mention.value());
+            }
+            figures.add(mention.value());
         }
         if (!figures.isEmpty()) validateRowGroup(dimensions, figures, rowFacts);
     }
@@ -108,15 +123,44 @@ public class AnalysisSummaryValidator {
         }
     }
 
-    private boolean isMetadataFigure(String conclusion, int start, int end,
-                                     String figure, TabularResult result) {
-        int contextEnd = Math.min(conclusion.length(), end + 12);
-        String context = conclusion.substring(end, contextEnd).toLowerCase(Locale.ROOT);
-        boolean rowCount = figure.equals(String.valueOf(result.rowCount()))
-                && context.matches("^\\s*(?:个)?(?:行|rows?\\b).*");
-        boolean columnCount = figure.equals(String.valueOf(result.columnNames().size()))
-                && context.matches("^\\s*(?:个)?(?:列|columns?\\b).*");
+    private boolean isMetadataFigure(String conclusion, Mention figure, TabularResult result) {
+        int segmentStart = metadataSegmentStart(conclusion, figure.start());
+        int segmentEnd = metadataSegmentEnd(conclusion, figure.end());
+        String prefix = conclusion.substring(segmentStart, figure.start()).strip();
+        String suffix = conclusion.substring(figure.end(), segmentEnd).strip();
+        // Metadata is a tiny explicit language contract, not an inference from
+        // the absence of a known entity. This prevents unknown entities and
+        // cross-sentence pronouns from disguising a data figure as row count.
+        if (!prefix.matches("(?:共返回|共计|共)")) return false;
+        boolean rowCount = figure.value().equals(String.valueOf(result.rowCount()))
+                && suffix.matches("(?:个)?行(?:数据|结果)?");
+        boolean columnCount = figure.value().equals(String.valueOf(result.columnNames().size()))
+                && suffix.matches("(?:个)?列(?:数据|结果)?");
         return rowCount || columnCount;
+    }
+
+    private int metadataSegmentStart(String text, int before) {
+        for (int index = before - 1; index >= 0; index--) {
+            if (isMetadataDelimiter(text, index)) return index + 1;
+        }
+        return 0;
+    }
+
+    private int metadataSegmentEnd(String text, int after) {
+        for (int index = after; index < text.length(); index++) {
+            if (isMetadataDelimiter(text, index)) return index;
+        }
+        return text.length();
+    }
+
+    private boolean isMetadataDelimiter(String text, int index) {
+        char value = text.charAt(index);
+        if ("，,。！？!?;；\n\r".indexOf(value) >= 0) return true;
+        if (value != '.') return false;
+        boolean decimalPoint = index > 0 && index + 1 < text.length()
+                && Character.isDigit(text.charAt(index - 1))
+                && Character.isDigit(text.charAt(index + 1));
+        return !decimalPoint;
     }
 
     private List<RowFact> rowFacts(QueryPlan plan, TabularResult result) {
@@ -142,7 +186,8 @@ public class AnalysisSummaryValidator {
             Set<String> figures = new LinkedHashSet<>();
             for (int index : dimensionIndexes) {
                 if (index < row.size() && row.get(index) != null) {
-                    dimensions.add(row.get(index).toString().strip().toLowerCase(Locale.ROOT));
+                    String value = row.get(index).toString().strip().toLowerCase(Locale.ROOT);
+                    dimensions.add(NUMBER.matcher(value).matches() ? normalize(value) : value);
                 }
             }
             for (int index = 0; index < row.size(); index++) {
@@ -171,7 +216,8 @@ public class AnalysisSummaryValidator {
 
     private record RowFact(Set<String> dimensionValues, Set<String> figures) { }
 
-    private record Mention(int start, int end, String value, boolean dimension) { }
+    private record Mention(int start, int end, String value,
+                           boolean dimensionCandidate, boolean numeric) { }
 
     private List<String> supportedFigures(TabularResult result) {
         List<String> figures = new ArrayList<>();
@@ -200,10 +246,13 @@ public class AnalysisSummaryValidator {
     }
 
     private static String normalize(String raw) {
-        // "1820.50" and "1820.5" describe the same figure.
-        if (raw.contains(".")) {
-            raw = raw.replaceAll("0+$", "").replaceAll("\\.$", "");
+        // "1820.50", "1.8205e3" and Unicode-minus spellings describe the
+        // same result figure and therefore share one canonical decimal form.
+        String normalized = raw.replaceAll("[\\-−－‐‑‒–—―﹣]", "-");
+        try {
+            return new BigDecimal(normalized).stripTrailingZeros().toPlainString();
+        } catch (NumberFormatException ignored) {
+            return normalized;
         }
-        return raw;
     }
 }

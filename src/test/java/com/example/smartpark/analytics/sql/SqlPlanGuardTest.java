@@ -148,7 +148,7 @@ class SqlPlanGuardTest {
     }
 
     @Test
-    void validatesPredicatesInsideTheCteThatProducesTheResult() throws UnsafeSqlException {
+    void rejectsCteEvenWhenItPreservesColumnsAndPredicates() throws UnsafeSqlException {
         QueryPlan plan = plan("energy_kwh", List.of("building_id"));
         ValidatedSql sql = SqlAstGuard.validate("""
                 WITH recent AS (
@@ -158,7 +158,73 @@ class SqlPlanGuardTest {
                 SELECT building_id, SUM(kwh) FROM recent
                 GROUP BY building_id LIMIT 100""");
 
-        assertThatCode(() -> SqlPlanGuard.validate(sql, plan)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("CTE");
+    }
+
+    @Test
+    void rejectsCteThatChangesFactCardinalityWithDistinct() throws UnsafeSqlException {
+        QueryPlan plan = plan("energy_kwh", List.of("building_id"));
+        ValidatedSql sql = SqlAstGuard.validate("""
+                WITH recent AS (
+                    SELECT DISTINCT building_id, hour_ts, kwh FROM analytics.v_energy_hourly
+                )
+                SELECT building_id, SUM(kwh) FROM recent
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                GROUP BY building_id LIMIT 100""");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("CTE");
+    }
+
+    @Test
+    void rejectsParenthesizedFromSubqueryThatChangesFactCardinality() throws UnsafeSqlException {
+        QueryPlan plan = plan("energy_kwh", List.of("building_id"));
+        ValidatedSql sql = SqlAstGuard.validate("""
+                SELECT building_id, SUM(kwh) FROM (
+                    SELECT building_id, hour_ts, kwh FROM analytics.v_energy_hourly LIMIT 1
+                ) recent
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                GROUP BY building_id LIMIT 100""");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("子查询");
+    }
+
+    @Test
+    void rejectsResultShapingOutsideTheQueryPlanContract() throws UnsafeSqlException {
+        QueryPlan plan = plan("energy_kwh", List.of("building_id"));
+        List<String> queries = List.of(
+                """
+                SELECT DISTINCT building_id, SUM(kwh) FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                GROUP BY building_id LIMIT 100""",
+                """
+                SELECT building_id, SUM(kwh) FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                GROUP BY building_id ORDER BY building_id LIMIT 100""",
+                """
+                SELECT building_id, SUM(kwh) FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                GROUP BY building_id LIMIT 100 OFFSET 1""",
+                """
+                SELECT building_id, SUM(kwh) FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                GROUP BY building_id LIMIT 1, 100""",
+                """
+                SELECT building_id, SUM(kwh) FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                GROUP BY building_id LIMIT 99""");
+
+        for (String query : queries) {
+            ValidatedSql sql = SqlAstGuard.validate(query);
+            assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
+                    .as(query)
+                    .isInstanceOf(UnsafeSqlException.class);
+        }
     }
 
     @Test
@@ -211,7 +277,7 @@ class SqlPlanGuardTest {
 
         assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
                 .isInstanceOf(UnsafeSqlException.class)
-                .hasMessageContaining("JOIN");
+                .hasMessageContaining("CTE");
     }
 
     @Test
@@ -325,7 +391,7 @@ class SqlPlanGuardTest {
 
         assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
                 .isInstanceOf(UnsafeSqlException.class)
-                .hasMessageContaining("lineage");
+                .hasMessageContaining("CTE");
     }
 
     @Test

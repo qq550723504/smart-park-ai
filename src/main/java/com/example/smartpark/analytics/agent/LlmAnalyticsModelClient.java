@@ -93,9 +93,10 @@ public class LlmAnalyticsModelClient implements AnalyticsModelClient {
                 硬性要求:
                 1. 只允许查询给定白名单视图。
                 2. 时间边界只能用命名参数 :fromTs（含）与 :toTs（不含），禁止任何日期字面量。
-                3. 必须带 LIMIT 子句且上限不超过 %d。
+                3. 必须带 LIMIT %d，数值必须与计划完全一致。
                 4. 单条语句，无注释、无分号、禁止 DML/DDL。
                 5. 维度列不得改名；聚合表达式如使用别名，必须使用对应指标 name。
+                6. 只生成单个直接 SELECT：禁止 CTE、子查询、JOIN、HAVING、DISTINCT、ORDER BY、OFFSET、FETCH。
                 """.formatted(maxRows);
     }
 

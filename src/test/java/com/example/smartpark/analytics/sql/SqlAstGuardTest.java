@@ -153,4 +153,16 @@ class SqlAstGuardTest {
                 .isInstanceOf(UnsafeSqlException.class)
                 .hasMessageContaining("FROM");
     }
+
+    @Test
+    void rejectsScalarSubqueriesHiddenInOrderByExpressions() {
+        assertThatThrownBy(() -> SqlAstGuard.validate("""
+                SELECT building_id, SUM(kwh) FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                GROUP BY building_id
+                ORDER BY (SELECT COUNT(*) FROM pg_catalog.pg_roles r WHERE r.rolname < building_id)
+                LIMIT 100"""))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("子查询");
+    }
 }

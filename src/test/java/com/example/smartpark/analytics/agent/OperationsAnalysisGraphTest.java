@@ -40,7 +40,7 @@ class OperationsAnalysisGraphTest {
     private static final String GOOD_SQL = """
             SELECT building_id, SUM(kwh) AS energy_kwh FROM analytics.v_energy_hourly
             WHERE hour_ts >= :fromTs AND hour_ts < :toTs
-            GROUP BY building_id ORDER BY building_id LIMIT 100""";
+            GROUP BY building_id LIMIT 200""";
     private static final String LIMIT_LESS_SQL = "SELECT building_id, kwh FROM analytics.v_energy_hourly";
 
     private PostgreSQLContainer<?> postgres;
@@ -256,7 +256,7 @@ class OperationsAnalysisGraphTest {
         String limit500 = """
                 SELECT building_id, SUM(kwh) AS energy_kwh FROM analytics.v_energy_hourly
                 WHERE hour_ts >= :fromTs AND hour_ts < :toTs
-                GROUP BY building_id ORDER BY building_id LIMIT 500""";
+                GROUP BY building_id LIMIT 500""";
         modelClient.reset(
                 new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of(),
                         null, List.of("building_id")),
@@ -267,7 +267,7 @@ class OperationsAnalysisGraphTest {
         var outcome = graph.run(UUID.randomUUID(), "上周能耗");
 
         assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
-        assertThat(modelClient.lastRejectionReason()).contains("行数上限");
+        assertThat(modelClient.lastRejectionReason()).contains("完全一致");
         assertThat(modelClient.generateSqlInvocations()).isEqualTo(2);
     }
 

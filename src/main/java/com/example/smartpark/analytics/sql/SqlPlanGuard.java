@@ -19,10 +19,8 @@ import net.sf.jsqlparser.expression.operators.relational.ParenthesedExpressionLi
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.statement.Statement;
-import net.sf.jsqlparser.statement.select.ParenthesedSelect;
 import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.Select;
-import net.sf.jsqlparser.statement.select.WithItem;
 import net.sf.jsqlparser.schema.Table;
 
 import java.util.ArrayList;
@@ -31,8 +29,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.LinkedHashSet;
-import java.util.ArrayDeque;
-import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -45,22 +41,25 @@ public final class SqlPlanGuard {
     }
 
     public static void validate(ValidatedSql validatedSql, QueryPlan plan) throws UnsafeSqlException {
-        // The plan pins the row bound; a wider declared LIMIT would widen what
-        // QueryPlan explicitly says downstream stages cannot widen.
-        if (validatedSql.maxRows() > plan.limit()) {
-            throw reject("LIMIT 超过计划的行数上限 " + plan.limit());
+        // LIMIT is part of the approved result contract, not merely a ceiling.
+        // A smaller LIMIT can silently omit planned entities just as a wider one
+        // can widen the result set.
+        if (validatedSql.maxRows() != plan.limit()) {
+            throw reject("LIMIT 必须与查询计划完全一致: " + plan.limit());
         }
         Statement statement = parse(validatedSql.sql());
         if (!(statement instanceof Select select)) {
             throw reject("查询计划只能应用于 SELECT");
         }
 
-        PlainSelect resultQuery = resultQuery(select);
         validateSourceGrain(plan);
-        List<Branch> branches = consumedBranches(select, resultQuery);
+        PlainSelect resultQuery = validateSupportedShape(select);
+        List<Expression> terms = new ArrayList<>();
+        flattenAnd(resultQuery.getWhere(), terms);
+        List<Branch> branches = List.of(new Branch(
+                resultQuery, List.copyOf(terms), List.of(SqlRelationName.from((Table) resultQuery.getFromItem()))));
         validateSourceOccurrences(branches, plan);
         validateMetricPredicateScopes(plan);
-        validateConsumedBranchLineage(resultQuery, branches, plan);
 
         for (MetricDefinition metric : plan.metrics()) {
             List<Branch> sourceBranches = branches.stream()
@@ -151,45 +150,6 @@ public final class SqlPlanGuard {
         }
     }
 
-    private static void validateConsumedBranchLineage(PlainSelect resultQuery,
-                                                       List<Branch> branches,
-                                                       QueryPlan plan) throws UnsafeSqlException {
-        Set<String> approvedInputs = approvedSourceInputs(plan);
-        for (Branch branch : branches) {
-            if (branch.select() == resultQuery) continue;
-            for (var item : branch.select().getSelectItems()) {
-                Expression expression = unwrap(item.getExpression());
-                if (!(expression instanceof Column column)) {
-                    throw reject("CTE lineage 必须保持指标输入列不变，禁止中间计算: " + expression);
-                }
-                String input = column.getUnquotedColumnName().toLowerCase(Locale.ROOT);
-                if (!approvedInputs.contains(input)) {
-                    throw reject("CTE lineage 引用了计划之外的输入列: " + input);
-                }
-                if (item.getAlias() != null
-                        && !item.getAlias().getUnquotedName().equalsIgnoreCase(input)) {
-                    throw reject("CTE lineage 禁止重命名指标输入列: " + input);
-                }
-            }
-        }
-    }
-
-    private static Set<String> approvedSourceInputs(QueryPlan plan) throws UnsafeSqlException {
-        Set<String> columns = new LinkedHashSet<>(allowedDimensions(plan));
-        for (MetricDefinition metric : plan.metrics()) {
-            columns.add(metric.timeColumn().toLowerCase(Locale.ROOT));
-            collectColumns(parseExpression(metric.expression()), columns);
-            if (metric.condition() != null) {
-                try {
-                    collectColumns(CCJSqlParserUtil.parseCondExpression(metric.condition()), columns);
-                } catch (Exception exception) {
-                    throw reject("指标目录包含无法解析的固定条件");
-                }
-            }
-        }
-        return Set.copyOf(columns);
-    }
-
     private static void validateCompletePredicates(List<Branch> branches, QueryPlan plan)
             throws UnsafeSqlException {
         if (!plan.filters().isEmpty()) {
@@ -237,16 +197,6 @@ public final class SqlPlanGuard {
         throw reject(missingMessage);
     }
 
-    private static void collectColumns(Expression expression, Set<String> columns) {
-        expression.accept(new ExpressionVisitorAdapter<Void>() {
-            @Override
-            public <S> Void visit(Column column, S context) {
-                columns.add(column.getUnquotedColumnName().toLowerCase(Locale.ROOT));
-                return super.visit(column, context);
-            }
-        });
-    }
-
     private static Statement parse(String sql) throws UnsafeSqlException {
         try {
             return CCJSqlParserUtil.parse(sql);
@@ -255,81 +205,42 @@ public final class SqlPlanGuard {
         }
     }
 
-    private static PlainSelect resultQuery(Select select) throws UnsafeSqlException {
-        if (select instanceof PlainSelect plain) return plain;
-        if (select instanceof ParenthesedSelect parenthesed) return resultQuery(parenthesed.getSelect());
-        throw reject("查询计划只允许单一结果 SELECT");
-    }
-
-    private static List<Branch> consumedBranches(Select root, PlainSelect resultQuery)
-            throws UnsafeSqlException {
-        Map<String, WithItem<?>> ctes = new HashMap<>();
-        if (root.getWithItemsList() != null) {
-            for (WithItem<?> item : root.getWithItemsList()) {
-                ctes.put(SqlRelationName.component(item.getAliasName()), item);
-            }
+    /**
+     * QueryPlan can currently describe one physical fact source, projections,
+     * predicates, grouping and an exact row bound. It cannot prove semantics
+     * through relational transformations, so accept only that direct shape.
+     */
+    private static PlainSelect validateSupportedShape(Select select) throws UnsafeSqlException {
+        if (select.getWithItemsList() != null && !select.getWithItemsList().isEmpty()) {
+            throw reject("当前 QueryPlan 不支持 CTE 关系变换");
         }
-        List<Branch> branches = new ArrayList<>();
-        Deque<PendingBranch> pending = new ArrayDeque<>();
-        pending.add(new PendingBranch(resultQuery, List.of()));
-        Set<String> usedCtes = new HashSet<>();
-        Set<Select> expanded = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
-        while (!pending.isEmpty()) {
-            PendingBranch current = pending.removeFirst();
-            PlainSelect plain = current.select() instanceof ParenthesedSelect parenthesed
-                    ? resultQuery(parenthesed.getSelect()) : (PlainSelect) current.select();
-            if (!expanded.add(current.select())) continue;
-            if (plain.getJoins() != null && !plain.getJoins().isEmpty()) {
-                throw reject("当前单事实 QueryPlan 不支持 JOIN");
-            }
-            if (plain.getHaving() != null) {
-                throw reject("当前 QueryPlan 不支持 HAVING 结果谓词");
-            }
-            List<Expression> terms = new ArrayList<>(current.inheritedTerms());
-            flattenAnd(plain.getWhere(), terms);
-            branches.add(new Branch(plain, List.copyOf(terms), sourceTables(plain)));
-            enqueue(plain.getFromItem(), terms, ctes, usedCtes, pending);
-            if (plain.getJoins() != null) {
-                for (var join : plain.getJoins()) {
-                    enqueue(join.getRightItem(), terms, ctes, usedCtes, pending);
-                }
-            }
+        if (!(select instanceof PlainSelect plain)) {
+            throw reject("当前 QueryPlan 不支持结果子查询");
         }
-        if (!usedCtes.containsAll(ctes.keySet())) {
-            throw reject("未参与结果查询的 CTE 被拒绝，不能用于拼接指标约束");
+        if (!(plain.getFromItem() instanceof Table)) {
+            throw reject("当前 QueryPlan 只支持直接白名单表，禁止 FROM 子查询");
         }
-        return List.copyOf(branches);
-    }
-
-    private static void enqueue(Object fromItem, List<Expression> inheritedTerms,
-                                Map<String, WithItem<?>> ctes, Set<String> usedCtes,
-                                Deque<PendingBranch> pending) {
-        if (fromItem instanceof Table table) {
-            SqlRelationName relation = SqlRelationName.from(table);
-            String alias = relation.isQualified() ? "" : relation.relation();
-            WithItem<?> cte = ctes.get(alias);
-            if (cte != null && usedCtes.add(alias)) {
-                pending.addLast(new PendingBranch(cte.getSelect(), inheritedTerms));
-            }
-        } else if (fromItem instanceof ParenthesedSelect nested) {
-            pending.addLast(new PendingBranch(nested, inheritedTerms));
+        if (plain.getJoins() != null && !plain.getJoins().isEmpty()) {
+            throw reject("当前单事实 QueryPlan 不支持 JOIN");
         }
-    }
-
-    private static List<SqlRelationName> sourceTables(PlainSelect plain) {
-        List<SqlRelationName> tables = new ArrayList<>();
-        addSourceTable(plain.getFromItem(), tables);
-        if (plain.getJoins() != null) {
-            for (var join : plain.getJoins()) addSourceTable(join.getRightItem(), tables);
+        if (plain.getHaving() != null) {
+            throw reject("当前 QueryPlan 不支持 HAVING 结果谓词");
         }
-        return List.copyOf(tables);
+        if (plain.getDistinct() != null) {
+            throw reject("当前 QueryPlan 不支持 DISTINCT 结果变换");
+        }
+        if (plain.getOrderByElements() != null && !plain.getOrderByElements().isEmpty()) {
+            throw reject("当前 QueryPlan 不支持 ORDER BY 结果变换");
+        }
+        if (plain.getOffset() != null
+                || (plain.getLimit() != null && plain.getLimit().getOffset() != null)) {
+            throw reject("当前 QueryPlan 不支持 OFFSET 结果变换");
+        }
+        if (plain.getFetch() != null) {
+            throw reject("当前 QueryPlan 不支持 FETCH 结果变换");
+        }
+        return plain;
     }
-
-    private static void addSourceTable(Object item, List<SqlRelationName> tables) {
-        if (item instanceof Table table) tables.add(SqlRelationName.from(table));
-    }
-
-    private record PendingBranch(Select select, List<Expression> inheritedTerms) { }
 
     private record Branch(PlainSelect select, List<Expression> terms, List<SqlRelationName> tables) { }
 
