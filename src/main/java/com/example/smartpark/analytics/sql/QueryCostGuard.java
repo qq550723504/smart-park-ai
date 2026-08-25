@@ -1,5 +1,6 @@
 package com.example.smartpark.analytics.sql;
 
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
 import java.util.List;
@@ -7,7 +8,9 @@ import java.util.Map;
 
 /**
  * Rejects queries whose EXPLAIN (FORMAT JSON) estimated cost exceeds the
- * configured threshold before any data is touched.
+ * configured threshold before any data is touched. The EXPLAIN statement is
+ * executed with exactly the same named-parameter bindings as the later real
+ * execution so PostgreSQL never sees an unbound placeholder.
  */
 public class QueryCostGuard {
 
@@ -23,9 +26,12 @@ public class QueryCostGuard {
         this.maxCost = maxCost;
     }
 
-    public EstimatedPlan estimatedCost(String sql, double thresholdOverride) throws UnsafeSqlException {
+    public EstimatedPlan estimatedCost(String sql, Map<String, Object> parameters, double thresholdOverride)
+            throws UnsafeSqlException {
         String explain = "EXPLAIN (FORMAT JSON) " + sql;
-        List<String> planRows = jdbcTemplate.getJdbcTemplate().queryForList(explain, String.class);
+        List<String> planRows = jdbcTemplate.queryForList(explain,
+                parameters == null ? new MapSqlParameterSource() : new MapSqlParameterSource(parameters),
+                String.class);
         if (planRows.size() != 1) {
             throw new UnsafeSqlException("QUERY_COST_UNKNOWN", "无法获得查询计划，已拒绝执行");
         }
@@ -37,8 +43,8 @@ public class QueryCostGuard {
         return new EstimatedPlan(cost);
     }
 
-    public EstimatedPlan estimatedCost(String sql) throws UnsafeSqlException {
-        return estimatedCost(sql, maxCost);
+    public EstimatedPlan estimatedCost(String sql, Map<String, Object> parameters) throws UnsafeSqlException {
+        return estimatedCost(sql, parameters, maxCost);
     }
 
     /**

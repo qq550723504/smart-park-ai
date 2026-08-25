@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useOperationsAnalysis, type ExecutionTraceLike } from '../../composables/useOperationsAnalysis'
 import AnalyticsChart from './AnalyticsChart.vue'
 
@@ -44,6 +44,18 @@ function onMetricChange(index: number, event: Event): void {
   while (chosenMetrics.value.length <= index) chosenMetrics.value.push('alert_count')
   chosenMetrics.value[index] = value
 }
+
+// Each <select> visibly defaults to its first option; initialize the model
+// with the same value so "continue" submits the displayed defaults even
+// before any change event fires.
+watch(
+  () => (dto.value?.status === 'NEEDS_CLARIFICATION' ? dto.value.clarificationQuestions?.length ?? 0 : 0),
+  (count) => {
+    if (count > 0) {
+      chosenMetrics.value = Array.from({ length: count }, () => METRIC_OPTIONS[0].value)
+    }
+  },
+)
 </script>
 
 <template>

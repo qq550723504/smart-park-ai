@@ -105,7 +105,7 @@ public class CollaborationRuntimeConfiguration {
             Set<String> observed = new HashSet<>();
             ToolCallback[] callbacks = audited(toolSet.callbacks(), observed);
             String response = modelTextWithTools(model,
-                    "You are the " + domain.name() + " park expert. Analyze only your assigned domain. Return only JSON with domain, status, conclusion, evidenceRefs, confidence, nextChecks. Cite evidence references observed from tool calls; never invent evidence.",
+                    "You are the " + domain.name() + " park expert. Analyze only your assigned domain. Return only JSON with domain, status, conclusion, evidenceRefs, confidence, nextChecks. Cite evidence references ONLY by copying the [[evidence:...]] markers returned with each successful tool result; never invent or reuse a marker from another call.",
                     assignment, callbacks);
             ExpertFinding finding = new ExpertFindingParser().parse(response, domain);
             return new ExpertFindingValidator().validate(finding, observed);
@@ -135,10 +135,38 @@ public class CollaborationRuntimeConfiguration {
         return response.getResult().getOutput().getText();
     }
 
+    /**
+     * Evidence is bound to the specific successful result: every reference is
+     * the tool name plus a digest of that exact invocation's arguments, and it
+     * is only recorded after the delegate succeeded. The marker is appended to
+     * the tool output so the model can copy the precise reference into its
+     * finding; generic names or failed calls authorize nothing.
+     */
     private record AuditedCallback(ToolCallback delegate, Set<String> observed) implements ToolCallback {
         @Override public org.springframework.ai.tool.metadata.ToolMetadata getToolMetadata() { return delegate.getToolMetadata(); }
         @Override public org.springframework.ai.tool.definition.ToolDefinition getToolDefinition() { return delegate.getToolDefinition(); }
-        @Override public String call(String input) { observed.add("tool:" + delegate.getToolDefinition().name()); return delegate.call(input); }
-        @Override public String call(String input, org.springframework.ai.chat.model.ToolContext context) { observed.add("tool:" + delegate.getToolDefinition().name()); return delegate.call(input, context); }
+        @Override public String call(String input) { return invoke(input, arguments -> delegate.call(arguments)); }
+        @Override public String call(String input, org.springframework.ai.chat.model.ToolContext context) {
+            return invoke(input, arguments -> delegate.call(arguments, context));
+        }
+
+        private String invoke(String input, java.util.function.UnaryOperator<String> action) {
+            String result = action.apply(input);
+            String ref = "tool:" + delegate.getToolDefinition().name() + "#" + digest(input);
+            observed.add(ref);
+            return result + "\n[[evidence:" + ref + "]]";
+        }
+    }
+
+    static String digest(String input) {
+        try {
+            byte[] hash = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest((input == null ? "" : input).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            for (int i = 0; i < 8; i++) hex.append(String.format("%02x", hash[i]));
+            return hex.toString();
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
     }
 }

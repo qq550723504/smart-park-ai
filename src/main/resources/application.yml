@@ -1,4 +1,13 @@
 spring:
+  flyway:
+    # Analytics owns the only DataSource; migrations run with the admin
+    # (object-owner) account and supply the read-only role password placeholder.
+    enabled: ${smartpark.analytics.enabled:false}
+    url: ${SMARTPARK_ANALYTICS_DB_URL:}
+    user: ${SMARTPARK_ANALYTICS_DB_ADMIN_USER:}
+    password: ${SMARTPARK_ANALYTICS_DB_ADMIN_PASSWORD:}
+    placeholders:
+      analyticsRoPassword: ${SMARTPARK_ANALYTICS_DB_RO_PASSWORD:${SMARTPARK_ANALYTICS_DB_PASSWORD:}}
   autoconfigure:
     # 2.0.0-M1.1 packaging defect: the DashScope autoconfigure jar lists this class in
     # AutoConfiguration.imports but does not ship it. Excluded until the next release.
@@ -35,6 +44,7 @@ smartpark:
   analytics:
     enabled: ${SMARTPARK_ANALYTICS_ENABLED:false}
     statement-timeout: 3s
+    analysis-timeout: 60s
     max-rows: 500
     max-result-bytes: 1048576
     max-plan-cost: 1000000

@@ -9,6 +9,9 @@ export function useExpertCollaboration(pollIntervalMs = 500) {
   let pollTimer: ReturnType<typeof setTimeout> | null = null
   let generation = 0
 
+  const MAX_CONSECUTIVE_FAILURES = 5
+  let consecutiveFailures = 0
+
   const isRunning = computed(() => run.value?.status === 'RUNNING')
   const isTerminal = computed(() => Boolean(run.value && run.value.status !== 'RUNNING'))
 
@@ -21,13 +24,23 @@ export function useExpertCollaboration(pollIntervalMs = 500) {
     try {
       const next = await getCollaborationRun(runId)
       if (generation !== currentGeneration) return
+      consecutiveFailures = 0
       run.value = next
       if (next.status === 'RUNNING') {
         pollTimer = setTimeout(() => void poll(runId, currentGeneration), pollIntervalMs)
       }
     } catch (cause) {
       if (generation !== currentGeneration) return
-      error.value = cause instanceof Error ? cause.message : '专家协作状态同步失败'
+      // A transient failure must not strand a RUNNING run: retry with bounded
+      // backoff while this collaboration is still the current one.
+      consecutiveFailures += 1
+      if (consecutiveFailures < MAX_CONSECUTIVE_FAILURES) {
+        const backoff = Math.min(4000, pollIntervalMs * 2 ** consecutiveFailures)
+        error.value = cause instanceof Error ? cause.message : '专家协作状态同步失败'
+        pollTimer = setTimeout(() => void poll(runId, currentGeneration), backoff)
+      } else {
+        error.value = cause instanceof Error ? cause.message : '专家协作状态同步失败，已停止重试'
+      }
     }
   }
 
@@ -57,6 +70,7 @@ export function useExpertCollaboration(pollIntervalMs = 500) {
     run.value = null
     error.value = ''
     loading.value = false
+    consecutiveFailures = 0
   }
 
   onBeforeUnmount(reset)

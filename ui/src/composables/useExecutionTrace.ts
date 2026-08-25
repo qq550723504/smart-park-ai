@@ -61,6 +61,9 @@ export function useExecutionTrace(): ExecutionTrace {
     if (events.value.some((item) => item.eventId === event.eventId)) return
     if (seen.has(event.sequence) || event.sequence < 1) return
 
+    // Events arriving again after a transient error mean the browser's
+    // EventSource reconnected successfully — the trace has recovered.
+    if (error.value) error.value = ''
     seen.set(event.sequence, event)
     publishContiguousPrefix()
 
@@ -78,8 +81,11 @@ export function useExecutionTrace(): ExecutionTrace {
     stream = subscribeToExecutionEvents(runId, {
       onEvent: handleEvent,
       onError: (message) => {
+        // EventSource reconnects automatically after transient errors; stay in
+        // the streaming state so recovered events are not discarded by the
+        // terminal guard. Only a real sequence gap or terminal event ends the
+        // trace.
         error.value = message
-        if (!isTerminal.value) status.value = 'failed'
       },
     })
   }

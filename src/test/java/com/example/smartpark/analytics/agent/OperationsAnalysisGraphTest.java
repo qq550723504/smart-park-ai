@@ -68,12 +68,12 @@ class OperationsAnalysisGraphTest {
         graph = new OperationsAnalysisGraph(
                 new MetricCatalog(),
                 modelClient,
-                sql -> new com.example.smartpark.analytics.sql.QueryCostGuard(
-                        new NamedParameterJdbcTemplate(dataSource)).estimatedCost(sql.sql()),
-                sql -> new com.example.smartpark.analytics.sql.ReadOnlyQueryExecutor(dataSource,
+                (sql, parameters) -> new com.example.smartpark.analytics.sql.QueryCostGuard(
+                        new NamedParameterJdbcTemplate(dataSource)).estimatedCost(sql.sql(), parameters),
+                (sql, parameters) -> new com.example.smartpark.analytics.sql.ReadOnlyQueryExecutor(dataSource,
                         new com.example.smartpark.analytics.sql.ReadOnlyQueryExecutor.QueryLimits(
                                 Duration.ofSeconds(3), 500, 1024L * 1024L, 1_000_000))
-                        .execute(sql, Map.of()),
+                        .execute(sql, parameters),
                 publisher,
                 new AnalysisSummaryValidator(),
                 Clock.fixed(Instant.parse("2026-08-24T00:00:00Z"), ZoneOffset.UTC));

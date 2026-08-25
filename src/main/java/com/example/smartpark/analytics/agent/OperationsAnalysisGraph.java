@@ -63,12 +63,12 @@ public class OperationsAnalysisGraph {
 
     /** Cost boundary abstraction backed by QueryCostGuard in production wiring. */
     public interface CostGate {
-        void check(ValidatedSql sql) throws UnsafeSqlException;
+        void check(ValidatedSql sql, java.util.Map<String, Object> parameters) throws UnsafeSqlException;
     }
 
     /** Execution boundary abstraction backed by ReadOnlyQueryExecutor in production wiring. */
     public interface ExecutionGate {
-        TabularResult execute(ValidatedSql sql) throws UnsafeSqlException;
+        TabularResult execute(ValidatedSql sql, java.util.Map<String, Object> parameters) throws UnsafeSqlException;
     }
 
     public enum RunOutcome { COMPLETED, NEEDS_CLARIFICATION, FAILED }
@@ -101,6 +101,8 @@ public class OperationsAnalysisGraph {
         String rejectionReason;
         String sqlDraft;
         ValidatedSql validatedSql;
+        /** Named-parameter values bound identically into the cost check and execution. */
+        Map<String, Object> parameters = Map.of();
         TabularResult result;
         ChartSpec chart;
         String summary = "";
@@ -213,10 +215,12 @@ public class OperationsAnalysisGraph {
         } catch (RuntimeException exception) {
             ctx.status = "FAILED";
             ctx.failureStage = "ANALYSIS_ABORTED";
+            // The raw exception may carry generated SQL, vendor responses or
+            // connection details; only a fixed public code is ever published.
             publish(ctx, runId, ExecutionStage.FAILURE, ExecutionEventType.FAILED,
                     ExecutionStatus.FAILED, "分析执行失败，已终止",
                     DisplayPayload.error(ExecutionStage.FAILURE, "ANALYSIS_ABORTED", true,
-                            String.valueOf(exception.getMessage())));
+                            "分析在执行过程中被终止，请调整问题后重试"));
             AnalysisRunResult result = AnalysisRunResult.failed(runId, ctx.failureStage);
             contexts.remove(runId);
             return result;
@@ -229,7 +233,10 @@ public class OperationsAnalysisGraph {
     private AnalysisRunResult buildOutcome(UUID runId, RunContext ctx) {
         switch (ctx.status) {
             case "NEEDS_CLARIFICATION" -> {
-                publish(ctx, runId, ExecutionStage.UNDERSTANDING, ExecutionEventType.INTERRUPTED,
+                // A clarification pause is not terminal: the run resumes on the
+                // same ID, so the trace must stay open (a terminal event would
+                // close the publisher and break every later resumption).
+                publish(ctx, runId, ExecutionStage.UNDERSTANDING, ExecutionEventType.PAUSED,
                         ExecutionStatus.NEEDS_CLARIFICATION, "需要澄清后再继续", null);
                 return AnalysisRunResult.needsClarification(runId, ctx.clarificationQuestions);
             }
@@ -331,6 +338,11 @@ public class OperationsAnalysisGraph {
                 Map.of(),
                 new QueryPlan.TimeRange(now.minus(Duration.ofDays(lookbackDays)), now),
                 200);
+        // One shared binding set for both gates: :fromTs/:toTs are the only
+        // supported time boundaries and travel as bound parameters end to end.
+        ctx.parameters = Map.of(
+                "fromTs", java.sql.Timestamp.from(now.minus(Duration.ofDays(lookbackDays))),
+                "toTs", java.sql.Timestamp.from(now));
         nodeCompleted(ctx, runId, ExecutionStage.PLANNING, "查询计划就绪", null);
         return Map.of();
     }
@@ -352,6 +364,12 @@ public class OperationsAnalysisGraph {
         nodeStarted(ctx, runId, ExecutionStage.SQL_VALIDATION, "AST 安全校验");
         try {
             ctx.validatedSql = SqlAstGuardAccess.validate(ctx.sqlDraft);
+            for (String name : ctx.validatedSql.namedParameters()) {
+                if (!ctx.parameters.containsKey(name)) {
+                    throw new UnsafeSqlException("SQL_POLICY_REJECTED",
+                            "使用了未提供绑定值的时间参数，仅允许 :fromTs 与 :toTs");
+                }
+            }
             ctx.status = "OK";
             nodeCompleted(ctx, runId, ExecutionStage.SQL_VALIDATION, "SQL 通过 AST 校验",
                     new DisplayPayload.SqlPayload(ctx.validatedSql.sql(),
@@ -367,7 +385,7 @@ public class OperationsAnalysisGraph {
         RunContext ctx = contexts.get(runId);
         nodeStarted(ctx, runId, ExecutionStage.SQL_VALIDATION, "EXPLAIN 成本检查");
         try {
-            costGate.check(ctx.validatedSql);
+            costGate.check(ctx.validatedSql, ctx.parameters);
             ctx.status = "OK_COST";
             nodeCompleted(ctx, runId, ExecutionStage.SQL_VALIDATION, "成本检查通过", null);
         } catch (UnsafeSqlException rejection) {
@@ -395,7 +413,7 @@ public class OperationsAnalysisGraph {
         RunContext ctx = contexts.get(runId);
         nodeStarted(ctx, runId, ExecutionStage.QUERY_EXECUTION, "只读执行查询");
         try {
-            ctx.result = executionGate.execute(ctx.validatedSql);
+            ctx.result = executionGate.execute(ctx.validatedSql, ctx.parameters);
             ctx.status = "OK_RESULT";
             nodeCompleted(ctx, runId, ExecutionStage.QUERY_EXECUTION,
                     "查询完成: " + ctx.result.rowCount() + " 行" + (ctx.result.truncated() ? "（已截断）" : ""),
@@ -420,7 +438,10 @@ public class OperationsAnalysisGraph {
             // degrade below
         }
         ctx.chart = ChartSpec.fromProposal(proposal, ctx.result);
-        nodeCompleted(ctx, runId, ExecutionStage.RENDERING, "图表规格: " + ctx.chart.type(),
+        // The chart payload travels on the dedicated CHART_SPECIFIED event type
+        // defined by the public execution contract; the frontend captures it there.
+        publish(ctx, runId, ExecutionStage.RENDERING, ExecutionEventType.CHART_SPECIFIED,
+                ExecutionStatus.RUNNING, "图表规格: " + ctx.chart.type(),
                 new DisplayPayload.ChartPayload(ctx.chart.type().name(), ctx.chart.title(), ctx.chart.xField(),
                         ctx.chart.yFields(), ctx.chart.seriesField(), ctx.chart.unit()));
         return Map.of();

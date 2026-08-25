@@ -62,7 +62,10 @@ public class OperationsAnalysisService {
         ensureNoActiveRun();
         UUID runId = UUID.randomUUID();
         store.put(new RecordBuilder(runId, question).running());
-        return execute(runId, question, null);
+        // The 202 response must return immediately: schedule the blocking graph
+        // execution on the analytics executor and hand back the RUNNING record.
+        CompletableFuture.runAsync(() -> execute(runId, question, null), executor);
+        return store.get(runId);
     }
 
     public AnalysisRunStore.RunRecord submitClarification(UUID runId, List<MetricSelection> selections) {
@@ -78,7 +81,9 @@ public class OperationsAnalysisService {
         var pinned = new AnalyticsModelClient.QuestionUnderstanding(
                 current.question(), safeSelections.stream().map(MetricSelection::metric).toList(), List.of());
         store.put(rerunningRecord(runId));
-        return executePinned(runId, current.question() + "（已明确指标: " + pinnedTerms + "）", pinned);
+        CompletableFuture.runAsync(
+                () -> execute(runId, current.question() + "（已明确指标: " + pinnedTerms + "）", pinned), executor);
+        return store.get(runId);
     }
 
     // ---- internals ---------------------------------------------------------
@@ -129,11 +134,6 @@ public class OperationsAnalysisService {
             return persistFailure(runId, question, "ANALYSIS_ABORTED",
                     System.currentTimeMillis() - start);
         }
-    }
-
-    private AnalysisRunStore.RunRecord executePinned(UUID runId, String enrichedQuestion,
-                                                     AnalyticsModelClient.QuestionUnderstanding pinned) {
-        return execute(runId, enrichedQuestion, pinned);
     }
 
     private AnalysisRunStore.RunRecord persistOutcome(UUID runId, String question,

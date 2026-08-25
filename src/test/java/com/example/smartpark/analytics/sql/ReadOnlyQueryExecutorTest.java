@@ -138,9 +138,9 @@ class ReadOnlyQueryExecutorTest {
         String sql = "SELECT building_id, SUM(kwh) FROM analytics.v_energy_hourly GROUP BY building_id";
 
         double cheapThreshold = Double.MAX_VALUE;
-        assertThat(guard.estimatedCost(sql, cheapThreshold).planCost()).isGreaterThan(0);
+        assertThat(guard.estimatedCost(sql, Map.of(), cheapThreshold).planCost()).isGreaterThan(0);
 
-        assertThatThrownBy(() -> guard.estimatedCost(sql, 0.000001))
+        assertThatThrownBy(() -> guard.estimatedCost(sql, Map.of(), 0.000001))
                 .isInstanceOf(UnsafeSqlException.class)
                 .hasFieldOrPropertyWithValue("errorCode", "QUERY_COST_EXCEEDED");
     }

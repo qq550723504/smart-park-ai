@@ -4,7 +4,9 @@
 
 CREATE SCHEMA IF NOT EXISTS analytics;
 
-REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+-- NOTE: no global REVOKE on the public schema — this database may be shared
+-- with other applications, so their privileges must stay untouched. The
+-- analytics read-only role is restricted explicitly below instead.
 
 CREATE TABLE IF NOT EXISTS analytics.energy_hourly_raw (
     building_id  varchar(32)   NOT NULL,

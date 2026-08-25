@@ -39,6 +39,20 @@ class ExpertCollaborationServiceTest {
                 .containsExactly(ExecutionEventType.RUN_STARTED, ExecutionEventType.NODE_STARTED, ExecutionEventType.FAILED);
     }
 
+    @Test void preservesCompletedFindingsWhenSynthesisFails() throws Exception {
+        var publisher = new InMemoryExecutionEventPublisher();
+        var service = service(publisher, (q) -> plan(), (p, f) -> {
+            throw new IllegalStateException("synthesis hung or failed");
+        });
+        var run = service.start("energy consumption");
+        waitFor(() -> service.get(run.runId()).status() == CollaborationRun.RunStatus.FAILED);
+
+        // Expert work completed before the synthesis failure must survive.
+        var failed = service.get(run.runId());
+        assertThat(failed.findings()).hasSize(1);
+        assertThat(failed.findings().get(0).domain()).isEqualTo(ExpertDomain.ENERGY);
+    }
+
     @Test void lateCompletionCannotOverwriteOverallTimeout() throws Exception {
         var publisher = new InMemoryExecutionEventPublisher();
         var releasePlanner = new java.util.concurrent.CountDownLatch(1);

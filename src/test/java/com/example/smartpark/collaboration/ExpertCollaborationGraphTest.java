@@ -48,16 +48,18 @@ class ExpertCollaborationGraphTest {
     }
 
     @Test void preservesOtherFindingsWhenOneExpertTimesOut() {
+        // Generous margins so the intended timeout path stays deterministic
+        // even on a heavily loaded machine running the whole suite.
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
             EnumMap<ExpertDomain, ExpertCollaborationGraph.Expert> experts = new EnumMap<>(ExpertDomain.class);
             experts.put(ExpertDomain.ENERGY, assignment -> {
-                try { Thread.sleep(100); } catch (InterruptedException ex) { Thread.currentThread().interrupt(); }
+                try { Thread.sleep(1000); } catch (InterruptedException ex) { Thread.currentThread().interrupt(); }
                 return finding(ExpertDomain.ENERGY);
             });
             experts.put(ExpertDomain.DEVICE, assignment -> finding(ExpertDomain.DEVICE));
             experts.put(ExpertDomain.SECURITY, assignment -> finding(ExpertDomain.SECURITY));
-            var graph = new ExpertCollaborationGraph(experts, executor, Duration.ofMillis(10));
+            var graph = new ExpertCollaborationGraph(experts, executor, Duration.ofMillis(200));
 
             var findings = graph.execute(new SupervisorPlan("energy and device",
                     EnumSet.of(ExpertDomain.ENERGY, ExpertDomain.DEVICE),

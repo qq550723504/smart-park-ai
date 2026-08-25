@@ -2,6 +2,8 @@ package com.example.smartpark.analytics;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.time.Duration;
+
 /**
  * Real-database contract for the analytics capability. Every value comes from
  * environment-overridable configuration; there is no in-memory fallback.
@@ -10,7 +12,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class AnalyticsProperties {
 
     private boolean enabled;
-    private String statementTimeout = "3s";
+    private Duration statementTimeout = Duration.ofSeconds(3);
+    private Duration analysisTimeout = Duration.ofSeconds(60);
     private int maxRows = 500;
     private long maxResultBytes = 1024L * 1024L;
     private double maxPlanCost = 1_000_000.0;
@@ -34,8 +37,10 @@ public class AnalyticsProperties {
 
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
-    public String getStatementTimeout() { return statementTimeout; }
-    public void setStatementTimeout(String statementTimeout) { this.statementTimeout = statementTimeout; }
+    public Duration getStatementTimeout() { return statementTimeout; }
+    public void setStatementTimeout(Duration statementTimeout) { this.statementTimeout = statementTimeout; }
+    public Duration getAnalysisTimeout() { return analysisTimeout; }
+    public void setAnalysisTimeout(Duration analysisTimeout) { this.analysisTimeout = analysisTimeout; }
     public int getMaxRows() { return maxRows; }
     public void setMaxRows(int maxRows) { this.maxRows = maxRows; }
     public long getMaxResultBytes() { return maxResultBytes; }

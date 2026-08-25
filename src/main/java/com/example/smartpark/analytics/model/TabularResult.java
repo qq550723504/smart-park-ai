@@ -15,8 +15,9 @@ public record TabularResult(
 
     public TabularResult {
         columnNames = List.copyOf(Objects.requireNonNull(columnNames, "columnNames"));
-        rows = List.copyOf(Objects.requireNonNull(rows, "rows"));
-        rows.forEach(java.util.Collections::unmodifiableList);
+        rows = Objects.requireNonNull(rows, "rows").stream()
+                .map(row -> (List<Object>) List.copyOf(Objects.requireNonNull(row, "row")))
+                .toList();
     }
 
     public int rowCount() {

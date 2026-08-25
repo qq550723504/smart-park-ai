@@ -120,6 +120,22 @@ describe('useExecutionTrace', () => {
     expect(trace.status.value).toBe('interrupted')
   })
 
+  it('keeps streaming after a transient error and accepts recovered events', () => {
+    const trace = useExecutionTrace()
+    trace.subscribe('run-1')
+    const source = FakeEventSource.instances.at(-1)!
+    source.emit('RUN_STARTED', eventOf(1, 'RUN_STARTED'))
+
+    // A nonterminal error must not mark the trace terminal: EventSource
+    // reconnects automatically and later events must still be consumed.
+    source.onerror?.()
+    expect(trace.status.value).toBe('streaming')
+
+    source.emit('NODE_COMPLETED', eventOf(2, 'NODE_COMPLETED'))
+    expect(trace.events.value.map((event) => event.sequence)).toEqual([1, 2])
+    expect(trace.status.value).toBe('streaming')
+  })
+
   it('surfaces parse failures without corrupting existing state', () => {
     const trace = useExecutionTrace()
     trace.subscribe('run-1')

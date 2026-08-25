@@ -36,9 +36,16 @@ public final class ExpertCollaborationService {
         CollaborationRun run = store.save(new CollaborationRun(id, question.trim(), CollaborationRun.RunStatus.RUNNING,
                 null, List.of(), null, null, Instant.now(clock)));
         publish(id, "Supervisor", ExecutionStage.INITIALIZATION, ExecutionEventType.RUN_STARTED, ExecutionStatus.RUNNING, "Expert collaboration started");
-        CompletableFuture.runAsync(() -> execute(id, question.trim()), runExecutor)
-                .orTimeout(runTimeout.toMillis(), TimeUnit.MILLISECONDS)
-                .exceptionally(ex -> { failIfRunning(id, "collaboration run timed out or failed"); return null; });
+        CompletableFuture<?> task = CompletableFuture.runAsync(() -> execute(id, question.trim()), runExecutor);
+        task.orTimeout(runTimeout.toMillis(), TimeUnit.MILLISECONDS)
+                .exceptionally(ex -> {
+                    failIfRunning(id, "collaboration run timed out or failed");
+                    // orTimeout completes only the wrapper; cancel(true) actually
+                    // interrupts the runAsync task so a hung call frees its thread
+                    // in the fixed-size executor instead of occupying it forever.
+                    task.cancel(true);
+                    return null;
+                });
         return run;
     }
 
@@ -51,6 +58,11 @@ public final class ExpertCollaborationService {
             store.save(new CollaborationRun(id, question, CollaborationRun.RunStatus.RUNNING, plan, List.of(), null, null, Instant.now(clock)));
             publish(id, "Supervisor", ExecutionStage.PLANNING, ExecutionEventType.EXPERT_HANDOFF, ExecutionStatus.RUNNING, "Selected " + plan.selectedDomains());
             var findings = graph.execute(plan);
+            // Persist completed expert work immediately: if synthesis later
+            // hangs, times out or throws, the failure path keeps the partial
+            // findings instead of discarding them with an empty list.
+            store.save(new CollaborationRun(id, question, CollaborationRun.RunStatus.RUNNING, plan,
+                    findings, null, null, Instant.now(clock)));
             Synthesis synthesis = synthesizer.synthesize(plan, findings);
             completeIfRunning(id, question, plan, findings, synthesis);
         } catch (Exception ex) { failIfRunning(id, "expert collaboration failed"); }

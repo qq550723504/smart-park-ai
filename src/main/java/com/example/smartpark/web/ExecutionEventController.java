@@ -1,6 +1,7 @@
 package com.example.smartpark.web;
 
 import com.example.smartpark.execution.ExecutionEventPublisher;
+import com.example.smartpark.execution.ExecutionEventPublisher.Subscription;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -35,16 +36,21 @@ class ExecutionEventController {
     Flux<ServerSentEvent<ExecutionDtos.ExecutionEventDto>> events(@PathVariable UUID runId) {
         Sinks.Many<ExecutionDtos.ExecutionEventDto> sink = Sinks.many().unicast().onBackpressureBuffer();
         try {
-            publisher.subscribe(runId, event -> {
+            Subscription subscription = publisher.subscribe(runId, event -> {
                 sink.tryEmitNext(ExecutionDtos.ExecutionEventDto.from(event));
                 if (event.isTerminal()) {
                     sink.tryEmitComplete();
                 }
             });
+            // A disconnected SSE client cancels the flux; wire that cancellation
+            // back to Subscription.close() so the consumer is removed from the
+            // run state instead of leaking until the run terminates.
+            return sink.asFlux()
+                    .doOnCancel(subscription::close)
+                    .map(ExecutionEventController::toSse);
         } catch (IllegalArgumentException exception) {
             throw new NoSuchElementException("Unknown execution run: " + runId);
         }
-        return sink.asFlux().map(ExecutionEventController::toSse);
     }
 
     private void requireKnownRun(UUID runId) {

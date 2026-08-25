@@ -90,8 +90,9 @@ class OperationsAnalysisServiceTest {
 
     @Test
     void timeoutMarksRunFailedWithoutSilentFallback() {
-        // A real async executor so .get(timeout) can fire while the task still runs.
-        Executor slowExecutor = java.util.concurrent.ForkJoinPool.commonPool();
+        // A real dedicated executor (as in production wiring) so the timeout
+        // fires while the graph execution is still running.
+        Executor slowExecutor = java.util.concurrent.Executors.newFixedThreadPool(2);
         OperationsAnalysisService service = service((runId, question, pinned) -> {
             try {
                 Thread.sleep(500);
@@ -102,8 +103,10 @@ class OperationsAnalysisServiceTest {
         }, slowExecutor, java.time.Duration.ofMillis(50));
 
         var run = service.start("上周能耗");
-        assertThat(run.status()).isEqualTo("FAILED");
-        assertThat(run.failureStage()).isEqualTo("ANALYSIS_TIMEOUT");
+        // start returns the RUNNING record immediately; execution is scheduled.
+        assertThat(run.status()).isEqualTo("RUNNING");
+        awaitTerminal(() -> "FAILED".equals(service.get(run.runId()).status()));
+        assertThat(service.get(run.runId()).failureStage()).isEqualTo("ANALYSIS_TIMEOUT");
     }
 
     @Test
@@ -152,6 +155,19 @@ class OperationsAnalysisServiceTest {
 
     private Executor directExecutor() {
         return Runnable::run;
+    }
+
+    private static void awaitTerminal(java.util.function.BooleanSupplier condition) {
+        long deadline = System.currentTimeMillis() + 5_000;
+        try {
+            while (!condition.getAsBoolean() && System.currentTimeMillis() < deadline) {
+                Thread.sleep(10);
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("interrupted while waiting for a terminal analysis run", interrupted);
+        }
+        org.assertj.core.api.Assertions.assertThat(condition.getAsBoolean()).isTrue();
     }
 
     private static OperationsAnalysisGraph.AnalysisRunResult completed(UUID runId) {

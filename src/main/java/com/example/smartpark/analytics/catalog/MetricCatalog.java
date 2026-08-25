@@ -29,7 +29,8 @@ public class MetricCatalog {
                 "kWh", "analytics.v_energy_hourly",
                 java.util.Set.of("building_id", "meter_id", "hour_ts"),
                 "SUM(kwh)", 7,
-                "(EXTRACT(HOUR FROM hour_ts) >= 22 OR EXTRACT(HOUR FROM hour_ts) < 6)"));
+                "(EXTRACT(HOUR FROM hour_ts AT TIME ZONE 'Asia/Shanghai') >= 22 OR "
+                        + "EXTRACT(HOUR FROM hour_ts AT TIME ZONE 'Asia/Shanghai') < 6)"));
         register(new MetricDefinition(
                 "energy_deviation_pct", "能耗基线偏差率",
                 java.util.Set.of("能耗偏差", "基线偏差"),

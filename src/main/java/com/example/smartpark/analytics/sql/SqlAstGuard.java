@@ -106,13 +106,33 @@ public final class SqlAstGuard {
             }
         }
 
-        // Function allow-list, bound-parameter-only time values.
+        // Function allow-list, bound-parameter-only time values. Every
+        // clause that carries expressions (select items, WHERE, JOIN ON,
+        // GROUP BY, HAVING, ORDER BY) is walked by the allow-list visitor —
+        // an unchecked clause would let a forbidden function or literal hide
+        // from the fail-closed gate.
         ExpressionPolicy policy = new ExpressionPolicy();
         for (PlainSelect plain : plainSelects) {
             walk(plain.getWhere(), policy);
             for (var item : plain.getSelectItems()) {
                 walk(item.getExpression(), policy);
             }
+            if (plain.getJoins() != null) {
+                for (var join : plain.getJoins()) {
+                    if (join.getOnExpressions() != null) {
+                        for (Expression onExpression : join.getOnExpressions()) {
+                            walk(onExpression, policy);
+                        }
+                    }
+                }
+            }
+            if (plain.getGroupBy() != null) {
+                var groupByList = plain.getGroupBy().getGroupByExpressionList();
+                for (int i = 0; i < groupByList.size(); i++) {
+                    walk((Expression) groupByList.get(i), policy);
+                }
+            }
+            walk(plain.getHaving(), policy);
             if (plain.getOrderByElements() != null) {
                 for (net.sf.jsqlparser.statement.select.OrderByElement element : plain.getOrderByElements()) {
                     walk(element.getExpression(), policy);

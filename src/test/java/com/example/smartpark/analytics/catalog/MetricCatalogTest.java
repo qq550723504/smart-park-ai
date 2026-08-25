@@ -29,7 +29,8 @@ class MetricCatalogTest {
         var night = catalog.findByName("night_energy_kwh").orElseThrow();
         assertThat(night.condition()).contains("22");
         assertThat(night.condition()).contains("6");
-        assertThat(night.condition()).contains("EXTRACT(HOUR FROM hour_ts)");
+        // Night hours are evaluated in the park timezone, not the session timezone.
+        assertThat(night.condition()).contains("EXTRACT(HOUR FROM hour_ts AT TIME ZONE 'Asia/Shanghai')");
     }
 
     @Test

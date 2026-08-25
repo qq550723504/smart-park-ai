@@ -67,6 +67,19 @@ class SqlAstGuardTest {
             "SELECT version() LIMIT 1",
             // dangerous function
             "SELECT pg_sleep(10) FROM analytics.v_alert_fact LIMIT 1",
+            // dangerous function hidden in a JOIN ON clause
+            """
+            SELECT d.building_id FROM analytics.v_device_snapshot d
+            JOIN analytics.v_alert_fact a ON a.device_id = d.device_id AND pg_sleep(0) IS NOT NULL
+            WHERE d.status = 'OFFLINE' LIMIT 10""",
+            // dangerous function hidden in HAVING
+            """
+            SELECT building_id, COUNT(*) FROM analytics.v_energy_hourly
+            GROUP BY building_id HAVING pg_sleep(0) IS NOT NULL LIMIT 10""",
+            // dangerous function hidden in GROUP BY
+            """
+            SELECT building_id, COUNT(*) FROM analytics.v_energy_hourly
+            GROUP BY building_id, (CASE WHEN pg_sleep(0) IS NULL THEN 1 ELSE 2 END) LIMIT 10""",
             // unbounded query
             "SELECT building_id FROM analytics.v_energy_hourly",
             // limit beyond contract

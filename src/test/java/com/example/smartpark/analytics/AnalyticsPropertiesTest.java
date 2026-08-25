@@ -19,19 +19,31 @@ class AnalyticsPropertiesTest {
             .withUserConfiguration(AnalyticsPropertiesTest.TestConfig.class,
                     com.example.smartpark.analytics.AnalyticsConfiguration.class);
 
+    private static final String[] FULL_DATASOURCE = {
+            "smartpark.analytics.enabled=true",
+            "smartpark.analytics.datasource.url=jdbc:postgresql://localhost/smartpark",
+            "smartpark.analytics.datasource.username=smartpark_analytics_ro",
+            "smartpark.analytics.datasource.password=secret",
+            "smartpark.analytics.datasource.admin-username=admin",
+            "smartpark.analytics.datasource.admin-password=secret-admin" };
+
     @Configuration
     @EnableConfigurationProperties(AnalyticsProperties.class)
-    static class TestConfig {}
+    static class TestConfig {
+        @org.springframework.context.annotation.Bean
+        org.springframework.ai.chat.model.ChatModel chatModel() {
+            return new com.example.smartpark.agent.TestChatModel();
+        }
+
+        @org.springframework.context.annotation.Bean
+        com.example.smartpark.execution.ExecutionEventPublisher events() {
+            return new com.example.smartpark.execution.InMemoryExecutionEventPublisher();
+        }
+    }
 
     @Test
     void disabledByDefaultAndUsableWhenComplete() {
-        runner.withPropertyValues(
-                        "smartpark.analytics.enabled=true",
-                        "smartpark.analytics.datasource.url=jdbc:postgresql://localhost/smartpark",
-                        "smartpark.analytics.datasource.username=smartpark_analytics_ro",
-                        "smartpark.analytics.datasource.password=secret",
-                        "smartpark.analytics.datasource.admin-username=admin",
-                        "smartpark.analytics.datasource.admin-password=secret-admin")
+        runner.withPropertyValues(FULL_DATASOURCE)
                 .run(context -> {
                     assertThat(context).hasSingleBean(AnalyticsProperties.class);
                     var properties = context.getBean(AnalyticsProperties.class);
@@ -39,7 +51,13 @@ class AnalyticsPropertiesTest {
                     assertThat(properties.isEnabled()).isTrue();
                     assertThat(properties.getMaxRows()).isEqualTo(500);
                     assertThat(properties.getMaxResultBytes()).isEqualTo(1024L * 1024L);
-                    assertThat(properties.getStatementTimeout()).isEqualTo("3s");
+                    assertThat(properties.getStatementTimeout()).isEqualTo(java.time.Duration.ofSeconds(3));
+                    // The full runtime is wired: both gates, the graph and the service.
+                    assertThat(context).hasBean("analyticsDataSource");
+                    assertThat(context).hasBean("queryCostGuard");
+                    assertThat(context).hasBean("readOnlyQueryExecutor");
+                    assertThat(context).hasBean("operationsAnalysisGraph");
+                    assertThat(context).hasBean("operationsAnalysisService");
                 });
     }
 
@@ -47,13 +65,9 @@ class AnalyticsPropertiesTest {
     void incompleteDatasourceContractFailsStartupInsteadOfDegrading() {
         runner.withPropertyValues("smartpark.analytics.enabled=true")
                 .run(context -> {
-                    var properties = context.getBean(AnalyticsProperties.class);
-                    try {
-                        properties.validateUsable();
-                        throw new AssertionError("expected fail-fast validation error");
-                    } catch (IllegalStateException expected) {
-                        assertThat(expected.getMessage()).contains("完整的数据源配置");
-                    }
+                    Throwable startupFailure = context.getStartupFailure();
+                    org.assertj.core.api.Assertions.assertThat(startupFailure).isNotNull();
+                    assertThat(startupFailure.getMessage()).contains("完整的数据源配置");
                 });
     }
 
@@ -63,7 +77,7 @@ class AnalyticsPropertiesTest {
             assertThat(context).doesNotHaveBean(com.example.smartpark.analytics.catalog.MetricCatalog.class);
             assertThat(context).doesNotHaveBean("analyticsExecutor");
         });
-        runner.withPropertyValues("smartpark.analytics.enabled=true").run(context ->
-                assertThat(context).hasBean("metricCatalog"));
+        runner.withPropertyValues(FULL_DATASOURCE)
+                .run(context -> assertThat(context).hasBean("metricCatalog"));
     }
 }
