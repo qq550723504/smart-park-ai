@@ -93,6 +93,13 @@ public class OperationsAnalysisService {
     }
 
     public AnalysisRunStore.RunRecord get(UUID runId) {
+        // Lazy expiry: an abandoned clarification pause must not keep the SSE
+        // trace open indefinitely while still offering a doomed clarification.
+        synchronized (lifecycleLock) {
+            if (runId != null && runId.equals(activeRunId)) {
+                publishExpiredClarification(expireAbandonedClarificationLocked(Instant.now(clock)));
+            }
+        }
         var record = store.get(runId);
         if (record == null) {
             throw new java.util.NoSuchElementException("Unknown analysis run: " + runId);

@@ -183,6 +183,29 @@ class OperationsAnalysisServiceTest {
     }
 
     @Test
+    void statusReadsExpireAnAbandonedClarificationPause() {
+        // A run paused past clarificationTimeout must not keep offering a
+        // doomed clarification: reading the status applies the expiry
+        // transition and closes the trace with a terminal failure event.
+        MutableClock clock = new MutableClock(NOW);
+        var publisher = new com.example.smartpark.execution.InMemoryExecutionEventPublisher();
+        OperationsAnalysisService service = new OperationsAnalysisService(new MetricCatalog(),
+                (id, q, p) -> clarifying(id), directExecutor(), DEFAULT_TIMEOUT,
+                Duration.ofMinutes(5), clock, publisher);
+        var paused = service.start("告警情况");
+        assertThat(paused.status()).isEqualTo("NEEDS_CLARIFICATION");
+
+        clock.advance(Duration.ofMinutes(6));
+        var polled = service.get(paused.runId());
+
+        assertThat(polled.status()).isEqualTo("FAILED");
+        assertThat(polled.failureStage()).isEqualTo("CLARIFICATION_TIMEOUT");
+        assertThat(publisher.history(paused.runId())).extracting(
+                        com.example.smartpark.execution.model.ExecutionEvent::eventType)
+                .contains(com.example.smartpark.execution.model.ExecutionEventType.FAILED);
+    }
+
+    @Test
     void unknownMetricInClarificationIsRejectedByCatalog() {
         OperationsAnalysisService service = service(
                 (runId, question, pinned) -> clarifying(runId), directExecutor());
