@@ -2,7 +2,7 @@
 
 这是一个基于 Spring Boot 4、Spring AI Alibaba 2.0 和 Vue 3 的智慧园区示例项目。它把告警处置、能耗分析、安防事件复核、园区客服、知识管理和运营审计串成可运行的垂直切片。
 
-> **版本与真实链路要求：** 当前基线为 Spring Boot `4.0.0` + Spring AI `2.0.0-M1` + Spring AI Alibaba `2.0.0-M1.1`，属于 milestone 预发布版本。运行时只走在线真实链路，不提供 Mock/离线模型降级路径：体验告警工作流等真实模型能力时必须配置有效的 DashScope API Key。默认自动化测试不访问外网。
+> **版本与真实链路要求：** 当前基线为 Spring Boot `4.0.0` + Spring AI `2.0.0-M1` + Spring AI Alibaba `2.0.0-M1.1`，属于 milestone 预发布版本。默认 Compose 栈以 Mock/离线模式运行；体验告警工作流等在线真实模型能力时，必须显式启用 DashScope 并配置有效的 API Key。默认自动化测试不访问外网。
 
 项目默认使用内存 Mock 数据，适合本地体验和架构学习。告警工作流可以接入 DashScope `qwen-plus`；客服检索与回答则可以分别在 Mock 和 DashScope/RAG 实现之间切换。
 
@@ -119,6 +119,47 @@ curl -X POST "http://localhost:8080/api/alerts/ALT-TEMP-001/workflows"
 ```bash
 curl "http://localhost:8080/api/workflows/replace-with-workflow-id"
 ```
+
+## Docker Compose 本地演示
+
+以下 Compose 配置仅用于本地演示，默认使用 Mock/离线能力，不需要 API Key。它不提供生产级认证、租户隔离或密钥管理；`X-Demo-Role` 仅是演示授权边界，不能作为生产认证方案。
+
+先从安全的示例文件创建本地环境文件，再启动默认栈：
+
+```powershell
+Copy-Item .env.example .env
+docker compose up --build
+```
+
+默认栈启动 backend、frontend 和 analytics PostgreSQL 容器。前端入口为 <http://localhost:5173>；容器内 Vite 会把 `/api` 代理到 backend，因此可用 <http://localhost:5173/api/operations/capabilities> 查看当前能力。默认模式下 backend 暴露的同一 capabilities endpoint 也可直接通过 <http://localhost:8080/api/operations/capabilities> 访问。
+
+常用生命周期命令：
+
+```powershell
+docker compose ps
+docker compose logs -f
+docker compose down
+```
+
+`docker compose down` 不会删除命名卷 `analytics-postgres-data`，因此普通停止/清理后其中的数据仍会保留。只有在明确需要重置本地演示数据时，才使用 `docker compose down -v`。
+
+### 显式启用 analytics
+
+analytics 使用独立 PostgreSQL 数据库；运行时查询角色固定为只读的 `smartpark_analytics_ro`，管理员角色只用于迁移和演示数据刷新。不要把真实值写进 README、源码或 Git 历史。
+
+在 `.env` 中填写以下三个必需变量后，显式加载 analytics 覆盖文件和 profile：
+
+| 变量 | 用途 |
+| --- | --- |
+| `AI_DASHSCOPE_API_KEY` | 启用 DashScope 在线模型能力所需的 API Key |
+| `SMARTPARK_ANALYTICS_DB_ADMIN_PASSWORD` | analytics 独立 PostgreSQL 的管理员密码，仅用于迁移和演示数据刷新 |
+| `SMARTPARK_ANALYTICS_DB_RO_PASSWORD` | `smartpark_analytics_ro` 的只读运行时密码 |
+
+```powershell
+docker compose -f compose.yaml -f compose.analytics.yaml --profile analytics up --build
+```
+
+analytics 覆盖配置会将 PostgreSQL 改为密码认证；默认栈中为便于无凭据离线演示而使用的 `trust` 认证仅限本地演示，不能作为生产部署建议。
 
 ## 运行模式与配置
 
