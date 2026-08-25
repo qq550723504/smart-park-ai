@@ -1,0 +1,485 @@
+package com.example.smartpark.analytics.agent;
+
+import com.example.smartpark.analytics.catalog.MetricCatalog;
+import com.example.smartpark.analytics.catalog.MetricResolution;
+import com.example.smartpark.analytics.model.ChartSpec;
+import com.example.smartpark.analytics.model.QueryPlan;
+import com.example.smartpark.analytics.model.TabularResult;
+import com.example.smartpark.analytics.model.ValidatedSql;
+import com.example.smartpark.analytics.sql.UnsafeSqlException;
+import com.example.smartpark.execution.ExecutionEventPublisher;
+import com.example.smartpark.execution.InMemoryExecutionEventPublisher;
+import com.example.smartpark.execution.model.DisplayPayload;
+import com.example.smartpark.execution.model.ExecutionEvent;
+import com.example.smartpark.execution.model.ExecutionEventType;
+import com.example.smartpark.execution.model.ExecutionScenario;
+import com.example.smartpark.execution.model.ExecutionStage;
+import com.example.smartpark.execution.model.ExecutionStatus;
+import com.alibaba.cloud.ai.graph.CompiledGraph;
+import com.alibaba.cloud.ai.graph.OverAllState;
+import com.alibaba.cloud.ai.graph.StateGraph;
+import com.alibaba.cloud.ai.graph.action.AsyncEdgeAction;
+import com.alibaba.cloud.ai.graph.action.AsyncNodeAction;
+import com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy;
+import reactor.core.publisher.Flux;
+
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Nine-node analysis workflow on the native 2.0 StateGraph:
+ * understandQuestion → resolveMetricAndDimensions → recallAllowedSchema →
+ * buildQueryPlan → generateSql → validateSqlAst → explainAndCheckCost →
+ * executeReadOnlyQuery → buildChartSpec → summarizeFromResult.
+ *
+ * The graph owns routing and ordering; typed payloads travel through a
+ * per-run context so no serialization round-trips can drop business objects.
+ * SQL is only carried forward after AST validation, at most one repair is
+ * allowed, and the conclusion is validated against executed results.
+ */
+public class OperationsAnalysisGraph {
+
+    private static final String STATE_QUESTION = "question";
+    private static final String STATE_RUN_ID = "runId";
+    private static final int MAX_SQL_ATTEMPTS = 2; // one original try, at most one repair
+
+    private final MetricCatalog catalog;
+    private final AnalyticsModelClient modelClient;
+    private final CostGate costGate;
+    private final ExecutionGate executionGate;
+    private final ExecutionEventPublisher publisher;
+    private final AnalysisSummaryValidator summaryValidator;
+    private final Clock clock;
+    private final CompiledGraph compiled;
+    private final ConcurrentHashMap<UUID, RunContext> contexts = new ConcurrentHashMap<>();
+
+    /** Cost boundary abstraction backed by QueryCostGuard in production wiring. */
+    public interface CostGate {
+        void check(ValidatedSql sql) throws UnsafeSqlException;
+    }
+
+    /** Execution boundary abstraction backed by ReadOnlyQueryExecutor in production wiring. */
+    public interface ExecutionGate {
+        TabularResult execute(ValidatedSql sql) throws UnsafeSqlException;
+    }
+
+    public enum RunOutcome { COMPLETED, NEEDS_CLARIFICATION, FAILED }
+
+    public record AnalysisRunResult(
+            UUID runId,
+            RunOutcome outcome,
+            List<String> clarificationQuestions,
+            ChartSpec chart,
+            TabularResult result,
+            String summary,
+            String failureStage) {
+
+        static AnalysisRunResult failed(UUID runId, String stage) {
+            return new AnalysisRunResult(runId, RunOutcome.FAILED, List.of(), null, null, null, stage);
+        }
+
+        static AnalysisRunResult needsClarification(UUID runId, List<String> questions) {
+            return new AnalysisRunResult(runId, RunOutcome.NEEDS_CLARIFICATION, questions, null, null, null, null);
+        }
+    }
+
+    private static final class RunContext {
+        AnalyticsModelClient.QuestionUnderstanding understanding;
+        List<com.example.smartpark.analytics.catalog.MetricDefinition> metrics = List.of();
+        String schemaDescription = "";
+        QueryPlan plan;
+        int sqlAttempts;
+        String rejectionReason;
+        String sqlDraft;
+        ValidatedSql validatedSql;
+        TabularResult result;
+        ChartSpec chart;
+        String summary = "";
+        volatile String status = "RUNNING";
+        String failureStage;
+        final List<String> clarificationQuestions = new ArrayList<>();
+    }
+
+    public OperationsAnalysisGraph(MetricCatalog catalog,
+                                   AnalyticsModelClient modelClient,
+                                   CostGate costGate,
+                                   ExecutionGate executionGate,
+                                   ExecutionEventPublisher publisher,
+                                   AnalysisSummaryValidator summaryValidator,
+                                   Clock clock) {
+        this.catalog = catalog;
+        this.modelClient = modelClient;
+        this.costGate = costGate;
+        this.executionGate = executionGate;
+        this.publisher = publisher == null ? new InMemoryExecutionEventPublisher() : publisher;
+        this.summaryValidator = summaryValidator;
+        this.clock = clock;
+        try {
+            this.compiled = build();
+        } catch (Exception exception) {
+            throw new IllegalStateException("unable to compile operations analysis graph", exception);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private CompiledGraph build() throws Exception {
+        StateGraph graph = new StateGraph(() -> {
+            Map<String, com.alibaba.cloud.ai.graph.KeyStrategy> strategies = new HashMap<>();
+            for (String key : List.of(STATE_QUESTION, STATE_RUN_ID)) {
+                strategies.put(key, new ReplaceStrategy());
+            }
+            return strategies;
+        });
+
+        graph.addNode("understandQuestion", AsyncNodeAction.node_async(this::understandQuestion));
+        graph.addNode("resolveMetricAndDimensions", AsyncNodeAction.node_async(this::resolveMetricAndDimensions));
+        graph.addNode("recallAllowedSchema", AsyncNodeAction.node_async(this::recallAllowedSchema));
+        graph.addNode("buildQueryPlan", AsyncNodeAction.node_async(this::buildQueryPlan));
+        graph.addNode("generateSql", AsyncNodeAction.node_async(this::generateSql));
+        graph.addNode("validateSqlAst", AsyncNodeAction.node_async(this::validateSqlAst));
+        graph.addNode("explainAndCheckCost", AsyncNodeAction.node_async(this::explainAndCheckCost));
+        graph.addNode("executeReadOnlyQuery", AsyncNodeAction.node_async(this::executeReadOnlyQueryNode));
+        graph.addNode("buildChartSpec", AsyncNodeAction.node_async(this::buildChartSpecNode));
+        graph.addNode("summarizeFromResult", AsyncNodeAction.node_async(this::summarizeFromResult));
+
+        graph.addEdge(StateGraph.START, "understandQuestion");
+        graph.addConditionalEdges("understandQuestion", AsyncEdgeAction.edge_async(state ->
+                        needsClarification(state) ? "END" : "resolveMetricAndDimensions"),
+                Map.of("END", StateGraph.END, "resolveMetricAndDimensions", "resolveMetricAndDimensions"));
+        graph.addConditionalEdges("resolveMetricAndDimensions", AsyncEdgeAction.edge_async(state ->
+                        needsClarification(state) ? "END" : "recallAllowedSchema"),
+                Map.of("END", StateGraph.END, "recallAllowedSchema", "recallAllowedSchema"));
+        graph.addEdge("recallAllowedSchema", "buildQueryPlan");
+        graph.addEdge("buildQueryPlan", "generateSql");
+        graph.addEdge("generateSql", "validateSqlAst");
+        graph.addConditionalEdges("validateSqlAst", AsyncEdgeAction.edge_async(this::routeAfterSqlCheck), Map.of(
+                "explainAndCheckCost", "explainAndCheckCost",
+                "generateSql", "generateSql",
+                "END", StateGraph.END));
+        graph.addConditionalEdges("explainAndCheckCost", AsyncEdgeAction.edge_async(this::routeAfterSqlCheck), Map.of(
+                "executeReadOnlyQuery", "executeReadOnlyQuery",
+                "generateSql", "generateSql",
+                "END", StateGraph.END));
+        graph.addEdge("executeReadOnlyQuery", "buildChartSpec");
+        graph.addEdge("buildChartSpec", "summarizeFromResult");
+        graph.addEdge("summarizeFromResult", StateGraph.END);
+        return graph.compile();
+    }
+
+    /**
+     * Shared routing for both SQL check nodes; the context status carries which
+     * check passed: OK → cost check next, OK_COST → execution next.
+     */
+    private String routeAfterSqlCheck(OverAllState state) {
+        RunContext ctx = contexts.get(runId(state));
+        if (ctx == null) {
+            return "END";
+        }
+        return switch (ctx.status) {
+            case "OK" -> "explainAndCheckCost";
+            case "OK_COST" -> "executeReadOnlyQuery";
+            case "RETRY_SQL" -> "generateSql";
+            default -> "END";
+        };
+    }
+
+    /** Runs the full workflow for one question; blocks until the terminal event. */
+    public AnalysisRunResult run(UUID runId, String question) {
+        RunContext ctx = new RunContext();
+        contexts.put(runId, ctx);
+        publish(ctx, runId, ExecutionStage.UNDERSTANDING, ExecutionEventType.RUN_STARTED,
+                ExecutionStatus.RUNNING, "运营分析已启动: " + strip(question), null);
+        try {
+            Flux.from(compiled.stream(Map.of(
+                            STATE_QUESTION, question,
+                            STATE_RUN_ID, runId.toString())))
+                    .blockLast(Duration.ofSeconds(60));
+        } catch (RuntimeException exception) {
+            ctx.status = "FAILED";
+            ctx.failureStage = "ANALYSIS_ABORTED";
+            publish(ctx, runId, ExecutionStage.FAILURE, ExecutionEventType.FAILED,
+                    ExecutionStatus.FAILED, "分析执行失败，已终止",
+                    DisplayPayload.error(ExecutionStage.FAILURE, "ANALYSIS_ABORTED", true,
+                            String.valueOf(exception.getMessage())));
+            AnalysisRunResult result = AnalysisRunResult.failed(runId, ctx.failureStage);
+            contexts.remove(runId);
+            return result;
+        }
+        AnalysisRunResult outcome = buildOutcome(runId, ctx);
+        contexts.remove(runId);
+        return outcome;
+    }
+
+    private AnalysisRunResult buildOutcome(UUID runId, RunContext ctx) {
+        switch (ctx.status) {
+            case "NEEDS_CLARIFICATION" -> {
+                publish(ctx, runId, ExecutionStage.UNDERSTANDING, ExecutionEventType.INTERRUPTED,
+                        ExecutionStatus.NEEDS_CLARIFICATION, "需要澄清后再继续", null);
+                return AnalysisRunResult.needsClarification(runId, ctx.clarificationQuestions);
+            }
+            case "FAILED" -> {
+                // The failing stage already published its terminal event; do not double-terminate.
+                return AnalysisRunResult.failed(runId, ctx.failureStage);
+            }
+            default -> {
+                publish(ctx, runId, ExecutionStage.COMPLETION, ExecutionEventType.COMPLETED,
+                        ExecutionStatus.SUCCEEDED, "运营分析完成", null);
+                return new AnalysisRunResult(runId, RunOutcome.COMPLETED, List.of(),
+                        ctx.chart, ctx.result, ctx.summary, null);
+            }
+        }
+    }
+
+    // ---- nodes -------------------------------------------------------------
+
+    Map<String, Object> understandQuestion(OverAllState state) {
+        UUID runId = runId(state);
+        RunContext ctx = contexts.get(runId);
+        nodeStarted(ctx, runId, ExecutionStage.UNDERSTANDING, "理解问题");
+        String question = text(state, STATE_QUESTION);
+        ctx.understanding = modelClient.understandQuestion(question);
+        if (ctx.understanding.needsClarification()) {
+            ctx.clarificationQuestions.addAll(ctx.understanding.clarificationQuestions());
+            ctx.status = "NEEDS_CLARIFICATION";
+        }
+        nodeCompleted(ctx, runId, ExecutionStage.UNDERSTANDING, "问题理解完成",
+                DisplayPayload.text(ctx.understanding.normalizedQuestion(), false));
+        return Map.of();
+    }
+
+    Map<String, Object> resolveMetricAndDimensions(OverAllState state) {
+        UUID runId = runId(state);
+        RunContext ctx = contexts.get(runId);
+        nodeStarted(ctx, runId, ExecutionStage.PLANNING, "解析指标与维度");
+        List<com.example.smartpark.analytics.catalog.MetricDefinition> selected = new ArrayList<>();
+        for (String term : ctx.understanding.metricTerms()) {
+            MetricResolution resolution = catalog.resolve(term);
+            if (resolution instanceof MetricResolution.Resolved resolved) {
+                selected.add(resolved.metric());
+            } else if (resolution instanceof MetricResolution.Ambiguous ambiguous) {
+                ctx.clarificationQuestions.add("“" + term + "”可以指: "
+                        + ambiguous.candidates().stream()
+                                .map(m -> m.displayName() + "(" + m.name() + ")")
+                                .reduce((a, b) -> a + " / " + b).orElse("") + "，请明确指标口径");
+            } else {
+                ctx.clarificationQuestions.add("无法识别指标 “" + term + "”，请从指标目录中选择");
+            }
+        }
+        if (!ctx.clarificationQuestions.isEmpty()) {
+            ctx.status = "NEEDS_CLARIFICATION";
+            nodeCompleted(ctx, runId, ExecutionStage.PLANNING, "需要澄清指标口径",
+                    DisplayPayload.text(String.join("; ", ctx.clarificationQuestions), false));
+            return Map.of();
+        }
+        ctx.metrics = List.copyOf(selected);
+        nodeCompleted(ctx, runId, ExecutionStage.PLANNING, "指标解析完成: "
+                + selected.stream().map(m -> m.name()).reduce((a, b) -> a + ", " + b).orElse(""), null);
+        return Map.of();
+    }
+
+    Map<String, Object> recallAllowedSchema(OverAllState state) {
+        UUID runId = runId(state);
+        RunContext ctx = contexts.get(runId);
+        nodeStarted(ctx, runId, ExecutionStage.PLANNING, "召回白名单 Schema");
+        LinkedHashSet<String> views = new LinkedHashSet<>();
+        StringBuilder description = new StringBuilder();
+        for (var metric : ctx.metrics) {
+            if (views.add(metric.sourceView())) {
+                description.append(metric.sourceView())
+                        .append(" 维度: ").append(String.join(", ", metric.allowedDimensions()));
+                if (metric.condition() != null) {
+                    description.append(" 固定条件: ").append(metric.condition());
+                }
+                description.append('\n');
+            }
+        }
+        ctx.schemaDescription = description.toString();
+        nodeCompleted(ctx, runId, ExecutionStage.PLANNING, "Schema 召回完成", null);
+        return Map.of();
+    }
+
+    Map<String, Object> buildQueryPlan(OverAllState state) {
+        UUID runId = runId(state);
+        RunContext ctx = contexts.get(runId);
+        nodeStarted(ctx, runId, ExecutionStage.PLANNING, "构建查询计划");
+        Instant now = Instant.now(clock);
+        int lookbackDays = ctx.metrics.stream().mapToInt(m -> m.defaultLookbackDays()).max().orElse(7);
+        ctx.plan = new QueryPlan(
+                ctx.understanding.normalizedQuestion(),
+                ctx.metrics,
+                ctx.metrics.stream().flatMap(m -> m.allowedDimensions().stream()).distinct().toList(),
+                Map.of(),
+                new QueryPlan.TimeRange(now.minus(Duration.ofDays(lookbackDays)), now),
+                200);
+        nodeCompleted(ctx, runId, ExecutionStage.PLANNING, "查询计划就绪", null);
+        return Map.of();
+    }
+
+    Map<String, Object> generateSql(OverAllState state) {
+        UUID runId = runId(state);
+        RunContext ctx = contexts.get(runId);
+        nodeStarted(ctx, runId, ExecutionStage.ANALYSIS, "生成 SQL");
+        ctx.sqlDraft = modelClient.generateSql(new AnalyticsModelClient.SqlGenerationRequest(
+                ctx.plan, ctx.schemaDescription, ctx.rejectionReason));
+        ctx.rejectionReason = null;
+        nodeCompleted(ctx, runId, ExecutionStage.ANALYSIS, "SQL 草案生成", null);
+        return Map.of();
+    }
+
+    Map<String, Object> validateSqlAst(OverAllState state) {
+        UUID runId = runId(state);
+        RunContext ctx = contexts.get(runId);
+        nodeStarted(ctx, runId, ExecutionStage.SQL_VALIDATION, "AST 安全校验");
+        try {
+            ctx.validatedSql = SqlAstGuardAccess.validate(ctx.sqlDraft);
+            ctx.status = "OK";
+            nodeCompleted(ctx, runId, ExecutionStage.SQL_VALIDATION, "SQL 通过 AST 校验",
+                    new DisplayPayload.SqlPayload(ctx.validatedSql.sql(),
+                            ctx.validatedSql.namedParameters(), "PASSED"));
+        } catch (UnsafeSqlException rejection) {
+            handleSqlRejection(ctx, runId, "validateSqlAst", rejection.getMessage());
+        }
+        return Map.of();
+    }
+
+    Map<String, Object> explainAndCheckCost(OverAllState state) {
+        UUID runId = runId(state);
+        RunContext ctx = contexts.get(runId);
+        nodeStarted(ctx, runId, ExecutionStage.SQL_VALIDATION, "EXPLAIN 成本检查");
+        try {
+            costGate.check(ctx.validatedSql);
+            ctx.status = "OK_COST";
+            nodeCompleted(ctx, runId, ExecutionStage.SQL_VALIDATION, "成本检查通过", null);
+        } catch (UnsafeSqlException rejection) {
+            handleSqlRejection(ctx, runId, "explainAndCheckCost", rejection.getMessage());
+        }
+        return Map.of();
+    }
+
+    private void handleSqlRejection(RunContext ctx, UUID runId, String stage, String safeMessage) {
+        if (ctx.sqlAttempts >= MAX_SQL_ATTEMPTS - 1) {
+            ctx.status = "FAILED";
+            ctx.failureStage = stage;
+            failStage(ctx, runId, stage, safeMessage);
+        } else {
+            ctx.sqlAttempts++;
+            ctx.rejectionReason = safeMessage;
+            ctx.status = "RETRY_SQL";
+            nodeCompleted(ctx, runId, ExecutionStage.SQL_VALIDATION,
+                    "SQL 被拒绝，允许一次修复: " + safeMessage, null);
+        }
+    }
+
+    Map<String, Object> executeReadOnlyQueryNode(OverAllState state) {
+        UUID runId = runId(state);
+        RunContext ctx = contexts.get(runId);
+        nodeStarted(ctx, runId, ExecutionStage.QUERY_EXECUTION, "只读执行查询");
+        try {
+            ctx.result = executionGate.execute(ctx.validatedSql);
+            ctx.status = "OK_RESULT";
+            nodeCompleted(ctx, runId, ExecutionStage.QUERY_EXECUTION,
+                    "查询完成: " + ctx.result.rowCount() + " 行" + (ctx.result.truncated() ? "（已截断）" : ""),
+                    DisplayPayload.text("返回 " + ctx.result.rowCount() + " 行数据", false));
+        } catch (UnsafeSqlException failure) {
+            ctx.status = "FAILED";
+            ctx.failureStage = "executeReadOnlyQuery";
+            failStage(ctx, runId, "executeReadOnlyQuery", failure.getMessage());
+        }
+        return Map.of();
+    }
+
+    Map<String, Object> buildChartSpecNode(OverAllState state) {
+        UUID runId = runId(state);
+        RunContext ctx = contexts.get(runId);
+        nodeStarted(ctx, runId, ExecutionStage.RENDERING, "生成图表规格");
+        ChartSpec.Proposal proposal = null;
+        try {
+            proposal = modelClient.proposeChart(new AnalyticsModelClient.ChartContext(
+                    strip(text(state, STATE_QUESTION)), ctx.plan, ctx.result));
+        } catch (RuntimeException modelFailure) {
+            // degrade below
+        }
+        ctx.chart = ChartSpec.fromProposal(proposal, ctx.result);
+        nodeCompleted(ctx, runId, ExecutionStage.RENDERING, "图表规格: " + ctx.chart.type(),
+                new DisplayPayload.ChartPayload(ctx.chart.type().name(), ctx.chart.title(), ctx.chart.xField(),
+                        ctx.chart.yFields(), ctx.chart.seriesField(), ctx.chart.unit()));
+        return Map.of();
+    }
+
+    Map<String, Object> summarizeFromResult(OverAllState state) {
+        UUID runId = runId(state);
+        RunContext ctx = contexts.get(runId);
+        nodeStarted(ctx, runId, ExecutionStage.RESPONSE_DELIVERY, "基于结果总结");
+        try {
+            String conclusion = modelClient.summarize(new AnalyticsModelClient.SummaryContext(
+                    strip(text(state, STATE_QUESTION)), ctx.plan, ctx.result, ctx.chart));
+            ctx.summary = summaryValidator.validate(conclusion, ctx.plan, ctx.result);
+            nodeCompleted(ctx, runId, ExecutionStage.RESPONSE_DELIVERY, "结论生成完成",
+                    DisplayPayload.text(ctx.summary, false));
+        } catch (RuntimeException summaryFailure) {
+            // Conclusion failures keep SQL + result table alive without a summary.
+            nodeCompleted(ctx, runId, ExecutionStage.RESPONSE_DELIVERY, "结论生成失败，保留 SQL 与结果表", null);
+        }
+        ctx.status = "COMPLETED";
+        return Map.of();
+    }
+
+    // ---- helpers -----------------------------------------------------------
+
+    private boolean needsClarification(OverAllState state) {
+        UUID runId = runId(state);
+        RunContext ctx = contexts.get(runId);
+        return ctx != null && "NEEDS_CLARIFICATION".equals(ctx.status);
+    }
+
+    private UUID runId(OverAllState state) {
+        return UUID.fromString(state.value(STATE_RUN_ID, String.class).orElseThrow());
+    }
+
+    private static String text(OverAllState state, String key) {
+        return state.value(key, String.class).orElse("");
+    }
+
+    private void nodeStarted(RunContext ctx, UUID runId, ExecutionStage stage, String summary) {
+        publish(ctx, runId, stage, ExecutionEventType.NODE_STARTED, ExecutionStatus.RUNNING, summary, null);
+    }
+
+    private void nodeCompleted(RunContext ctx, UUID runId, ExecutionStage stage, String summary, DisplayPayload payload) {
+        publish(ctx, runId, stage, ExecutionEventType.NODE_COMPLETED, ExecutionStatus.RUNNING, summary, payload);
+    }
+
+    private void failStage(RunContext ctx, UUID runId, String stage, String safeMessage) {
+        publish(ctx, runId, ExecutionStage.FAILURE, ExecutionEventType.FAILED, ExecutionStatus.FAILED,
+                "阶段失败: " + stage,
+                DisplayPayload.error(ExecutionStage.FAILURE, "ANALYTICS_POLICY", false,
+                        safeMessage == null ? "" : safeMessage));
+    }
+
+    private void publish(RunContext ignoredCtx, UUID runId, ExecutionStage stage, ExecutionEventType type,
+                         ExecutionStatus status, String summary, DisplayPayload payload) {
+        publisher.publish(new ExecutionEvent(UUID.randomUUID(), runId, 0, Instant.now(clock),
+                ExecutionScenario.OPERATIONS_ANALYSIS, "analytics", stage, type, status,
+                summary == null ? "" : summary, payload));
+    }
+
+    private static String strip(String value) {
+        return value == null ? "" : value.strip();
+    }
+
+    /**
+     * Indirection over the static guard keeping JSqlParser details out of the graph.
+     */
+    private static final class SqlAstGuardAccess {
+        static ValidatedSql validate(String sql) throws UnsafeSqlException {
+            return com.example.smartpark.analytics.sql.SqlAstGuard.validate(sql);
+        }
+    }
+}
