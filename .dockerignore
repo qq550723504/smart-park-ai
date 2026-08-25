@@ -1,0 +1,6 @@
+.git
+.worktrees
+.env*
+target
+ui/node_modules
+ui/dist
