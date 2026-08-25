@@ -31,6 +31,7 @@ class ExpertCollaborationServiceTest {
         var run = service.start("energy consumption");
 
         waitFor(() -> service.get(run.runId()).status() == CollaborationRun.RunStatus.FAILED);
+        waitForEvent(publisher, run.runId(), ExecutionEventType.FAILED);
         assertThat(service.get(run.runId()).synthesis()).isNotNull();
         assertThat(publisher.history(run.runId())).extracting(e -> e.eventType())
                 .contains(ExecutionEventType.FAILED);
@@ -44,6 +45,7 @@ class ExpertCollaborationServiceTest {
                 new Synthesis(FindingStatus.SUPPORTED, "energy supported", List.of("energy:1"), .8, List.of()));
         var run = service.start("energy consumption");
         waitFor(() -> service.get(run.runId()).status() == CollaborationRun.RunStatus.COMPLETED);
+        waitForEvent(publisher, run.runId(), ExecutionEventType.COMPLETED);
         assertThat(publisher.history(run.runId())).extracting(e -> e.eventType())
                 .containsExactly(ExecutionEventType.RUN_STARTED, ExecutionEventType.NODE_STARTED,
                         ExecutionEventType.EXPERT_HANDOFF, ExecutionEventType.COMPLETED);
@@ -138,6 +140,7 @@ class ExpertCollaborationServiceTest {
         }, (p, f) -> null, Duration.ofMillis(30));
         var run = service.start("energy consumption");
         waitFor(() -> service.get(run.runId()).status() == CollaborationRun.RunStatus.FAILED);
+        waitForEvent(publisher, run.runId(), ExecutionEventType.FAILED);
         assertThat(publisher.history(run.runId())).last().extracting(e -> e.eventType()).isEqualTo(ExecutionEventType.FAILED);
     }
 
@@ -192,5 +195,10 @@ class ExpertCollaborationServiceTest {
         long deadline = System.nanoTime() + 3_000_000_000L;
         while (!condition.getAsBoolean() && System.nanoTime() < deadline) Thread.sleep(10);
         assertThat(condition.getAsBoolean()).isTrue();
+    }
+
+    private static void waitForEvent(InMemoryExecutionEventPublisher publisher, java.util.UUID runId,
+            ExecutionEventType eventType) throws Exception {
+        waitFor(() -> publisher.history(runId).stream().anyMatch(event -> event.eventType() == eventType));
     }
 }
