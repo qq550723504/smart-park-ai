@@ -92,16 +92,38 @@ class ExpertFindingValidatorTest {
     @Test void replacesModelQuantitativeClaimsWithTheCitedStructuredResult() {
         ExpertFinding finding = new ExpertFinding(ExpertDomain.ENERGY, FindingStatus.SUPPORTED,
                 "consumption is 9999 kWh and baseline is 1 kWh",
-                java.util.List.of("tool:energy:1"), .9, java.util.List.of());
+                java.util.List.of("tool:lookupEnergyConsumption#abc"), .9, java.util.List.of());
         EvidenceLedger ledger = new EvidenceLedger();
-        ledger.record("tool:energy:1", "{\"consumptionKwh\":120,\"baselineKwh\":100}");
+        ledger.record("tool:lookupEnergyConsumption#abc",
+                "{\"consumptionKwh\":120,\"baselineKwh\":100}");
 
         ExpertFinding validated = validator.validateWithObservations(finding, ledger.snapshotObservations());
 
         assertThat(validated.status()).isEqualTo(FindingStatus.SUPPORTED);
         assertThat(validated.conclusion())
-                .contains("tool:energy:1", "\"consumptionKwh\":120", "\"baselineKwh\":100")
+                .contains("tool:lookupEnergyConsumption#abc",
+                        "\"consumptionKwh\":120", "\"baselineKwh\":100")
                 .doesNotContain("9999");
+    }
+
+    @Test void projectsKnowledgeEvidenceWithoutPublishingDocumentBodies() {
+        ExpertFinding finding = new ExpertFinding(ExpertDomain.ENERGY, FindingStatus.SUPPORTED,
+                "knowledge is available", java.util.List.of("tool:searchParkKnowledge#abc"), .9,
+                java.util.List.of());
+        EvidenceLedger ledger = new EvidenceLedger();
+        ledger.record("tool:searchParkKnowledge#abc", """
+                {"query":"energy","documents":[{"id":"KD-1","domain":"ALERT_OPERATIONS",
+                "title":"Energy playbook","content":"INTERNAL SECRET BODY","tags":["energy"],
+                "updatedAt":"2026-08-25T00:00:00Z"}],"error":null,"notice":"mock"}
+                """);
+
+        ExpertFinding validated = validator.validateWithObservations(
+                finding, ledger.snapshotObservations());
+
+        assertThat(validated.status()).isEqualTo(FindingStatus.SUPPORTED);
+        assertThat(validated.conclusion())
+                .contains("KD-1", "Energy playbook", "energy")
+                .doesNotContain("content", "INTERNAL SECRET BODY");
     }
 
     @Test void downgradesSuccessfulTransportThatReturnedAnErrorObservation() {

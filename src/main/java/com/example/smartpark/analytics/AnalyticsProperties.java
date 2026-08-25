@@ -11,6 +11,8 @@ import java.time.Duration;
 @ConfigurationProperties(prefix = "smartpark.analytics")
 public class AnalyticsProperties {
 
+    public static final String RUNTIME_READ_ONLY_ROLE = "smartpark_analytics_ro";
+
     private boolean enabled;
     private Duration statementTimeout = Duration.ofSeconds(3);
     private Duration analysisTimeout = Duration.ofSeconds(60);
@@ -29,6 +31,10 @@ public class AnalyticsProperties {
                 || isBlank(datasource.adminUsername) || isBlank(datasource.adminPassword)) {
             throw new IllegalStateException(
                     "smartpark.analytics.enabled=true 需要完整的数据源配置（url/username/password/admin-username/admin-password）");
+        }
+        if (!RUNTIME_READ_ONLY_ROLE.equals(datasource.username)) {
+            throw new IllegalStateException("analytics runtime username must be the migrated read-only role "
+                    + RUNTIME_READ_ONLY_ROLE);
         }
     }
 

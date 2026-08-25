@@ -40,19 +40,33 @@ public final class ExpertCollaborationService {
             throw new IllegalArgumentException("question must not exceed " + MAX_QUESTION_LENGTH + " characters");
         }
         UUID id = UUID.randomUUID();
-        CollaborationRun run = store.save(new CollaborationRun(id, question.trim(), CollaborationRun.RunStatus.RUNNING,
-                null, List.of(), null, null, Instant.now(clock)));
-        publish(id, "Supervisor", ExecutionStage.INITIALIZATION, ExecutionEventType.RUN_STARTED, ExecutionStatus.RUNNING, "Expert collaboration started");
+        CountDownLatch admitted = new CountDownLatch(1);
         FutureTask<Void> task = new FutureTask<>(() -> {
+            admitted.await();
             execute(id, question.trim());
             return null;
         });
         try {
+            // Admission is decided by the bounded executor before the run is
+            // made externally visible. The gate prevents an accepted worker
+            // from observing an ID before its store/event registration commits.
             runExecutor.execute(task);
         } catch (RejectedExecutionException rejected) {
-            failIfRunning(id, "collaboration run could not be scheduled");
+            task.cancel(false);
             throw rejected;
         }
+        CollaborationRun run;
+        try {
+            run = store.save(new CollaborationRun(id, question.trim(), CollaborationRun.RunStatus.RUNNING,
+                    null, List.of(), null, null, Instant.now(clock)));
+            publish(id, "Supervisor", ExecutionStage.INITIALIZATION, ExecutionEventType.RUN_STARTED,
+                    ExecutionStatus.RUNNING, "Expert collaboration started");
+        } catch (RuntimeException registrationFailure) {
+            task.cancel(true);
+            admitted.countDown();
+            throw registrationFailure;
+        }
+        admitted.countDown();
         CompletableFuture.delayedExecutor(runTimeout.toMillis(), TimeUnit.MILLISECONDS)
                 .execute(() -> timeoutIfRunning(id, task));
         return run;

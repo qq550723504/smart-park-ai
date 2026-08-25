@@ -43,6 +43,54 @@ class LlmAnalyticsModelClientTest {
     }
 
     @Test
+    void understandingContractIncludesTypedEntityFilters() throws Exception {
+        var accessor = AnalyticsModelClient.QuestionUnderstanding.class.getMethod("requestedFilters");
+        assertThat(accessor.getReturnType()).isEqualTo(java.util.Map.class);
+    }
+
+    @Test
+    void parsesEntityFiltersAsAStringMap() {
+        TestChatModel model = new TestChatModel("""
+                {
+                  "normalizedQuestion": "B1楼宇的能耗",
+                  "metricTerms": ["energy_kwh"],
+                  "clarificationQuestions": [],
+                  "requestedDimensions": [],
+                  "requestedFilters": {"building_id": "B1"},
+                  "requestedTimeRange": null
+                }
+                """);
+        var client = new LlmAnalyticsModelClient(
+                model, new MetricCatalog(), Clock.fixed(NOW, ZoneOffset.UTC));
+
+        var understanding = client.understandQuestion("B1楼宇的能耗");
+
+        assertThat(understanding.requestedFilters()).containsExactlyEntriesOf(
+                java.util.Map.of("building_id", "B1"));
+        assertThat(model.lastPrompt().getSystemMessage().getText()).contains("requestedFilters");
+    }
+
+    @Test
+    void preservesTheOriginalQuestionWhenTheModelDropsEntityScope() {
+        TestChatModel model = new TestChatModel("""
+                {
+                  "normalizedQuestion": "能耗",
+                  "metricTerms": ["energy_kwh"],
+                  "clarificationQuestions": [],
+                  "requestedDimensions": [],
+                  "requestedFilters": {},
+                  "requestedTimeRange": null
+                }
+                """);
+        var client = new LlmAnalyticsModelClient(
+                model, new MetricCatalog(), Clock.fixed(NOW, ZoneOffset.UTC));
+
+        var understanding = client.understandQuestion("  B1楼宇的能耗  ");
+
+        assertThat(understanding.normalizedQuestion()).isEqualTo("B1楼宇的能耗");
+    }
+
+    @Test
     void rejectsPartialRequestedTimeRangeInsteadOfSilentlyUsingDefault() {
         TestChatModel model = new TestChatModel("""
                 {

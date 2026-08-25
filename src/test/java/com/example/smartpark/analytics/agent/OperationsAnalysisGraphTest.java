@@ -121,6 +121,28 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
+    void preservesEntityFiltersFromUnderstandingThroughPlanValidationAndBinding() {
+        String filteredSql = """
+                SELECT SUM(kwh) AS energy_kwh FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                  AND building_id = :filter_building_id LIMIT 200""";
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("B1楼宇的能耗", List.of("能耗"),
+                        List.of(), null, List.of(), Map.of("building_id", "B1")),
+                List.of(filteredSql),
+                new ChartSpec.Proposal("TABLE", "B1能耗", "energy_kwh", List.of(), "", "kWh"),
+                "共 1 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "B1楼宇的能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().filters()).containsExactlyEntriesOf(
+                Map.of("building_id", "B1"));
+        assertThat(lastExecutionParameters).containsEntry("filter_building_id", "B1");
+        assertThat(outcome.result().rowCount()).isEqualTo(1);
+    }
+
+    @Test
     void carriesRequestedTimeRangeIntoPlanAndBoundParameters() {
         Instant from = Instant.parse("2026-07-25T00:00:00Z");
         Instant to = Instant.parse("2026-08-24T00:00:00Z");

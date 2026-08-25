@@ -78,6 +78,28 @@ class SqlPlanGuardTest {
     }
 
     @Test
+    void acceptsOnlyTheEntityFilterAndBoundParameterDeclaredByThePlan() throws UnsafeSqlException {
+        MetricDefinition metric = catalog.findByName("energy_kwh").orElseThrow();
+        QueryPlan filteredPlan = new QueryPlan("B1 energy", List.of(metric), List.of(),
+                Map.of("building_id", "B1"), new QueryPlan.TimeRange(
+                        Instant.parse("2026-08-17T00:00:00Z"),
+                        Instant.parse("2026-08-24T00:00:00Z")), 100);
+        ValidatedSql exact = SqlAstGuard.validate("""
+                SELECT SUM(kwh) AS energy_kwh FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                  AND building_id = :filter_building_id LIMIT 100""");
+        ValidatedSql literal = SqlAstGuard.validate("""
+                SELECT SUM(kwh) AS energy_kwh FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                  AND building_id = 'B2' LIMIT 100""");
+
+        assertThatCode(() -> SqlPlanGuard.validate(exact, filteredPlan)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> SqlPlanGuard.validate(literal, filteredPlan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("building_id");
+    }
+
+    @Test
     void acceptsNightConditionWithQualifiedTimeColumn() throws UnsafeSqlException {
         QueryPlan plan = plan("night_energy_kwh", List.of("building_id"));
         ValidatedSql sql = SqlAstGuard.validate("""

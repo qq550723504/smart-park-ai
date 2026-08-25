@@ -31,6 +31,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 @Configuration
 public class CollaborationRuntimeConfiguration {
@@ -54,7 +57,9 @@ public class CollaborationRuntimeConfiguration {
     @Bean(destroyMethod = "shutdownNow")
     @Qualifier("collaborationRunExecutor")
     ExecutorService collaborationRunExecutor(ExpertCollaborationProperties properties) {
-        return Executors.newFixedThreadPool(properties.getMaxParallel());
+        int maxParallel = properties.getMaxParallel();
+        return new ThreadPoolExecutor(maxParallel, maxParallel, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(maxParallel), new ThreadPoolExecutor.AbortPolicy());
     }
 
     @Bean

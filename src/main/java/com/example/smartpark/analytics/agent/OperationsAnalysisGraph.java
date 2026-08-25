@@ -395,14 +395,17 @@ public class OperationsAnalysisGraph {
                 ctx.understanding.normalizedQuestion(),
                 ctx.metrics,
                 validatedRequestedDimensions(ctx),
-                Map.of(),
+                ctx.understanding.requestedFilters(),
                 timeRange,
                 200);
-        // One shared binding set for both gates: :fromTs/:toTs are the only
-        // supported time boundaries and travel as bound parameters end to end.
-        ctx.parameters = Map.of(
-                "fromTs", java.sql.Timestamp.from(ctx.plan.timeRange().from()),
-                "toTs", java.sql.Timestamp.from(ctx.plan.timeRange().to()));
+        // One shared binding set travels through both gates and execution.
+        // Entity values are never copied into SQL literals.
+        java.util.LinkedHashMap<String, Object> parameters = new java.util.LinkedHashMap<>();
+        parameters.put("fromTs", java.sql.Timestamp.from(ctx.plan.timeRange().from()));
+        parameters.put("toTs", java.sql.Timestamp.from(ctx.plan.timeRange().to()));
+        ctx.plan.filters().forEach((dimension, value) ->
+                parameters.put(QueryPlan.filterParameterName(dimension), value));
+        ctx.parameters = java.util.Collections.unmodifiableMap(parameters);
         nodeCompleted(ctx, runId, ExecutionStage.PLANNING, "查询计划就绪", null);
         return Map.of();
     }
@@ -452,7 +455,7 @@ public class OperationsAnalysisGraph {
             for (String name : ctx.validatedSql.namedParameters()) {
                 if (!ctx.parameters.containsKey(name)) {
                     throw new UnsafeSqlException("SQL_POLICY_REJECTED",
-                            "使用了未提供绑定值的时间参数，仅允许 :fromTs 与 :toTs");
+                            "使用了查询计划未提供的绑定参数");
                 }
             }
             ctx.status = "OK";

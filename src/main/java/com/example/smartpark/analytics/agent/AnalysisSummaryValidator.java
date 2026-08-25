@@ -17,11 +17,13 @@ import java.util.Set;
  */
 public class AnalysisSummaryValidator {
 
-    // Do not extract digits from identifiers such as B1/MTR-2. A unit suffix is
-    // intentionally allowed (10kWh), and scientific notation / Unicode minus
-    // are normalized before comparison with result cells.
+    // Do not extract digits from ASCII identifiers such as B1/MTR-2. Chinese
+    // text is prose, not an identifier boundary: ordinary output such as
+    // “能耗为9999kWh” must still expose 9999 to the grounding check.
+    // A unit suffix is intentionally allowed (10kWh), and scientific notation
+    // / Unicode minus are normalized before comparison with result cells.
     private static final java.util.regex.Pattern NUMBER = java.util.regex.Pattern.compile(
-            "(?<![\\p{L}\\p{N}_\\-−－‐‑‒–—―﹣])[\\-−－‐‑‒–—―﹣]?"
+            "(?<![A-Za-z0-9_\\-−－‐‑‒–—―﹣])[\\-−－‐‑‒–—―﹣]?"
                     + "(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)"
                     + "(?:[eE][+\\-−－‐‑‒–—―﹣]?[0-9]+)?");
 

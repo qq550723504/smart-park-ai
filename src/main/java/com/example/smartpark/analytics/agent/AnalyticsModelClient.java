@@ -6,6 +6,7 @@ import com.example.smartpark.analytics.model.TabularResult;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -29,19 +30,29 @@ public interface AnalyticsModelClient {
             List<String> metricTerms,
             List<String> clarificationQuestions,
             RequestedTimeRange requestedTimeRange,
-            List<String> requestedDimensions) {
+            List<String> requestedDimensions,
+            Map<String, String> requestedFilters) {
 
         public QuestionUnderstanding(String normalizedQuestion,
                                      List<String> metricTerms,
                                      List<String> clarificationQuestions) {
-            this(normalizedQuestion, metricTerms, clarificationQuestions, null, List.of());
+            this(normalizedQuestion, metricTerms, clarificationQuestions, null, List.of(), Map.of());
         }
 
         public QuestionUnderstanding(String normalizedQuestion,
                                      List<String> metricTerms,
                                      List<String> clarificationQuestions,
                                      RequestedTimeRange requestedTimeRange) {
-            this(normalizedQuestion, metricTerms, clarificationQuestions, requestedTimeRange, List.of());
+            this(normalizedQuestion, metricTerms, clarificationQuestions, requestedTimeRange, List.of(), Map.of());
+        }
+
+        public QuestionUnderstanding(String normalizedQuestion,
+                                     List<String> metricTerms,
+                                     List<String> clarificationQuestions,
+                                     RequestedTimeRange requestedTimeRange,
+                                     List<String> requestedDimensions) {
+            this(normalizedQuestion, metricTerms, clarificationQuestions,
+                    requestedTimeRange, requestedDimensions, Map.of());
         }
 
         public QuestionUnderstanding {
@@ -49,6 +60,7 @@ public interface AnalyticsModelClient {
             metricTerms = List.copyOf(metricTerms == null ? List.of() : metricTerms);
             clarificationQuestions = List.copyOf(clarificationQuestions == null ? List.of() : clarificationQuestions);
             requestedDimensions = List.copyOf(requestedDimensions == null ? List.of() : requestedDimensions);
+            requestedFilters = Map.copyOf(requestedFilters == null ? Map.of() : requestedFilters);
         }
 
         public boolean needsClarification() {

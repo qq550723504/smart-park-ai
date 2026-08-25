@@ -48,6 +48,11 @@ public class ApiExceptionHandler {
         return error(HttpStatus.BAD_REQUEST, "Invalid request");
     }
 
+    @ExceptionHandler(java.util.concurrent.RejectedExecutionException.class)
+    ResponseEntity<WebDtos.ApiError> overloaded(java.util.concurrent.RejectedExecutionException exception) {
+        return error(HttpStatus.TOO_MANY_REQUESTS, "Too many collaboration runs; retry later");
+    }
+
     @ExceptionHandler({MethodArgumentNotValidException.class, HttpMessageNotReadableException.class})
     ResponseEntity<WebDtos.ApiError> badRequest(Exception exception) {
         return error(HttpStatus.BAD_REQUEST, "Malformed or incomplete request");

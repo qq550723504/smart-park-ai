@@ -4,7 +4,7 @@
 
 - Date: 2026-08-25
 - Approved in chat: yes
-- Target: all thirteen P1 review threads current on 2026-08-25: the seven query,
+- Target: all eighteen P1 review threads current on 2026-08-25: the seven query,
   summary, synthesis, privilege, and identifier contract findings; the later
   demo-snapshot integrity finding; the table-valued `FROM` bypass; and the
   clarification-resume metric-loss finding; plus the second-page findings for
@@ -209,6 +209,26 @@ tool fixtures (`DEV-ENERGY-001`, `DEV-POWER-001`, `DEV-HVAC-001`, and
 entity discovery remains a separate capability; the demo no longer advertises
 questions its current tools cannot resolve.
 
+### 3.8 Server-owned runtime, admission, disclosure, and analytics scope
+
+The analytics runtime login is exactly the migrated `smartpark_analytics_ro`
+role; an enabled configuration using any other login fails startup. Summary
+number extraction treats ASCII identifier shapes as atomic while still
+recognizing figures adjacent to ordinary Chinese prose.
+
+Collaboration run admission uses a bounded queue and completes executor
+admission before persisting or publishing a RUNNING record. Internal evidence
+retains raw tool results for validation, while public conclusions use an
+explicit tool projection: knowledge search exposes document metadata but never
+the administrator-managed `content` body, and unknown future tools fail closed.
+
+Analytics understanding carries typed dimension filters. The server preserves
+the exact original question, requires identifier-shaped entity scope from that
+question to appear in the filter values, validates filter dimensions against
+every selected metric, binds values as named parameters, and requires the SQL
+AST predicates to exactly match the plan. A model that drops or replaces `B1`
+cannot broaden the query.
+
 ## 4. Data flow
 
 ```text
@@ -275,6 +295,18 @@ Each production change starts with a focused test that fails on baseline
    `ExpertCollaborationPage.spec.ts`
    - prove model assignment text cannot replace original entities;
    - prove every shipped demo question contains valid seeded tool identifiers.
+10. `AnalyticsPropertiesTest`
+   - rejects privileged or arbitrary analytics runtime usernames.
+11. `AnalysisSummaryValidatorTest`
+   - rejects unsupported figures in unspaced Chinese conclusions.
+12. `CollaborationRuntimeConfigurationTest` and `ExpertCollaborationServiceTest`
+   - prove bounded admission and zero run publication on overload rejection.
+13. `ExpertFindingValidatorTest`
+   - proves public grounded conclusions omit knowledge document bodies.
+14. `LlmAnalyticsModelClientTest`, `QueryPlanTest`, `SqlPlanGuardTest`, and
+    `OperationsAnalysisGraphTest`
+   - prove exact original-question scope and parameterized entity filters from
+     structured understanding through a real PostgreSQL execution.
 
 Final verification:
 
@@ -289,7 +321,7 @@ git diff --check
 
 ## 7. Acceptance criteria
 
-- All thirteen GitHub P1 counterexamples are red on their preceding implementation and
+- All eighteen GitHub P1 counterexamples are red on their preceding implementation and
   green after the fix.
 - SQL execution is impossible unless the full supported query shape matches the
   plan; no lossy identifier or occurrence normalization remains.
@@ -298,5 +330,5 @@ git diff --check
 - An upgraded dedicated analytics database removes inherited `PUBLIC`
   privileges from the runtime login without rewriting V1.
 - Public REST/SSE DTOs remain compatible.
-- The thirteen GitHub threads receive technical replies and are resolved
+- The eighteen GitHub threads receive technical replies and are resolved
   only after local and remote verification.

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Close all thirteen current P1 findings by making SQL, result-summary,
+**Goal:** Close all eighteen current P1 findings by making SQL, result-summary,
 expert-synthesis, database privilege, demo-fixture, and clarification-resume
 contracts complete and lossless, and by making expert entity scope and shipped
 demo questions server-verifiable.
@@ -335,15 +335,31 @@ git commit -m "fix: harden analytics database privileges"
 
 ---
 
-### Task 6: Full verification and GitHub review closure
+### Task 6: Close runtime identity, disclosure, admission, and entity-scope boundaries
+
+**Files:**
+- Modify analytics configuration, understanding/plan/SQL validation, and summary validation.
+- Modify collaboration executor admission and expert evidence projection.
+- Add focused regression tests for all five new P1 counterexamples.
+
+- [ ] **Step 1: Require the migrated `smartpark_analytics_ro` runtime identity**
+- [ ] **Step 2: Recognize unsupported figures adjacent to Chinese prose**
+- [ ] **Step 3: Use a bounded run executor and admit before registering a run**
+- [ ] **Step 4: Project knowledge evidence to public metadata only**
+- [ ] **Step 5: Preserve entity filters from the original question through bound SQL**
+- [ ] **Step 6: Verify focused tests and adversarial counterexamples**
+
+---
+
+### Task 7: Full verification and GitHub review closure
 
 **Files:**
 - Verify all files changed by Tasks 1-5.
 - No unrelated production edits.
 
 **Interfaces:**
-- Consumes: the four independently committed fixes.
-- Produces: pushed PR head, technical replies in all thirteen P1 threads, resolved threads, and separately reported CI state.
+- Consumes: all independently verified contract fixes.
+- Produces: pushed PR head, technical replies in all eighteen P1 threads, resolved threads, and separately reported CI state.
 
 - [ ] **Step 1: Run full local verification**
 
@@ -362,7 +378,7 @@ Record exact backend test totals, frontend test totals, build warnings, skipped 
 - [ ] **Step 2: Re-fetch all PR review threads**
 
 Paginate GitHub GraphQL `reviewThreads(first:100, after:...)` to exhaustion and
-confirm the thirteen targeted thread IDs are current. Re-evaluate any newly
+confirm the eighteen targeted thread IDs are current. Re-evaluate any newly
 added P1 before pushing; do not resolve outdated or unrelated comments by
 assumption.
 
@@ -374,7 +390,7 @@ Push local HEAD to `origin/codex/smart-park-p1` without force:
 git push origin HEAD:codex/smart-park-p1
 ```
 
-- [ ] **Step 4: Reply and resolve the thirteen P1 threads**
+- [ ] **Step 4: Reply and resolve the eighteen P1 threads**
 
 Reply inside each original review thread with the root contract changed and the focused test that proves it. Resolve only after the push succeeds and GitHub shows the target commit.
 

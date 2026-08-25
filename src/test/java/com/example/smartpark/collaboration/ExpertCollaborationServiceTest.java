@@ -16,8 +16,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ExpertCollaborationServiceTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-08-25T00:00:00Z"), ZoneOffset.UTC);
@@ -45,6 +47,46 @@ class ExpertCollaborationServiceTest {
         assertThat(publisher.history(run.runId())).extracting(e -> e.eventType())
                 .containsExactly(ExecutionEventType.RUN_STARTED, ExecutionEventType.NODE_STARTED,
                         ExecutionEventType.EXPERT_HANDOFF, ExecutionEventType.COMPLETED);
+    }
+
+    @Test void rejectsOverloadBeforeRegisteringOrPublishingARun() {
+        AtomicInteger published = new AtomicInteger();
+        com.example.smartpark.execution.ExecutionEventPublisher publisher =
+                new com.example.smartpark.execution.ExecutionEventPublisher() {
+                    @Override public com.example.smartpark.execution.model.ExecutionEvent publish(
+                            com.example.smartpark.execution.model.ExecutionEvent event) {
+                        published.incrementAndGet();
+                        return event;
+                    }
+                    @Override public List<com.example.smartpark.execution.model.ExecutionEvent> history(
+                            java.util.UUID runId) { return List.of(); }
+                    @Override public Subscription subscribe(java.util.UUID runId,
+                            java.util.function.Consumer<com.example.smartpark.execution.model.ExecutionEvent> consumer) {
+                        return () -> { };
+                    }
+                    @Override public String status(java.util.UUID runId) { return "UNKNOWN"; }
+                    @Override public void remove(java.util.UUID runId) { }
+                };
+        java.util.concurrent.ExecutorService rejectingExecutor =
+                java.util.concurrent.Executors.newSingleThreadExecutor();
+        rejectingExecutor.shutdownNow();
+        var graph = new ExpertCollaborationGraph(Map.of(
+                ExpertDomain.ENERGY, assignment -> new ExpertFinding(ExpertDomain.ENERGY,
+                        FindingStatus.SUPPORTED, "energy", List.of("energy:1"), .8, List.of()),
+                ExpertDomain.DEVICE, assignment -> new ExpertFinding(ExpertDomain.DEVICE,
+                        FindingStatus.SUPPORTED, "device", List.of("device:1"), .8, List.of()),
+                ExpertDomain.SECURITY, assignment -> new ExpertFinding(ExpertDomain.SECURITY,
+                        FindingStatus.SUPPORTED, "security", List.of("security:1"), .8, List.of())),
+                Runnable::run);
+        var service = new ExpertCollaborationService(question -> plan(), graph,
+                (plan, findings) -> new Synthesis(FindingStatus.SUPPORTED, "ok",
+                        List.of("energy:1"), .8, List.of()),
+                new CollaborationRunStore(Duration.ofMinutes(30), CLOCK), publisher,
+                rejectingExecutor, Duration.ofSeconds(2), CLOCK);
+
+        assertThatThrownBy(() -> service.start("energy consumption"))
+                .isInstanceOf(java.util.concurrent.RejectedExecutionException.class);
+        assertThat(published).hasValue(0);
     }
 
     @Test void publishesOneFailureWhenPlannerFails() throws Exception {

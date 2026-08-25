@@ -7,7 +7,9 @@ import java.util.List;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Structured analysis plan. The limit is bounded here so no downstream stage
@@ -20,6 +22,10 @@ public record QueryPlan(
         Map<String, String> filters,
         TimeRange timeRange,
         int limit) {
+
+    private static final java.util.regex.Pattern ENTITY_IDENTIFIER = java.util.regex.Pattern.compile(
+            "(?i)(?<![A-Za-z0-9_-])(?:[A-Za-z]\\d+|[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)+)"
+                    + "(?![A-Za-z0-9_-])");
 
     public QueryPlan {
         Objects.requireNonNull(question, "question");
@@ -44,7 +50,40 @@ public record QueryPlan(
             normalizedDimensions.add(normalized);
         }
         dimensions = List.copyOf(normalizedDimensions);
-        filters = Map.copyOf(Objects.requireNonNullElse(filters, Map.of()));
+        LinkedHashMap<String, String> normalizedFilters = new LinkedHashMap<>();
+        for (var filter : Objects.requireNonNullElse(filters, Map.<String, String>of()).entrySet()) {
+            if (filter.getKey() == null || filter.getKey().isBlank()
+                    || filter.getValue() == null || filter.getValue().isBlank()) {
+                throw new IllegalArgumentException("filter dimension and value must not be blank");
+            }
+            String dimension = filter.getKey().strip().toLowerCase(Locale.ROOT);
+            if (!dimension.matches("[a-z][a-z0-9_]*")) {
+                throw new IllegalArgumentException("filter dimension is not a supported catalog identifier");
+            }
+            boolean allowedByEveryMetric = metrics.stream().allMatch(metric ->
+                    metric.allowedDimensions().stream().anyMatch(value -> value.equalsIgnoreCase(dimension)));
+            if (!allowedByEveryMetric) {
+                throw new IllegalArgumentException("filter dimension is not approved by every metric: " + dimension);
+            }
+            String value = filter.getValue().strip();
+            if (!question.contains(value)) {
+                throw new IllegalArgumentException("filter value must appear in the original question: " + value);
+            }
+            if (normalizedFilters.putIfAbsent(dimension, value) != null) {
+                throw new IllegalArgumentException("duplicate filter dimension: " + dimension);
+            }
+        }
+        Set<String> filterValues = normalizedFilters.values().stream()
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        java.util.regex.Matcher scopedEntity = ENTITY_IDENTIFIER.matcher(question);
+        while (scopedEntity.find()) {
+            String identifier = scopedEntity.group();
+            if (!filterValues.contains(identifier)) {
+                throw new IllegalArgumentException(
+                        "query plan dropped entity identifier from original question: " + identifier);
+            }
+        }
+        filters = java.util.Collections.unmodifiableMap(normalizedFilters);
         Objects.requireNonNull(timeRange, "timeRange");
         if (!timeRange.isOrdered()) {
             throw new IllegalArgumentException("timeRange.from must be before timeRange.to");
@@ -52,6 +91,10 @@ public record QueryPlan(
         if (limit < 1 || limit > 500) {
             throw new IllegalArgumentException("limit must be 1..500");
         }
+    }
+
+    public static String filterParameterName(String dimension) {
+        return "filter_" + dimension.toLowerCase(Locale.ROOT);
     }
 
     public record TimeRange(Instant from, Instant to) {

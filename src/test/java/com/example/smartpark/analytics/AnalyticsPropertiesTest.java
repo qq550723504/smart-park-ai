@@ -82,6 +82,21 @@ class AnalyticsPropertiesTest {
     }
 
     @Test
+    void rejectsPrivilegedRuntimeLoginInsteadOfWeakeningTheMigratedRoleBoundary() {
+        AnalyticsProperties properties = new AnalyticsProperties();
+        properties.setEnabled(true);
+        properties.getDatasource().setUrl("jdbc:postgresql://localhost/smartpark");
+        properties.getDatasource().setUsername("admin");
+        properties.getDatasource().setPassword("secret");
+        properties.getDatasource().setAdminUsername("admin");
+        properties.getDatasource().setAdminPassword("secret-admin");
+
+        assertThatThrownBy(properties::validateUsable)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("smartpark_analytics_ro");
+    }
+
+    @Test
     void capabilityIsAbsentUnlessExplicitlyEnabled() {
         runner.run(context -> {
             assertThat(context).doesNotHaveBean(com.example.smartpark.analytics.catalog.MetricCatalog.class);

@@ -21,11 +21,39 @@ class QueryPlanTest {
 
     @Test
     void acceptsPlanWithinContractBounds() {
-        QueryPlan plan = new QueryPlan("上周能耗", List.of(metric("energy_kwh")),
+        QueryPlan plan = new QueryPlan("B1 上周能耗", List.of(metric("energy_kwh")),
                 List.of("building_id"), Map.of("building_id", "B1"),
                 new QueryPlan.TimeRange(now.minusSeconds(86400 * 7), now), 200);
         assertThat(plan.limit()).isEqualTo(200);
         assertThat(plan.metrics()).hasSize(1);
+    }
+
+    @Test
+    void entityFiltersMustUseCatalogDimensionsAndValuesFromTheOriginalQuestion() {
+        assertThatThrownBy(() -> new QueryPlan("B1 energy", List.of(metric("energy_kwh")),
+                List.of(), Map.of("customer_id", "B1"),
+                new QueryPlan.TimeRange(now.minusSeconds(60), now), 100))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("customer_id");
+        assertThatThrownBy(() -> new QueryPlan("B1 energy", List.of(metric("energy_kwh")),
+                List.of(), Map.of("building_id", "B2"),
+                new QueryPlan.TimeRange(now.minusSeconds(60), now), 100))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("original question");
+        assertThatThrownBy(() -> new QueryPlan("B1 energy", List.of(metric("energy_kwh")),
+                List.of(), Map.of("building_id", "b1"),
+                new QueryPlan.TimeRange(now.minusSeconds(60), now), 100))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("original question");
+    }
+
+    @Test
+    void rejectsAPlanThatDropsAnEntityIdentifierFromTheQuestion() {
+        assertThatThrownBy(() -> new QueryPlan("B1 energy", List.of(metric("energy_kwh")),
+                List.of(), Map.of(),
+                new QueryPlan.TimeRange(now.minusSeconds(60), now), 100))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("B1");
     }
 
     @Test

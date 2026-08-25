@@ -152,9 +152,6 @@ public final class SqlPlanGuard {
 
     private static void validateCompletePredicates(List<Branch> branches, QueryPlan plan)
             throws UnsafeSqlException {
-        if (!plan.filters().isEmpty()) {
-            throw reject("当前查询计划尚不支持普通维度过滤条件");
-        }
         Set<SqlRelationName> plannedSources = plan.metrics().stream()
                 .map(metric -> SqlRelationName.parseCatalogName(metric.sourceView()))
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
@@ -180,9 +177,23 @@ public final class SqlPlanGuard {
             consumeOne(remaining, term -> canonical(term).equals(fixedCondition),
                     "查询缺少指标的固定条件，请按口径过滤");
         }
+        for (var filter : plan.filters().entrySet()) {
+            String parameter = QueryPlan.filterParameterName(filter.getKey());
+            consumeOne(remaining, term -> isFilterEquality(term, filter.getKey(), parameter),
+                    "查询缺少计划实体过滤 " + filter.getKey());
+        }
         if (!remaining.isEmpty()) {
             throw reject("查询包含计划之外的结果谓词 " + remaining);
         }
+    }
+
+    private static boolean isFilterEquality(Expression expression, String column, String parameter) {
+        Expression term = unwrap(expression);
+        if (!(term instanceof EqualsTo equality)) return false;
+        return (isColumn(equality.getLeftExpression(), column)
+                && isParameter(equality.getRightExpression(), parameter))
+                || (isParameter(equality.getLeftExpression(), parameter)
+                && isColumn(equality.getRightExpression(), column));
     }
 
     private static void consumeOne(List<Expression> terms,

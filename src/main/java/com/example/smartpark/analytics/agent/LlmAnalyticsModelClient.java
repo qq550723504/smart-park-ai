@@ -19,6 +19,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -55,17 +56,28 @@ public class LlmAnalyticsModelClient implements AnalyticsModelClient {
                 你是园区运营分析的理解模块。只输出 JSON 对象，字段:
                 normalizedQuestion (字符串), metricTerms (name 数组), clarificationQuestions (字符串数组),
                 requestedDimensions (用户明确要求的目录维度 name 数组；总计查询为空数组),
+                requestedFilters (用户明确指定的实体过滤对象，键为目录维度 name、值为问题中原样出现的实体；没有则为空对象),
                 requestedTimeRange (没有时间要求时为 null；否则为对象，包含 ISO-8601 UTC 字段
                 fromInclusive 与 toExclusive)。所有相对时间都以当前时刻和园区时区解释。
                 当前时刻: %s；园区时区: Asia/Shanghai；园区当地时间: %s。
                 """.formatted(now, now.atZone(ZoneId.of("Asia/Shanghai"))) + catalogHint;
         JsonNode json = parseJson(call(system, question));
+        if (text(json, "normalizedQuestion").isBlank()) {
+            throw new IllegalStateException("normalizedQuestion must be a non-empty string");
+        }
         return new QuestionUnderstanding(
-                text(json, "normalizedQuestion"),
+                requireQuestion(question),
                 stringList(json, "metricTerms"),
                 stringList(json, "clarificationQuestions"),
                 requestedTimeRange(json),
-                stringList(json, "requestedDimensions"));
+                stringList(json, "requestedDimensions"),
+                stringMap(json, "requestedFilters"));
+    }
+
+    private static String requireQuestion(String question) {
+        String normalized = question == null ? "" : question.strip();
+        if (normalized.isBlank()) throw new IllegalArgumentException("question must not be blank");
+        return normalized;
     }
 
     @Override
@@ -81,7 +93,11 @@ public class LlmAnalyticsModelClient implements AnalyticsModelClient {
         if (request.rejectionReason() != null && !request.rejectionReason().isBlank()) {
             system = system + "\n上一次生成被拒绝，必须修复该问题: " + request.rejectionReason();
         }
+        String filterContract = plan.filters().isEmpty() ? "无" : plan.filters().entrySet().stream()
+                .map(entry -> entry.getKey() + " = :" + QueryPlan.filterParameterName(entry.getKey()))
+                .collect(Collectors.joining(", "));
         String user = "问题: " + plan.question() + "\n时间范围: :fromTs ~ :toTs\n指标:\n" + metricDescriptions
+                + "\n实体过滤（必须逐项使用绑定参数，不得写字面量）: " + filterContract
                 + "\nSchema:\n" + request.schemaDescription();
         return stripCodeFences(call(system, user));
     }
@@ -171,6 +187,22 @@ public class LlmAnalyticsModelClient implements AnalyticsModelClient {
             node.forEach(item -> values.add(item.asText()));
         }
         return values;
+    }
+
+    private static Map<String, String> stringMap(JsonNode json, String field) {
+        JsonNode node = json.get(field);
+        if (node == null || node.isNull()) return Map.of();
+        if (!node.isObject()) {
+            throw new IllegalStateException(field + " must be an object");
+        }
+        java.util.LinkedHashMap<String, String> values = new java.util.LinkedHashMap<>();
+        node.fields().forEachRemaining(entry -> {
+            if (!entry.getValue().isTextual() || entry.getValue().asText().isBlank()) {
+                throw new IllegalStateException(field + " values must be non-empty strings");
+            }
+            values.put(entry.getKey(), entry.getValue().asText().strip());
+        });
+        return java.util.Collections.unmodifiableMap(values);
     }
 
     private static RequestedTimeRange requestedTimeRange(JsonNode json) {

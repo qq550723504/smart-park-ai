@@ -188,8 +188,60 @@ public final class ExpertFindingValidator {
     private static String groundedConclusion(List<String> refs,
                                              Map<String, EvidenceLedger.Observation> observed) {
         return refs.stream()
-                .map(ref -> "已验证工具结果[" + ref + "]: " + canonicalResult(observed.get(ref).result()))
+                .map(ref -> "已验证工具结果[" + ref + "]: "
+                        + publicResult(ref, observed.get(ref).result()))
                 .collect(java.util.stream.Collectors.joining("；"));
+    }
+
+    /**
+     * Public findings are a separate disclosure boundary from internal tool
+     * observations. Known public-safe tool contracts retain their structured
+     * result; knowledge search is projected to metadata only, and any future
+     * unregistered tool fails closed instead of exposing its raw payload.
+     */
+    private static String publicResult(String ref, String result) {
+        String toolName = ref.startsWith("tool:") && ref.contains("#")
+                ? ref.substring("tool:".length(), ref.indexOf('#')) : "";
+        return switch (toolName) {
+            case "searchParkKnowledge" -> publicKnowledgeResult(result);
+            case "lookupEnergyConsumption", "lookupDeviceStatus", "lookupSecurityEvent",
+                    "lookupAlert", "lookupAlertHistory", "lookupWorkOrders" -> canonicalResult(result);
+            default -> "{\"notice\":\"tool result withheld from public output\"}";
+        };
+    }
+
+    private static String publicKnowledgeResult(String result) {
+        try {
+            JsonNode root = JSON.readTree(result.strip());
+            if (root == null || !root.isObject()) {
+                return "{\"notice\":\"knowledge result withheld from public output\"}";
+            }
+            com.fasterxml.jackson.databind.node.ObjectNode safe = JSON.createObjectNode();
+            copyField(root, safe, "query");
+            com.fasterxml.jackson.databind.node.ArrayNode documents = safe.putArray("documents");
+            JsonNode rawDocuments = root.get("documents");
+            if (rawDocuments != null && rawDocuments.isArray()) {
+                for (JsonNode document : rawDocuments) {
+                    if (!document.isObject()) continue;
+                    com.fasterxml.jackson.databind.node.ObjectNode metadata = documents.addObject();
+                    for (String field : List.of("id", "domain", "title", "tags", "updatedAt")) {
+                        copyField(document, metadata, field);
+                    }
+                }
+            }
+            copyField(root, safe, "error");
+            copyField(root, safe, "notice");
+            return JSON.writeValueAsString(safe);
+        } catch (Exception malformed) {
+            return "{\"notice\":\"knowledge result withheld from public output\"}";
+        }
+    }
+
+    private static void copyField(JsonNode source,
+                                  com.fasterxml.jackson.databind.node.ObjectNode target,
+                                  String field) {
+        JsonNode value = source.get(field);
+        if (value != null) target.set(field, value.deepCopy());
     }
 
     private static String canonicalResult(String result) {

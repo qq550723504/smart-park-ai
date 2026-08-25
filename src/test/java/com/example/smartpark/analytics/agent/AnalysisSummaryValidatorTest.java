@@ -43,6 +43,14 @@ class AnalysisSummaryValidatorTest {
     }
 
     @Test
+    void rejectsUnsupportedFiguresAdjacentToChineseText() {
+        assertThatThrownBy(() -> new AnalysisSummaryValidator().validate(
+                "B1能耗为9999kWh。", plan, result))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("不支持的数字");
+    }
+
+    @Test
     void rejectsEmptyConclusion() {
         assertThatThrownBy(() -> new AnalysisSummaryValidator().validate("  ", plan, result))
                 .isInstanceOf(IllegalArgumentException.class);
