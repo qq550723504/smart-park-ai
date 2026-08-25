@@ -5,14 +5,16 @@ import com.example.smartpark.analytics.model.QueryPlan;
 import com.example.smartpark.analytics.model.ValidatedSql;
 import net.sf.jsqlparser.expression.BinaryExpression;
 import net.sf.jsqlparser.expression.Expression;
+import net.sf.jsqlparser.expression.ExtractExpression;
 import net.sf.jsqlparser.expression.JdbcNamedParameter;
-import net.sf.jsqlparser.expression.Parenthesis;
+import net.sf.jsqlparser.expression.TimezoneExpression;
 import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
 import net.sf.jsqlparser.expression.operators.conditional.OrExpression;
 import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
 import net.sf.jsqlparser.expression.operators.relational.GreaterThan;
 import net.sf.jsqlparser.expression.operators.relational.GreaterThanEquals;
 import net.sf.jsqlparser.expression.operators.relational.MinorThan;
+import net.sf.jsqlparser.expression.operators.relational.ParenthesedExpressionList;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.statement.Statement;
@@ -191,6 +193,16 @@ public final class SqlPlanGuard {
         if (value instanceof JdbcNamedParameter parameter) {
             return "parameter:" + parameter.getName();
         }
+        if (value instanceof ExtractExpression extract) {
+            return "extract:" + extract.getName().toLowerCase(Locale.ROOT)
+                    + "(" + canonical(extract.getExpression()) + ")";
+        }
+        if (value instanceof TimezoneExpression timezone) {
+            return "timezone:(" + canonical(timezone.getLeftExpression()) + ","
+                    + timezone.getTimezoneExpressions().stream()
+                            .map(SqlPlanGuard::canonical)
+                            .toList() + ")";
+        }
         if (value instanceof AndExpression || value instanceof OrExpression) {
             BinaryExpression binary = (BinaryExpression) value;
             List<String> sides = new ArrayList<>(List.of(
@@ -213,8 +225,8 @@ public final class SqlPlanGuard {
 
     private static Expression unwrap(Expression expression) {
         Expression value = expression;
-        while (value instanceof Parenthesis parenthesis) {
-            value = parenthesis.getExpression();
+        while (value instanceof ParenthesedExpressionList<?> parenthesized && parenthesized.size() == 1) {
+            value = parenthesized.get(0);
         }
         return value;
     }

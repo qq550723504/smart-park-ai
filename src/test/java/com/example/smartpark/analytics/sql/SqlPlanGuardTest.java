@@ -77,6 +77,19 @@ class SqlPlanGuardTest {
         assertThatCode(() -> SqlPlanGuard.validate(sql, plan)).doesNotThrowAnyException();
     }
 
+    @Test
+    void acceptsNightConditionWithQualifiedTimeColumn() throws UnsafeSqlException {
+        QueryPlan plan = plan("night_energy_kwh");
+        ValidatedSql sql = SqlAstGuard.validate("""
+                SELECT e.building_id, SUM(e.kwh) FROM analytics.v_energy_hourly e
+                WHERE e.hour_ts >= :fromTs AND e.hour_ts < :toTs
+                  AND (EXTRACT(HOUR FROM e.hour_ts AT TIME ZONE 'Asia/Shanghai') >= 22
+                       OR EXTRACT(HOUR FROM e.hour_ts AT TIME ZONE 'Asia/Shanghai') < 6)
+                GROUP BY e.building_id LIMIT 100""");
+
+        assertThatCode(() -> SqlPlanGuard.validate(sql, plan)).doesNotThrowAnyException();
+    }
+
     private QueryPlan plan(String metricName) {
         MetricDefinition metric = catalog.findByName(metricName).orElseThrow();
         return new QueryPlan("test", List.of(metric), List.copyOf(metric.allowedDimensions()), Map.of(),

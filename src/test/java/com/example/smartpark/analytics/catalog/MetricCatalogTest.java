@@ -65,6 +65,7 @@ class MetricCatalogTest {
         for (var definition : catalog.all()) {
             assertThat(definition.allowedDimensions()).isNotEmpty();
             assertThat(definition.defaultLookbackDays()).isBetween(1, 90);
+            assertThat(definition.timeColumn()).isIn(definition.allowedDimensions());
             assertThat(definition.sourceView()).startsWith("analytics.v_");
             assertThat(definition.expression()).doesNotContainIgnoringCase("DROP", "INSERT", "UPDATE", "DELETE");
         }
