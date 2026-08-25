@@ -28,12 +28,23 @@ public final class ExpertFindingValidator {
 
     public ExpertFinding validateWithObservations(ExpertFinding finding,
                                                   Collection<EvidenceLedger.Observation> observations) {
+        return validateWithObservations(finding, observations, null);
+    }
+
+    /** Validates that cited tool calls stayed within the exact entity scope assigned to the expert. */
+    public ExpertFinding validateWithObservations(ExpertFinding finding,
+                                                  Collection<EvidenceLedger.Observation> observations,
+                                                  String assignment) {
         Objects.requireNonNull(finding, "finding");
         Map<String, EvidenceLedger.Observation> observed = Objects.requireNonNull(observations,
                         "observations").stream()
                 .collect(java.util.stream.Collectors.toUnmodifiableMap(
                         EvidenceLedger.Observation::ref, value -> value, (left, right) -> right));
         List<String> refs = finding.evidenceRefs();
+        if (finding.status() == FindingStatus.SUPPORTED && assignment != null
+                && !evidenceWithinAssignment(refs, observed, assignment)) {
+            return insufficientEvidence(finding);
+        }
         boolean validRefs = !refs.isEmpty() && new HashSet<>(observed.keySet()).containsAll(refs);
         if (finding.status() == FindingStatus.SUPPORTED) {
             boolean usableResults = validRefs && refs.stream()
@@ -52,6 +63,56 @@ public final class ExpertFindingValidator {
                     groundedConclusion(refs, observed), refs, finding.confidence(), finding.nextChecks());
         }
         return finding;
+    }
+
+    private ExpertFinding insufficientEvidence(ExpertFinding finding) {
+        return new ExpertFinding(finding.domain(), FindingStatus.INSUFFICIENT_EVIDENCE,
+                "Insufficient evidence: the cited tool call escaped the assigned entity scope.",
+                List.of(), 0, List.of("repeat the domain tool lookup for the assigned entity"));
+    }
+
+    private boolean evidenceWithinAssignment(List<String> refs,
+                                             Map<String, EvidenceLedger.Observation> observed,
+                                             String assignment) {
+        for (String ref : refs) {
+            EvidenceLedger.Observation observation = observed.get(ref);
+            if (observation == null || observation.input().isBlank()) continue;
+            try {
+                JsonNode root = JSON.readTree(observation.input());
+                if (!argumentsWithinAssignment(root, assignment)) return false;
+            } catch (Exception malformedInput) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean argumentsWithinAssignment(JsonNode node, String assignment) {
+        if (node == null) return true;
+        if (node.isObject()) {
+            var fields = node.fields();
+            while (fields.hasNext()) {
+                var entry = fields.next();
+                String key = entry.getKey().toLowerCase(Locale.ROOT);
+                JsonNode value = entry.getValue();
+                if (value.isTextual() && (key.endsWith("id") || key.endsWith("_id")
+                        || key.contains("zone"))) {
+                    if (!containsToken(assignment, value.asText().strip())) return false;
+                }
+                if (!argumentsWithinAssignment(value, assignment)) return false;
+            }
+        } else if (node.isArray()) {
+            for (JsonNode value : node) if (!argumentsWithinAssignment(value, assignment)) return false;
+        }
+        return true;
+    }
+
+    private boolean containsToken(String text, String token) {
+        if (token == null || token.isBlank()) return true;
+        return java.util.regex.Pattern.compile("(?i)(?<![A-Za-z0-9_-])"
+                        + java.util.regex.Pattern.quote(token)
+                        + "(?![A-Za-z0-9_-])")
+                .matcher(text == null ? "" : text).find();
     }
 
     private boolean claimMatchesToolResults(ExpertFinding finding, List<String> refs,

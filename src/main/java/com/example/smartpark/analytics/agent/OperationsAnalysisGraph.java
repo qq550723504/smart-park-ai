@@ -330,12 +330,19 @@ public class OperationsAnalysisGraph {
     Map<String, Object> resolveMetricAndDimensions(OverAllState state) {
         UUID runId = runId(state);
         RunContext ctx = contexts.get(runId);
+        String question = text(state, STATE_QUESTION);
         nodeStarted(ctx, runId, ExecutionStage.PLANNING, "解析指标与维度");
         List<com.example.smartpark.analytics.catalog.MetricDefinition> selected = new ArrayList<>();
         for (String term : ctx.understanding.metricTerms()) {
             MetricResolution resolution = catalog.resolve(term);
             if (resolution instanceof MetricResolution.Resolved resolved) {
-                selected.add(resolved.metric());
+                if (metricMentionedInQuestion(resolved.metric(), question)) {
+                    selected.add(resolved.metric());
+                } else {
+                    ctx.clarificationOptions.add(catalog.all().stream().map(m -> m.name()).toList());
+                    ctx.clarificationQuestions.add("模型选择的指标 “" + resolved.metric().name()
+                            + "” 未出现在原始问题术语中，请确认指标口径");
+                }
             } else if (resolution instanceof MetricResolution.Ambiguous ambiguous) {
                 ctx.clarificationOptions.add(ambiguous.candidates().stream().map(m -> m.name()).toList());
                 ctx.clarificationQuestions.add("“" + term + "”可以指: "
@@ -358,6 +365,16 @@ public class OperationsAnalysisGraph {
         nodeCompleted(ctx, runId, ExecutionStage.PLANNING, "指标解析完成: "
                 + selected.stream().map(m -> m.name()).reduce((a, b) -> a + ", " + b).orElse(""), null);
         return Map.of();
+    }
+
+    private static boolean metricMentionedInQuestion(
+            com.example.smartpark.analytics.catalog.MetricDefinition metric, String question) {
+        String normalizedQuestion = question == null ? "" : question.toLowerCase(java.util.Locale.ROOT);
+        return java.util.stream.Stream.concat(
+                        java.util.stream.Stream.of(metric.name(), metric.displayName()), metric.aliases().stream())
+                .filter(term -> term != null && !term.isBlank())
+                .map(term -> term.toLowerCase(java.util.Locale.ROOT))
+                .anyMatch(normalizedQuestion::contains);
     }
 
     Map<String, Object> recallAllowedSchema(OverAllState state) {

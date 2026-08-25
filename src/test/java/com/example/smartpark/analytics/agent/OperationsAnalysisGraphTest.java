@@ -341,6 +341,19 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
+    void modelMetricMustBeMentionedByTheOriginalQuestion() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("parking_entries"), List.of(),
+                        null, List.of("building_id")),
+                List.of(), null, null);
+
+        var outcome = graph.run(UUID.randomUUID(), "上周能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.NEEDS_CLARIFICATION);
+        assertThat(outcome.clarificationQuestions()).anyMatch(question -> question.contains("原始问题"));
+    }
+
+    @Test
     void unsafeSqlIsRepairedExactlyOnceThenSucceeds() {
         modelClient.reset(
                 new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of(),

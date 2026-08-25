@@ -66,6 +66,10 @@ public record QueryPlan(
                 throw new IllegalArgumentException("filter dimension is not approved by every metric: " + dimension);
             }
             String value = filter.getValue().strip();
+            if (!isFilterValueCompatible(dimension, value)) {
+                throw new IllegalArgumentException("filter value is incompatible with dimension "
+                        + dimension + ": " + value);
+            }
             if (!question.contains(value)) {
                 throw new IllegalArgumentException("filter value must appear in the original question: " + value);
             }
@@ -91,6 +95,21 @@ public record QueryPlan(
         if (limit < 1 || limit > 500) {
             throw new IllegalArgumentException("limit must be 1..500");
         }
+    }
+
+    /**
+     * Entity identifiers are typed at the plan boundary. Without this check a
+     * model can put a building identifier into a meter predicate (both are
+     * syntactically valid strings) and silently query a different scope.
+     */
+    private static boolean isFilterValueCompatible(String dimension, String value) {
+        return switch (dimension) {
+            case "building_id" -> value.matches("(?i)B\\d+");
+            case "meter_id" -> value.matches("(?i)MTR-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+");
+            case "device_id" -> value.matches("(?i)(?:AC|PWR|LFT|HUM|DR|CAM|DEV)-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+");
+            case "alert_id" -> value.matches("(?i)ALT-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+");
+            default -> true;
+        };
     }
 
     public static String filterParameterName(String dimension) {

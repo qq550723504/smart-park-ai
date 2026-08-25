@@ -115,7 +115,8 @@ public class CollaborationRuntimeConfiguration {
                     "You are the " + domain.name() + " park expert. Analyze only your assigned domain. Return only JSON with domain, status, conclusion, evidenceRefs, confidence, nextChecks. Cite evidence references ONLY by copying the [[evidence:...]] markers returned with each successful tool result; never invent or reuse a marker from another call.",
                     assignment, callbacks);
             ExpertFinding finding = new ExpertFindingParser().parse(response, domain);
-            return new ExpertFindingValidator().validateWithObservations(finding, observed.snapshotObservations());
+            return new ExpertFindingValidator().validateWithObservations(
+                    finding, observed.snapshotObservations(), assignment);
         };
     }
 
@@ -160,7 +161,7 @@ public class CollaborationRuntimeConfiguration {
         private String invoke(String input, java.util.function.UnaryOperator<String> action) {
             String result = action.apply(input);
             String ref = "tool:" + delegate.getToolDefinition().name() + "#" + digest(input);
-            observed.record(ref, result);
+            observed.record(ref, result, input);
             return result + "\n[[evidence:" + ref + "]]";
         }
     }

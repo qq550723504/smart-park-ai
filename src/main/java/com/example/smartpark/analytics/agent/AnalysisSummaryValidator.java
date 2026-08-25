@@ -33,6 +33,10 @@ public class AnalysisSummaryValidator {
             "上升", "下降", "增长", "降低", "增加", "减少", "最高", "最低", "趋势",
             "increase", "decrease", "highest", "lowest", "rising", "falling", "trend");
 
+    /** Qualitative predicates are not facts in a tabular result and must not be invented by the model. */
+    private static final List<String> UNSUPPORTED_QUALITATIVE_CLAIMS = List.of(
+            "异常", "正常", "偏高", "偏低", "严重", "安全", "不安全", "anomaly", "abnormal", "unsafe");
+
     public String validate(String conclusion, QueryPlan plan, TabularResult result) {
         if (conclusion == null || conclusion.isBlank()) {
             throw new IllegalArgumentException("结论不能为空");
@@ -43,14 +47,24 @@ public class AnalysisSummaryValidator {
                 throw new IllegalArgumentException("结论包含无法从结果表验证的趋势性描述: " + claim);
             }
         }
+        for (String claim : UNSUPPORTED_QUALITATIVE_CLAIMS) {
+            if (lowered.contains(claim)) {
+                throw new IllegalArgumentException("结论包含无法从结果表验证的定性描述: " + claim);
+            }
+        }
         List<String> supported = supportedFigures(result);
         java.util.regex.Matcher matcher = NUMBER.matcher(conclusion);
         List<String> unsupported = new ArrayList<>();
+        boolean hasFigure = false;
         while (matcher.find()) {
+            hasFigure = true;
             String figure = normalize(matcher.group());
             if (!supported.contains(figure)) {
                 unsupported.add(figure);
             }
+        }
+        if (!hasFigure) {
+            throw new IllegalArgumentException("结论缺少可验证的结果数值");
         }
         if (!unsupported.isEmpty()) {
             throw new IllegalArgumentException("结论包含结果数据不支持的数字: " + unsupported);
@@ -67,6 +81,7 @@ public class AnalysisSummaryValidator {
         Set<String> knownDimensions = rowFacts.stream()
                 .flatMap(row -> row.dimensionValues().stream())
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        boolean dimensionlessResult = rowFacts.stream().allMatch(row -> row.dimensionValues().isEmpty());
         List<Mention> mentions = new ArrayList<>();
         for (String dimension : knownDimensions) {
             if (NUMBER.matcher(dimension).matches()) continue;
@@ -109,7 +124,7 @@ public class AnalysisSummaryValidator {
             if (isMetadataFigure(conclusion, mention, result)) {
                 continue;
             }
-            if (dimensions.isEmpty()) {
+            if (dimensions.isEmpty() && !dimensionlessResult) {
                 throw new IllegalArgumentException("结论中的数字缺少可验证的维度对应关系: " + mention.value());
             }
             figures.add(mention.value());
@@ -253,8 +268,6 @@ public class AnalysisSummaryValidator {
             }
             dimensionIndexes.add(index);
         }
-        if (dimensionIndexes.isEmpty()) return List.of();
-
         List<RowFact> facts = new ArrayList<>();
         for (List<Object> row : result.rows()) {
             Set<String> dimensions = new LinkedHashSet<>();

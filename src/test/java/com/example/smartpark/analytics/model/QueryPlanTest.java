@@ -48,6 +48,22 @@ class QueryPlanTest {
     }
 
     @Test
+    void rejectsEntityValuesThatDoNotMatchTheirDimensionType() {
+        MetricDefinition energy = new MetricDefinition("energy_kwh", "能耗", java.util.Set.of("能耗"), "kWh",
+                "analytics.v_energy_hourly", java.util.Set.of("building_id", "meter_id", "hour_ts"),
+                "SUM(kwh)", 7);
+
+        assertThatThrownBy(() -> new QueryPlan("B1 能耗", List.of(energy), List.of(),
+                Map.of("meter_id", "B1"), new QueryPlan.TimeRange(now.minusSeconds(60), now), 100))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("meter_id");
+        assertThatThrownBy(() -> new QueryPlan("B1 能耗", List.of(energy), List.of(),
+                Map.of("building_id", "MTR-2"), new QueryPlan.TimeRange(now.minusSeconds(60), now), 100))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("building_id");
+    }
+
+    @Test
     void rejectsAPlanThatDropsAnEntityIdentifierFromTheQuestion() {
         assertThatThrownBy(() -> new QueryPlan("B1 energy", List.of(metric("energy_kwh")),
                 List.of(), Map.of(),

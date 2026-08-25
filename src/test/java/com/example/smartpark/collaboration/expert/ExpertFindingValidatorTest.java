@@ -50,6 +50,18 @@ class ExpertFindingValidatorTest {
         assertThat(validated.status()).isEqualTo(FindingStatus.SUPPORTED);
     }
 
+    @Test void rejectsEvidenceInvokedForAnEntityOutsideTheAssignedScope() {
+        ExpertFinding finding = new ExpertFinding(ExpertDomain.DEVICE, FindingStatus.SUPPORTED,
+                "DEV-POWER-002 is offline", java.util.List.of("tool:device:1"), .9, java.util.List.of());
+        EvidenceLedger ledger = new EvidenceLedger();
+        ledger.record("tool:device:1", "{\"deviceId\":\"DEV-POWER-002\",\"status\":\"OFFLINE\"}",
+                "{\"deviceId\":\"DEV-POWER-002\"}");
+
+        assertThat(validator.validateWithObservations(finding, ledger.snapshotObservations(),
+                "请只检查 DEV-POWER-001" ).status())
+                .isEqualTo(FindingStatus.INSUFFICIENT_EVIDENCE);
+    }
+
     @Test void rejectsAStatusClaimBoundToTheWrongEntity() {
         ExpertFinding finding = new ExpertFinding(ExpertDomain.DEVICE, FindingStatus.SUPPORTED,
                 "D1 is offline while D2 is offline", java.util.List.of("tool:device:1", "tool:device:2"),

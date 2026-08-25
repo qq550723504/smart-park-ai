@@ -115,6 +115,38 @@ class AnalysisSummaryValidatorTest {
     }
 
     @Test
+    void bindsDimensionlessMetricClaimsToTheirOwnResultColumns() {
+        var energy = new com.example.smartpark.analytics.catalog.MetricDefinition(
+                "energy_kwh", "能耗", java.util.Set.of("能耗"), "kWh",
+                "analytics.v_energy_hourly", java.util.Set.of("building_id", "hour_ts"),
+                "SUM(kwh)", "hour_ts", 7, null);
+        var deviation = new com.example.smartpark.analytics.catalog.MetricDefinition(
+                "energy_deviation_pct", "能耗偏差", java.util.Set.of("偏差"), "%",
+                "analytics.v_energy_hourly", java.util.Set.of("building_id", "hour_ts"),
+                "AVG(deviation_pct)", "hour_ts", 7, null);
+        QueryPlan dimensionlessPlan = new QueryPlan("楼栋能耗和偏差", List.of(energy, deviation),
+                List.of(), Map.of(), plan.timeRange(), 100);
+        TabularResult dimensionlessResult = new TabularResult(
+                List.of("energy_kwh", "energy_deviation_pct"),
+                List.of(List.of(10, 5)), false, 12);
+
+        assertThatThrownBy(() -> new AnalysisSummaryValidator().validate(
+                "能耗为 5 kWh，能耗偏差为 10%。", dimensionlessPlan, dimensionlessResult))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("对应");
+        assertThat(new AnalysisSummaryValidator().validate(
+                "能耗为 10 kWh，能耗偏差为 5%。", dimensionlessPlan, dimensionlessResult)).isNotBlank();
+    }
+
+    @Test
+    void rejectsQualitativeClaimsWithoutAResultFigure() {
+        assertThatThrownBy(() -> new AnalysisSummaryValidator().validate(
+                "B1 能耗异常。", plan, result))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("定性");
+    }
+
+    @Test
     void doesNotMistakeADataFigureForMetadataWhenItEqualsTheRowCount() {
         QueryPlan riskPlan = new QueryPlan("按风险等级统计告警",
                 List.of(new com.example.smartpark.analytics.catalog.MetricDefinition(
