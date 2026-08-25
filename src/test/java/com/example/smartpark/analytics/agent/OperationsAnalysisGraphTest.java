@@ -198,14 +198,14 @@ class OperationsAnalysisGraphTest {
     @Test
     void emitsTheDeclaredSqlLifecycleEventTypesOnTheHappyPath() {
         modelClient.reset(
-                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of(),
+                new AnalyticsModelClient.QuestionUnderstanding("上周各楼宇能耗", List.of("能耗"), List.of(),
                         null, List.of("building_id")),
                 List.of(GOOD_SQL),
                 new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("energy_kwh"), "", "kWh"),
                 "共 3 行结果。");
         UUID runId = UUID.randomUUID();
 
-        graph.run(runId, "上周能耗");
+        graph.run(runId, "上周各楼宇能耗");
 
         List<ExecutionEventType> types = publisher.history(runId).stream()
                 .map(ExecutionEvent::eventType)
@@ -223,14 +223,14 @@ class OperationsAnalysisGraphTest {
     @Test
     void publishesSqlRejectedWhenGeneratedSqlFailsValidation() {
         modelClient.reset(
-                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of(),
+                new AnalyticsModelClient.QuestionUnderstanding("上周各楼宇能耗", List.of("能耗"), List.of(),
                         null, List.of("building_id")),
                 List.of(LIMIT_LESS_SQL, GOOD_SQL),
                 null,
                 "共 3 行结果。");
         UUID runId = UUID.randomUUID();
 
-        var outcome = graph.run(runId, "上周能耗");
+        var outcome = graph.run(runId, "上周各楼宇能耗");
 
         assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
         assertThat(publisher.history(runId).stream()
@@ -281,13 +281,13 @@ class OperationsAnalysisGraphTest {
                 WHERE hour_ts >= :fromTs AND hour_ts < :toTs
                 GROUP BY building_id LIMIT 500""";
         modelClient.reset(
-                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of(),
+                new AnalyticsModelClient.QuestionUnderstanding("上周各楼宇能耗", List.of("能耗"), List.of(),
                         null, List.of("building_id")),
                 List.of(limit500, GOOD_SQL),
                 new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("energy_kwh"), "", "kWh"),
                 "共 3 行结果。");
 
-        var outcome = graph.run(UUID.randomUUID(), "上周能耗");
+        var outcome = graph.run(UUID.randomUUID(), "上周各楼宇能耗");
 
         assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
         assertThat(modelClient.lastRejectionReason()).contains("完全一致");
@@ -310,15 +310,15 @@ class OperationsAnalysisGraphTest {
     @Test
     void resumedRunPublishesResumedInsteadOfASecondRunStarted() {
         modelClient.reset(
-                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of(),
+                new AnalyticsModelClient.QuestionUnderstanding("上周各楼宇能耗", List.of("能耗"), List.of(),
                         null, List.of("building_id")),
                 List.of(GOOD_SQL),
                 new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("energy_kwh"), "", "kWh"),
                 "共 3 行结果。");
         UUID runId = UUID.randomUUID();
 
-        graph.run(runId, "上周能耗", new AnalyticsModelClient.QuestionUnderstanding(
-                "上周能耗", List.of("能耗"), List.of()));
+        graph.run(runId, "上周各楼宇能耗", new AnalyticsModelClient.QuestionUnderstanding(
+                "上周各楼宇能耗", List.of("能耗"), List.of()));
 
         // Lifecycle registration moved to OperationsAnalysisService: the graph
         // itself must not emit RUN_STARTED/RESUMED (the service publishes
@@ -355,15 +355,41 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
+    void rejectsModelTimeRangeThatTheOriginalQuestionDidNotRequest() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("昨天能耗", List.of("能耗"), List.of(),
+                        new AnalyticsModelClient.RequestedTimeRange(
+                                Instant.parse("2026-07-01T00:00:00Z"), Instant.parse("2026-08-01T00:00:00Z")),
+                        List.of()),
+                List.of(), null, null);
+
+        var outcome = graph.run(UUID.randomUUID(), "昨天能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.FAILED);
+    }
+
+    @Test
+    void rejectsModelDimensionThatTheOriginalQuestionDidNotRequest() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("总能耗", List.of("能耗"), List.of(),
+                        null, List.of("building_id")),
+                List.of(), null, null);
+
+        var outcome = graph.run(UUID.randomUUID(), "总能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.FAILED);
+    }
+
+    @Test
     void unsafeSqlIsRepairedExactlyOnceThenSucceeds() {
         modelClient.reset(
-                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of(),
+                new AnalyticsModelClient.QuestionUnderstanding("上周各楼宇能耗", List.of("能耗"), List.of(),
                         null, List.of("building_id")),
                 List.of(LIMIT_LESS_SQL, GOOD_SQL),
                 null,
                 "共 3 行结果。");
 
-        var outcome = graph.run(UUID.randomUUID(), "上周能耗");
+        var outcome = graph.run(UUID.randomUUID(), "上周各楼宇能耗");
 
         assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
         assertThat(modelClient.generateSqlInvocations()).isEqualTo(2);
@@ -373,12 +399,12 @@ class OperationsAnalysisGraphTest {
     @Test
     void secondUnsafeSqlFailureTerminatesTheRun() {
         modelClient.reset(
-                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of(),
+                new AnalyticsModelClient.QuestionUnderstanding("上周各楼宇能耗", List.of("能耗"), List.of(),
                         null, List.of("building_id")),
                 List.of(LIMIT_LESS_SQL, LIMIT_LESS_SQL),
                 null, null);
 
-        var outcome = graph.run(UUID.randomUUID(), "上周能耗");
+        var outcome = graph.run(UUID.randomUUID(), "上周各楼宇能耗");
 
         assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.FAILED);
         assertThat(outcome.failureStage()).isEqualTo("validateSqlAst");
@@ -388,13 +414,13 @@ class OperationsAnalysisGraphTest {
     @Test
     void invalidChartProposalFallsBackToRealTableColumns() {
         modelClient.reset(
-                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of(),
+                new AnalyticsModelClient.QuestionUnderstanding("上周各楼宇能耗", List.of("能耗"), List.of(),
                         null, List.of("building_id")),
                 List.of(GOOD_SQL),
                 new ChartSpec.Proposal("LINE", "趋势", "not_a_column", List.of("also_missing"), "", "kWh"),
                 "共 3 行结果。");
 
-        var outcome = graph.run(UUID.randomUUID(), "上周能耗");
+        var outcome = graph.run(UUID.randomUUID(), "上周各楼宇能耗");
 
         assertThat(outcome.chart().type()).isEqualTo(ChartSpec.ChartType.TABLE);
         assertThat(outcome.chart().xField()).isIn(outcome.result().columnNames());
@@ -403,13 +429,13 @@ class OperationsAnalysisGraphTest {
     @Test
     void hallucinatedSummaryNumbersAreRejectedButResultSurvives() {
         modelClient.reset(
-                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of(),
+                new AnalyticsModelClient.QuestionUnderstanding("上周各楼宇能耗", List.of("能耗"), List.of(),
                         null, List.of("building_id")),
                 List.of(GOOD_SQL),
                 new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("energy_kwh"), "", "kWh"),
                 "总计高达 99999.99 kWh，环比上升 37%。");
 
-        var outcome = graph.run(UUID.randomUUID(), "上周能耗");
+        var outcome = graph.run(UUID.randomUUID(), "上周各楼宇能耗");
 
         assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
         assertThat(outcome.summary()).isEmpty();

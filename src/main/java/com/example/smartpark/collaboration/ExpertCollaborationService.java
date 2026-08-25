@@ -1,6 +1,7 @@
 package com.example.smartpark.collaboration;
 
 import com.example.smartpark.collaboration.model.CollaborationRun;
+import com.example.smartpark.collaboration.model.FindingStatus;
 import com.example.smartpark.collaboration.model.SupervisorPlan;
 import com.example.smartpark.collaboration.model.Synthesis;
 import com.example.smartpark.execution.ExecutionEventPublisher;
@@ -85,6 +86,13 @@ public final class ExpertCollaborationService {
             // hangs, times out or throws, the failure path keeps the partial
             // findings instead of discarding them with an empty list.
             if (!saveFindingsIfRunning(id, question, plan, findings)) return;
+            if (!findings.isEmpty() && findings.stream()
+                    .allMatch(finding -> finding.status() == FindingStatus.FAILED)) {
+                failIfRunningWithSynthesis(id, plan, findings,
+                        new Synthesis(FindingStatus.FAILED, "所有专家分支均失败", List.of(), 0,
+                                List.of("retry all selected expert branches")));
+                return;
+            }
             Synthesis synthesis = synthesizer.synthesize(plan, findings);
             completeIfRunning(id, question, plan, findings, synthesis);
         } catch (Exception ex) { failIfRunning(id, "expert collaboration failed"); }

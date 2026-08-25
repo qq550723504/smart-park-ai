@@ -82,6 +82,7 @@ public class AnalysisSummaryValidator {
                 .flatMap(row -> row.dimensionValues().stream())
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
         boolean dimensionlessResult = rowFacts.stream().allMatch(row -> row.dimensionValues().isEmpty());
+        if (dimensionlessResult) validateDimensionlessEntityClaims(conclusion, plan);
         List<Mention> mentions = new ArrayList<>();
         for (String dimension : knownDimensions) {
             if (NUMBER.matcher(dimension).matches()) continue;
@@ -130,6 +131,20 @@ public class AnalysisSummaryValidator {
             figures.add(mention.value());
         }
         if (!figures.isEmpty()) validateRowGroup(dimensions, figures, rowFacts, plan, conclusion);
+    }
+
+    private void validateDimensionlessEntityClaims(String conclusion, QueryPlan plan) {
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile(
+                "(?i)(?<![A-Za-z0-9_-])(?:B\\d+|(?:MTR|AC|PWR|LFT|HUM|DR|CAM|DEV)-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+)(?![A-Za-z0-9_-])")
+                .matcher(conclusion);
+        Set<String> allowed = plan.filters().values().stream()
+                .map(value -> value.toLowerCase(Locale.ROOT)).collect(java.util.stream.Collectors.toSet());
+        while (matcher.find()) {
+            String entity = matcher.group().toLowerCase(Locale.ROOT);
+            if (!allowed.contains(entity)) {
+                throw new IllegalArgumentException("无维度汇总结论包含未绑定的实体: " + matcher.group());
+            }
+        }
     }
 
     private void validateRowGroup(Set<String> dimensions, Set<String> figures, List<RowFact> rowFacts,

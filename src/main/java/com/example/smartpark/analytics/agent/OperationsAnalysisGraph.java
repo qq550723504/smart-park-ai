@@ -405,13 +405,15 @@ public class OperationsAnalysisGraph {
         Instant now = Instant.now(clock);
         int lookbackDays = ctx.metrics.stream().mapToInt(m -> m.defaultLookbackDays()).max().orElse(7);
         AnalyticsModelClient.RequestedTimeRange requested = ctx.understanding.requestedTimeRange();
+        String originalQuestion = text(state, STATE_QUESTION).strip();
+        validateRequestedTimeRange(originalQuestion, requested, now);
         QueryPlan.TimeRange timeRange = requested == null
                 ? new QueryPlan.TimeRange(now.minus(Duration.ofDays(lookbackDays)), now)
                 : new QueryPlan.TimeRange(requested.fromInclusive(), requested.toExclusive());
         ctx.plan = new QueryPlan(
-                ctx.understanding.normalizedQuestion(),
+                originalQuestion,
                 ctx.metrics,
-                validatedRequestedDimensions(ctx),
+                validatedRequestedDimensions(ctx, originalQuestion),
                 ctx.understanding.requestedFilters(),
                 timeRange,
                 200);
@@ -427,7 +429,7 @@ public class OperationsAnalysisGraph {
         return Map.of();
     }
 
-    private static List<String> validatedRequestedDimensions(RunContext ctx) {
+    private static List<String> validatedRequestedDimensions(RunContext ctx, String originalQuestion) {
         LinkedHashSet<String> requested = new LinkedHashSet<>();
         for (String dimension : ctx.understanding.requestedDimensions()) {
             if (dimension == null || dimension.isBlank()) {
@@ -440,9 +442,70 @@ public class OperationsAnalysisGraph {
             if (!allowedByEveryMetric) {
                 throw new IllegalArgumentException("请求维度未获所有指标目录批准: " + dimension);
             }
+            if (!dimensionMentionedInQuestion(normalized, originalQuestion)) {
+                throw new IllegalArgumentException("请求维度未出现在原始问题意图中: " + dimension);
+            }
             requested.add(normalized);
         }
         return List.copyOf(requested);
+    }
+
+    private static boolean dimensionMentionedInQuestion(String dimension, String question) {
+        String normalized = question == null ? "" : question.toLowerCase(java.util.Locale.ROOT);
+        return switch (dimension) {
+            case "building_id" -> containsAny(normalized, "building", "楼宇", "楼栋", "建筑", "栋", "各楼");
+            case "meter_id" -> containsAny(normalized, "meter", "表计", "电表", "表号");
+            case "hour_ts" -> containsAny(normalized, "hour", "小时", "逐时", "按小时", "每小时");
+            case "occurred_at" -> containsAny(normalized, "occurred", "发生时间", "时间", "按日", "日期");
+            case "snapshot_at" -> containsAny(normalized, "snapshot", "快照", "时间");
+            case "stat_date" -> containsAny(normalized, "stat", "日期", "按日", "每天", "每日");
+            case "risk_level" -> containsAny(normalized, "risk", "风险", "风险等级");
+            case "category" -> containsAny(normalized, "category", "类别", "分类", "类型");
+            case "status" -> containsAny(normalized, "status", "状态");
+            case "device_type" -> containsAny(normalized, "device", "设备", "设备类型");
+            case "parking_zone" -> containsAny(normalized, "parking", "停车", "车区", "区域");
+            default -> normalized.contains(dimension.toLowerCase(java.util.Locale.ROOT));
+        };
+    }
+
+    private static boolean containsAny(String text, String... terms) {
+        for (String term : terms) if (text.contains(term.toLowerCase(java.util.Locale.ROOT))) return true;
+        return false;
+    }
+
+    private static void validateRequestedTimeRange(String question,
+                                                    AnalyticsModelClient.RequestedTimeRange requested,
+                                                    Instant now) {
+        if (requested == null) return;
+        String normalized = question.toLowerCase(java.util.Locale.ROOT);
+        QueryPlan.TimeRange expected = expectedTimeRange(normalized, now);
+        if (expected == null || !expected.from().equals(requested.fromInclusive())
+                || !expected.to().equals(requested.toExclusive())) {
+            throw new IllegalArgumentException("模型时间范围未被原始问题支持");
+        }
+    }
+
+    private static QueryPlan.TimeRange expectedTimeRange(String question, Instant now) {
+        java.util.regex.Matcher days = java.util.regex.Pattern.compile("(?:过去|最近|近)(\\d+)(?:天|日)")
+                .matcher(question);
+        if (days.find()) {
+            long count = Long.parseLong(days.group(1));
+            return new QueryPlan.TimeRange(now.minus(Duration.ofDays(count)), now);
+        }
+        if (question.contains("昨天") || question.contains("昨日")) {
+            java.time.Instant today = now.atZone(java.time.ZoneOffset.UTC).toLocalDate()
+                    .atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
+            return new QueryPlan.TimeRange(today.minus(Duration.ofDays(1)), today);
+        }
+        if (question.contains("今天") || question.contains("今日")) {
+            java.time.Instant today = now.atZone(java.time.ZoneOffset.UTC).toLocalDate()
+                    .atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
+            return new QueryPlan.TimeRange(today, now);
+        }
+        if (question.contains("上周") || question.contains("过去一周") || question.contains("最近一周")) {
+            return new QueryPlan.TimeRange(now.minus(Duration.ofDays(7)), now);
+        }
+        return null;
     }
 
     Map<String, Object> generateSql(OverAllState state) {

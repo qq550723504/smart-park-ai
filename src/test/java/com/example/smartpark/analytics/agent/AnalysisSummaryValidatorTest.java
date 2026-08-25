@@ -147,6 +147,23 @@ class AnalysisSummaryValidatorTest {
     }
 
     @Test
+    void rejectsUnboundEntityClaimsForDimensionlessTotals() {
+        QueryPlan totalPlan = new QueryPlan("总能耗", plan.metrics(), List.of(), Map.of(),
+                plan.timeRange(), 100);
+        TabularResult totalResult = new TabularResult(
+                List.of("energy_kwh"), List.of(List.of(10)), false, 12);
+
+        assertThatThrownBy(() -> new AnalysisSummaryValidator().validate(
+                "B9 能耗为 10 kWh。", totalPlan, totalResult))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("未绑定");
+        assertThat(new AnalysisSummaryValidator().validate(
+                "B1 能耗为 10 kWh。", new QueryPlan("B1 能耗", plan.metrics(), List.of(),
+                        Map.of("building_id", "B1"), plan.timeRange(), 100), totalResult))
+                .isNotBlank();
+    }
+
+    @Test
     void doesNotMistakeADataFigureForMetadataWhenItEqualsTheRowCount() {
         QueryPlan riskPlan = new QueryPlan("按风险等级统计告警",
                 List.of(new com.example.smartpark.analytics.catalog.MetricDefinition(

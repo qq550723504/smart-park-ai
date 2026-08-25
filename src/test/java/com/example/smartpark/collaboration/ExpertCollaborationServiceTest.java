@@ -51,6 +51,38 @@ class ExpertCollaborationServiceTest {
                         ExecutionEventType.EXPERT_HANDOFF, ExecutionEventType.COMPLETED);
     }
 
+    @Test void derivesFailureWhenEveryExpertBranchFailsBeforeTrustingSynthesisStatus() throws Exception {
+        var publisher = new InMemoryExecutionEventPublisher();
+        var executor = Executors.newSingleThreadExecutor();
+        AtomicBoolean synthesizerCalled = new AtomicBoolean();
+        try {
+            var failedGraph = new ExpertCollaborationGraph(Map.of(
+                    ExpertDomain.ENERGY, assignment -> new ExpertFinding(ExpertDomain.ENERGY,
+                            FindingStatus.FAILED, "energy lookup failed", List.of(), 0, List.of("retry")),
+                    ExpertDomain.DEVICE, assignment -> new ExpertFinding(ExpertDomain.DEVICE,
+                            FindingStatus.FAILED, "device lookup failed", List.of(), 0, List.of("retry")),
+                    ExpertDomain.SECURITY, assignment -> new ExpertFinding(ExpertDomain.SECURITY,
+                            FindingStatus.FAILED, "security lookup failed", List.of(), 0, List.of("retry"))),
+                    Runnable::run);
+            var service = new ExpertCollaborationService(q -> plan(), failedGraph,
+                    (p, findings) -> {
+                        synthesizerCalled.set(true);
+                        return new Synthesis(FindingStatus.INSUFFICIENT_EVIDENCE, "model says insufficient",
+                                List.of(), 0, List.of("more evidence"));
+                    }, new CollaborationRunStore(Duration.ofMinutes(30), CLOCK), publisher,
+                    executor, Duration.ofSeconds(2), CLOCK);
+
+            var run = service.start("energy consumption");
+            waitFor(() -> service.get(run.runId()).status() == CollaborationRun.RunStatus.FAILED);
+            assertThat(service.get(run.runId()).synthesis()).extracting(Synthesis::status)
+                    .isEqualTo(FindingStatus.FAILED);
+            assertThat(service.get(run.runId()).synthesis().conclusion()).isEqualTo("所有专家分支均失败");
+            assertThat(synthesizerCalled).isFalse();
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
     @Test void rejectsOverloadBeforeRegisteringOrPublishingARun() {
         AtomicInteger published = new AtomicInteger();
         com.example.smartpark.execution.ExecutionEventPublisher publisher =

@@ -3,6 +3,7 @@ package com.example.smartpark.analytics;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -70,23 +71,25 @@ public class AnalyticsConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean
+    AnalyticsRoleCredentialProvisioner analyticsRoleCredentialProvisioner() {
+        return properties -> AnalyticsRoleCredentials.sync(properties.getDatasource().getUrl(),
+                properties.getDatasource().getAdminUsername(), properties.getDatasource().getAdminPassword(),
+                properties.getDatasource().getPassword());
+    }
+
+    @Bean
     org.springframework.boot.ApplicationRunner analyticsRolePasswordProvisioner(
-            AnalyticsProperties properties) {
+            AnalyticsProperties properties, AnalyticsRoleCredentialProvisioner provisioner) {
         // Binds the configured read-only credential to the role created
         // password-less by V1 — via the single audited quoting point, never
-        // through migration SQL interpolation. Runs at application startup;
-        // failure is logged but non-fatal so boot robustness is unchanged
-        // (mismatched credentials still surface on the first analysis query).
+        // through migration SQL interpolation. Runs at application startup and
+        // fails the application context if the runtime credential cannot be
+        // provisioned; an analytics instance must never advertise a broken
+        // database boundary.
         return args -> {
-            try {
-                AnalyticsRoleCredentials.sync(properties.getDatasource().getUrl(),
-                        properties.getDatasource().getAdminUsername(),
-                        properties.getDatasource().getAdminPassword(),
-                        properties.getDatasource().getPassword());
-            } catch (RuntimeException provisioningFailure) {
-                org.slf4j.LoggerFactory.getLogger(AnalyticsConfiguration.class)
-                        .warn("分析只读账号密码同步失败: {}", provisioningFailure.getMessage());
-            }
+            properties.validateUsable();
+            provisioner.provision(properties);
         };
     }
 

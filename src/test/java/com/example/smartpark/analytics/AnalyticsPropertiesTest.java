@@ -32,6 +32,13 @@ class AnalyticsPropertiesTest {
     @EnableConfigurationProperties(AnalyticsProperties.class)
     static class TestConfig {
         @org.springframework.context.annotation.Bean
+        AnalyticsRoleCredentialProvisioner analyticsRoleCredentialProvisioner() {
+            // These wiring tests use a fake JDBC URL; provisioning failure is
+            // covered separately with an explicit failing provisioner.
+            return properties -> { };
+        }
+
+        @org.springframework.context.annotation.Bean
         org.springframework.ai.chat.model.ChatModel chatModel() {
             return new com.example.smartpark.agent.TestChatModel();
         }
@@ -88,6 +95,39 @@ class AnalyticsPropertiesTest {
                     org.assertj.core.api.Assertions.assertThat(startupFailure).isNotNull();
                     assertThat(startupFailure.getMessage()).contains("完整的数据源配置");
                 });
+    }
+
+    @Test
+    void roleCredentialProvisioningFailureFailsStartup() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(FailingProvisionerConfig.class,
+                        com.example.smartpark.analytics.AnalyticsConfiguration.class)
+                .withPropertyValues(FULL_DATASOURCE)
+                .run(context -> {
+                    var runner = context.getBean(org.springframework.boot.ApplicationRunner.class);
+                    assertThatThrownBy(() -> runner.run(
+                            new org.springframework.boot.DefaultApplicationArguments()))
+                            .hasMessage("role provisioning failed");
+                });
+    }
+
+    @Configuration
+    @EnableConfigurationProperties(AnalyticsProperties.class)
+    static class FailingProvisionerConfig {
+        @org.springframework.context.annotation.Bean
+        AnalyticsRoleCredentialProvisioner analyticsRoleCredentialProvisioner() {
+            return properties -> { throw new IllegalStateException("role provisioning failed"); };
+        }
+
+        @org.springframework.context.annotation.Bean
+        org.springframework.ai.chat.model.ChatModel chatModel() {
+            return new com.example.smartpark.agent.TestChatModel();
+        }
+
+        @org.springframework.context.annotation.Bean
+        com.example.smartpark.execution.ExecutionEventPublisher events() {
+            return new com.example.smartpark.execution.InMemoryExecutionEventPublisher();
+        }
     }
 
     @Test
