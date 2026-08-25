@@ -54,7 +54,7 @@ class OperationsAnalysisServiceTest {
         OperationsAnalysisGraph.AnalysisRunResult clarification = new OperationsAnalysisGraph.AnalysisRunResult(
                 UUID.randomUUID(), OperationsAnalysisGraph.RunOutcome.NEEDS_CLARIFICATION,
                 List.of("“告警”可以指: 告警数量(alert_count) / 高风险告警数量(high_risk_alert_count)"),
-                null, null, null, null);
+                List.of(List.of("alert_count", "high_risk_alert_count")), null, null, null, null);
         AtomicReference<AnalyticsModelClient.QuestionUnderstanding> pinned = new AtomicReference<>();
         OperationsAnalysisService service = service((runId, question, pinnedUnderstanding) -> {
             if (pinnedUnderstanding == null) {
@@ -113,7 +113,7 @@ class OperationsAnalysisServiceTest {
     void failedRunsExposeTheirStageAndRemainTerminal() {
         OperationsAnalysisService service = service(
                 (runId, question, pinned) -> new OperationsAnalysisGraph.AnalysisRunResult(runId,
-                        OperationsAnalysisGraph.RunOutcome.FAILED, List.of(),
+                        OperationsAnalysisGraph.RunOutcome.FAILED, List.of(), List.of(),
                         null, null, null, "validateSqlAst"),
                 directExecutor());
 
@@ -172,13 +172,13 @@ class OperationsAnalysisServiceTest {
 
     private static OperationsAnalysisGraph.AnalysisRunResult completed(UUID runId) {
         return new OperationsAnalysisGraph.AnalysisRunResult(runId,
-                OperationsAnalysisGraph.RunOutcome.COMPLETED, List.of(),
+                OperationsAnalysisGraph.RunOutcome.COMPLETED, List.of(), List.of(),
                 null, null, "共 3 行结果。", null);
     }
 
     private static OperationsAnalysisGraph.AnalysisRunResult clarifying(UUID runId) {
         return new OperationsAnalysisGraph.AnalysisRunResult(runId,
                 OperationsAnalysisGraph.RunOutcome.NEEDS_CLARIFICATION,
-                List.of("请明确指标口径"), null, null, null, null);
+                List.of("请明确指标口径"), List.of(List.of("energy_kwh")), null, null, null, null);
     }
 }

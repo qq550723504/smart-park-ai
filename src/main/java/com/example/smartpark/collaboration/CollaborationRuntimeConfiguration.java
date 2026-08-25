@@ -65,6 +65,7 @@ public class CollaborationRuntimeConfiguration {
             @Qualifier("securityExpertTools") ObjectProvider<ExpertToolSet> securityProvider,
             @Qualifier("collaborationExecutor") ExecutorService executor,
             ObjectProvider<ChatModel> modelProvider,
+            ExecutionEventPublisher events,
             ExpertCollaborationProperties properties) {
         ExpertToolSet energy = energyProvider.getIfAvailable();
         ExpertToolSet device = deviceProvider.getIfAvailable();
@@ -75,7 +76,7 @@ public class CollaborationRuntimeConfiguration {
         experts.put(ExpertDomain.ENERGY, expert(model, ExpertDomain.ENERGY, energy));
         experts.put(ExpertDomain.DEVICE, expert(model, ExpertDomain.DEVICE, device));
         experts.put(ExpertDomain.SECURITY, expert(model, ExpertDomain.SECURITY, security));
-        return new ExpertCollaborationGraph(experts, executor, properties.getExpertTimeout());
+        return new ExpertCollaborationGraph(experts, executor, properties.getExpertTimeout(), events);
     }
 
     @Bean

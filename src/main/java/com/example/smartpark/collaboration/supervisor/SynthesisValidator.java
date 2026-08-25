@@ -14,14 +14,20 @@ public final class SynthesisValidator {
     private static final Pattern FACT_TOKEN = Pattern.compile("(?<![A-Za-z0-9])[0-9]+(?:\\.[0-9]+)?(?![A-Za-z0-9])|\\b[A-Z]{2,}[A-Z0-9-]*[0-9][A-Z0-9-]*\\b");
 
     public Synthesis validate(Synthesis synthesis, List<ExpertFinding> findings) {
+        // Evidence and facts may only come from findings that survived
+        // evidence validation: FAILED / INSUFFICIENT_EVIDENCE branches are
+        // allowed to retain arbitrary references and must not leak into a
+        // supported synthesis.
         Set<String> allowedRefs = new HashSet<>();
         Set<String> allowedFacts = new HashSet<>();
         for (ExpertFinding finding : findings) {
-            allowedRefs.addAll(finding.evidenceRefs());
-            collectFacts(finding.conclusion(), allowedFacts);
+            if (finding.status() == FindingStatus.SUPPORTED) {
+                allowedRefs.addAll(finding.evidenceRefs());
+                collectFacts(finding.conclusion(), allowedFacts);
+            }
         }
         if (!allowedRefs.containsAll(synthesis.evidenceRefs())) {
-            throw new IllegalArgumentException("synthesis contains evidence not present in findings");
+            throw new IllegalArgumentException("synthesis contains evidence not present in validated findings");
         }
         Set<String> synthesisFacts = new HashSet<>();
         collectFacts(synthesis.conclusion(), synthesisFacts);
@@ -32,6 +38,9 @@ public final class SynthesisValidator {
         boolean hasSupported = findings.stream().anyMatch(f -> f.status() == FindingStatus.SUPPORTED);
         if (!hasSupported && synthesis.status() == FindingStatus.SUPPORTED) {
             throw new IllegalArgumentException("synthesis cannot be supported without a supported finding");
+        }
+        if (synthesis.status() == FindingStatus.SUPPORTED && synthesis.evidenceRefs().isEmpty()) {
+            throw new IllegalArgumentException("supported synthesis must cite validated evidence references");
         }
         boolean hasUncertainty = findings.stream().anyMatch(f -> f.status() != FindingStatus.SUPPORTED);
         if (hasUncertainty && synthesis.uncertainties().isEmpty()) {

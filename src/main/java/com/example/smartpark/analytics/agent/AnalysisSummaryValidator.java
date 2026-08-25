@@ -17,9 +17,36 @@ public class AnalysisSummaryValidator {
     private static final java.util.regex.Pattern NUMBER = java.util.regex.Pattern.compile(
             "(?<![A-Za-z0-9])-?[0-9]+(?:\\.[0-9]+)?(?![0-9A-Za-z])");
 
+    /** Identifiers that contain a digit (B2, MTR-1) name real entities and must exist in the result. */
+    private static final java.util.regex.Pattern DIGIT_IDENTIFIER = java.util.regex.Pattern.compile(
+            "(?<![A-Za-z0-9])[A-Za-z][A-Za-z0-9]*[0-9][A-Za-z0-9-]*");
+
+    /** Comparative or trend claims cannot be verified from a static result table; they are refused. */
+    private static final List<String> UNVERIFIABLE_CLAIMS = List.of(
+            "上升", "下降", "增长", "降低", "增加", "减少", "最高", "最低", "趋势",
+            "increase", "decrease", "highest", "lowest", "rising", "falling", "trend");
+
     public String validate(String conclusion, QueryPlan plan, TabularResult result) {
         if (conclusion == null || conclusion.isBlank()) {
             throw new IllegalArgumentException("结论不能为空");
+        }
+        String lowered = conclusion.toLowerCase(java.util.Locale.ROOT);
+        for (String claim : UNVERIFIABLE_CLAIMS) {
+            if (lowered.contains(claim)) {
+                throw new IllegalArgumentException("结论包含无法从结果表验证的趋势性描述: " + claim);
+            }
+        }
+        List<String> supportedValues = supportedValues(result);
+        java.util.regex.Matcher identifiers = DIGIT_IDENTIFIER.matcher(conclusion);
+        List<String> unknownEntities = new ArrayList<>();
+        while (identifiers.find()) {
+            String entity = identifiers.group();
+            if (supportedValues.stream().noneMatch(value -> value.contains(entity))) {
+                unknownEntities.add(entity);
+            }
+        }
+        if (!unknownEntities.isEmpty()) {
+            throw new IllegalArgumentException("结论包含结果数据中不存在的实体: " + unknownEntities);
         }
         List<String> supported = supportedFigures(result);
         java.util.regex.Matcher matcher = NUMBER.matcher(conclusion);
@@ -34,6 +61,18 @@ public class AnalysisSummaryValidator {
             throw new IllegalArgumentException("结论包含结果数据不支持的数字: " + unsupported);
         }
         return conclusion.strip();
+    }
+
+    private List<String> supportedValues(TabularResult result) {
+        List<String> values = new ArrayList<>(result.columnNames());
+        for (List<Object> row : result.rows()) {
+            for (Object value : row) {
+                if (value != null) {
+                    values.add(value.toString());
+                }
+            }
+        }
+        return values;
     }
 
     private List<String> supportedFigures(TabularResult result) {

@@ -25,8 +25,7 @@ public record ExpertFinding(
         if (status != FindingStatus.SUPPORTED && confidence > 0) {
             throw new IllegalArgumentException("non-supported findings cannot carry confidence");
         }
-        if (status == FindingStatus.FAILED && !conclusion.toLowerCase().contains("fail")) {
-            throw new IllegalArgumentException("failed findings must state failure");
-        }
+        // Failure is expressed by the enum itself; the conclusion text may be
+        // written in any language (e.g. "设备查询超时"), so wording is not validated.
     }
 }

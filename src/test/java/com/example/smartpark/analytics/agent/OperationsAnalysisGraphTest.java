@@ -38,6 +38,7 @@ class OperationsAnalysisGraphTest {
 
     private static final String GOOD_SQL = """
             SELECT building_id, SUM(kwh) AS total FROM analytics.v_energy_hourly
+            WHERE hour_ts >= :fromTs AND hour_ts < :toTs
             GROUP BY building_id ORDER BY building_id LIMIT 100""";
     private static final String LIMIT_LESS_SQL = "SELECT building_id, kwh FROM analytics.v_energy_hourly";
 

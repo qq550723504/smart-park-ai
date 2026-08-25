@@ -35,7 +35,7 @@ export function useOperationsAnalysis(
   options: { trace?: ExecutionTraceLike; pollIntervalMs?: number; maxPolls?: number } = {},
 ): OperationsAnalysis {
   const pollIntervalMs = options.pollIntervalMs ?? 500
-  const maxPolls = options.maxPolls ?? 60
+  const maxPolls = options.maxPolls ?? 180
 
   const phase = ref<AnalysisPhase>('idle')
   const dto = ref<AnalysisStatusDto | null>(null)

@@ -111,8 +111,9 @@ public class AnalyticsConfiguration {
                                                         OperationsAnalysisGraph graph,
                                                         ExecutorService analyticsExecutor,
                                                         AnalyticsProperties properties,
-                                                        Clock analyticsClock) {
+                                                        Clock analyticsClock,
+                                                        com.example.smartpark.execution.ExecutionEventPublisher publisher) {
         return new OperationsAnalysisService(metricCatalog, graph::run, analyticsExecutor,
-                properties.getAnalysisTimeout(), analyticsClock);
+                properties.getAnalysisTimeout(), analyticsClock, publisher);
     }
 }

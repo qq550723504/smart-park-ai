@@ -51,7 +51,9 @@ INSERT INTO analytics.energy_hourly_raw (building_id, meter_id, reading_at, kwh,
 SELECT
     'B' || b,
     'MTR-' || b || '-' || m,
-    TIMESTAMP '2026-08-20 00:00:00+08' + make_interval(hours => (d * 24 + h)),
+    -- TIMESTAMPTZ honors the +08 offset; a plain TIMESTAMP literal would be
+    -- re-interpreted in the migration session timezone and shift every row.
+    TIMESTAMPTZ '2026-08-20 00:00:00+08' + make_interval(hours => (d * 24 + h)),
     CASE WHEN h >= 22 OR h < 6 THEN 4.5 + d + b ELSE 18.0 + d * 2 + b END + m,
     15.0 + b * 2,
     CASE WHEN h BETWEEN 9 AND 19 THEN 42.0 + b * 3 ELSE 12.0 + b END

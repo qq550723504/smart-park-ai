@@ -17,7 +17,7 @@ import { customerIntentLabel, workflowNodeLabel } from './utils/labels'
 import { alertWorkflowRunId } from './utils/runId'
 import './styles.css'
 
-const capabilities = ref<{ knowledgeMode: string; customerAnswerMode: string; vectorStore: string } | null>(null)
+const capabilities = ref<{ knowledgeMode: string; customerAnswerMode: string; vectorStore: string; analyticsEnabled: boolean } | null>(null)
 const capabilityLabels = computed(() => capabilities.value ? {
   knowledge: capabilities.value.knowledgeMode === 'mock' ? 'Mock' : 'RAG',
   customer: capabilities.value.customerAnswerMode === 'mock' ? 'Mock' : 'DashScope',
@@ -150,7 +150,7 @@ function confidence(value?: number) {
           <button :class="{ active: activeView === 'customer' }" @click="activeView = 'customer'">园区客服</button>
           <button type="button" disabled title="实时语音助手将在 P1 后续切片开放">实时语音</button>
           <button :class="{ active: activeView === 'collaboration' }" @click="activeView = 'collaboration'">专家协作</button>
-          <button :class="{ active: activeView === 'analytics' }" @click="activeView = 'analytics'">运营分析</button>
+          <button v-if="capabilities?.analyticsEnabled" :class="{ active: activeView === 'analytics' }" @click="activeView = 'analytics'">运营分析</button>
         </nav>
         <div class="system-status"><span class="status-pulse"></span><span>模拟园区系统</span><span class="divider"></span><span class="muted">知识检索 {{ capabilityLabels?.knowledge ?? '--' }} · 客服回答 {{ capabilityLabels?.customer ?? '--' }} · 索引存储 {{ capabilityLabels?.vector ?? '--' }}</span></div>
       </div>

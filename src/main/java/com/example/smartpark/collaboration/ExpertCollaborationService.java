@@ -14,6 +14,10 @@ import java.util.UUID;
 import java.util.concurrent.*;
 
 public final class ExpertCollaborationService {
+
+    /** Mirrors the analytics question bound: protects heap and model token budget. */
+    private static final int MAX_QUESTION_LENGTH = 500;
+
     private final Planner planner;
     private final ExpertCollaborationGraph graph;
     private final Synthesizer synthesizer;
@@ -32,6 +36,9 @@ public final class ExpertCollaborationService {
 
     public CollaborationRun start(String question) {
         if (question == null || question.isBlank()) throw new IllegalArgumentException("question must not be blank");
+        if (question.trim().length() > MAX_QUESTION_LENGTH) {
+            throw new IllegalArgumentException("question must not exceed " + MAX_QUESTION_LENGTH + " characters");
+        }
         UUID id = UUID.randomUUID();
         CollaborationRun run = store.save(new CollaborationRun(id, question.trim(), CollaborationRun.RunStatus.RUNNING,
                 null, List.of(), null, null, Instant.now(clock)));
@@ -57,7 +64,7 @@ public final class ExpertCollaborationService {
             SupervisorPlan plan = planner.plan(question);
             store.save(new CollaborationRun(id, question, CollaborationRun.RunStatus.RUNNING, plan, List.of(), null, null, Instant.now(clock)));
             publish(id, "Supervisor", ExecutionStage.PLANNING, ExecutionEventType.EXPERT_HANDOFF, ExecutionStatus.RUNNING, "Selected " + plan.selectedDomains());
-            var findings = graph.execute(plan);
+            var findings = graph.execute(plan, id);
             // Persist completed expert work immediately: if synthesis later
             // hangs, times out or throws, the failure path keeps the partial
             // findings instead of discarding them with an empty list.

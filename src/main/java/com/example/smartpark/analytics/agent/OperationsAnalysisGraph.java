@@ -77,17 +77,19 @@ public class OperationsAnalysisGraph {
             UUID runId,
             RunOutcome outcome,
             List<String> clarificationQuestions,
+            /** Structured candidate metric names, one candidate set per pending question. */
+            List<List<String>> clarificationOptions,
             ChartSpec chart,
             TabularResult result,
             String summary,
             String failureStage) {
 
         static AnalysisRunResult failed(UUID runId, String stage) {
-            return new AnalysisRunResult(runId, RunOutcome.FAILED, List.of(), null, null, null, stage);
+            return new AnalysisRunResult(runId, RunOutcome.FAILED, List.of(), List.of(), null, null, null, stage);
         }
 
-        static AnalysisRunResult needsClarification(UUID runId, List<String> questions) {
-            return new AnalysisRunResult(runId, RunOutcome.NEEDS_CLARIFICATION, questions, null, null, null, null);
+        static AnalysisRunResult needsClarification(UUID runId, List<String> questions, List<List<String>> options) {
+            return new AnalysisRunResult(runId, RunOutcome.NEEDS_CLARIFICATION, questions, options, null, null, null, null);
         }
     }
 
@@ -109,6 +111,7 @@ public class OperationsAnalysisGraph {
         volatile String status = "RUNNING";
         String failureStage;
         final List<String> clarificationQuestions = new ArrayList<>();
+        final List<List<String>> clarificationOptions = new ArrayList<>();
     }
 
     public OperationsAnalysisGraph(MetricCatalog catalog,
@@ -171,7 +174,10 @@ public class OperationsAnalysisGraph {
                 "executeReadOnlyQuery", "executeReadOnlyQuery",
                 "generateSql", "generateSql",
                 "END", StateGraph.END));
-        graph.addEdge("executeReadOnlyQuery", "buildChartSpec");
+        // A failed query execution is terminal: never feed a null result into
+        // the chart node (which would raise a second, generic failure).
+        graph.addConditionalEdges("executeReadOnlyQuery", AsyncEdgeAction.edge_async(this::routeAfterQueryExecution),
+                Map.of("buildChartSpec", "buildChartSpec", "END", StateGraph.END));
         graph.addEdge("buildChartSpec", "summarizeFromResult");
         graph.addEdge("summarizeFromResult", StateGraph.END);
         return graph.compile();
@@ -192,6 +198,15 @@ public class OperationsAnalysisGraph {
             case "RETRY_SQL" -> "generateSql";
             default -> "END";
         };
+    }
+
+    /** Routing after the read-only execution: failures end the run immediately. */
+    private String routeAfterQueryExecution(OverAllState state) {
+        RunContext ctx = contexts.get(runId(state));
+        if (ctx == null || "FAILED".equals(ctx.status)) {
+            return "END";
+        }
+        return "buildChartSpec";
     }
 
     /** Runs the full workflow for one question; blocks until the terminal event. */
@@ -238,7 +253,8 @@ public class OperationsAnalysisGraph {
                 // close the publisher and break every later resumption).
                 publish(ctx, runId, ExecutionStage.UNDERSTANDING, ExecutionEventType.PAUSED,
                         ExecutionStatus.NEEDS_CLARIFICATION, "需要澄清后再继续", null);
-                return AnalysisRunResult.needsClarification(runId, ctx.clarificationQuestions);
+                return AnalysisRunResult.needsClarification(runId, ctx.clarificationQuestions,
+                        List.copyOf(ctx.clarificationOptions));
             }
             case "FAILED" -> {
                 // The failing stage already published its terminal event; do not double-terminate.
@@ -247,7 +263,7 @@ public class OperationsAnalysisGraph {
             default -> {
                 publish(ctx, runId, ExecutionStage.COMPLETION, ExecutionEventType.COMPLETED,
                         ExecutionStatus.SUCCEEDED, "运营分析完成", null);
-                return new AnalysisRunResult(runId, RunOutcome.COMPLETED, List.of(),
+                return new AnalysisRunResult(runId, RunOutcome.COMPLETED, List.of(), List.of(),
                         ctx.chart, ctx.result, ctx.summary, null);
             }
         }
@@ -267,6 +283,12 @@ public class OperationsAnalysisGraph {
                 : modelClient.understandQuestion(question);
         if (ctx.understanding.needsClarification()) {
             ctx.clarificationQuestions.addAll(ctx.understanding.clarificationQuestions());
+            // No structured candidates from the model: the operator picks from
+            // the full catalog for each pending question.
+            List<String> allNames = catalog.all().stream().map(m -> m.name()).toList();
+            for (int i = 0; i < ctx.understanding.clarificationQuestions().size(); i++) {
+                ctx.clarificationOptions.add(allNames);
+            }
             ctx.status = "NEEDS_CLARIFICATION";
         }
         nodeCompleted(ctx, runId, ExecutionStage.UNDERSTANDING, "问题理解完成",
@@ -284,11 +306,14 @@ public class OperationsAnalysisGraph {
             if (resolution instanceof MetricResolution.Resolved resolved) {
                 selected.add(resolved.metric());
             } else if (resolution instanceof MetricResolution.Ambiguous ambiguous) {
+                ctx.clarificationOptions.add(ambiguous.candidates().stream().map(m -> m.name()).toList());
                 ctx.clarificationQuestions.add("“" + term + "”可以指: "
                         + ambiguous.candidates().stream()
                                 .map(m -> m.displayName() + "(" + m.name() + ")")
                                 .reduce((a, b) -> a + " / " + b).orElse("") + "，请明确指标口径");
             } else {
+                // Unknown term: the operator may choose any catalog metric.
+                ctx.clarificationOptions.add(catalog.all().stream().map(m -> m.name()).toList());
                 ctx.clarificationQuestions.add("无法识别指标 “" + term + "”，请从指标目录中选择");
             }
         }
@@ -364,6 +389,7 @@ public class OperationsAnalysisGraph {
         nodeStarted(ctx, runId, ExecutionStage.SQL_VALIDATION, "AST 安全校验");
         try {
             ctx.validatedSql = SqlAstGuardAccess.validate(ctx.sqlDraft);
+            enforcePlan(ctx);
             for (String name : ctx.validatedSql.namedParameters()) {
                 if (!ctx.parameters.containsKey(name)) {
                     throw new UnsafeSqlException("SQL_POLICY_REJECTED",
@@ -378,6 +404,36 @@ public class OperationsAnalysisGraph {
             handleSqlRejection(ctx, runId, "validateSqlAst", rejection.getMessage());
         }
         return Map.of();
+    }
+
+    /**
+     * The generation prompt is advisory; this gate is binding. Every accepted
+     * query must bind the planned time range (:fromTs/:toTs), touch each
+     * selected metric's whitelisted view, and carry each metric's fixed
+     * condition — otherwise an all-time or wrong-metric query could slip
+     * through on a plausible-looking model answer.
+     */
+    private void enforcePlan(RunContext ctx) throws UnsafeSqlException {
+        if (!ctx.validatedSql.namedParameters().contains("fromTs")
+                || !ctx.validatedSql.namedParameters().contains("toTs")) {
+            throw new UnsafeSqlException("SQL_POLICY_REJECTED",
+                    "查询必须使用 :fromTs 与 :toTs 绑定计划时间范围");
+        }
+        String normalized = normalize(ctx.sqlDraft);
+        for (var metric : ctx.metrics) {
+            if (!normalized.contains(normalize(metric.sourceView()))) {
+                throw new UnsafeSqlException("SQL_POLICY_REJECTED",
+                        "查询缺少计划要求的数据视图 " + metric.sourceView());
+            }
+            if (metric.condition() != null && !normalized.contains(normalize(metric.condition()))) {
+                throw new UnsafeSqlException("SQL_POLICY_REJECTED",
+                        "查询缺少指标的固定条件，请按口径过滤");
+            }
+        }
+    }
+
+    private static String normalize(String value) {
+        return value == null ? "" : value.replaceAll("[\\s'\"]", "").toLowerCase(java.util.Locale.ROOT);
     }
 
     Map<String, Object> explainAndCheckCost(OverAllState state) {

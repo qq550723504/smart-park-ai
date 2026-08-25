@@ -3,6 +3,14 @@ package com.example.smartpark.analytics;
 import com.example.smartpark.analytics.agent.AnalyticsModelClient;
 import com.example.smartpark.analytics.agent.OperationsAnalysisGraph;
 import com.example.smartpark.analytics.catalog.MetricCatalog;
+import com.example.smartpark.execution.ExecutionEventPublisher;
+import com.example.smartpark.execution.model.DisplayPayload;
+import com.example.smartpark.execution.model.ExecutionEvent;
+import com.example.smartpark.execution.model.ExecutionEventType;
+import com.example.smartpark.execution.model.ExecutionScenario;
+import com.example.smartpark.execution.model.ExecutionStage;
+import com.example.smartpark.execution.model.ExecutionStatus;
+
 import java.time.Clock;
 import java.time.Instant;
 import java.time.Duration;
@@ -36,17 +44,32 @@ public class OperationsAnalysisService {
     private final Duration timeout;
     private final Clock clock;
     private final AnalysisRunStore store = new AnalysisRunStore();
+    private final ExecutionEventPublisher events;
+
+    /** Pending ambiguity per run: one candidate metric set per clarification question. */
+    private final java.util.concurrent.ConcurrentHashMap<UUID, List<java.util.Set<String>>> pendingClarifications
+            = new java.util.concurrent.ConcurrentHashMap<>();
 
     public OperationsAnalysisService(MetricCatalog catalog,
                                      GraphRunner runner,
                                      Executor analyticsExecutor,
                                      Duration timeout,
                                      Clock clock) {
+        this(catalog, runner, analyticsExecutor, timeout, clock, null);
+    }
+
+    public OperationsAnalysisService(MetricCatalog catalog,
+                                     GraphRunner runner,
+                                     Executor analyticsExecutor,
+                                     Duration timeout,
+                                     Clock clock,
+                                     ExecutionEventPublisher events) {
         this.catalog = catalog;
         this.runner = runner;
         this.executor = analyticsExecutor;
         this.timeout = timeout;
         this.clock = clock;
+        this.events = events;
     }
 
     public AnalysisRunStore.RunRecord get(UUID runId) {
@@ -74,6 +97,7 @@ public class OperationsAnalysisService {
             throw new IllegalStateException("该运行不处于待澄清状态");
         }
         List<MetricSelection> safeSelections = validateSelections(selections);
+        validateAgainstPendingClarification(runId, safeSelections);
         String pinnedTerms = safeSelections.stream()
                 .map(MetricSelection::metric)
                 .reduce((a, b) -> a + ", " + b)
@@ -81,6 +105,7 @@ public class OperationsAnalysisService {
         var pinned = new AnalyticsModelClient.QuestionUnderstanding(
                 current.question(), safeSelections.stream().map(MetricSelection::metric).toList(), List.of());
         store.put(rerunningRecord(runId));
+        pendingClarifications.remove(runId);
         CompletableFuture.runAsync(
                 () -> execute(runId, current.question() + "（已明确指标: " + pinnedTerms + "）", pinned), executor);
         return store.get(runId);
@@ -114,26 +139,64 @@ public class OperationsAnalysisService {
         return List.copyOf(selections);
     }
 
+    private void validateAgainstPendingClarification(UUID runId, List<MetricSelection> selections) {
+        var pending = pendingClarifications.get(runId);
+        if (pending == null || pending.size() != selections.size()) {
+            throw new IllegalArgumentException("澄清选择数量与待澄清问题不一致");
+        }
+        for (int i = 0; i < selections.size(); i++) {
+            if (!pending.get(i).contains(selections.get(i).metric())) {
+                throw new IllegalArgumentException("第 " + (i + 1) + " 个选择的指标不在该问题的候选范围内");
+            }
+        }
+    }
+
     private AnalysisRunStore.RunRecord execute(UUID runId, String question,
                                                AnalyticsModelClient.QuestionUnderstanding pinned) {
         long start = System.currentTimeMillis();
+        // FutureTask (not CompletableFuture): cancel(true) actually interrupts
+        // the graph thread, so a hung model or query call cannot keep holding
+        // one of the two analytics executor threads after the deadline.
+        var task = new java.util.concurrent.FutureTask<>(
+                () -> runner.execute(runId, question, pinned));
+        executor.execute(task);
         try {
-            OperationsAnalysisGraph.AnalysisRunResult outcome = CompletableFuture
-                    .<OperationsAnalysisGraph.AnalysisRunResult>supplyAsync(
-                            () -> runner.execute(runId, question, pinned), executor)
-                    .get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            OperationsAnalysisGraph.AnalysisRunResult outcome = task.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
             return persistOutcome(runId, question, outcome, System.currentTimeMillis() - start);
         } catch (TimeoutException timedOut) {
-            return persistFailure(runId, question, "ANALYSIS_TIMEOUT",
-                    System.currentTimeMillis() - start);
+            return terminate(runId, question, "ANALYSIS_TIMEOUT", System.currentTimeMillis() - start, task);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-            return persistFailure(runId, question, "ANALYSIS_INTERRUPTED",
-                    System.currentTimeMillis() - start);
+            task.cancel(true);
+            return terminate(runId, question, "ANALYSIS_INTERRUPTED", System.currentTimeMillis() - start, null);
         } catch (java.util.concurrent.ExecutionException failedExecution) {
             return persistFailure(runId, question, "ANALYSIS_ABORTED",
                     System.currentTimeMillis() - start);
+        } catch (java.util.concurrent.CancellationException cancelled) {
+            // Timeout path already persisted and terminated the trace.
+            return store.get(runId);
         }
+    }
+
+    /** Cancels the work, persists the failure and closes the execution trace with FAILED. */
+    private AnalysisRunStore.RunRecord terminate(UUID runId, String question, String stage,
+                                                 long durationMs, java.util.concurrent.FutureTask<?> task) {
+        if (task != null) {
+            task.cancel(true);
+        }
+        AnalysisRunStore.RunRecord record = persistFailure(runId, question, stage, durationMs);
+        if (events != null) {
+            try {
+                events.publish(new ExecutionEvent(UUID.randomUUID(), runId, 0, Instant.now(clock),
+                        ExecutionScenario.OPERATIONS_ANALYSIS, "analytics", ExecutionStage.FAILURE,
+                        ExecutionEventType.FAILED, ExecutionStatus.FAILED, "分析超时，已终止",
+                        DisplayPayload.error(ExecutionStage.FAILURE, stage, true,
+                                stage.equals("ANALYSIS_TIMEOUT") ? "分析超过时间上限，已取消执行" : "分析执行被中断")));
+            } catch (IllegalStateException alreadyClosed) {
+                // Trace already terminal; nothing more to do.
+            }
+        }
+        return record;
     }
 
     private AnalysisRunStore.RunRecord persistOutcome(UUID runId, String question,
@@ -152,13 +215,21 @@ public class OperationsAnalysisService {
                     durationMs, null, Instant.now(clock),
                     outcome.result() == null ? List.of() : outcome.result().columnNames(),
                     outcome.result() == null ? List.of() : outcome.result().rows());
-            case NEEDS_CLARIFICATION -> new AnalysisRunStore.RunRecord(runId, question, "NEEDS_CLARIFICATION",
-                    List.copyOf(outcome.clarificationQuestions()), "", 0, false, durationMs, null,
-                    Instant.now(clock), List.of(), List.of());
-            case FAILED -> new AnalysisRunStore.RunRecord(runId, question, "FAILED",
-                    List.of(), "", 0, false, durationMs,
-                    outcome.failureStage() == null ? "UNKNOWN" : outcome.failureStage(),
-                    Instant.now(clock), List.of(), List.of());
+            case NEEDS_CLARIFICATION -> {
+                pendingClarifications.put(runId, outcome.clarificationOptions().stream()
+                        .map(java.util.Set::copyOf)
+                        .toList());
+                yield new AnalysisRunStore.RunRecord(runId, question, "NEEDS_CLARIFICATION",
+                        List.copyOf(outcome.clarificationQuestions()), "", 0, false, durationMs, null,
+                        Instant.now(clock), List.of(), List.of());
+            }
+            case FAILED -> {
+                pendingClarifications.remove(runId);
+                yield new AnalysisRunStore.RunRecord(runId, question, "FAILED",
+                        List.of(), "", 0, false, durationMs,
+                        outcome.failureStage() == null ? "UNKNOWN" : outcome.failureStage(),
+                        Instant.now(clock), List.of(), List.of());
+            }
         };
         store.put(record);
         return record;

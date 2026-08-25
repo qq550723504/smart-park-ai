@@ -9,7 +9,7 @@ class OperationsCapabilitiesControllerTest {
     @Test
     void reportsConfiguredRagAndDashScopeModesBackedByCurrentRuntime() {
         OperationsCapabilitiesController.Capabilities capabilities =
-                new OperationsCapabilitiesController("rag", "dashscope").capabilities();
+                new OperationsCapabilitiesController("rag", "dashscope", true).capabilities();
 
         assertThat(capabilities.knowledgeMode()).isEqualTo("rag");
         assertThat(capabilities.customerAnswerMode()).isEqualTo("dashscope");

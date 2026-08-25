@@ -11,18 +11,21 @@ public class OperationsCapabilitiesController {
 
     private final String knowledgeMode;
     private final String customerAnswerMode;
+    private final boolean analyticsEnabled;
 
     public OperationsCapabilitiesController(
             @Value("${smartpark.knowledge.mode:mock}") String knowledgeMode,
-            @Value("${smartpark.customer-service.answer-mode:mock}") String customerAnswerMode) {
+            @Value("${smartpark.customer-service.answer-mode:mock}") String customerAnswerMode,
+            @Value("${smartpark.analytics.enabled:false}") boolean analyticsEnabled) {
         this.knowledgeMode = safeMode(knowledgeMode, "mock", "rag");
         this.customerAnswerMode = safeMode(customerAnswerMode, "mock", "dashscope");
+        this.analyticsEnabled = analyticsEnabled;
     }
 
     @GetMapping("/capabilities")
     public Capabilities capabilities() {
         return new Capabilities(knowledgeMode, customerAnswerMode,
-                "rag".equals(knowledgeMode) ? "simple-vector-store" : "none");
+                "rag".equals(knowledgeMode) ? "simple-vector-store" : "none", analyticsEnabled);
     }
 
     private static String safeMode(String value, String... allowed) {
@@ -35,5 +38,6 @@ public class OperationsCapabilitiesController {
     public record Capabilities(
             String knowledgeMode,
             String customerAnswerMode,
-            String vectorStore) { }
+            String vectorStore,
+            boolean analyticsEnabled) { }
 }
