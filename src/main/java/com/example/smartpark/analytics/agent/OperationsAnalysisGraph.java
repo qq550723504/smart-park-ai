@@ -26,6 +26,7 @@ import reactor.core.publisher.Flux;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -50,6 +51,8 @@ public class OperationsAnalysisGraph {
     private static final String STATE_QUESTION = "question";
     private static final String STATE_RUN_ID = "runId";
     private static final int MAX_SQL_ATTEMPTS = 2; // one original try, at most one repair
+    private static final ZoneId PARK_ZONE = ZoneId.of("Asia/Shanghai");
+    private static final long MODEL_TIME_SKEW_TOLERANCE_SECONDS = 300;
 
     private final MetricCatalog catalog;
     private final AnalyticsModelClient modelClient;
@@ -407,7 +410,13 @@ public class OperationsAnalysisGraph {
         AnalyticsModelClient.RequestedTimeRange requested = ctx.understanding.requestedTimeRange();
         String originalQuestion = text(state, STATE_QUESTION).strip();
         validateRequestedTimeRange(originalQuestion, requested, now);
-        QueryPlan.TimeRange timeRange = requested == null
+        // Relative time is a server-owned contract. The model prompt and this
+        // node run at different instants, so never copy its rolling endpoints
+        // into SQL; derive them once from the same reference instant here.
+        QueryPlan.TimeRange recognizedTime = expectedTimeRange(originalQuestion.toLowerCase(java.util.Locale.ROOT), now);
+        QueryPlan.TimeRange timeRange = recognizedTime != null
+                ? recognizedTime
+                : requested == null
                 ? new QueryPlan.TimeRange(now.minus(Duration.ofDays(lookbackDays)), now)
                 : new QueryPlan.TimeRange(requested.fromInclusive(), requested.toExclusive());
         ctx.plan = new QueryPlan(
@@ -447,7 +456,52 @@ public class OperationsAnalysisGraph {
             }
             requested.add(normalized);
         }
+        // A missing model dimension must not silently change an explicit
+        // aggregation into a total. Infer only unambiguous aggregation
+        // phrases ("按楼宇", "各楼宇", ...); entity mentions such as "B1楼宇"
+        // remain filters, not grouping dimensions.
+        for (String dimension : inferredAggregationDimensions(ctx, originalQuestion)) {
+            requested.add(dimension);
+        }
         return List.copyOf(requested);
+    }
+
+    private static List<String> inferredAggregationDimensions(RunContext ctx, String question) {
+        List<String> dimensions = List.of(
+                "building_id", "meter_id", "hour_ts", "occurred_at", "snapshot_at",
+                "stat_date", "risk_level", "category", "status", "device_type", "parking_zone");
+        List<String> inferred = new ArrayList<>();
+        for (String dimension : dimensions) {
+            if (!aggregationDimensionMentionedInQuestion(dimension, question)) continue;
+            boolean allowedByEveryMetric = ctx.metrics.stream()
+                    .allMatch(metric -> metric.allowedDimensions().stream()
+                            .anyMatch(allowed -> allowed.equalsIgnoreCase(dimension)));
+            if (!allowedByEveryMetric) {
+                throw new IllegalArgumentException("原始问题要求的聚合维度未获所有指标目录批准: " + dimension);
+            }
+            inferred.add(dimension);
+        }
+        return List.copyOf(inferred);
+    }
+
+    private static boolean aggregationDimensionMentionedInQuestion(String dimension, String question) {
+        String normalized = question == null ? "" : question.toLowerCase(java.util.Locale.ROOT);
+        return switch (dimension) {
+            case "building_id" -> containsAny(normalized,
+                    "按楼宇", "各楼宇", "每个楼宇", "分楼宇", "楼宇对比", "按楼栋", "各楼栋", "每栋", "各栋");
+            case "meter_id" -> containsAny(normalized,
+                    "按表计", "各表计", "每个表计", "分表计", "按电表", "各电表");
+            case "hour_ts" -> containsAny(normalized,
+                    "按小时", "逐时", "每小时", "逐小时", "小时趋势");
+            case "occurred_at", "stat_date", "snapshot_at" -> containsAny(normalized,
+                    "按日", "每天", "每日", "按日期", "按时间");
+            case "risk_level" -> containsAny(normalized, "按风险", "各风险", "按风险等级");
+            case "category" -> containsAny(normalized, "按类别", "各类别", "按分类", "各分类", "按类型", "各类型");
+            case "status" -> containsAny(normalized, "按状态", "各状态");
+            case "device_type" -> containsAny(normalized, "按设备类型", "各设备类型");
+            case "parking_zone" -> containsAny(normalized, "按区域", "各区域", "按车区", "各车区");
+            default -> false;
+        };
     }
 
     private static boolean dimensionMentionedInQuestion(String dimension, String question) {
@@ -479,10 +533,22 @@ public class OperationsAnalysisGraph {
         if (requested == null) return;
         String normalized = question.toLowerCase(java.util.Locale.ROOT);
         QueryPlan.TimeRange expected = expectedTimeRange(normalized, now);
-        if (expected == null || !expected.from().equals(requested.fromInclusive())
-                || !expected.to().equals(requested.toExclusive())) {
+        if (expected == null || !temporallyConsistent(expected, requested, normalized)) {
             throw new IllegalArgumentException("模型时间范围未被原始问题支持");
         }
+    }
+
+    private static boolean temporallyConsistent(QueryPlan.TimeRange expected,
+                                                AnalyticsModelClient.RequestedTimeRange requested,
+                                                String question) {
+        long endSkew = Math.abs(Duration.between(requested.toExclusive(), expected.to()).toSeconds());
+        if (endSkew > MODEL_TIME_SKEW_TOLERANCE_SECONDS) return false;
+        if (question.contains("今天") || question.contains("今日")) {
+            return requested.fromInclusive().equals(expected.from());
+        }
+        Duration expectedWidth = Duration.between(expected.from(), expected.to());
+        Duration requestedWidth = Duration.between(requested.fromInclusive(), requested.toExclusive());
+        return expectedWidth.equals(requestedWidth);
     }
 
     private static QueryPlan.TimeRange expectedTimeRange(String question, Instant now) {
@@ -493,13 +559,13 @@ public class OperationsAnalysisGraph {
             return new QueryPlan.TimeRange(now.minus(Duration.ofDays(count)), now);
         }
         if (question.contains("昨天") || question.contains("昨日")) {
-            java.time.Instant today = now.atZone(java.time.ZoneOffset.UTC).toLocalDate()
-                    .atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
+            java.time.Instant today = now.atZone(PARK_ZONE).toLocalDate()
+                    .atStartOfDay(PARK_ZONE).toInstant();
             return new QueryPlan.TimeRange(today.minus(Duration.ofDays(1)), today);
         }
         if (question.contains("今天") || question.contains("今日")) {
-            java.time.Instant today = now.atZone(java.time.ZoneOffset.UTC).toLocalDate()
-                    .atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
+            java.time.Instant today = now.atZone(PARK_ZONE).toLocalDate()
+                    .atStartOfDay(PARK_ZONE).toInstant();
             return new QueryPlan.TimeRange(today, now);
         }
         if (question.contains("上周") || question.contains("过去一周") || question.contains("最近一周")) {

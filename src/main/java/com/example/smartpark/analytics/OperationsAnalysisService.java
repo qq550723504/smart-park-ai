@@ -43,11 +43,13 @@ public class OperationsAnalysisService {
 
     private static final int MAX_QUESTION_LENGTH = 500;
     private static final int MAX_SELECTIONS = 5;
+    private static final Duration MAX_ADMISSION_WAIT = Duration.ofSeconds(1);
 
     private final MetricCatalog catalog;
     private final GraphRunner runner;
     private final Executor executor;
     private final Duration timeout;
+    private final Duration admissionTimeout;
     private final Duration clarificationTimeout;
     private final Clock clock;
     private final AnalysisRunStore store;
@@ -89,7 +91,12 @@ public class OperationsAnalysisService {
         this.catalog = catalog;
         this.runner = runner;
         this.executor = analyticsExecutor;
+        if (timeout == null || timeout.isZero() || timeout.isNegative()) {
+            throw new IllegalArgumentException("timeout must be positive");
+        }
         this.timeout = timeout;
+        this.admissionTimeout = timeout.compareTo(MAX_ADMISSION_WAIT) < 0
+                ? timeout : MAX_ADMISSION_WAIT;
         if (clarificationTimeout == null || clarificationTimeout.isZero() || clarificationTimeout.isNegative()) {
             throw new IllegalArgumentException("clarificationTimeout must be positive");
         }
@@ -267,7 +274,9 @@ public class OperationsAnalysisService {
                                          boolean resumed, Runnable registration, Runnable rollback) {
         long startedAt = System.currentTimeMillis();
         CountDownLatch registered = new CountDownLatch(1);
+        CountDownLatch admissionDecision = new CountDownLatch(1);
         AtomicBoolean registeredSuccessfully = new AtomicBoolean();
+        AtomicBoolean admitted = new AtomicBoolean();
         AtomicReference<RuntimeException> registrationFailure = new AtomicReference<>();
         FutureTask<OperationsAnalysisGraph.AnalysisRunResult> task = new FutureTask<>(
                 () -> {
@@ -285,11 +294,22 @@ public class OperationsAnalysisService {
                     }
                     RuntimeException failure = registrationFailure.get();
                     if (failure != null) throw failure;
+                    try {
+                        // Do not start the graph until the submitting thread has
+                        // accepted this worker. This closes the race where an
+                        // admission timeout rolls back state while a late
+                        // worker would otherwise continue into the graph.
+                        admissionDecision.await();
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        return null;
+                    }
+                    if (!admitted.get()) return null;
                     return runner.execute(runId, question, pinned);
                 }) {
             @Override
             protected void done() {
-                if (registeredSuccessfully.get()) {
+                if (registeredSuccessfully.get() && admitted.get()) {
                     completeTask(runId, question, startedAt, this);
                 }
             }
@@ -302,17 +322,34 @@ public class OperationsAnalysisService {
             throw rejected;
         }
         try {
-            registered.await();
+            if (!registered.await(admissionTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                admitted.set(false);
+                admissionDecision.countDown();
+                task.cancel(false);
+                rollback.run();
+                closeRejectedTrace(runId);
+                throw new java.util.concurrent.RejectedExecutionException(
+                        "analysis admission timed out before a worker became available");
+            }
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
+            admitted.set(false);
+            admissionDecision.countDown();
             task.cancel(true);
+            rollback.run();
+            closeRejectedTrace(runId);
             throw new IllegalStateException("analysis admission interrupted", interrupted);
         }
         RuntimeException failure = registrationFailure.get();
         if (failure != null) {
+            admitted.set(false);
+            admissionDecision.countDown();
             rollback.run();
+            closeRejectedTrace(runId);
             throw failure;
         }
+        admitted.set(true);
+        admissionDecision.countDown();
         java.util.concurrent.CompletableFuture.delayedExecutor(timeout.toMillis(), TimeUnit.MILLISECONDS)
                 .execute(() -> task.cancel(true));
     }

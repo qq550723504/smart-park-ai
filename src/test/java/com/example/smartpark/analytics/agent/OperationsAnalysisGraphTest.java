@@ -41,6 +41,9 @@ class OperationsAnalysisGraphTest {
             SELECT building_id, SUM(kwh) AS energy_kwh FROM analytics.v_energy_hourly
             WHERE hour_ts >= :fromTs AND hour_ts < :toTs
             GROUP BY building_id LIMIT 200""";
+    private static final String GOOD_TOTAL_SQL = """
+            SELECT SUM(kwh) AS energy_kwh FROM analytics.v_energy_hourly
+            WHERE hour_ts >= :fromTs AND hour_ts < :toTs LIMIT 200""";
     private static final String LIMIT_LESS_SQL = "SELECT building_id, kwh FROM analytics.v_energy_hourly";
 
     private PostgreSQLContainer<?> postgres;
@@ -352,6 +355,71 @@ class OperationsAnalysisGraphTest {
 
         assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.NEEDS_CLARIFICATION);
         assertThat(outcome.clarificationQuestions()).anyMatch(question -> question.contains("原始问题"));
+    }
+
+    @Test
+    void derivesRecognizedTimeRangeWhenModelOmitsIt() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("过去30天各楼宇能耗", List.of("能耗"), List.of(),
+                        null, List.of("building_id")),
+                List.of(GOOD_SQL),
+                new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("energy_kwh"), "", "kWh"),
+                "共 3 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "过去30天各楼宇能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().timeRange())
+                .isEqualTo(new com.example.smartpark.analytics.model.QueryPlan.TimeRange(
+                        Instant.parse("2026-07-25T00:00:00Z"), Instant.parse("2026-08-24T00:00:00Z")));
+    }
+
+    @Test
+    void infersExplicitAggregationDimensionWhenModelOmitsIt() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("按楼宇查看能耗", List.of("能耗"), List.of()),
+                List.of(GOOD_SQL),
+                new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("energy_kwh"), "", "kWh"),
+                "共 3 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "按楼宇查看能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().dimensions()).containsExactly("building_id");
+    }
+
+    @Test
+    void interpretsCalendarDayInTheParkTimezone() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("昨天能耗", List.of("能耗"), List.of()),
+                List.of(GOOD_TOTAL_SQL),
+                new ChartSpec.Proposal("TABLE", "昨日能耗", "energy_kwh", List.of(), "", "kWh"),
+                "共 1 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "昨天能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().timeRange())
+                .isEqualTo(new com.example.smartpark.analytics.model.QueryPlan.TimeRange(
+                        Instant.parse("2026-08-22T16:00:00Z"), Instant.parse("2026-08-23T16:00:00Z")));
+    }
+
+    @Test
+    void acceptsModelRangeSampledShortlyBeforeServerValidation() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("过去30天能耗", List.of("能耗"), List.of(),
+                        new AnalyticsModelClient.RequestedTimeRange(
+                                Instant.parse("2026-07-24T23:59:00Z"), Instant.parse("2026-08-23T23:59:00Z"))),
+                List.of(GOOD_TOTAL_SQL),
+                new ChartSpec.Proposal("TABLE", "能耗", "energy_kwh", List.of(), "", "kWh"),
+                "共 1 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "过去30天能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().timeRange())
+                .isEqualTo(new com.example.smartpark.analytics.model.QueryPlan.TimeRange(
+                        Instant.parse("2026-07-25T00:00:00Z"), Instant.parse("2026-08-24T00:00:00Z")));
     }
 
     @Test

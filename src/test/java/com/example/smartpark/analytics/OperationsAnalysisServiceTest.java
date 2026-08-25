@@ -17,6 +17,9 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -256,6 +259,45 @@ class OperationsAnalysisServiceTest {
 
         reject.set(false);
         assertThat(service.start("恢复后问题").status()).isEqualTo("COMPLETED");
+    }
+
+    @Test
+    void boundsAdmissionWhenAWorkerIgnoresThePreviousTimeout() throws Exception {
+        CountDownLatch firstStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(1), new ThreadPoolExecutor.AbortPolicy());
+        try {
+            OperationsAnalysisService service = service((runId, question, pinned) -> {
+                firstStarted.countDown();
+                try {
+                    releaseFirst.await();
+                } catch (InterruptedException ignored) {
+                    // Simulate a provider call that ignores interruption.
+                    try {
+                        releaseFirst.await();
+                    } catch (InterruptedException ignoredAgain) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+                return completed(runId);
+            }, executor, Duration.ofMillis(100));
+
+            var first = service.start("第一个分析");
+            assertThat(firstStarted.await(1, TimeUnit.SECONDS)).isTrue();
+            awaitTerminal(() -> "FAILED".equals(service.get(first.runId()).status()));
+
+            long started = System.nanoTime();
+            assertThatThrownBy(() -> service.start("第二个分析"))
+                    .isInstanceOf(RejectedExecutionException.class)
+                    .hasMessageContaining("admission");
+            assertThat(Duration.ofNanos(System.nanoTime() - started))
+                    .isLessThan(Duration.ofSeconds(1));
+        } finally {
+            releaseFirst.countDown();
+            executor.shutdownNow();
+            executor.awaitTermination(2, TimeUnit.SECONDS);
+        }
     }
 
     @Test
