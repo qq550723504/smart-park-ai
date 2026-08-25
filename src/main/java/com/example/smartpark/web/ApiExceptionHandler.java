@@ -30,12 +30,22 @@ public class ApiExceptionHandler {
         return error(HttpStatus.BAD_REQUEST, "Invalid customer service request");
     }
 
-    @ExceptionHandler({IllegalStateException.class, IllegalArgumentException.class})
+    @ExceptionHandler(IllegalStateException.class)
     ResponseEntity<WebDtos.ApiError> conflict(RuntimeException exception) {
         String message = "Idempotency key was already used for another question".equals(exception.getMessage())
                 ? "Idempotency-Key 已用于其他问题，请生成新的请求键"
                 : "Request conflicts with current resource state";
         return error(HttpStatus.CONFLICT, message);
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    ResponseEntity<WebDtos.ApiError> validation(IllegalArgumentException exception) {
+        // Legacy contract: an idempotency-key reuse is a conflict, not a validation error.
+        String message = exception.getMessage() == null ? "" : exception.getMessage();
+        if (message.contains("idempotency") && message.contains("already used")) {
+            return error(HttpStatus.CONFLICT, "Idempotency-Key 已用于其他决定，请生成新的请求键");
+        }
+        return error(HttpStatus.BAD_REQUEST, "Invalid request");
     }
 
     @ExceptionHandler({MethodArgumentNotValidException.class, HttpMessageNotReadableException.class})

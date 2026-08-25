@@ -93,6 +93,7 @@ public class OperationsAnalysisGraph {
 
     private static final class RunContext {
         AnalyticsModelClient.QuestionUnderstanding understanding;
+        AnalyticsModelClient.QuestionUnderstanding pinnedUnderstanding;
         List<com.example.smartpark.analytics.catalog.MetricDefinition> metrics = List.of();
         String schemaDescription = "";
         QueryPlan plan;
@@ -193,7 +194,14 @@ public class OperationsAnalysisGraph {
 
     /** Runs the full workflow for one question; blocks until the terminal event. */
     public AnalysisRunResult run(UUID runId, String question) {
+        return run(runId, question, null);
+    }
+
+    /** Runs the workflow with a pinned understanding (operator's structured clarification). */
+    public AnalysisRunResult run(UUID runId, String question,
+                                 AnalyticsModelClient.QuestionUnderstanding pinnedUnderstanding) {
         RunContext ctx = new RunContext();
+        ctx.pinnedUnderstanding = pinnedUnderstanding;
         contexts.put(runId, ctx);
         publish(ctx, runId, ExecutionStage.UNDERSTANDING, ExecutionEventType.RUN_STARTED,
                 ExecutionStatus.RUNNING, "运营分析已启动: " + strip(question), null);
@@ -245,7 +253,11 @@ public class OperationsAnalysisGraph {
         RunContext ctx = contexts.get(runId);
         nodeStarted(ctx, runId, ExecutionStage.UNDERSTANDING, "理解问题");
         String question = text(state, STATE_QUESTION);
-        ctx.understanding = modelClient.understandQuestion(question);
+        // Clarified runs carry the operator's structured selection as the understanding;
+        // the model is not consulted again for metric resolution.
+        ctx.understanding = ctx.pinnedUnderstanding != null
+                ? ctx.pinnedUnderstanding
+                : modelClient.understandQuestion(question);
         if (ctx.understanding.needsClarification()) {
             ctx.clarificationQuestions.addAll(ctx.understanding.clarificationQuestions());
             ctx.status = "NEEDS_CLARIFICATION";
