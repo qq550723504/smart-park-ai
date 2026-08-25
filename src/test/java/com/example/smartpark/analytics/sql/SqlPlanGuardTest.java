@@ -206,6 +206,25 @@ class SqlPlanGuardTest {
     }
 
     @Test
+    void rejectsSameViewMetricsThatRequireDifferentPredicateScopes() throws UnsafeSqlException {
+        MetricDefinition allAlerts = catalog.findByName("alert_count").orElseThrow();
+        MetricDefinition highRiskAlerts = catalog.findByName("high_risk_alert_count").orElseThrow();
+        QueryPlan plan = new QueryPlan("all and high risk alerts", List.of(allAlerts, highRiskAlerts),
+                List.of("building_id"), Map.of(), new QueryPlan.TimeRange(
+                        Instant.parse("2026-08-17T00:00:00Z"), Instant.parse("2026-08-24T00:00:00Z")), 100);
+        ValidatedSql sql = SqlAstGuard.validate("""
+                SELECT building_id, COUNT(*) AS all_alerts, COUNT(*) AS high_risk_alerts
+                FROM analytics.v_alert_fact
+                WHERE occurred_at >= :fromTs AND occurred_at < :toTs
+                  AND risk_level = 'HIGH'
+                GROUP BY building_id LIMIT 100""");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("metric-specific predicate");
+    }
+
+    @Test
     void rejectsConsumedCteThatTransformsMetricInputBeforeAggregation() throws UnsafeSqlException {
         QueryPlan plan = plan("energy_kwh");
         ValidatedSql sql = SqlAstGuard.validate("""

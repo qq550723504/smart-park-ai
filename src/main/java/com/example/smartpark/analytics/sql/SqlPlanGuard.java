@@ -57,6 +57,7 @@ public final class SqlPlanGuard {
         PlainSelect resultQuery = resultQuery(select);
         List<Branch> branches = consumedBranches(select, resultQuery);
         validateSourceGrain(plan);
+        validateMetricPredicateScopes(plan);
         validateConsumedBranchLineage(resultQuery, branches, plan);
 
         for (MetricDefinition metric : plan.metrics()) {
@@ -99,6 +100,33 @@ public final class SqlPlanGuard {
                 .count();
         if (sourceViews > 1) {
             throw reject("多事实视图查询缺少可验证的 source grain，禁止合并原始事实行");
+        }
+    }
+
+    /**
+     * Fixed catalog predicates currently apply to a whole source branch. If
+     * metrics sharing that branch require different predicates, one metric's
+     * filter would silently change every other metric. Such combinations need
+     * a future per-metric conditional-aggregation plan and are refused today.
+     */
+    private static void validateMetricPredicateScopes(QueryPlan plan) throws UnsafeSqlException {
+        Map<String, Set<String>> conditionsByView = new HashMap<>();
+        for (MetricDefinition metric : plan.metrics()) {
+            String condition = metric.condition() == null
+                    ? "<none>" : canonical(parseCondition(metric.condition()));
+            conditionsByView.computeIfAbsent(normalizeIdentifier(metric.sourceView()), ignored -> new HashSet<>())
+                    .add(condition);
+        }
+        if (conditionsByView.values().stream().anyMatch(conditions -> conditions.size() > 1)) {
+            throw reject("指标组合需要独立的 metric-specific predicate，不能共享分支级固定条件");
+        }
+    }
+
+    private static Expression parseCondition(String condition) throws UnsafeSqlException {
+        try {
+            return CCJSqlParserUtil.parseCondExpression(condition);
+        } catch (Exception exception) {
+            throw reject("指标目录包含无法解析的固定条件");
         }
     }
 
