@@ -19,7 +19,7 @@ class SqlPlanGuardTest {
 
     @Test
     void acceptsPlannedSourceAndDirectTimeBounds() throws UnsafeSqlException {
-        QueryPlan plan = plan("energy_kwh");
+        QueryPlan plan = plan("energy_kwh", List.of("building_id"));
         ValidatedSql sql = SqlAstGuard.validate("""
                 SELECT building_id, SUM(kwh) FROM analytics.v_energy_hourly
                 WHERE :fromTs <= hour_ts AND :toTs > hour_ts
@@ -30,7 +30,7 @@ class SqlPlanGuardTest {
 
     @Test
     void rejectsTimeParametersUsedOnlyInTautologies() throws UnsafeSqlException {
-        QueryPlan plan = plan("energy_kwh");
+        QueryPlan plan = plan("energy_kwh", List.of("building_id"));
         ValidatedSql sql = SqlAstGuard.validate("""
                 SELECT building_id, SUM(kwh) FROM analytics.v_energy_hourly
                 WHERE :fromTs = :fromTs AND :toTs = :toTs
@@ -43,7 +43,7 @@ class SqlPlanGuardTest {
 
     @Test
     void rejectsPlannedSourceMentionedOnlyAsLiteral() throws UnsafeSqlException {
-        QueryPlan plan = plan("energy_kwh");
+        QueryPlan plan = plan("energy_kwh", List.of());
         ValidatedSql sql = SqlAstGuard.validate("""
                 SELECT 'analytics.v_energy_hourly' FROM analytics.v_alert_fact
                 WHERE hour_ts >= :fromTs AND hour_ts < :toTs LIMIT 100""");
@@ -55,7 +55,7 @@ class SqlPlanGuardTest {
 
     @Test
     void rejectsFixedMetricConditionMentionedOnlyAsStringLiteral() throws UnsafeSqlException {
-        QueryPlan plan = plan("high_risk_alert_count");
+        QueryPlan plan = plan("high_risk_alert_count", List.of());
         ValidatedSql sql = SqlAstGuard.validate("""
                 SELECT COUNT(*) FROM analytics.v_alert_fact
                 WHERE occurred_at >= :fromTs AND occurred_at < :toTs
@@ -68,7 +68,7 @@ class SqlPlanGuardTest {
 
     @Test
     void acceptsStructurallyEquivalentFixedMetricCondition() throws UnsafeSqlException {
-        QueryPlan plan = plan("high_risk_alert_count");
+        QueryPlan plan = plan("high_risk_alert_count", List.of());
         ValidatedSql sql = SqlAstGuard.validate("""
                 SELECT COUNT(*) FROM analytics.v_alert_fact
                 WHERE occurred_at >= :fromTs AND occurred_at < :toTs
@@ -79,7 +79,7 @@ class SqlPlanGuardTest {
 
     @Test
     void acceptsNightConditionWithQualifiedTimeColumn() throws UnsafeSqlException {
-        QueryPlan plan = plan("night_energy_kwh");
+        QueryPlan plan = plan("night_energy_kwh", List.of("building_id"));
         ValidatedSql sql = SqlAstGuard.validate("""
                 SELECT e.building_id, SUM(e.kwh) FROM analytics.v_energy_hourly e
                 WHERE e.hour_ts >= :fromTs AND e.hour_ts < :toTs
@@ -92,7 +92,7 @@ class SqlPlanGuardTest {
 
     @Test
     void rejectsProjectionThatDoesNotImplementCatalogMetricExpression() throws UnsafeSqlException {
-        QueryPlan plan = plan("energy_kwh");
+        QueryPlan plan = plan("energy_kwh", List.of());
         ValidatedSql sql = SqlAstGuard.validate("""
                 SELECT COUNT(*) FROM analytics.v_energy_hourly
                 WHERE hour_ts >= :fromTs AND hour_ts < :toTs LIMIT 100""");
@@ -104,7 +104,7 @@ class SqlPlanGuardTest {
 
     @Test
     void rejectsProjectionDimensionOutsideMetricCatalog() throws UnsafeSqlException {
-        QueryPlan plan = plan("energy_kwh");
+        QueryPlan plan = plan("energy_kwh", List.of("building_id"));
         ValidatedSql sql = SqlAstGuard.validate("""
                 SELECT customer_id, SUM(kwh) FROM analytics.v_energy_hourly
                 WHERE hour_ts >= :fromTs AND hour_ts < :toTs
@@ -134,7 +134,7 @@ class SqlPlanGuardTest {
 
     @Test
     void rejectsTimeBoundsHiddenInUnusedCte() throws UnsafeSqlException {
-        QueryPlan plan = plan("energy_kwh");
+        QueryPlan plan = plan("energy_kwh", List.of());
         ValidatedSql sql = SqlAstGuard.validate("""
                 WITH bounded AS (
                     SELECT kwh FROM analytics.v_energy_hourly
@@ -149,7 +149,7 @@ class SqlPlanGuardTest {
 
     @Test
     void validatesPredicatesInsideTheCteThatProducesTheResult() throws UnsafeSqlException {
-        QueryPlan plan = plan("energy_kwh");
+        QueryPlan plan = plan("energy_kwh", List.of("building_id"));
         ValidatedSql sql = SqlAstGuard.validate("""
                 WITH recent AS (
                     SELECT building_id, kwh FROM analytics.v_energy_hourly
@@ -183,7 +183,7 @@ class SqlPlanGuardTest {
 
     @Test
     void rejectsRepeatedOccurrenceOfThePlannedFactView() throws UnsafeSqlException {
-        QueryPlan plan = plan("energy_kwh");
+        QueryPlan plan = plan("energy_kwh", List.of("building_id"));
         ValidatedSql sql = SqlAstGuard.validate("""
                 SELECT e.building_id, SUM(e.kwh)
                 FROM analytics.v_energy_hourly e
@@ -242,7 +242,7 @@ class SqlPlanGuardTest {
 
     @Test
     void rejectsConsumedCteThatTransformsMetricInputBeforeAggregation() throws UnsafeSqlException {
-        QueryPlan plan = plan("energy_kwh");
+        QueryPlan plan = plan("energy_kwh", List.of("building_id"));
         ValidatedSql sql = SqlAstGuard.validate("""
                 WITH recent AS (
                     SELECT building_id, kwh * 100 AS kwh FROM analytics.v_energy_hourly
@@ -261,7 +261,7 @@ class SqlPlanGuardTest {
         // A projected non-aggregate dimension without a matching GROUP BY makes
         // PostgreSQL reject the query at EXPLAIN time as ANALYSIS_ABORTED;
         // the guard must catch it as a repairable rejection instead.
-        QueryPlan plan = plan("energy_kwh");
+        QueryPlan plan = plan("energy_kwh", List.of("building_id"));
         ValidatedSql sql = SqlAstGuard.validate("""
                 SELECT building_id, SUM(kwh) FROM analytics.v_energy_hourly
                 WHERE hour_ts >= :fromTs AND hour_ts < :toTs LIMIT 100""");
@@ -271,9 +271,48 @@ class SqlPlanGuardTest {
                 .hasMessageContaining("GROUP BY");
     }
 
-    private QueryPlan plan(String metricName) {
+    @Test
+    void rejectsMissingRequestedDimension() throws UnsafeSqlException {
+        QueryPlan plan = plan("energy_kwh", List.of("building_id"));
+        ValidatedSql sql = SqlAstGuard.validate("""
+                SELECT SUM(kwh) FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs LIMIT 100""");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("building_id");
+    }
+
+    @Test
+    void rejectsPredicateAbsentFromThePlan() throws UnsafeSqlException {
+        QueryPlan plan = plan("energy_kwh", List.of());
+        ValidatedSql sql = SqlAstGuard.validate("""
+                SELECT SUM(kwh) FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                  AND building_id = 'B1' LIMIT 100""");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("计划之外");
+    }
+
+    @Test
+    void rejectsExtraPredicateOnAProjectedDimension() throws UnsafeSqlException {
+        QueryPlan plan = plan("energy_kwh", List.of("building_id"));
+        ValidatedSql sql = SqlAstGuard.validate("""
+                SELECT building_id, SUM(kwh) FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                  AND building_id = 'B1'
+                GROUP BY building_id LIMIT 100""");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("计划之外");
+    }
+
+    private QueryPlan plan(String metricName, List<String> dimensions) {
         MetricDefinition metric = catalog.findByName(metricName).orElseThrow();
-        return new QueryPlan("test", List.of(metric), List.copyOf(metric.allowedDimensions()), Map.of(),
+        return new QueryPlan("test", List.of(metric), dimensions, Map.of(),
                 new QueryPlan.TimeRange(
                         Instant.parse("2026-08-17T00:00:00Z"),
                         Instant.parse("2026-08-24T00:00:00Z")), 100);

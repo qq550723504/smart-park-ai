@@ -36,6 +36,7 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.function.Predicate;
 
 /** Enforces that a safe SELECT structurally implements its approved query plan. */
 public final class SqlPlanGuard {
@@ -85,6 +86,7 @@ public final class SqlPlanGuard {
                 if (!conditionPresent) throw reject("查询缺少指标的固定条件，请按口径过滤");
             }
         }
+        validateCompletePredicates(branches, plan);
         validateProjection(resultQuery, plan);
     }
 
@@ -188,6 +190,53 @@ public final class SqlPlanGuard {
         return Set.copyOf(columns);
     }
 
+    private static void validateCompletePredicates(List<Branch> branches, QueryPlan plan)
+            throws UnsafeSqlException {
+        if (!plan.filters().isEmpty()) {
+            throw reject("当前查询计划尚不支持普通维度过滤条件");
+        }
+        Set<SqlRelationName> plannedSources = plan.metrics().stream()
+                .map(metric -> SqlRelationName.parseCatalogName(metric.sourceView()))
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        Branch sourceBranch = branches.stream()
+                .filter(branch -> branch.tables().stream().anyMatch(plannedSources::contains))
+                .findFirst()
+                .orElseThrow(() -> reject("查询缺少计划要求的数据视图"));
+        List<Expression> remaining = new ArrayList<>(sourceBranch.terms());
+
+        for (String timeColumn : plan.metrics().stream().map(MetricDefinition::timeColumn).distinct().toList()) {
+            consumeOne(remaining, term -> isLowerBound(term, timeColumn),
+                    "时间列 " + timeColumn + " 缺少 :fromTs 包含下界");
+            consumeOne(remaining, term -> isUpperBound(term, timeColumn),
+                    "时间列 " + timeColumn + " 缺少 :toTs 排除上界");
+        }
+        Set<String> fixedConditions = new LinkedHashSet<>();
+        for (MetricDefinition metric : plan.metrics()) {
+            if (metric.condition() != null) {
+                fixedConditions.add(canonical(parseCondition(metric.condition())));
+            }
+        }
+        for (String fixedCondition : fixedConditions) {
+            consumeOne(remaining, term -> canonical(term).equals(fixedCondition),
+                    "查询缺少指标的固定条件，请按口径过滤");
+        }
+        if (!remaining.isEmpty()) {
+            throw reject("查询包含计划之外的结果谓词 " + remaining);
+        }
+    }
+
+    private static void consumeOne(List<Expression> terms,
+                                   Predicate<Expression> matches,
+                                   String missingMessage) throws UnsafeSqlException {
+        for (int index = 0; index < terms.size(); index++) {
+            if (matches.test(terms.get(index))) {
+                terms.remove(index);
+                return;
+            }
+        }
+        throw reject(missingMessage);
+    }
+
     private static void collectColumns(Expression expression, Set<String> columns) {
         expression.accept(new ExpressionVisitorAdapter<Void>() {
             @Override
@@ -288,8 +337,9 @@ public final class SqlPlanGuard {
                 throw reject("指标目录包含无法解析的聚合表达式 " + metric.expression());
             }
         }
-        Set<String> groupedColumns = groupedColumns(resultQuery);
+        Set<String> groupedColumns = groupedColumns(resultQuery, plan);
         Set<String> projected = new LinkedHashSet<>();
+        Set<String> projectedDimensions = new LinkedHashSet<>();
         List<String> invalidProjections = new ArrayList<>();
         for (var item : resultQuery.getSelectItems()) {
             Expression expression = item.getExpression();
@@ -307,6 +357,9 @@ public final class SqlPlanGuard {
                 if (!groupedColumns.contains(name)) {
                     throw reject("投影的维度 " + column.getUnquotedColumnName() + " 必须出现在 GROUP BY 中");
                 }
+                if (!projectedDimensions.add(name)) {
+                    throw reject("查询重复投影了维度 " + name);
+                }
                 continue;
             }
             invalidProjections.add(expression.toString());
@@ -320,26 +373,35 @@ public final class SqlPlanGuard {
         if (!invalidProjections.isEmpty()) {
             throw reject("查询包含未获指标目录批准的投影 " + invalidProjections);
         }
-        if (resultQuery.getGroupBy() != null) {
-            var groupBy = resultQuery.getGroupBy().getGroupByExpressionList();
-            for (int i = 0; i < groupBy.size(); i++) {
-                Expression expression = (Expression) groupBy.get(i);
-                if (!(expression instanceof Column column)
-                        || !allowedDimensions(plan).contains(column.getUnquotedColumnName().toLowerCase(Locale.ROOT))) {
-                    throw reject("GROUP BY 使用了未获指标目录批准的维度 " + expression);
-                }
-            }
+        Set<String> expectedDimensions = allowedDimensions(plan);
+        if (!projectedDimensions.equals(expectedDimensions)) {
+            Set<String> missing = new LinkedHashSet<>(expectedDimensions);
+            missing.removeAll(projectedDimensions);
+            throw reject("查询缺少计划要求的投影维度 " + missing);
+        }
+        if (!groupedColumns.equals(expectedDimensions)) {
+            Set<String> missing = new LinkedHashSet<>(expectedDimensions);
+            missing.removeAll(groupedColumns);
+            throw reject("GROUP BY 缺少计划要求的维度 " + missing);
         }
     }
 
-    private static Set<String> groupedColumns(PlainSelect resultQuery) {
+    private static Set<String> groupedColumns(PlainSelect resultQuery, QueryPlan plan)
+            throws UnsafeSqlException {
         Set<String> grouped = new LinkedHashSet<>();
         if (resultQuery.getGroupBy() != null) {
             var groupBy = resultQuery.getGroupBy().getGroupByExpressionList();
             for (int i = 0; i < groupBy.size(); i++) {
                 Expression expression = (Expression) groupBy.get(i);
-                if (expression instanceof Column column) {
-                    grouped.add(column.getUnquotedColumnName().toLowerCase(Locale.ROOT));
+                if (!(expression instanceof Column column)) {
+                    throw reject("GROUP BY 使用了未获指标目录批准的维度 " + expression);
+                }
+                String name = column.getUnquotedColumnName().toLowerCase(Locale.ROOT);
+                if (!allowedDimensions(plan).contains(name)) {
+                    throw reject("GROUP BY 使用了未获指标目录批准的维度 " + expression);
+                }
+                if (!grouped.add(name)) {
+                    throw reject("GROUP BY 重复使用了维度 " + name);
                 }
             }
         }
@@ -376,16 +438,23 @@ public final class SqlPlanGuard {
     }
 
     private static boolean hasLowerBound(List<Expression> terms, String timeColumn) {
-        return terms.stream().anyMatch(term ->
-                comparison(term, GreaterThanEquals.class, timeColumn, "fromTs")
-                        || reversedComparison(term, net.sf.jsqlparser.expression.operators.relational.MinorThanEquals.class,
-                                "fromTs", timeColumn));
+        return terms.stream().anyMatch(term -> isLowerBound(term, timeColumn));
     }
 
     private static boolean hasUpperBound(List<Expression> terms, String timeColumn) {
-        return terms.stream().anyMatch(term ->
-                comparison(term, MinorThan.class, timeColumn, "toTs")
-                        || reversedComparison(term, GreaterThan.class, "toTs", timeColumn));
+        return terms.stream().anyMatch(term -> isUpperBound(term, timeColumn));
+    }
+
+    private static boolean isLowerBound(Expression term, String timeColumn) {
+        return comparison(term, GreaterThanEquals.class, timeColumn, "fromTs")
+                || reversedComparison(term,
+                        net.sf.jsqlparser.expression.operators.relational.MinorThanEquals.class,
+                        "fromTs", timeColumn);
+    }
+
+    private static boolean isUpperBound(Expression term, String timeColumn) {
+        return comparison(term, MinorThan.class, timeColumn, "toTs")
+                || reversedComparison(term, GreaterThan.class, "toTs", timeColumn);
     }
 
     private static boolean comparison(Expression expression,
