@@ -52,6 +52,9 @@ export function useExpertCollaboration(pollIntervalMs = 500) {
     loading.value = true
     error.value = ''
     run.value = null
+    // A fresh collaboration gets its own poll retry budget; a previous run
+    // that exhausted the retries must not consume it.
+    consecutiveFailures = 0
     try {
       const started = await startCollaboration(normalized)
       if (generation === currentGeneration) void poll(started.runId, currentGeneration)

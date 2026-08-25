@@ -110,6 +110,20 @@ class ReadOnlyQueryExecutorTest {
     }
 
     @Test
+    void rejectsUnrewritableLimitShapesInsteadOfProducingBrokenSql() {
+        // jsqlparser drops OFFSET during parsing, so the AST guard accepts
+        // "LIMIT 2 OFFSET 0"; the executor must reject the shape when its
+        // truncation probe cannot rewrite the trailing LIMIT — never append a
+        // second LIMIT and let PostgreSQL fail with a syntax error.
+        ValidatedSql sql = new ValidatedSql(
+                "SELECT building_id, kwh FROM analytics.v_energy_hourly LIMIT 2 OFFSET 0",
+                List.of(), 2);
+        assertThatThrownBy(() -> executor.execute(sql, Map.of()))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("OFFSET");
+    }
+
+    @Test
     void rejectsResultsExceedingTheByteBudget() throws UnsafeSqlException {
         ReadOnlyQueryExecutor tiny = new ReadOnlyQueryExecutor(readOnlyDataSource,
                 new ReadOnlyQueryExecutor.QueryLimits(java.time.Duration.ofSeconds(3), 500, 512, 1_000_000.0));

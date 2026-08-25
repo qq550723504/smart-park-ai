@@ -50,9 +50,22 @@ public class AnalyticsProperties {
         this.clarificationTimeout = clarificationTimeout;
     }
     public int getMaxRows() { return maxRows; }
-    public void setMaxRows(int maxRows) { this.maxRows = maxRows; }
+    public void setMaxRows(int maxRows) {
+        // Must match SqlAstGuard's LIMIT contract (1..500): a cap the guard can
+        // never satisfy would silently truncate every analysis to zero rows.
+        int supportedMaximum = com.example.smartpark.analytics.sql.SqlAstGuard.MAX_ROWS;
+        if (maxRows < 1 || maxRows > supportedMaximum) {
+            throw new IllegalArgumentException("max-rows must be between 1 and " + supportedMaximum);
+        }
+        this.maxRows = maxRows;
+    }
     public long getMaxResultBytes() { return maxResultBytes; }
-    public void setMaxResultBytes(long maxResultBytes) { this.maxResultBytes = maxResultBytes; }
+    public void setMaxResultBytes(long maxResultBytes) {
+        if (maxResultBytes <= 0) {
+            throw new IllegalArgumentException("max-result-bytes must be positive");
+        }
+        this.maxResultBytes = maxResultBytes;
+    }
     public double getMaxPlanCost() { return maxPlanCost; }
     public void setMaxPlanCost(double maxPlanCost) {
         if (!Double.isFinite(maxPlanCost) || maxPlanCost <= 0) {

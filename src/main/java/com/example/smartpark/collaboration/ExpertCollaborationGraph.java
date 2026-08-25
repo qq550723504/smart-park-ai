@@ -64,6 +64,10 @@ public final class ExpertCollaborationGraph {
 
     /** Runs the fan-out for one collaboration run; runId enables live branch handoff tracing. */
     public List<ExpertFinding> execute(SupervisorPlan plan, UUID runId) {
+        // Every branch shares the same submission deadline so a hung branch is
+        // canceled after its own configured lifetime — never after the sum of
+        // the timeouts of the branches awaited before it.
+        java.time.Instant submissionDeadline = Instant.now(clock).plus(expertTimeout);
         List<BranchTask> tasks = plan.selectedDomains().stream()
                 .map(domain -> {
                     publishBranchHandoff(runId, domain, "supervisor -> " + domain.name().toLowerCase(), null);
@@ -73,7 +77,7 @@ public final class ExpertCollaborationGraph {
                     return new BranchTask(domain, task);
                 })
                 .toList();
-        List<ExpertFinding> findings = tasks.stream().map(this::await)
+        List<ExpertFinding> findings = tasks.stream().map(task -> await(task, submissionDeadline))
                 .sorted(Comparator.comparing(ExpertFinding::domain)).toList();
         for (ExpertFinding finding : findings) {
             publishBranchHandoff(runId, finding.domain(),
@@ -82,9 +86,10 @@ public final class ExpertCollaborationGraph {
         return findings;
     }
 
-    private ExpertFinding await(BranchTask branch) {
+    private ExpertFinding await(BranchTask branch, java.time.Instant submissionDeadline) {
+        long remainingMs = Math.max(1, Duration.between(Instant.now(clock), submissionDeadline).toMillis());
         try {
-            return branch.task().get(expertTimeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+            return branch.task().get(remainingMs, java.util.concurrent.TimeUnit.MILLISECONDS);
         } catch (java.util.concurrent.TimeoutException timeout) {
             branch.task().cancel(true);
             return failed(branch.domain(), "expert timed out or failed");

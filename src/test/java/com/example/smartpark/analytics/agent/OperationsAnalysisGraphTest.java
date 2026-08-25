@@ -198,6 +198,29 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
+    void removesRunContextEvenWhenTheTerminalEventWasAlreadyPublishedByTheTimeoutTimer() {
+        // OperationsAnalysisService's independent timer can publish its terminal
+        // FAILED event before an interrupted graph enters the catch block; the
+        // run context (which retains result rows) must still be removed.
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of()),
+                List.of(GOOD_SQL), null, null);
+        UUID runId = UUID.randomUUID();
+        modelClient.onGenerateSql(() -> publisher.publish(new ExecutionEvent(
+                UUID.randomUUID(), runId, 0, Instant.now(),
+                com.example.smartpark.execution.model.ExecutionScenario.OPERATIONS_ANALYSIS,
+                "analytics", com.example.smartpark.execution.model.ExecutionStage.FAILURE,
+                ExecutionEventType.FAILED, com.example.smartpark.execution.model.ExecutionStatus.FAILED,
+                "timeout", null)));
+
+        var outcome = graph.run(runId, "上周能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.FAILED);
+        assertThat(graph.trackedContextCount()).as("run context must not leak after a raced terminal publish")
+                .isZero();
+    }
+
+    @Test
     void ambiguousMetricTermPausesRunAsClarificationWithoutTouchingDatabase() {
         modelClient.reset(
                 new AnalyticsModelClient.QuestionUnderstanding("告警情况", List.of("告警"), List.of()),
@@ -307,6 +330,7 @@ class OperationsAnalysisGraphTest {
         private String conclusion;
         private int generateSqlCalls;
         private String lastRejectionReason = "";
+        private Runnable generateSqlSideEffect;
         private com.example.smartpark.analytics.model.QueryPlan lastPlan;
 
         void reset(QuestionUnderstanding understanding, List<String> sqlDrafts,
@@ -318,6 +342,12 @@ class OperationsAnalysisGraphTest {
             this.generateSqlCalls = 0;
             this.lastRejectionReason = "";
             this.lastPlan = null;
+            this.generateSqlSideEffect = null;
+        }
+
+        /** Side effect run right before generateSql returns (test hook for publisher races). */
+        void onGenerateSql(Runnable sideEffect) {
+            this.generateSqlSideEffect = sideEffect;
         }
 
         int generateSqlInvocations() {
@@ -342,7 +372,11 @@ class OperationsAnalysisGraphTest {
             generateSqlCalls++;
             lastPlan = request.plan();
             lastRejectionReason = request.rejectionReason() == null ? "" : request.rejectionReason();
-            return sqlDrafts.poll();
+            String draft = sqlDrafts.poll();
+            if (generateSqlSideEffect != null) {
+                generateSqlSideEffect.run();
+            }
+            return draft;
         }
 
         @Override

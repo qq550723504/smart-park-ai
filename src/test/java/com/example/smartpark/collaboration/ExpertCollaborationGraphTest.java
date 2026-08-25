@@ -74,6 +74,39 @@ class ExpertCollaborationGraphTest {
         }
     }
 
+    @Test void cancelsEveryBranchWithinOneExpertTimeoutOfTheCommonSubmission() {
+        // Timeouts must be measured from the shared submission deadline: with
+        // sequential per-await waits, three hung branches would each consume
+        // their own full expert timeout and occupy executor threads far beyond
+        // the configured limit.
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            EnumMap<ExpertDomain, ExpertCollaborationGraph.Expert> experts = new EnumMap<>(ExpertDomain.class);
+            for (ExpertDomain domain : ExpertDomain.values()) {
+                experts.put(domain, assignment -> {
+                    try {
+                        Thread.sleep(5000);
+                    } catch (InterruptedException ex) {
+                        Thread.currentThread().interrupt();
+                    }
+                    return finding(domain);
+                });
+            }
+            var graph = new ExpertCollaborationGraph(experts, executor, Duration.ofMillis(300));
+
+            long startNanos = System.nanoTime();
+            var findings = graph.execute(plan(ExpertDomain.SECURITY, ExpertDomain.ENERGY, ExpertDomain.DEVICE));
+            long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000;
+
+            assertThat(findings).extracting(ExpertFinding::status).containsOnly(FindingStatus.FAILED);
+            // Sequential awaits would need at least 3 x 300ms; a shared deadline
+            // cancels every branch after roughly one timeout window.
+            assertThat(elapsedMs).as("all branches share one submission deadline").isLessThan(700);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
     @Test void interruptsTimedOutExpertInvocation() throws InterruptedException {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         CountDownLatch interrupted = new CountDownLatch(1);

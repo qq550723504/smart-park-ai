@@ -45,7 +45,9 @@ public class OperationsAnalysisService {
     private final Duration timeout;
     private final Duration clarificationTimeout;
     private final Clock clock;
-    private final AnalysisRunStore store = new AnalysisRunStore();
+    private final AnalysisRunStore store;
+    // ... store is created with the service clock so terminal-record retention
+    // is measured on the same timeline as record timestamps.
     private final ExecutionEventPublisher events;
     private final Object lifecycleLock = new Object();
     private UUID activeRunId;
@@ -87,6 +89,7 @@ public class OperationsAnalysisService {
         this.clarificationTimeout = clarificationTimeout;
         this.clock = clock;
         this.events = events;
+        this.store = new AnalysisRunStore(clock);
     }
 
     public AnalysisRunStore.RunRecord get(UUID runId) {

@@ -36,9 +36,14 @@ public class ReadOnlyQueryExecutor {
 
     public TabularResult execute(ValidatedSql validated, Map<String, Object> parameters) throws UnsafeSqlException {
         long start = System.currentTimeMillis();
+        int hardCap = Math.min(limits.maxRows(), validated.maxRows());
+        // Rewrite before touching the database so an unrewritable LIMIT shape
+        // (e.g. a trailing OFFSET the parser silently dropped) is rejected
+        // cleanly instead of failing as a broken-SQL syntax error.
+        String boundedProbe = withOneExtraProbeRow(validated.sql(), hardCap);
         try {
             TabularResult result = readOnlyTransaction.execute(status ->
-                    runQuery(validated, parameters, start));
+                    runQuery(boundedProbe, parameters, hardCap, start));
             return result == null
                     ? new TabularResult(List.of(), List.of(), false, System.currentTimeMillis() - start)
                     : result;
@@ -60,16 +65,10 @@ public class ReadOnlyQueryExecutor {
         }
     }
 
-    private TabularResult runQuery(ValidatedSql validated, Map<String, Object> parameters, long start) {
+    private TabularResult runQuery(String boundedProbe, Map<String, Object> parameters,
+                                    int hardCap, long start) {
         NamedParameterJdbcTemplate template = new NamedParameterJdbcTemplate(dataSource);
         template.getJdbcTemplate().setQueryTimeout(Math.max(1, (int) limits.statementTimeout().toSeconds()));
-
-        int hardCap = Math.min(limits.maxRows(), validated.maxRows());
-        // The SQL's own LIMIT hides whether further matches exist: once the
-        // database stops at LIMIT N there is no extra row to observe. Raise
-        // the declared bound by exactly one row so truncation becomes
-        // detectable while still returning at most hardCap rows.
-        String boundedProbe = withOneExtraProbeRow(validated.sql(), hardCap);
 
         List<String> columns = new ArrayList<>();
         List<List<Object>> rows = new ArrayList<>();
@@ -103,8 +102,13 @@ public class ReadOnlyQueryExecutor {
         });
     }
 
-    /** Raises a trailing LIMIT by one row (capped at hardCap+1) for the truncation probe. */
-    private static String withOneExtraProbeRow(String sql, int hardCap) {
+    /**
+     * Raises a trailing LIMIT by one row (capped at hardCap+1) for the
+     * truncation probe. jsqlparser silently drops a trailing OFFSET from its
+     * AST, so such shapes slip past the guard; they cannot be rewritten safely
+     * and are rejected fail-closed instead of appending a duplicate LIMIT.
+     */
+    private static String withOneExtraProbeRow(String sql, int hardCap) throws UnsafeSqlException {
         String base = sql.strip();
         if (base.endsWith(";")) {
             base = base.substring(0, base.length() - 1).strip();
@@ -115,7 +119,13 @@ public class ReadOnlyQueryExecutor {
             long probeLimit = Math.min(declared, hardCap) + 1;
             return base.substring(0, matcher.start()) + "LIMIT " + probeLimit;
         }
-        // The AST guard mandates a trailing LIMIT; keep a defensive fallback.
+        if (java.util.regex.Pattern.compile("(?i)\\blimit\\s+\\d+\\s+offset\\s+\\d+$")
+                .matcher(base).find()) {
+            throw new UnsafeSqlException("SQL_POLICY_REJECTED",
+                    "不支持的 LIMIT/OFFSET 形态，已拒绝执行（OFFSET）");
+        }
+        // The guard's contract is a plain trailing LIMIT; anything else that is
+        // not an OFFSET shape keeps the previous append fallback.
         return base + " LIMIT " + (hardCap + 1);
     }
 

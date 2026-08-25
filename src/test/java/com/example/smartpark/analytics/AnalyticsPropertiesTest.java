@@ -96,6 +96,20 @@ class AnalyticsPropertiesTest {
     }
 
     @Test
+    void rejectsNonPositiveOrOverLargeRowAndByteCaps() {
+        AnalyticsProperties properties = new AnalyticsProperties();
+
+        assertThatThrownBy(() -> properties.setMaxRows(0)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> properties.setMaxRows(-5)).isInstanceOf(IllegalArgumentException.class);
+        // The executor cannot accept SQL beyond the AST guard's LIMIT contract.
+        assertThatThrownBy(() -> properties.setMaxRows(501)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(properties.getMaxRows()).isEqualTo(500); // default unchanged
+
+        assertThatThrownBy(() -> properties.setMaxResultBytes(0)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> properties.setMaxResultBytes(-1L)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void rejectsNonPositiveClarificationTimeout() {
         AnalyticsProperties properties = new AnalyticsProperties();
 

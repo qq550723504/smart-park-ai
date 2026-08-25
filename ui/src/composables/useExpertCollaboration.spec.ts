@@ -57,6 +57,26 @@ describe('useExpertCollaboration', () => {
     expect(mockedStart).not.toHaveBeenCalled()
   })
 
+  it('gives a newly started collaboration its own poll retry budget', async () => {
+    // A previous run that exhausted all poll retries must not consume the new
+    // run's budget: the counter resets on every start.
+    mockedGet.mockRejectedValue(new Error('network down'))
+    const state = useExpertCollaboration(10)
+    await state.start('first')
+    await vi.runAllTimersAsync()
+    // Retry budget exhausted: exactly MAX_CONSECUTIVE_FAILURES polls, no more.
+    expect(mockedGet).toHaveBeenCalledTimes(5)
+
+    mockedGet.mockClear()
+    mockedGet.mockRejectedValueOnce(new Error('flaky')).mockResolvedValueOnce({ ...completed(), runId: 'run-2' })
+    mockedStart.mockResolvedValueOnce({ runId: 'run-2', statusUrl: '', eventsUrl: '' })
+    await state.start('second')
+    await vi.runAllTimersAsync()
+
+    expect(mockedGet).toHaveBeenCalledWith('run-2')
+    expect(state.run.value?.runId).toBe('run-2')
+  })
+
   it('does not let an older poll overwrite a newer run', async () => {
     let resolveOld!: (value: typeof running) => void
     mockedGet.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve }))

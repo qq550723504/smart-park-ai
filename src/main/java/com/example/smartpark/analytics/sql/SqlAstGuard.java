@@ -44,7 +44,8 @@ public final class SqlAstGuard {
             "count", "sum", "avg", "min", "max", "round", "coalesce", "nullif",
             "extract", "date_trunc", "cast", "greatest", "least");
 
-    private static final int MAX_ROWS = 500;
+    /** Upper row bound shared with the analytics configuration contract. */
+    public static final int MAX_ROWS = 500;
 
     private SqlAstGuard() {
     }

@@ -73,13 +73,13 @@ INSERT INTO analytics.alert_fact_raw (alert_id, building_id, device_id, category
 ON CONFLICT DO NOTHING;
 
 INSERT INTO analytics.device_snapshot_raw (device_id, building_id, device_type, status, snapshot_at) VALUES
-    ('AC-B1-07',  'B1', 'HVAC',       'ONLINE',       (((CURRENT_DATE - 1)::timestamp + TIME '08:00') AT TIME ZONE 'Asia/Shanghai')),
-    ('PWR-B1-02', 'B1', 'POWER_METER','ONLINE',       (((CURRENT_DATE - 1)::timestamp + TIME '08:00') AT TIME ZONE 'Asia/Shanghai')),
-    ('LFT-B1-01', 'B1', 'ELEVATOR',   'OFFLINE',      (((CURRENT_DATE - 1)::timestamp + TIME '08:00') AT TIME ZONE 'Asia/Shanghai')),
-    ('HUM-B2-11', 'B2', 'HVAC',       'DEGRADED',     (((CURRENT_DATE - 1)::timestamp + TIME '08:00') AT TIME ZONE 'Asia/Shanghai')),
-    ('DR-B2-01',  'B2', 'ACCESS',     'ONLINE',       (((CURRENT_DATE - 1)::timestamp + TIME '08:00') AT TIME ZONE 'Asia/Shanghai')),
-    ('AC-B3-03',  'B3', 'HVAC',       'OFFLINE',      (((CURRENT_DATE - 1)::timestamp + TIME '08:00') AT TIME ZONE 'Asia/Shanghai')),
-    ('CAM-B3-05', 'B3', 'CAMERA',     'ONLINE',       (((CURRENT_DATE - 1)::timestamp + TIME '08:00') AT TIME ZONE 'Asia/Shanghai'))
+    ('AC-B1-07',  'B1', 'HVAC',       'ONLINE',       (now() - INTERVAL '2 hours')),
+    ('PWR-B1-02', 'B1', 'POWER_METER','ONLINE',       (now() - INTERVAL '2 hours')),
+    ('LFT-B1-01', 'B1', 'ELEVATOR',   'OFFLINE',      (now() - INTERVAL '2 hours')),
+    ('HUM-B2-11', 'B2', 'HVAC',       'DEGRADED',     (now() - INTERVAL '2 hours')),
+    ('DR-B2-01',  'B2', 'ACCESS',     'ONLINE',       (now() - INTERVAL '2 hours')),
+    ('AC-B3-03',  'B3', 'HVAC',       'OFFLINE',      (now() - INTERVAL '2 hours')),
+    ('CAM-B3-05', 'B3', 'CAMERA',     'ONLINE',       (now() - INTERVAL '2 hours'))
 ON CONFLICT DO NOTHING;
 
 INSERT INTO analytics.parking_daily_raw (stat_date, parking_zone, entries, peak_occupancy, capacity) VALUES

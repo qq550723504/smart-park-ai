@@ -86,6 +86,23 @@ class AnalyticsSchemaMigrationTest {
     }
 
     @Test
+    void seedsDeviceSnapshotsInsideTheRollingOneDayLookback() throws Exception {
+        // device_offline_count uses a rolling one-day lookback; snapshots
+        // anchored to a fixed wall-clock time can already be more than 24h old
+        // when the migration runs, so the seeded facts must be recent.
+        migrate();
+        try (var ro = DriverManager.getConnection(POSTGRES.getJdbcUrl(), RO_USER, RO_PASSWORD);
+             var statement = ro.createStatement();
+             ResultSet rs = statement.executeQuery(
+                     "SELECT MIN(snapshot_at), MAX(snapshot_at), now() FROM analytics.v_device_snapshot")) {
+            assertThat(rs.next()).isTrue();
+            var oldest = rs.getObject(1, java.time.OffsetDateTime.class);
+            var reference = rs.getObject(3, java.time.OffsetDateTime.class);
+            assertThat(oldest).isAfter(reference.minus(java.time.Duration.ofHours(24)));
+        }
+    }
+
+    @Test
     void demoEnergySeedUsesARecentRelativeDateAnchor() throws Exception {
         String migration = new String(new ClassPathResource(
                 "db/migration/V1__analytics_readonly_schema.sql").getInputStream().readAllBytes(),

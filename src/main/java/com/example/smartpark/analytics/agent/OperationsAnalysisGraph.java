@@ -266,17 +266,27 @@ public class OperationsAnalysisGraph {
             ctx.failureStage = "ANALYSIS_ABORTED";
             // The raw exception may carry generated SQL, vendor responses or
             // connection details; only a fixed public code is ever published.
-            publish(ctx, runId, ExecutionStage.FAILURE, ExecutionEventType.FAILED,
-                    ExecutionStatus.FAILED, "分析执行失败，已终止",
-                    DisplayPayload.error(ExecutionStage.FAILURE, "ANALYSIS_ABORTED", true,
-                            "分析在执行过程中被终止，请调整问题后重试"));
-            AnalysisRunResult result = AnalysisRunResult.failed(runId, ctx.failureStage);
+            try {
+                publish(ctx, runId, ExecutionStage.FAILURE, ExecutionEventType.FAILED,
+                        ExecutionStatus.FAILED, "分析执行失败，已终止",
+                        DisplayPayload.error(ExecutionStage.FAILURE, "ANALYSIS_ABORTED", true,
+                                "分析在执行过程中被终止，请调整问题后重试"));
+            } catch (IllegalStateException alreadyClosed) {
+                // The service-side timeout won the race and already published a
+                // terminal event; the context removal below must still happen.
+            }
+            return AnalysisRunResult.failed(runId, ctx.failureStage);
+        } finally {
+            // Unconditional removal: even a raced terminal publish must never
+            // leak the run context (which can retain result rows).
             contexts.remove(runId);
-            return result;
         }
-        AnalysisRunResult outcome = buildOutcome(runId, ctx);
-        contexts.remove(runId);
-        return outcome;
+        return buildOutcome(runId, ctx);
+    }
+
+    /** Test visibility: proves no run context leaks after terminal paths. */
+    int trackedContextCount() {
+        return contexts.size();
     }
 
     private AnalysisRunResult buildOutcome(UUID runId, RunContext ctx) {
