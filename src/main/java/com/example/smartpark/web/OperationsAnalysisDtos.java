@@ -16,6 +16,10 @@ final class OperationsAnalysisDtos {
         if (!record.clarificationQuestions().isEmpty()) {
             dto.put("clarificationQuestions", record.clarificationQuestions());
         }
+        if (!record.clarificationOptions().isEmpty()) {
+            // The operator can only choose within what the graph actually offered.
+            dto.put("clarificationOptions", record.clarificationOptions());
+        }
         if (record.summary() != null && !record.summary().isBlank()) {
             dto.put("summary", record.summary());
         }

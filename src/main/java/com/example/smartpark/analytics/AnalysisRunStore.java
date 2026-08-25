@@ -15,6 +15,8 @@ public class AnalysisRunStore {
             String question,
             String status,
             List<String> clarificationQuestions,
+            /** Structured candidate metric names, one candidate set per pending question. */
+            List<List<String>> clarificationOptions,
             String summary,
             int rowCount,
             boolean truncated,

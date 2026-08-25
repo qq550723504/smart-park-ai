@@ -255,7 +255,7 @@ public class OperationsAnalysisService {
             Instant now = Instant.now(clock);
             AnalysisRunStore.RunRecord record = switch (outcome.outcome()) {
                 case COMPLETED -> new AnalysisRunStore.RunRecord(runId, question, "COMPLETED",
-                        List.of(), outcome.summary() == null ? "" : outcome.summary(),
+                        List.of(), List.of(), outcome.summary() == null ? "" : outcome.summary(),
                         outcome.result() == null ? 0 : outcome.result().rowCount(),
                         outcome.result() != null && outcome.result().truncated(),
                         durationMs, null, now,
@@ -267,13 +267,15 @@ public class OperationsAnalysisService {
                             outcome.clarificationOptions().stream().map(Set::copyOf).toList(),
                             now.plus(clarificationTimeout)));
                     yield new AnalysisRunStore.RunRecord(runId, question, "NEEDS_CLARIFICATION",
-                            List.copyOf(outcome.clarificationQuestions()), "", 0, false, durationMs, null,
+                            List.copyOf(outcome.clarificationQuestions()),
+                            outcome.clarificationOptions().stream().map(List::copyOf).toList(),
+                            "", 0, false, durationMs, null,
                             now, List.of(), List.of());
                 }
                 case FAILED -> {
                     pendingClarifications.remove(runId);
                     yield new AnalysisRunStore.RunRecord(runId, question, "FAILED",
-                            List.of(), "", 0, false, durationMs,
+                            List.of(), List.of(), "", 0, false, durationMs,
                             outcome.failureStage() == null ? "UNKNOWN" : outcome.failureStage(),
                             now, List.of(), List.of());
                 }
@@ -289,7 +291,7 @@ public class OperationsAnalysisService {
     private AnalysisRunStore.RunRecord persistFailure(UUID runId, String question,
                                                       String stage, long durationMs) {
         synchronized (lifecycleLock) {
-            var record = new AnalysisRunStore.RunRecord(runId, question, "FAILED", List.of(),
+            var record = new AnalysisRunStore.RunRecord(runId, question, "FAILED", List.of(), List.of(),
                     "", 0, false, durationMs, stage, Instant.now(clock), List.of(), List.of());
             store.put(record);
             pendingClarifications.remove(runId);
@@ -310,7 +312,7 @@ public class OperationsAnalysisService {
         if (pending == null || now.isBefore(pending.expiresAt())) return null;
         AnalysisRunStore.RunRecord previous = store.get(activeRunId);
         AnalysisRunStore.RunRecord expired = new AnalysisRunStore.RunRecord(
-                previous.runId(), previous.question(), "FAILED", List.of(), "", 0, false,
+                previous.runId(), previous.question(), "FAILED", List.of(), List.of(), "", 0, false,
                 previous.durationMs(), "CLARIFICATION_TIMEOUT", now, List.of(), List.of());
         store.put(expired);
         pendingClarifications.remove(activeRunId);
@@ -334,7 +336,7 @@ public class OperationsAnalysisService {
     private AnalysisRunStore.RunRecord rerunningRecord(UUID runId) {
         var previous = get(runId);
         return new AnalysisRunStore.RunRecord(runId, previous.question(), "RUNNING",
-                List.of(), "", 0, false, 0, null, Instant.now(clock), List.of(), List.of());
+                List.of(), List.of(), "", 0, false, 0, null, Instant.now(clock), List.of(), List.of());
     }
 
     private static final class RecordBuilder {
@@ -351,7 +353,7 @@ public class OperationsAnalysisService {
 
         AnalysisRunStore.RunRecord running() {
             return new AnalysisRunStore.RunRecord(runId, question, "RUNNING",
-                    List.of(), "", 0, false, 0, null, Instant.now(clock), List.of(), List.of());
+                    List.of(), List.of(), "", 0, false, 0, null, Instant.now(clock), List.of(), List.of());
         }
     }
 

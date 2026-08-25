@@ -89,6 +89,18 @@ class ReadOnlyQueryExecutorTest {
     }
 
     @Test
+    void detectsTruncationWhenTheSqlLimitMatchesTheHardCap() throws UnsafeSqlException {
+        // The SQL itself carries LIMIT equal to the validated cap while more
+        // rows match; the executor must still report the result as truncated
+        // instead of presenting a clipped result as complete.
+        ValidatedSql sql = new ValidatedSql(
+                "SELECT building_id, kwh FROM analytics.v_energy_hourly LIMIT 2", List.of(), 2);
+        TabularResult result = executor.execute(sql, Map.of());
+        assertThat(result.rowCount()).isEqualTo(2);
+        assertThat(result.truncated()).isTrue();
+    }
+
+    @Test
     void truncatesResultsAtTheConfiguredRowBound() throws UnsafeSqlException {
         // Constructed directly (bypassing the AST guard) to prove the executor's own cap.
         ValidatedSql sql = new ValidatedSql("SELECT building_id, kwh FROM analytics.v_energy_hourly", List.of(), 10);

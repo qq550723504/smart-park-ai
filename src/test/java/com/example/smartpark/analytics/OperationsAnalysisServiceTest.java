@@ -104,6 +104,18 @@ class OperationsAnalysisServiceTest {
     }
 
     @Test
+    void pausedClarificationRecordCarriesThePendingCandidateOptions() {
+        // The status DTO can only expose candidates if the stored record keeps them.
+        OperationsAnalysisService service = service(
+                (runId, question, pinned) -> clarifying(runId), directExecutor());
+
+        var paused = service.start("告警情况");
+
+        assertThat(paused.status()).isEqualTo("NEEDS_CLARIFICATION");
+        assertThat(paused.clarificationOptions()).containsExactly(List.of("energy_kwh"));
+    }
+
+    @Test
     void unknownMetricInClarificationIsRejectedByCatalog() {
         OperationsAnalysisService service = service(
                 (runId, question, pinned) -> clarifying(runId), directExecutor());

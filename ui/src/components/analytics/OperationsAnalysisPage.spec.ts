@@ -68,9 +68,11 @@ describe('OperationsAnalysisPage', () => {
 
   it('shows clarification controls and resumes with a chosen metric', async () => {
     let clarified = false
-    handler = (url) => {
+    let submitted: unknown = undefined
+    handler = (url, init) => {
       if (url.includes('/clarifications')) {
         clarified = true
+        submitted = JSON.parse(String(init?.body ?? '{}'))
         return jsonResponse({ runId: RUN_ID, status: 'COMPLETED', summary: 'ok', rowCount: 3,
           columns: ['c'], rows: [[1]], createdAt: '' })
       }
@@ -79,6 +81,7 @@ describe('OperationsAnalysisPage', () => {
           runId: RUN_ID,
           status: 'NEEDS_CLARIFICATION',
           clarificationQuestions: ['“告警”可以指: 告警数量 / 高风险告警数量'],
+          clarificationOptions: [['alert_count', 'parking_entries']],
           createdAt: '',
         })
       }
@@ -91,11 +94,15 @@ describe('OperationsAnalysisPage', () => {
     await flush()
 
     expect(wrapper.find('[data-testid="clarify-panel"]').exists()).toBe(true)
-    await wrapper.find('select').setValue('alert_count')
+    // Each select renders the backend-provided candidate list, not hard-coded options.
+    const options = wrapper.findAll('option').map((o) => (o.element as HTMLOptionElement).value)
+    expect(options).toEqual(['alert_count', 'parking_entries'])
+    await wrapper.find('select').setValue('parking_entries')
     await wrapper.find('[data-testid="resume-button"]').trigger('click')
     await flush()
 
     expect(clarified).toBe(true)
+    expect(submitted).toMatchObject({ selections: [{ term: '澄清-1', metric: 'parking_entries' }] })
     expect(wrapper.find('[data-testid="result-panel"]').exists()).toBe(true)
     wrapper.unmount()
   })

@@ -25,6 +25,16 @@ class MetricCatalogTest {
     }
 
     @Test
+    void offlineDeviceSchemaExposesTheSnapshotTimestampForTimePredicates() {
+        // device_offline_count has a one-day lookback and every accepted query
+        // must bind :fromTs/:toTs, so the recalled schema has to include the
+        // view's temporal column or no compliant SQL can be generated.
+        var offline = catalog.findByName("device_offline_count").orElseThrow();
+        assertThat(offline.allowedDimensions()).contains("snapshot_at");
+        assertThat(offline.allowedDimensions()).contains("building_id", "device_type");
+    }
+
+    @Test
     void nightEnergyDefinitionIsFixedTo22To6() {
         var night = catalog.findByName("night_energy_kwh").orElseThrow();
         assertThat(night.condition()).contains("22");

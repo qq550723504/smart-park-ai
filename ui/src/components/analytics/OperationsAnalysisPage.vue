@@ -39,20 +39,33 @@ const METRIC_OPTIONS = [
   { value: 'parking_entries', label: '停车进场量 (parking_entries)' },
 ]
 
+// Each question renders the candidates the backend actually offered; the
+// hard-coded list is only a fallback for responses that predate the contract.
+function optionsFor(index: number): string[] {
+  const fromBackend = dto.value?.clarificationOptions?.[index]
+  if (fromBackend && fromBackend.length > 0) return fromBackend
+  return METRIC_OPTIONS.map((option) => option.value)
+}
+
+function metricLabel(value: string): string {
+  return METRIC_OPTIONS.find((option) => option.value === value)?.label ?? value
+}
+
 function onMetricChange(index: number, event: Event): void {
   const value = (event.target as HTMLSelectElement).value
   while (chosenMetrics.value.length <= index) chosenMetrics.value.push('alert_count')
   chosenMetrics.value[index] = value
 }
 
-// Each <select> visibly defaults to its first option; initialize the model
+// Each <select> visibly defaults to its first candidate; initialize the model
 // with the same value so "continue" submits the displayed defaults even
 // before any change event fires.
 watch(
-  () => (dto.value?.status === 'NEEDS_CLARIFICATION' ? dto.value.clarificationQuestions?.length ?? 0 : 0),
-  (count) => {
+  () => (dto.value?.status === 'NEEDS_CLARIFICATION' ? dto.value : null),
+  (current) => {
+    const count = current?.clarificationQuestions?.length ?? 0
     if (count > 0) {
-      chosenMetrics.value = Array.from({ length: count }, () => METRIC_OPTIONS[0].value)
+      chosenMetrics.value = Array.from({ length: count }, (_, index) => optionsFor(index)[0])
     }
   },
 )
@@ -85,7 +98,7 @@ watch(
       <div v-for="(_, index) in dto.clarificationQuestions ?? []" :key="'sel-' + index" class="selection-row">
         <label :for="'metric-' + index">指标 {{ index + 1 }}</label>
         <select :id="'metric-' + index" @change="onMetricChange(index, $event)">
-          <option v-for="option in METRIC_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
+          <option v-for="value in optionsFor(index)" :key="value" :value="value">{{ metricLabel(value) }}</option>
         </select>
       </div>
       <button data-testid="resume-button" @click="resume">按所选口径继续</button>

@@ -405,6 +405,11 @@ public class OperationsAnalysisGraph {
                 ctx.plan, ctx.schemaDescription, ctx.rejectionReason));
         ctx.rejectionReason = null;
         nodeCompleted(ctx, runId, ExecutionStage.ANALYSIS, "SQL 草案生成", null);
+        // The declared SQL_GENERATED event carries the draft for consumers that
+        // subscribe to the named lifecycle events rather than generic nodes.
+        publish(ctx, runId, ExecutionStage.ANALYSIS, ExecutionEventType.SQL_GENERATED,
+                ExecutionStatus.RUNNING, "SQL 草案已生成",
+                new DisplayPayload.SqlPayload(ctx.sqlDraft, List.of(), "DRAFT"));
         return Map.of();
     }
 
@@ -423,6 +428,10 @@ public class OperationsAnalysisGraph {
             }
             ctx.status = "OK";
             nodeCompleted(ctx, runId, ExecutionStage.SQL_VALIDATION, "SQL 通过 AST 校验",
+                    new DisplayPayload.SqlPayload(ctx.validatedSql.sql(),
+                            ctx.validatedSql.namedParameters(), "PASSED"));
+            publish(ctx, runId, ExecutionStage.SQL_VALIDATION, ExecutionEventType.SQL_VALIDATED,
+                    ExecutionStatus.RUNNING, "SQL 校验通过",
                     new DisplayPayload.SqlPayload(ctx.validatedSql.sql(),
                             ctx.validatedSql.namedParameters(), "PASSED"));
         } catch (UnsafeSqlException rejection) {
@@ -446,6 +455,12 @@ public class OperationsAnalysisGraph {
     }
 
     private void handleSqlRejection(RunContext ctx, UUID runId, String stage, String safeMessage) {
+        // Rejections surface on the dedicated declared event type before the
+        // retry (or terminal failure) proceeds.
+        publish(ctx, runId, ExecutionStage.SQL_VALIDATION, ExecutionEventType.SQL_REJECTED,
+                ExecutionStatus.RUNNING, "SQL 被拒绝: " + safeMessage,
+                DisplayPayload.error(ExecutionStage.SQL_VALIDATION, "SQL_POLICY_REJECTED", false,
+                        safeMessage == null ? "" : safeMessage));
         if (ctx.sqlAttempts >= MAX_SQL_ATTEMPTS - 1) {
             ctx.status = "FAILED";
             ctx.failureStage = stage;
@@ -469,6 +484,11 @@ public class OperationsAnalysisGraph {
             nodeCompleted(ctx, runId, ExecutionStage.QUERY_EXECUTION,
                     "查询完成: " + ctx.result.rowCount() + " 行" + (ctx.result.truncated() ? "（已截断）" : ""),
                     DisplayPayload.text("返回 " + ctx.result.rowCount() + " 行数据", false));
+            publish(ctx, runId, ExecutionStage.QUERY_EXECUTION, ExecutionEventType.QUERY_EXECUTED,
+                    ExecutionStatus.RUNNING,
+                    "查询执行完成: " + ctx.result.rowCount() + " 行",
+                    DisplayPayload.text("返回 " + ctx.result.rowCount() + " 行数据"
+                            + (ctx.result.truncated() ? "（已按上限截断）" : ""), false));
         } catch (UnsafeSqlException failure) {
             ctx.status = "FAILED";
             ctx.failureStage = "executeReadOnlyQuery";

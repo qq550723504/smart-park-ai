@@ -156,6 +156,48 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
+    void emitsTheDeclaredSqlLifecycleEventTypesOnTheHappyPath() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of()),
+                List.of(GOOD_SQL),
+                new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("total"), "", "kWh"),
+                "共 3 行结果。");
+        UUID runId = UUID.randomUUID();
+
+        graph.run(runId, "上周能耗");
+
+        List<ExecutionEventType> types = publisher.history(runId).stream()
+                .map(ExecutionEvent::eventType)
+                .toList();
+        int generated = types.indexOf(ExecutionEventType.SQL_GENERATED);
+        int validated = types.indexOf(ExecutionEventType.SQL_VALIDATED);
+        int executed = types.indexOf(ExecutionEventType.QUERY_EXECUTED);
+        assertThat(generated).as("SQL_GENERATED must be published").isGreaterThanOrEqualTo(0);
+        assertThat(validated).as("SQL_VALIDATED must follow generation")
+                .isGreaterThan(generated);
+        assertThat(executed).as("QUERY_EXECUTED must follow validation")
+                .isGreaterThan(validated);
+    }
+
+    @Test
+    void publishesSqlRejectedWhenGeneratedSqlFailsValidation() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of()),
+                List.of(LIMIT_LESS_SQL, GOOD_SQL),
+                null,
+                "共 3 行结果。");
+        UUID runId = UUID.randomUUID();
+
+        var outcome = graph.run(runId, "上周能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(publisher.history(runId).stream()
+                .filter(event -> event.eventType() == ExecutionEventType.SQL_REJECTED))
+                .as("the rejected draft must surface as SQL_REJECTED before the repair")
+                .hasSize(1);
+    }
+
+    @Test
     void ambiguousMetricTermPausesRunAsClarificationWithoutTouchingDatabase() {
         modelClient.reset(
                 new AnalyticsModelClient.QuestionUnderstanding("告警情况", List.of("告警"), List.of()),

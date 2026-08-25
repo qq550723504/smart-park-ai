@@ -64,18 +64,27 @@ public class ReadOnlyQueryExecutor {
         NamedParameterJdbcTemplate template = new NamedParameterJdbcTemplate(dataSource);
         template.getJdbcTemplate().setQueryTimeout(Math.max(1, (int) limits.statementTimeout().toSeconds()));
 
+        int hardCap = Math.min(limits.maxRows(), validated.maxRows());
+        // The SQL's own LIMIT hides whether further matches exist: once the
+        // database stops at LIMIT N there is no extra row to observe. Raise
+        // the declared bound by exactly one row so truncation becomes
+        // detectable while still returning at most hardCap rows.
+        String boundedProbe = withOneExtraProbeRow(validated.sql(), hardCap);
+
         List<String> columns = new ArrayList<>();
         List<List<Object>> rows = new ArrayList<>();
         boolean[] truncated = {false};
 
-        return template.query(validated.sql(), new MapSqlParameterSource(parameters), rs -> {
+        return template.query(boundedProbe, new MapSqlParameterSource(parameters), rs -> {
             for (int c = 1; c <= rs.getMetaData().getColumnCount(); c++) {
                 columns.add(rs.getMetaData().getColumnLabel(c));
             }
-            int hardCap = Math.min(limits.maxRows(), validated.maxRows());
             long bytes = 0;
             while (rs.next()) {
-                if (rows.size() >= hardCap) {
+                if (rows.size() == hardCap) {
+                    // One extra row exists beyond the SQL LIMIT/hard cap: the
+                    // result is a clipped window of the full match set and must
+                    // be reported as truncated rather than complete.
                     truncated[0] = true;
                     break;
                 }
@@ -92,6 +101,22 @@ public class ReadOnlyQueryExecutor {
             }
             return new TabularResult(columns, rows, truncated[0], System.currentTimeMillis() - start);
         });
+    }
+
+    /** Raises a trailing LIMIT by one row (capped at hardCap+1) for the truncation probe. */
+    private static String withOneExtraProbeRow(String sql, int hardCap) {
+        String base = sql.strip();
+        if (base.endsWith(";")) {
+            base = base.substring(0, base.length() - 1).strip();
+        }
+        var matcher = java.util.regex.Pattern.compile("(?i)\\blimit\\s+(\\d+)\\s*$").matcher(base);
+        if (matcher.find()) {
+            long declared = Long.parseLong(matcher.group(1));
+            long probeLimit = Math.min(declared, hardCap) + 1;
+            return base.substring(0, matcher.start()) + "LIMIT " + probeLimit;
+        }
+        // The AST guard mandates a trailing LIMIT; keep a defensive fallback.
+        return base + " LIMIT " + (hardCap + 1);
     }
 
     /** Runtime wrapper so checked rejections can cross the transaction callback. */

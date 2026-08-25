@@ -9,6 +9,8 @@ export interface AnalysisStatusDto {
   runId: string
   status: 'RUNNING' | 'NEEDS_CLARIFICATION' | 'COMPLETED' | 'FAILED'
   clarificationQuestions?: string[]
+  /** One candidate metric list per pending clarification question. */
+  clarificationOptions?: string[][]
   summary?: string
   rowCount?: number
   truncated?: boolean

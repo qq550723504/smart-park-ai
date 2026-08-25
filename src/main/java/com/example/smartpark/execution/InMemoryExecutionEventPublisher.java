@@ -15,15 +15,35 @@ import java.util.function.Consumer;
 /**
  * Thread-safe in-memory publisher. A per-run lock makes sequence assignment,
  * history append and sink emission one atomic commit so concurrent publishers
- * can never duplicate or skip a sequence.
+ * can never duplicate or skip a sequence. Terminal run histories are retained
+ * only for a bounded retention window; an opportunistic sweep triggered by
+ * publishing evicts them once they have stayed replayable long enough.
  */
 @Component
 public class InMemoryExecutionEventPublisher implements ExecutionEventPublisher {
 
+    /** Default replayable window after a run reaches a terminal state. */
+    private static final java.time.Duration DEFAULT_RETENTION = java.time.Duration.ofMinutes(30);
+
     private final Map<UUID, RunState> runs = new ConcurrentHashMap<>();
+    private final java.time.Clock clock;
+    private final java.time.Duration retention;
+
+    public InMemoryExecutionEventPublisher() {
+        this(DEFAULT_RETENTION, java.time.Clock.systemUTC());
+    }
+
+    public InMemoryExecutionEventPublisher(java.time.Duration retention, java.time.Clock clock) {
+        if (retention == null || retention.isZero() || retention.isNegative()) {
+            throw new IllegalArgumentException("retention must be positive");
+        }
+        this.retention = retention;
+        this.clock = java.util.Objects.requireNonNull(clock, "clock");
+    }
 
     @Override
     public ExecutionEvent publish(ExecutionEvent event) {
+        evictExpiredRuns(clock.instant());
         RunState state = runs.computeIfAbsent(event.runId(), id -> new RunState());
         state.lock.lock();
         try {
@@ -46,6 +66,7 @@ public class InMemoryExecutionEventPublisher implements ExecutionEventPublisher 
             if (stored.isTerminal()) {
                 state.closed = true;
                 state.consumers.clear();
+                state.terminalAt = clock.instant();
             }
             return stored;
         } finally {
@@ -110,11 +131,28 @@ public class InMemoryExecutionEventPublisher implements ExecutionEventPublisher 
         runs.remove(runId);
     }
 
+    /** Removes terminal runs whose replayable window has elapsed; running runs are never touched. */
+    private void evictExpiredRuns(java.time.Instant now) {
+        for (var entry : runs.entrySet()) {
+            RunState state = entry.getValue();
+            state.lock.lock();
+            try {
+                if (state.closed && state.terminalAt != null
+                        && state.terminalAt.plus(retention).compareTo(now) <= 0) {
+                    runs.remove(entry.getKey(), state);
+                }
+            } finally {
+                state.lock.unlock();
+            }
+        }
+    }
+
     private static final class RunState {
         final ReentrantLock lock = new ReentrantLock();
         final CopyOnWriteArrayList<Consumer<ExecutionEvent>> consumers = new CopyOnWriteArrayList<>();
         final List<ExecutionEvent> historyBacking = new ArrayList<>();
         volatile boolean closed;
+        volatile java.time.Instant terminalAt;
         long count;
 
         void addInternal(ExecutionEvent event) {

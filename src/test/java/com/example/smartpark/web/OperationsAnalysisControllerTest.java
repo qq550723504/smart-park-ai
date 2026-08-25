@@ -100,7 +100,7 @@ class OperationsAnalysisControllerTest {
 
     @Test
     void failedRunExposesFailureStageWithoutSensitiveDetail() throws Exception {
-        when(service.get(RUN_ID)).thenReturn(new RunRecord(RUN_ID, "上周能耗", "FAILED", List.of(), "",
+        when(service.get(RUN_ID)).thenReturn(new RunRecord(RUN_ID, "上周能耗", "FAILED", List.of(), List.of(), "",
                 0, false, 5, "validateSqlAst", Instant.parse("2026-08-24T00:00:00Z"), List.of(), List.of()));
 
         mockMvc.perform(get("/api/operations-analysis/runs/{runId}", RUN_ID))
@@ -110,7 +110,7 @@ class OperationsAnalysisControllerTest {
     }
 
     private static RunRecord record(String status, List<String> questions) {
-        return new RunRecord(RUN_ID, "上周能耗", status, questions, "共 3 行结果。",
+        return new RunRecord(RUN_ID, "上周能耗", status, questions, List.of(), "共 3 行结果。",
                 3, false, 1500, null, Instant.parse("2026-08-24T00:00:00Z"),
                 List.of("building_id", "total_kwh"),
                 List.of(List.of("B1", "1820.5"), List.of("B2", "1444.25"), List.of("B3", "990")));

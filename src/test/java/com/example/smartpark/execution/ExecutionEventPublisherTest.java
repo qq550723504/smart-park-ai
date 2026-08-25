@@ -121,6 +121,37 @@ class ExecutionEventPublisherTest {
     }
 
     @Test
+    void evictsTerminalRunHistoriesAfterTheRetentionExpires() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-08-24T00:00:00Z"));
+        InMemoryExecutionEventPublisher ttl =
+                new InMemoryExecutionEventPublisher(java.time.Duration.ofMinutes(10), clock);
+        UUID finished = UUID.randomUUID();
+        UUID running = UUID.randomUUID();
+
+        ttl.publish(event(finished, "working", false));
+        ttl.publish(event(running, "busy", false));
+        ttl.publish(event(finished, "done", true));
+
+        // Just before the retention deadline the terminal history stays replayable.
+        clock.advance(java.time.Duration.ofMinutes(9));
+        ttl.publish(event(UUID.randomUUID(), "trigger sweep", false));
+        assertThat(ttl.status(finished)).isEqualTo("COMPLETED");
+        assertThat(ttl.history(finished)).hasSize(2);
+
+        // Past the retention, the sweep evicts only the expired terminal run.
+        clock.advance(java.time.Duration.ofMinutes(2));
+        ttl.publish(event(UUID.randomUUID(), "trigger sweep again", false));
+        assertThat(ttl.history(finished)).isEmpty();
+        assertThat(ttl.status(finished)).isEqualTo("UNKNOWN");
+        assertThatThrownBy(() -> ttl.subscribe(finished, ignored -> {}))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        // Non-terminal runs are never evicted by age.
+        assertThat(ttl.history(running)).hasSize(1);
+        assertThat(ttl.status(running)).isEqualTo("RUNNING");
+    }
+
+    @Test
     void removeOnlyCleansUpTerminalRuns() {
         UUID finished = UUID.randomUUID();
         publisher.publish(event(finished, "done", true));
@@ -140,6 +171,18 @@ class ExecutionEventPublisherTest {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    private static final class MutableClock extends java.time.Clock {
+        private Instant instant;
+
+        MutableClock(Instant instant) { this.instant = instant; }
+
+        void advance(java.time.Duration duration) { instant = instant.plus(duration); }
+
+        @Override public java.time.ZoneId getZone() { return java.time.ZoneOffset.UTC; }
+        @Override public java.time.Clock withZone(java.time.ZoneId zone) { return this; }
+        @Override public Instant instant() { return instant; }
     }
 
     private static ExecutionEvent event(UUID runId, String summary, boolean terminal) {
