@@ -131,6 +131,27 @@ describe('useOperationsAnalysis', () => {
     expect(analysis.error.value).toContain('请输入分析问题')
   })
 
+  it('clears the previous run id before a new analysis that fails to start', async () => {
+    let starts = 0
+    handler = (url, init) => {
+      if (init?.method === 'POST' && url.endsWith('/api/operations-analysis/runs')) {
+        starts += 1
+        return starts === 1
+          ? jsonResponse({ runId: RUN_ID }, 202)
+          : jsonResponse({ message: 'busy' }, 503)
+      }
+      return jsonResponse({ runId: RUN_ID, status: 'COMPLETED', createdAt: '' })
+    }
+    const analysis = useOperationsAnalysis({ pollIntervalMs: 1 })
+
+    await analysis.submit('第一次分析')
+    expect(analysis.runId.value).toBe(RUN_ID)
+    await analysis.submit('第二次分析')
+
+    expect(analysis.runId.value).toBeNull()
+    expect(analysis.phase.value).toBe('failed')
+  })
+
   it('captures the chart spec from real CHART_SPECIFIED trace events only', async () => {
     const trace = fakeTrace()
     handler = (url, init) => {

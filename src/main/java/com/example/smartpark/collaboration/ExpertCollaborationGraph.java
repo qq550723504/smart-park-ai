@@ -75,7 +75,7 @@ public final class ExpertCollaborationGraph {
                 .map(domain -> {
                     publishBranchHandoff(runId, domain, "supervisor -> " + domain.name().toLowerCase(), null);
                     Future<ExpertFinding> task = new FutureTask<>(
-                            () -> invoke(domain, plan.assignments().get(domain)));
+                            () -> invoke(domain, plan.assignments().get(domain), runId));
                     try {
                         executor.execute((Runnable) task);
                     } catch (RejectedExecutionException rejected) {
@@ -134,8 +134,8 @@ public final class ExpertCollaborationGraph {
                 List.of(), 0, List.of("retry " + domain.name().toLowerCase() + " expert"));
     }
 
-    private ExpertFinding invoke(ExpertDomain domain, String assignment) {
-        try { return experts.get(domain).analyze(assignment); }
+    private ExpertFinding invoke(ExpertDomain domain, String assignment, UUID runId) {
+        try { return experts.get(domain).analyze(assignment, runId); }
         catch (RuntimeException ex) {
             return failed(domain, "failed to analyze expert assignment");
         }
@@ -146,5 +146,10 @@ public final class ExpertCollaborationGraph {
     @FunctionalInterface
     public interface Expert {
         ExpertFinding analyze(String assignment);
+
+        /** Run-scoped overload used by audited tools; the old seam remains compatible for tests/callers. */
+        default ExpertFinding analyze(String assignment, UUID runId) {
+            return analyze(assignment);
+        }
     }
 }

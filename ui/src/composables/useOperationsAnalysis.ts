@@ -132,6 +132,9 @@ export function useOperationsAnalysis(
     }
     error.value = ''
     stopClarificationPolling()
+    // A failed POST must not leave the previous run addressable to the page;
+    // otherwise the page can emit that old ID as if this attempt had started.
+    runId.value = null
     chart.value = null
     dto.value = null
     phase.value = 'running'

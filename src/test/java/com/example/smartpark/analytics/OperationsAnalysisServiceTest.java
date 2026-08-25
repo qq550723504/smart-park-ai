@@ -125,6 +125,25 @@ class OperationsAnalysisServiceTest {
     }
 
     @Test
+    void clarificationResumeUsesTheValidatedSnapshotWhenTheDeadlinePassesDuringResume() {
+        AdvancingClock clock = new AdvancingClock(NOW, 12);
+        AtomicReference<AnalyticsModelClient.QuestionUnderstanding> pinned = new AtomicReference<>();
+        OperationsAnalysisService service = new OperationsAnalysisService(new MetricCatalog(),
+                (runId, question, pinnedUnderstanding) -> {
+                    if (pinnedUnderstanding == null) return clarifying(runId);
+                    pinned.set(pinnedUnderstanding);
+                    return completed(runId);
+                }, directExecutor(), DEFAULT_TIMEOUT, Duration.ofMinutes(5), clock, null);
+
+        var paused = service.start("告警情况");
+        var resumed = service.submitClarification(paused.runId(),
+                List.of(new MetricSelection("告警", "energy_kwh")));
+
+        assertThat(resumed.status()).isEqualTo("COMPLETED");
+        assertThat(pinned.get()).isNotNull();
+    }
+
+    @Test
     void clarificationResumePreservesMetricsThatWereAlreadyResolved() {
         var partialUnderstanding = new AnalyticsModelClient.QuestionUnderstanding(
                 "能耗和告警", List.of("energy_kwh", "告警"), List.of(), null, List.of("building_id"));
@@ -402,7 +421,7 @@ class OperationsAnalysisServiceTest {
                 List.of("请明确指标口径"), List.of(List.of("energy_kwh")), null, null, null, null);
     }
 
-    private static final class MutableClock extends Clock {
+    private static class MutableClock extends Clock {
         private Instant instant;
 
         private MutableClock(Instant instant) {
@@ -416,5 +435,21 @@ class OperationsAnalysisServiceTest {
         @Override public ZoneId getZone() { return ZoneOffset.UTC; }
         @Override public Clock withZone(ZoneId zone) { return this; }
         @Override public Instant instant() { return instant; }
+    }
+
+    private static final class AdvancingClock extends MutableClock {
+        private final int advanceOnCall;
+        private int calls;
+
+        private AdvancingClock(Instant instant, int advanceOnCall) {
+            super(instant);
+            this.advanceOnCall = advanceOnCall;
+        }
+
+        @Override public Instant instant() {
+            calls++;
+            if (calls == advanceOnCall) advance(Duration.ofMinutes(6));
+            return super.instant();
+        }
     }
 }

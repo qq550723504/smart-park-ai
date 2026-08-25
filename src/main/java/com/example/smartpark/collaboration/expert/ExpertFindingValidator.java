@@ -46,9 +46,15 @@ public final class ExpertFindingValidator {
                 .collect(java.util.stream.Collectors.toUnmodifiableMap(
                         EvidenceLedger.Observation::ref, value -> value, (left, right) -> right));
         List<String> refs = finding.evidenceRefs();
-        if (finding.status() == FindingStatus.SUPPORTED && assignment != null
-                && !evidenceWithinAssignment(refs, observed, assignment)) {
-            return insufficientEvidence(finding);
+        if (assignment != null) {
+            List<String> scopedRefs = refs.stream()
+                    .filter(ref -> observed.containsKey(ref)
+                            && evidenceWithinAssignment(List.of(ref), observed, assignment))
+                    .toList();
+            if (finding.status() == FindingStatus.SUPPORTED && scopedRefs.size() != refs.size()) {
+                return insufficientEvidence(finding);
+            }
+            refs = scopedRefs;
         }
         boolean validRefs = !refs.isEmpty() && new HashSet<>(observed.keySet()).containsAll(refs);
         if (finding.status() == FindingStatus.SUPPORTED) {
@@ -115,7 +121,7 @@ public final class ExpertFindingValidator {
                                              String assignment) {
         for (String ref : refs) {
             EvidenceLedger.Observation observation = observed.get(ref);
-            if (observation == null || observation.input().isBlank()) continue;
+            if (observation == null || observation.input().isBlank()) return false;
             try {
                 JsonNode root = JSON.readTree(observation.input());
                 if (!argumentsWithinAssignment(root, assignment)) return false;

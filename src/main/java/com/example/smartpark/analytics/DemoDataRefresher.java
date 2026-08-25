@@ -28,13 +28,18 @@ public class DemoDataRefresher {
 
     private static final String DEVICE_IDS =
             "('AC-B1-07', 'PWR-B1-02', 'LFT-B1-01', 'HUM-B2-11', 'DR-B2-01', 'AC-B3-03', 'CAM-B3-05')";
+    private static final String ENERGY_METER_IDS =
+            "('MTR-1-1', 'MTR-1-2', 'MTR-2-1', 'MTR-2-2', 'MTR-3-1', 'MTR-3-2')";
     private static final String ALERT_IDS =
             "('ALT-TEMP-001', 'ALT-PWR-002', 'ALT-HUM-003', 'ALT-DOOR-004', 'ALT-TEMP-005')";
     private static final String PARKING_ZONES = "parking_zone IN ('ZONE-A', 'ZONE-B')";
 
-    private final String url;
-    private final String username;
-    private final String password;
+    @FunctionalInterface
+    interface ConnectionProvider {
+        java.sql.Connection open() throws SQLException;
+    }
+
+    private final ConnectionProvider connectionProvider;
     private final Duration interval;
     private final ScheduledExecutorService executor =
             Executors.newSingleThreadScheduledExecutor(runnable -> {
@@ -44,9 +49,14 @@ public class DemoDataRefresher {
             });
 
     public DemoDataRefresher(String url, String username, String password, Duration interval) {
-        this.url = Objects.requireNonNull(url, "url");
-        this.username = Objects.requireNonNull(username, "username");
-        this.password = Objects.requireNonNull(password, "password");
+        this(() -> DriverManager.getConnection(
+                Objects.requireNonNull(url, "url"),
+                Objects.requireNonNull(username, "username"),
+                Objects.requireNonNull(password, "password")), interval);
+    }
+
+    DemoDataRefresher(ConnectionProvider connectionProvider, Duration interval) {
+        this.connectionProvider = Objects.requireNonNull(connectionProvider, "connectionProvider");
         if (interval == null || interval.isZero() || interval.isNegative()) {
             throw new IllegalArgumentException("interval must be positive");
         }
@@ -79,22 +89,29 @@ public class DemoDataRefresher {
      * moved primary keys. Device snapshots pin to two hours ago.
      */
     void refreshOnce() throws SQLException {
-        try (var connection = DriverManager.getConnection(url, username, password);
+        try (var connection = connectionProvider.open();
              var statement = connection.createStatement()) {
-            statement.executeUpdate(
-                    "UPDATE analytics.device_snapshot_raw SET snapshot_at = now() - INTERVAL '2 hours' "
-                            + "WHERE snapshot_at < now() - INTERVAL '2 hours' "
-                            + "AND device_id IN " + DEVICE_IDS);
-            // Energy: only rows matching the exact V1 demo shape are replaced,
-            // so a real deployment using its own MTR-* meters is untouched.
-            statement.executeUpdate(
-                    "DELETE FROM analytics.energy_hourly_raw WHERE meter_id ~ '^MTR-[0-9]+-[0-9]+$' "
-                            + "AND building_id IN ('B1', 'B2', 'B3')");
-            statement.executeUpdate(ENERGY_SEED);
-            statement.executeUpdate("DELETE FROM analytics.alert_fact_raw WHERE alert_id IN " + ALERT_IDS);
-            statement.executeUpdate(ALERT_SEED);
-            statement.executeUpdate("DELETE FROM analytics.parking_daily_raw WHERE " + PARKING_ZONES);
-            statement.executeUpdate(PARKING_SEED);
+            boolean originalAutoCommit = connection.getAutoCommit();
+            connection.setAutoCommit(false);
+            try {
+                statement.executeUpdate(
+                        "UPDATE analytics.device_snapshot_raw SET snapshot_at = now() - INTERVAL '2 hours' "
+                                + "WHERE snapshot_at < now() - INTERVAL '2 hours' "
+                                + "AND device_id IN " + DEVICE_IDS);
+                statement.executeUpdate(
+                        "DELETE FROM analytics.energy_hourly_raw WHERE meter_id IN " + ENERGY_METER_IDS);
+                statement.executeUpdate(ENERGY_SEED);
+                statement.executeUpdate("DELETE FROM analytics.alert_fact_raw WHERE alert_id IN " + ALERT_IDS);
+                statement.executeUpdate(ALERT_SEED);
+                statement.executeUpdate("DELETE FROM analytics.parking_daily_raw WHERE " + PARKING_ZONES);
+                statement.executeUpdate(PARKING_SEED);
+                connection.commit();
+            } catch (SQLException failure) {
+                connection.rollback();
+                throw failure;
+            } finally {
+                if (originalAutoCommit) connection.setAutoCommit(true);
+            }
         }
     }
 

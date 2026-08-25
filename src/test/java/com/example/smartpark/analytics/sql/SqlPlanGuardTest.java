@@ -21,7 +21,7 @@ class SqlPlanGuardTest {
     void acceptsPlannedSourceAndDirectTimeBounds() throws UnsafeSqlException {
         QueryPlan plan = plan("energy_kwh", List.of("building_id"));
         ValidatedSql sql = SqlAstGuard.validate("""
-                SELECT building_id, SUM(kwh) FROM analytics.v_energy_hourly
+                SELECT building_id, SUM(kwh) AS energy_kwh FROM analytics.v_energy_hourly
                 WHERE :fromTs <= hour_ts AND :toTs > hour_ts
                 GROUP BY building_id LIMIT 100""");
 
@@ -70,7 +70,7 @@ class SqlPlanGuardTest {
     void acceptsStructurallyEquivalentFixedMetricCondition() throws UnsafeSqlException {
         QueryPlan plan = plan("high_risk_alert_count", List.of());
         ValidatedSql sql = SqlAstGuard.validate("""
-                SELECT COUNT(*) FROM analytics.v_alert_fact
+                SELECT COUNT(*) AS high_risk_alert_count FROM analytics.v_alert_fact
                 WHERE occurred_at >= :fromTs AND occurred_at < :toTs
                   AND risk_level = 'HIGH' LIMIT 100""");
 
@@ -103,7 +103,7 @@ class SqlPlanGuardTest {
     void acceptsNightConditionWithQualifiedTimeColumn() throws UnsafeSqlException {
         QueryPlan plan = plan("night_energy_kwh", List.of("building_id"));
         ValidatedSql sql = SqlAstGuard.validate("""
-                SELECT e.building_id, SUM(e.kwh) FROM analytics.v_energy_hourly e
+                SELECT e.building_id, SUM(e.kwh) AS night_energy_kwh FROM analytics.v_energy_hourly e
                 WHERE e.hour_ts >= :fromTs AND e.hour_ts < :toTs
                   AND (EXTRACT(HOUR FROM e.hour_ts AT TIME ZONE 'Asia/Shanghai') >= 22
                        OR EXTRACT(HOUR FROM e.hour_ts AT TIME ZONE 'Asia/Shanghai') < 6)
@@ -434,7 +434,7 @@ class SqlPlanGuardTest {
     void rejectsMissingRequestedDimension() throws UnsafeSqlException {
         QueryPlan plan = plan("energy_kwh", List.of("building_id"));
         ValidatedSql sql = SqlAstGuard.validate("""
-                SELECT SUM(kwh) FROM analytics.v_energy_hourly
+                SELECT SUM(kwh) AS energy_kwh FROM analytics.v_energy_hourly
                 WHERE hour_ts >= :fromTs AND hour_ts < :toTs LIMIT 100""");
 
         assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
@@ -467,6 +467,19 @@ class SqlPlanGuardTest {
         assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
                 .isInstanceOf(UnsafeSqlException.class)
                 .hasMessageContaining("计划之外");
+    }
+
+    @Test
+    void rejectsUnaliasedMetricProjectionBecauseResultColumnIdentityWouldBeAmbiguous() throws UnsafeSqlException {
+        QueryPlan plan = plan("energy_kwh", List.of("building_id"));
+        ValidatedSql sql = SqlAstGuard.validate("""
+                SELECT building_id, SUM(kwh) FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                GROUP BY building_id LIMIT 100""");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("投影别名");
     }
 
     private QueryPlan plan(String metricName, List<String> dimensions) {

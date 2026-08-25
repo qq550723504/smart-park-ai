@@ -286,8 +286,12 @@ public final class SqlPlanGuard {
                     if (!usedMetricAliases.add(alias)) {
                         throw reject("查询重复使用了指标投影别名 " + alias);
                     }
-                } else if (metricNames.size() > 1) {
-                    throw reject("同表达式指标必须使用计划指标名作为投影别名");
+                } else {
+                    // PostgreSQL assigns labels such as "sum" or "count" to
+                    // unaliased aggregates. Those labels are not the catalog
+                    // metric identity, so chart units and downstream fields
+                    // cannot be mapped safely after execution.
+                    throw reject("指标投影必须使用计划指标名作为投影别名");
                 }
                 continue;
             }

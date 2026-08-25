@@ -1,6 +1,7 @@
 package com.example.smartpark.collaboration;
 
 import com.example.smartpark.collaboration.expert.ExpertToolSet;
+import com.example.smartpark.collaboration.expert.EvidenceLedger;
 import com.example.smartpark.collaboration.model.CollaborationRun;
 import com.example.smartpark.execution.ExecutionEventPublisher;
 import com.example.smartpark.execution.InMemoryExecutionEventPublisher;
@@ -11,6 +12,8 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
@@ -79,6 +82,51 @@ class CollaborationRuntimeConfigurationTest {
             assertThat(completed.status()).isEqualTo(CollaborationRun.RunStatus.COMPLETED);
             assertThat(model.expertPrompts()).containsExactlyInAnyOrder("ENERGY", "DEVICE", "SECURITY");
         });
+    }
+
+    @Test
+    void publishesToolLifecycleEventsForTheCurrentCollaborationRun() {
+        InMemoryExecutionEventPublisher events = new InMemoryExecutionEventPublisher();
+        UUID runId = UUID.randomUUID();
+        EvidenceLedger ledger = new EvidenceLedger();
+        ToolCallback delegate = new ToolCallback() {
+            @Override public ToolDefinition getToolDefinition() {
+                return new ToolDefinition() {
+                    @Override public String name() { return "probe"; }
+                    @Override public String description() { return "test probe"; }
+                    @Override public String inputSchema() { return "{}"; }
+                };
+            }
+
+            @Override public String call(String input) { return "ok"; }
+        };
+
+        ToolCallback audited = CollaborationRuntimeConfiguration.audited(
+                delegate, ledger, events, runId);
+        assertThat(audited.call("{\"deviceId\":\"D1\"}")).contains("[[evidence:");
+        assertThat(events.history(runId)).extracting(event -> event.eventType())
+                .containsExactly(
+                        com.example.smartpark.execution.model.ExecutionEventType.TOOL_CALL_STARTED,
+                        com.example.smartpark.execution.model.ExecutionEventType.TOOL_CALL_COMPLETED);
+
+        UUID failedRunId = UUID.randomUUID();
+        ToolCallback failedDelegate = new ToolCallback() {
+            @Override public ToolDefinition getToolDefinition() {
+                return delegate.getToolDefinition();
+            }
+
+            @Override public String call(String input) {
+                throw new IllegalStateException("provider failed");
+            }
+        };
+        ToolCallback auditedFailure = CollaborationRuntimeConfiguration.audited(
+                failedDelegate, new EvidenceLedger(), events, failedRunId);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> auditedFailure.call("{}"))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(events.history(failedRunId)).extracting(event -> event.eventType())
+                .containsExactly(
+                        com.example.smartpark.execution.model.ExecutionEventType.TOOL_CALL_STARTED,
+                        com.example.smartpark.execution.model.ExecutionEventType.TOOL_CALL_FAILED);
     }
 
     private static CollaborationRun awaitTerminal(ExpertCollaborationService service, UUID id) {

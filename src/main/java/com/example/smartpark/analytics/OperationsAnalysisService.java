@@ -168,7 +168,11 @@ public class OperationsAnalysisService {
                 pinned = new AnalyticsModelClient.QuestionUnderstanding(
                         normalizedQuestion, List.copyOf(metricTerms),
                         List.of(), requestedTimeRange, requestedDimensions, requestedFilters);
-                store.put(rerunningRecord(runId));
+                // Use the snapshot already checked above. Calling the public
+                // getter here would perform lazy clarification expiry again;
+                // a clock crossing the deadline during resume could therefore
+                // replace the validated RUNNING transition with a timeout.
+                store.put(rerunningRecord(current));
                 pendingClarifications.remove(runId);
             }
         }
@@ -421,10 +425,9 @@ public class OperationsAnalysisService {
         }
     }
 
-    private AnalysisRunStore.RunRecord rerunningRecord(UUID runId) {
-        var previous = get(runId);
+    private AnalysisRunStore.RunRecord rerunningRecord(AnalysisRunStore.RunRecord previous) {
         // The original creation time survives the resume; only updatedAt moves.
-        return new AnalysisRunStore.RunRecord(runId, previous.question(), "RUNNING",
+        return new AnalysisRunStore.RunRecord(previous.runId(), previous.question(), "RUNNING",
                 List.of(), List.of(), "", 0, false, 0, null,
                 previous.createdAt(), Instant.now(clock), List.of(), List.of());
     }

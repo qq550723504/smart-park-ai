@@ -66,6 +66,21 @@ class ExpertFindingValidatorTest {
         assertThat(validated.conclusion()).contains("tool:device:1").doesNotContain("invented");
     }
 
+    @Test void filtersOutOfScopeEvidenceForNonSupportedFindingsToo() {
+        ExpertFinding finding = new ExpertFinding(ExpertDomain.DEVICE, FindingStatus.FAILED,
+                "设备查询失败", java.util.List.of("tool:device:1"), 0, java.util.List.of("retry"));
+        EvidenceLedger ledger = new EvidenceLedger();
+        ledger.record("tool:device:1", "{\"deviceId\":\"DEV-POWER-002\",\"status\":\"OFFLINE\"}",
+                "{\"deviceId\":\"DEV-POWER-002\"}");
+
+        ExpertFinding validated = validator.validateWithObservations(
+                finding, ledger.snapshotObservations(), "请只检查 DEV-POWER-001");
+
+        assertThat(validated.status()).isEqualTo(FindingStatus.FAILED);
+        assertThat(validated.evidenceRefs()).isEmpty();
+        assertThat(validated.conclusion()).contains("专家执行失败").doesNotContain("DEV-POWER-002");
+    }
+
     @Test void acceptsPerEntityStatusClaimsAcrossCitedResults() {
         // "D1 offline while D2 online" cites two lookups with different
         // statuses; one global enum must not reject this valid conclusion.
