@@ -297,9 +297,13 @@ class OperationsAnalysisGraphTest {
         graph.run(runId, "上周能耗", new AnalyticsModelClient.QuestionUnderstanding(
                 "上周能耗", List.of("能耗"), List.of()));
 
-        assertThat(publisher.history(runId).get(0).eventType()).isEqualTo(ExecutionEventType.RESUMED);
+        // Lifecycle registration moved to OperationsAnalysisService: the graph
+        // itself must not emit RUN_STARTED/RESUMED (the service publishes
+        // RESUMED synchronously when resuming, and never a second RUN_STARTED).
         assertThat(publisher.history(runId).stream()
-                .filter(event -> event.eventType() == ExecutionEventType.RUN_STARTED)).isEmpty();
+                .filter(event -> event.eventType() == ExecutionEventType.RESUMED
+                        || event.eventType() == ExecutionEventType.RUN_STARTED))
+                .as("lifecycle events are owned by the service").isEmpty();
     }
 
     @Test

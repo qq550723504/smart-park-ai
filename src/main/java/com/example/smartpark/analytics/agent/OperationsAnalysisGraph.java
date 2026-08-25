@@ -250,12 +250,11 @@ public class OperationsAnalysisGraph {
         RunContext ctx = new RunContext();
         ctx.pinnedUnderstanding = pinnedUnderstanding;
         contexts.put(runId, ctx);
-        ExecutionEventType lifecycleEvent = pinnedUnderstanding == null
-                ? ExecutionEventType.RUN_STARTED : ExecutionEventType.RESUMED;
-        publish(ctx, runId, ExecutionStage.UNDERSTANDING, lifecycleEvent,
-                ExecutionStatus.RUNNING,
-                pinnedUnderstanding == null ? "运营分析已启动: " + strip(question) : "澄清已提交，继续运营分析",
-                null);
+        // Lifecycle registration (RUN_STARTED/RESUMED) and every terminal event
+        // are owned by OperationsAnalysisService: registration happens before
+        // the queued task exposes the run ID, and terminal publication happens
+        // only after the outcome wins the lifecycle transition — so a racing
+        // timeout can never pair a completed trace with a failed status.
         try {
             Flux.from(compiled.stream(Map.of(
                             STATE_QUESTION, question,
@@ -264,17 +263,6 @@ public class OperationsAnalysisGraph {
         } catch (RuntimeException exception) {
             ctx.status = "FAILED";
             ctx.failureStage = "ANALYSIS_ABORTED";
-            // The raw exception may carry generated SQL, vendor responses or
-            // connection details; only a fixed public code is ever published.
-            try {
-                publish(ctx, runId, ExecutionStage.FAILURE, ExecutionEventType.FAILED,
-                        ExecutionStatus.FAILED, "分析执行失败，已终止",
-                        DisplayPayload.error(ExecutionStage.FAILURE, "ANALYSIS_ABORTED", true,
-                                "分析在执行过程中被终止，请调整问题后重试"));
-            } catch (IllegalStateException alreadyClosed) {
-                // The service-side timeout won the race and already published a
-                // terminal event; the context removal below must still happen.
-            }
             return AnalysisRunResult.failed(runId, ctx.failureStage);
         } finally {
             // Unconditional removal: even a raced terminal publish must never
@@ -301,12 +289,11 @@ public class OperationsAnalysisGraph {
                         List.copyOf(ctx.clarificationOptions), ctx.understanding);
             }
             case "FAILED" -> {
-                // The failing stage already published its terminal event; do not double-terminate.
+                // Terminal publication is owned by the service after the
+                // outcome wins the lifecycle transition; the graph only records state.
                 return AnalysisRunResult.failed(runId, ctx.failureStage);
             }
             default -> {
-                publish(ctx, runId, ExecutionStage.COMPLETION, ExecutionEventType.COMPLETED,
-                        ExecutionStatus.SUCCEEDED, "运营分析完成", null);
                 return new AnalysisRunResult(runId, RunOutcome.COMPLETED, List.of(), List.of(),
                         ctx.chart, ctx.result, ctx.summary, null);
             }
@@ -506,7 +493,7 @@ public class OperationsAnalysisGraph {
         if (ctx.sqlAttempts >= MAX_SQL_ATTEMPTS - 1) {
             ctx.status = "FAILED";
             ctx.failureStage = stage;
-            failStage(ctx, runId, stage, safeMessage);
+            // Terminal publication is owned by the service after persistence.
         } else {
             ctx.sqlAttempts++;
             ctx.rejectionReason = safeMessage;
@@ -534,7 +521,7 @@ public class OperationsAnalysisGraph {
         } catch (UnsafeSqlException failure) {
             ctx.status = "FAILED";
             ctx.failureStage = "executeReadOnlyQuery";
-            failStage(ctx, runId, "executeReadOnlyQuery", failure.getMessage());
+            // Terminal publication is owned by the service after persistence.
         }
         return Map.of();
     }
@@ -600,13 +587,6 @@ public class OperationsAnalysisGraph {
 
     private void nodeCompleted(RunContext ctx, UUID runId, ExecutionStage stage, String summary, DisplayPayload payload) {
         publish(ctx, runId, stage, ExecutionEventType.NODE_COMPLETED, ExecutionStatus.RUNNING, summary, payload);
-    }
-
-    private void failStage(RunContext ctx, UUID runId, String stage, String safeMessage) {
-        publish(ctx, runId, ExecutionStage.FAILURE, ExecutionEventType.FAILED, ExecutionStatus.FAILED,
-                "阶段失败: " + stage,
-                DisplayPayload.error(ExecutionStage.FAILURE, "ANALYTICS_POLICY", false,
-                        safeMessage == null ? "" : safeMessage));
     }
 
     private void publish(RunContext ignoredCtx, UUID runId, ExecutionStage stage, ExecutionEventType type,

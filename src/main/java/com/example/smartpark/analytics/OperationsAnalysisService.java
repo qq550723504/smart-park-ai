@@ -113,7 +113,7 @@ public class OperationsAnalysisService {
             store.put(new RecordBuilder(runId, question, clock).running());
         }
         publishExpiredClarification(expired);
-        launch(runId, question, null);
+        launch(runId, question, null, false);
         return store.get(runId);
     }
 
@@ -154,7 +154,7 @@ public class OperationsAnalysisService {
         if (pinned == null) {
             throw new IllegalStateException("该运行的澄清等待已超时");
         }
-        launch(runId, current.question() + "（已明确指标: " + pinnedTerms + "）", pinned);
+        launch(runId, current.question() + "（已明确指标: " + pinnedTerms + "）", pinned, true);
         return store.get(runId);
     }
 
@@ -193,8 +193,12 @@ public class OperationsAnalysisService {
     }
 
     private void launch(UUID runId, String question,
-                        AnalyticsModelClient.QuestionUnderstanding pinned) {
+                        AnalyticsModelClient.QuestionUnderstanding pinned, boolean resumed) {
         long startedAt = System.currentTimeMillis();
+        // Register the live trace synchronously — before the queued task can
+        // expose any events — so /executions/{runId}/events always resolves
+        // immediately after the run ID is handed out.
+        registerTrace(runId, resumed);
         FutureTask<OperationsAnalysisGraph.AnalysisRunResult> task = new FutureTask<>(
                 () -> runner.execute(runId, question, pinned)) {
             @Override
@@ -295,6 +299,10 @@ public class OperationsAnalysisService {
             store.put(record);
             if (!"NEEDS_CLARIFICATION".equals(record.status())) {
                 releaseActiveLocked(runId);
+                // Terminal events are published strictly after persistence so
+                // a racing timeout can never pair a completed trace with a
+                // failed status record (or vice versa).
+                publishTerminalLocked(record);
             }
             return record;
         }
@@ -304,13 +312,57 @@ public class OperationsAnalysisService {
                                                       String stage, long durationMs) {
         synchronized (lifecycleLock) {
             var previous = store.get(runId);
+            // Terminal states are final: a raced timeout never overwrites an
+            // already-persisted outcome.
+            if (previous != null && ("FAILED".equals(previous.status()) || "COMPLETED".equals(previous.status()))) {
+                return previous;
+            }
             Instant createdAt = previous != null ? previous.createdAt() : Instant.now(clock);
             var record = new AnalysisRunStore.RunRecord(runId, question, "FAILED", List.of(), List.of(),
                     "", 0, false, durationMs, stage, createdAt, Instant.now(clock), List.of(), List.of());
             store.put(record);
             pendingClarifications.remove(runId);
             releaseActiveLocked(runId);
+            publishTerminalLocked(record);
             return record;
+        }
+    }
+
+    /**
+     * Publishes terminal events only after persistence has won the lifecycle
+     * transition, so the trace and the stored status can never disagree.
+     */
+    private void publishTerminalLocked(AnalysisRunStore.RunRecord record) {
+        if (events == null) return;
+        try {
+            if ("COMPLETED".equals(record.status())) {
+                events.publish(new ExecutionEvent(UUID.randomUUID(), record.runId(), 0, Instant.now(clock),
+                        ExecutionScenario.OPERATIONS_ANALYSIS, "analytics", ExecutionStage.COMPLETION,
+                        ExecutionEventType.COMPLETED, ExecutionStatus.SUCCEEDED, "运营分析完成", null));
+            } else if ("FAILED".equals(record.status())) {
+                String stage = record.failureStage() == null ? "ANALYSIS_ABORTED" : record.failureStage();
+                events.publish(new ExecutionEvent(UUID.randomUUID(), record.runId(), 0, Instant.now(clock),
+                        ExecutionScenario.OPERATIONS_ANALYSIS, "analytics", ExecutionStage.FAILURE,
+                        ExecutionEventType.FAILED, ExecutionStatus.FAILED, "分析执行失败，已终止",
+                        DisplayPayload.error(ExecutionStage.FAILURE, stage, true,
+                                "分析在执行过程中被终止，请调整问题后重试")));
+            }
+        } catch (IllegalStateException alreadyClosed) {
+            // The trace was closed by another terminal path; nothing more to do.
+        }
+    }
+
+    /** Registers RUN_STARTED/RESUMED synchronously so the trace resolves before polling starts. */
+    private void registerTrace(UUID runId, boolean resumed) {
+        if (events == null) return;
+        try {
+            events.publish(new ExecutionEvent(UUID.randomUUID(), runId, 0, Instant.now(clock),
+                    ExecutionScenario.OPERATIONS_ANALYSIS, "analytics", ExecutionStage.INITIALIZATION,
+                    resumed ? ExecutionEventType.RESUMED : ExecutionEventType.RUN_STARTED,
+                    ExecutionStatus.RUNNING,
+                    resumed ? "澄清已提交，继续运营分析" : "运营分析已启动", null));
+        } catch (IllegalStateException alreadyRegistered) {
+            // Trace already open for this run; nothing more to do.
         }
     }
 

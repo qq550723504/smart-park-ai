@@ -159,6 +159,19 @@ class ReadOnlyQueryExecutorTest {
     }
 
     @Test
+    void appliesTheConfiguredStatementTimeoutToExplain() {
+        // The EXPLAIN runs on the unrestricted analytics connection; without a
+        // database-side timeout it could outlive the analysis timeout.
+        var template = new NamedParameterJdbcTemplate(readOnlyDataSource);
+        int before = template.getJdbcTemplate().getQueryTimeout();
+        new QueryCostGuard(template, 1_000_000.0, java.time.Duration.ofSeconds(3));
+        assertThat(template.getJdbcTemplate().getQueryTimeout())
+                .as("EXPLAIN must carry the same database-side timeout as real queries")
+                .isEqualTo(3)
+                .isNotEqualTo(before);
+    }
+
+    @Test
     void costGuardRejectsExpensivePlansAndAcceptsCheapOnes() throws Exception {
         QueryCostGuard guard = new QueryCostGuard(jdbcTemplate);
         String sql = "SELECT building_id, SUM(kwh) FROM analytics.v_energy_hourly GROUP BY building_id";

@@ -18,12 +18,26 @@ public class QueryCostGuard {
     private final double maxCost;
 
     public QueryCostGuard(NamedParameterJdbcTemplate jdbcTemplate) {
-        this(jdbcTemplate, 1_000_000.0);
+        this(jdbcTemplate, 1_000_000.0, null);
     }
 
     public QueryCostGuard(NamedParameterJdbcTemplate jdbcTemplate, double maxCost) {
+        this(jdbcTemplate, maxCost, null);
+    }
+
+    /**
+     * The EXPLAIN runs on the unrestricted analytics connection; without a
+     * database-side timeout it could outlive the analysis timeout (thread
+     * interruption does not issue JDBC Statement.cancel). Applying the same
+     * statement timeout as the real query bounds it at the database.
+     */
+    public QueryCostGuard(NamedParameterJdbcTemplate jdbcTemplate, double maxCost,
+                          java.time.Duration statementTimeout) {
         this.jdbcTemplate = jdbcTemplate;
         this.maxCost = maxCost;
+        if (statementTimeout != null) {
+            jdbcTemplate.getJdbcTemplate().setQueryTimeout(Math.max(1, (int) statementTimeout.toSeconds()));
+        }
     }
 
     public EstimatedPlan estimatedCost(String sql, Map<String, Object> parameters, double thresholdOverride)

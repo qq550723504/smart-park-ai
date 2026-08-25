@@ -167,6 +167,22 @@ class OperationsAnalysisServiceTest {
     }
 
     @Test
+    void registersTheExecutionTraceSynchronouslyBeforeReturningTheRunId() {
+        // An executor that never runs the task simulates a busy queue: the
+        // /executions/{runId}/events trace must already exist when start()
+        // hands out the run ID.
+        var publisher = new com.example.smartpark.execution.InMemoryExecutionEventPublisher();
+        OperationsAnalysisService service = new OperationsAnalysisService(new MetricCatalog(),
+                (id, q, p) -> completed(id), task -> { }, DEFAULT_TIMEOUT,
+                Clock.fixed(NOW, ZoneOffset.UTC), publisher);
+
+        var run = service.start("上周能耗");
+        assertThat(publisher.history(run.runId())).extracting(
+                        com.example.smartpark.execution.model.ExecutionEvent::eventType)
+                .containsExactly(com.example.smartpark.execution.model.ExecutionEventType.RUN_STARTED);
+    }
+
+    @Test
     void unknownMetricInClarificationIsRejectedByCatalog() {
         OperationsAnalysisService service = service(
                 (runId, question, pinned) -> clarifying(runId), directExecutor());

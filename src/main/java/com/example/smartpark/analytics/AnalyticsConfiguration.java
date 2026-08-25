@@ -83,7 +83,8 @@ public class AnalyticsConfiguration {
     @Bean
     QueryCostGuard queryCostGuard(NamedParameterJdbcTemplate analyticsJdbcTemplate,
                                   AnalyticsProperties properties) {
-        return new QueryCostGuard(analyticsJdbcTemplate, properties.getMaxPlanCost());
+        return new QueryCostGuard(analyticsJdbcTemplate, properties.getMaxPlanCost(),
+                properties.getStatementTimeout());
     }
 
     @Bean
