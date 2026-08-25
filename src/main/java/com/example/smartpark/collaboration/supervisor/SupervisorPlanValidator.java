@@ -28,12 +28,14 @@ public final class SupervisorPlanValidator {
     public Set<ExpertDomain> expectedDomains(String question) {
         String text = question == null ? "" : question.toLowerCase(Locale.ROOT);
         EnumSet<ExpertDomain> domains = EnumSet.noneOf(ExpertDomain.class);
-        if (containsAny(text, "energy", "consumption", "kwh", "baseline", "meter", "能耗", "用电", "电量", "电表")
-                || containsEntityIdentifier(text, "MTR-")) {
+        boolean energyContext = containsAny(text, "energy", "consumption", "kwh", "baseline", "meter", "能耗", "用电", "电量", "电表")
+                || containsEntityIdentifier(text, "MTR-")
+                || containsEntityIdentifier(text, "DEV-ENERGY-");
+        if (energyContext) {
             domains.add(ExpertDomain.ENERGY);
         }
         if (containsAny(text, "device", "offline", "hvac", "equipment", "冷机", "设备", "离线")
-                || containsEntityIdentifier(text, "DEV-")) {
+                || (containsEntityIdentifier(text, "DEV-") && !energyContext)) {
             domains.add(ExpertDomain.DEVICE);
         }
         // Generic alert words (告警/alarm) must NOT route to SECURITY: ordinary

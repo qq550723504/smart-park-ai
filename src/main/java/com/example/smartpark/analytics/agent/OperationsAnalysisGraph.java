@@ -2,6 +2,7 @@ package com.example.smartpark.analytics.agent;
 
 import com.example.smartpark.analytics.catalog.MetricCatalog;
 import com.example.smartpark.analytics.catalog.MetricResolution;
+import com.example.smartpark.analytics.catalog.CategoricalFilterVocabulary;
 import com.example.smartpark.analytics.model.ChartSpec;
 import com.example.smartpark.analytics.model.QueryPlan;
 import com.example.smartpark.analytics.model.TabularResult;
@@ -36,6 +37,7 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -59,20 +61,6 @@ public class OperationsAnalysisGraph {
     private static final long MODEL_TIME_SKEW_TOLERANCE_SECONDS = 300;
     private static final java.util.regex.Pattern CALENDAR_DATE_RANGE = java.util.regex.Pattern.compile(
             "(\\d{4}-\\d{2}-\\d{2})\\s*(?:到|至|~|～)\\s*(\\d{4}-\\d{2}-\\d{2})");
-    private static final Map<String, Map<String, String>> CATEGORICAL_FILTER_TERMS = Map.of(
-            "status", Map.ofEntries(
-                    Map.entry("open", "OPEN"), Map.entry("未处理", "OPEN"),
-                    Map.entry("resolved", "RESOLVED"), Map.entry("已解决", "RESOLVED"), Map.entry("已处理", "RESOLVED")),
-            "risk_level", Map.ofEntries(
-                    Map.entry("high", "HIGH"), Map.entry("高风险", "HIGH"),
-                    Map.entry("medium", "MEDIUM"), Map.entry("中风险", "MEDIUM"),
-                    Map.entry("low", "LOW"), Map.entry("低风险", "LOW")),
-            "category", Map.ofEntries(
-                    Map.entry("temperature", "TEMPERATURE"), Map.entry("温度", "TEMPERATURE"),
-                    Map.entry("power", "POWER"), Map.entry("用电", "POWER"), Map.entry("电力", "POWER"),
-                    Map.entry("配电", "POWER"), Map.entry("humidity", "HUMIDITY"), Map.entry("湿度", "HUMIDITY"),
-                    Map.entry("access", "ACCESS"), Map.entry("门禁", "ACCESS"), Map.entry("安防", "ACCESS")));
-
     private final MetricCatalog catalog;
     private final AnalyticsModelClient modelClient;
     private final CostGate costGate;
@@ -495,17 +483,20 @@ public class OperationsAnalysisGraph {
             String value = canonicalCategoricalValue(dimension, entry.getValue());
             filters.put(dimension, value);
         }
-        for (var dimensionEntry : CATEGORICAL_FILTER_TERMS.entrySet()) {
-            String dimension = dimensionEntry.getKey();
+        for (String dimension : List.of("status", "risk_level", "category")) {
             boolean allowedByEveryMetric = ctx.metrics.stream()
                     .allMatch(metric -> metric.allowedDimensions().stream()
                             .anyMatch(allowed -> allowed.equalsIgnoreCase(dimension)));
-            if (!allowedByEveryMetric || filters.containsKey(dimension)) continue;
-            for (var termEntry : dimensionEntry.getValue().entrySet()) {
-                if (question.toLowerCase(java.util.Locale.ROOT).contains(termEntry.getKey().toLowerCase(java.util.Locale.ROOT))) {
-                    filters.put(dimension, termEntry.getValue());
-                    break;
-                }
+            if (!allowedByEveryMetric) continue;
+            if (CategoricalFilterVocabulary.containsNegatedTerm(dimension, question)) {
+                throw new IllegalArgumentException("暂不支持分类条件的否定表达: " + dimension);
+            }
+            Set<String> matches = CategoricalFilterVocabulary.matchingCanonicalValues(dimension, question);
+            if (matches.size() > 1) {
+                throw new IllegalArgumentException("原始问题包含多个分类值，无法安全生成单值过滤条件: " + dimension);
+            }
+            if (!filters.containsKey(dimension) && matches.size() == 1) {
+                filters.put(dimension, matches.iterator().next());
             }
         }
         return java.util.Collections.unmodifiableMap(filters);
@@ -513,13 +504,19 @@ public class OperationsAnalysisGraph {
 
     private static String canonicalCategoricalValue(String dimension, String value) {
         if (value == null) return null;
-        Map<String, String> vocabulary = CATEGORICAL_FILTER_TERMS.get(dimension);
-        if (vocabulary == null) return value;
-        return vocabulary.getOrDefault(value.toLowerCase(java.util.Locale.ROOT), value);
+        return CategoricalFilterVocabulary.canonicalValue(dimension, value);
     }
 
     private static List<String> inferredAggregationDimensions(RunContext ctx, String question) {
         List<String> inferred = new ArrayList<>();
+        if (dailyAggregationMentionedInQuestion(question)
+                && ctx.metrics.stream().anyMatch(metric -> !metric.timeColumn().equalsIgnoreCase("stat_date"))) {
+            throw new IllegalArgumentException("当前指标目录没有可验证的日粒度聚合表达式");
+        }
+        if (hourlyAggregationMentionedInQuestion(question)
+                && ctx.metrics.stream().anyMatch(metric -> !metric.timeColumn().equalsIgnoreCase("hour_ts"))) {
+            throw new IllegalArgumentException("当前指标目录没有可验证的小时粒度聚合表达式");
+        }
         if (timeAggregationMentionedInQuestion(question)) {
             for (var metric : ctx.metrics) {
                 String timeColumn = metric.timeColumn();
@@ -567,7 +564,17 @@ public class OperationsAnalysisGraph {
 
     private static boolean timeAggregationMentionedInQuestion(String question) {
         return containsAny(question == null ? "" : question.toLowerCase(java.util.Locale.ROOT),
-                "按日", "每天", "每日", "按日期", "按时间");
+                "按日", "每天", "每日", "按日期", "按时间", "按小时", "逐时", "每小时", "逐小时", "小时趋势");
+    }
+
+    private static boolean dailyAggregationMentionedInQuestion(String question) {
+        return containsAny(question == null ? "" : question.toLowerCase(java.util.Locale.ROOT),
+                "按日", "每天", "每日", "按日期");
+    }
+
+    private static boolean hourlyAggregationMentionedInQuestion(String question) {
+        return containsAny(question == null ? "" : question.toLowerCase(java.util.Locale.ROOT),
+                "按小时", "逐时", "每小时", "逐小时", "小时趋势");
     }
 
     private static boolean dimensionMentionedInQuestion(String dimension, String question) {

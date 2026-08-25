@@ -1,6 +1,7 @@
 package com.example.smartpark.analytics.model;
 
 import com.example.smartpark.analytics.catalog.MetricDefinition;
+import com.example.smartpark.analytics.catalog.CategoricalFilterVocabulary;
 
 import java.time.Instant;
 import java.util.List;
@@ -114,7 +115,7 @@ public record QueryPlan(
 
     private static boolean valueAppearsInQuestion(String question, String dimension, String value) {
         if (Set.of("status", "risk_level", "category").contains(dimension)) {
-            return question.toLowerCase(Locale.ROOT).contains(value.toLowerCase(Locale.ROOT));
+            return CategoricalFilterVocabulary.valueAppearsInQuestion(dimension, value, question);
         }
         return question.contains(value);
     }

@@ -204,6 +204,38 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
+    void rejectsDailyEnergyAggregationUntilDailyGrainIsCataloged() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("按日查看能耗", List.of("能耗"), List.of()),
+                List.of(GOOD_TOTAL_SQL),
+                new ChartSpec.Proposal("LINE", "每日能耗", "energy_kwh", List.of(), "", "kWh"),
+                "不应生成小时粒度结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "按日查看能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.FAILED);
+        assertThat(modelClient.generateSqlInvocations()).isZero();
+    }
+
+    @Test
+    void infersHourlyGroupingWhenModelOmitsDimensions() {
+        String hourlySql = """
+                SELECT hour_ts, SUM(kwh) AS energy_kwh FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                GROUP BY hour_ts LIMIT 200""";
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("按小时查看能耗", List.of("能耗"), List.of()),
+                List.of(hourlySql),
+                new ChartSpec.Proposal("LINE", "每小时能耗", "hour_ts", List.of("energy_kwh"), "", "kWh"),
+                "共 3 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "按小时查看能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().dimensions()).containsExactly("hour_ts");
+    }
+
+    @Test
     void deduplicatesMetricsAfterCanonicalCatalogResolution() {
         modelClient.reset(
                 new AnalyticsModelClient.QuestionUnderstanding("能耗和用电量", List.of("能耗", "用电量"), List.of()),
@@ -301,6 +333,40 @@ class OperationsAnalysisGraphTest {
         assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
         assertThat(modelClient.lastPlan().filters()).containsEntry("status", "OPEN");
         assertThat(lastExecutionParameters).containsEntry("filter_status", "OPEN");
+    }
+
+    @Test
+    void infersChineseCategoricalAliasFilterFromOriginalQuestion() {
+        String alertSql = """
+                SELECT COUNT(*) AS alert_count FROM analytics.v_alert_fact
+                WHERE occurred_at >= :fromTs AND occurred_at < :toTs
+                  AND status = :filter_status LIMIT 200""";
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("未处理状态的告警数量", List.of("告警数量"), List.of()),
+                List.of(alertSql),
+                new ChartSpec.Proposal("TABLE", "未处理告警", "alert_count", List.of(), "", "条"),
+                "共 1 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "未处理状态的告警数量");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().filters()).containsEntry("status", "OPEN");
+        assertThat(lastExecutionParameters).containsEntry("filter_status", "OPEN");
+    }
+
+    @Test
+    void rejectsMultipleCategoricalValuesInsteadOfChoosingOne() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding(
+                        "OPEN 和 RESOLVED 状态的告警数量", List.of("告警数量"), List.of()),
+                List.of(GOOD_TOTAL_SQL),
+                new ChartSpec.Proposal("TABLE", "告警", "alert_count", List.of(), "", "条"),
+                "不应静默选择一个状态。");
+
+        var outcome = graph.run(UUID.randomUUID(), "OPEN 和 RESOLVED 状态的告警数量");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.FAILED);
+        assertThat(modelClient.generateSqlInvocations()).isZero();
     }
 
     @Test

@@ -62,6 +62,22 @@ class QueryPlanTest {
     }
 
     @Test
+    void categoricalFilterAliasesMayMatchQuestion() {
+        QueryPlan plan = new QueryPlan("未处理 状态的告警数量", List.of(alertMetric()), List.of(),
+                Map.of("status", "OPEN"), new QueryPlan.TimeRange(now.minusSeconds(60), now), 100);
+
+        assertThat(plan.filters()).containsEntry("status", "OPEN");
+    }
+
+    @Test
+    void rejectsNegatedCategoricalValuesRatherThanReversingTheirMeaning() {
+        assertThatThrownBy(() -> new QueryPlan("not resolved 状态的告警数量", List.of(alertMetric()), List.of(),
+                Map.of("status", "RESOLVED"), new QueryPlan.TimeRange(now.minusSeconds(60), now), 100))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("original question");
+    }
+
+    @Test
     void rejectsEntityValuesThatDoNotMatchTheirDimensionType() {
         MetricDefinition energy = new MetricDefinition("energy_kwh", "能耗", java.util.Set.of("能耗"), "kWh",
                 "analytics.v_energy_hourly", java.util.Set.of("building_id", "meter_id", "hour_ts"),
