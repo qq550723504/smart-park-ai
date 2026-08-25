@@ -104,7 +104,7 @@ class OperationsAnalysisServiceTest {
     }
 
     @Test
-    void clarificationResumeRetainsTheOriginalRequestedTimeRange() {
+    void clarificationResumeRetainsTheOriginalRequestedTimeRangeAndDimensions() {
         var requested = new AnalyticsModelClient.RequestedTimeRange(
                 Instant.parse("2026-08-23T00:00:00Z"), Instant.parse("2026-08-24T00:00:00Z"));
         OperationsAnalysisGraph.AnalysisRunResult clarification = new OperationsAnalysisGraph.AnalysisRunResult(
@@ -121,12 +121,13 @@ class OperationsAnalysisServiceTest {
         service.submitClarification(paused.runId(), List.of(new MetricSelection("告警", "alert_count")));
 
         assertThat(pinned.get().requestedTimeRange()).isEqualTo(requested);
+        assertThat(pinned.get().requestedDimensions()).containsExactly("building_id");
     }
 
     private static AnalyticsModelClient.QuestionUnderstanding requestedUnderstanding(
             AnalyticsModelClient.RequestedTimeRange requested) {
         return new AnalyticsModelClient.QuestionUnderstanding("昨天的告警", List.of("告警"),
-                List.of("请明确告警口径"), requested);
+                List.of("请明确告警口径"), requested, List.of("building_id"));
     }
 
     @Test

@@ -22,6 +22,7 @@ class LlmAnalyticsModelClientTest {
                   "normalizedQuestion": "过去30天各楼宇能耗",
                   "metricTerms": ["energy_consumption"],
                   "clarificationQuestions": [],
+                  "requestedDimensions": ["building_id"],
                   "requestedTimeRange": {
                     "fromInclusive": "2026-07-25T00:00:00Z",
                     "toExclusive": "2026-08-24T00:00:00Z"
@@ -36,6 +37,7 @@ class LlmAnalyticsModelClientTest {
         assertThat(understanding.requestedTimeRange()).isEqualTo(
                 new AnalyticsModelClient.RequestedTimeRange(
                         Instant.parse("2026-07-25T00:00:00Z"), NOW));
+        assertThat(understanding.requestedDimensions()).containsExactly("building_id");
         assertThat(model.lastPrompt().getSystemMessage().getText())
                 .contains("2026-08-24T00:00:00Z", "Asia/Shanghai", "requestedTimeRange");
     }

@@ -116,6 +116,23 @@ class SqlPlanGuardTest {
     }
 
     @Test
+    void rejectsCatalogDimensionThatWasNotRequestedByTheUser() throws UnsafeSqlException {
+        MetricDefinition metric = catalog.findByName("energy_kwh").orElseThrow();
+        QueryPlan totalPlan = new QueryPlan("total energy", List.of(metric), List.of(), Map.of(),
+                new QueryPlan.TimeRange(
+                        Instant.parse("2026-08-17T00:00:00Z"),
+                        Instant.parse("2026-08-24T00:00:00Z")), 100);
+        ValidatedSql sql = SqlAstGuard.validate("""
+                SELECT building_id, SUM(kwh) FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                GROUP BY building_id LIMIT 100""");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(sql, totalPlan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("building_id");
+    }
+
+    @Test
     void rejectsTimeBoundsHiddenInUnusedCte() throws UnsafeSqlException {
         QueryPlan plan = plan("energy_kwh");
         ValidatedSql sql = SqlAstGuard.validate("""
@@ -142,6 +159,66 @@ class SqlPlanGuardTest {
                 GROUP BY building_id LIMIT 100""");
 
         assertThatCode(() -> SqlPlanGuard.validate(sql, plan)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void rejectsRawJoinThatCombinesMetricsFromDifferentFactViews() throws UnsafeSqlException {
+        MetricDefinition energy = catalog.findByName("energy_kwh").orElseThrow();
+        MetricDefinition alerts = catalog.findByName("alert_count").orElseThrow();
+        QueryPlan plan = new QueryPlan("energy and alerts", List.of(energy, alerts), List.of("building_id"),
+                Map.of(), new QueryPlan.TimeRange(
+                        Instant.parse("2026-08-17T00:00:00Z"), Instant.parse("2026-08-24T00:00:00Z")), 100);
+        ValidatedSql sql = SqlAstGuard.validate("""
+                SELECT e.building_id, SUM(e.kwh), COUNT(*)
+                FROM analytics.v_energy_hourly e
+                JOIN analytics.v_alert_fact a ON a.building_id = e.building_id
+                WHERE e.hour_ts >= :fromTs AND e.hour_ts < :toTs
+                  AND a.occurred_at >= :fromTs AND a.occurred_at < :toTs
+                GROUP BY e.building_id LIMIT 100""");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("source grain");
+    }
+
+    @Test
+    void rejectsMultiViewPlanWhenSeparateCtesStillExposeRawFactRows() throws UnsafeSqlException {
+        MetricDefinition energy = catalog.findByName("energy_kwh").orElseThrow();
+        MetricDefinition alerts = catalog.findByName("alert_count").orElseThrow();
+        QueryPlan plan = new QueryPlan("energy and alerts", List.of(energy, alerts), List.of("building_id"),
+                Map.of(), new QueryPlan.TimeRange(
+                        Instant.parse("2026-08-17T00:00:00Z"), Instant.parse("2026-08-24T00:00:00Z")), 100);
+        ValidatedSql sql = SqlAstGuard.validate("""
+                WITH energy AS (
+                    SELECT building_id, kwh FROM analytics.v_energy_hourly
+                    WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                ), alerts AS (
+                    SELECT building_id FROM analytics.v_alert_fact
+                    WHERE occurred_at >= :fromTs AND occurred_at < :toTs
+                )
+                SELECT e.building_id, SUM(e.kwh), COUNT(*)
+                FROM energy e JOIN alerts a ON a.building_id = e.building_id
+                GROUP BY e.building_id LIMIT 100""");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("source grain");
+    }
+
+    @Test
+    void rejectsConsumedCteThatTransformsMetricInputBeforeAggregation() throws UnsafeSqlException {
+        QueryPlan plan = plan("energy_kwh");
+        ValidatedSql sql = SqlAstGuard.validate("""
+                WITH recent AS (
+                    SELECT building_id, kwh * 100 AS kwh FROM analytics.v_energy_hourly
+                    WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                )
+                SELECT building_id, SUM(kwh) FROM recent
+                GROUP BY building_id LIMIT 100""");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("lineage");
     }
 
     private QueryPlan plan(String metricName) {

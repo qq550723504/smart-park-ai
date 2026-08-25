@@ -90,6 +90,9 @@ class SqlAstGuardTest {
             "SELECT building_id FROM analytics.v_energy_hourly LIMIT 501",
             // literal time values instead of bound parameters
             "SELECT building_id FROM analytics.v_energy_hourly WHERE hour_ts > '2026-08-01' LIMIT 5",
+            "SELECT building_id FROM analytics.v_energy_hourly WHERE hour_ts > 'August 1, 2026' LIMIT 5",
+            "SELECT building_id FROM analytics.v_energy_hourly WHERE DATE_TRUNC('day', hour_ts) > 'August 1, 2026' LIMIT 5",
+            "SELECT building_id FROM analytics.v_energy_hourly WHERE hour_ts > CAST('August 1, 2026' AS timestamp) LIMIT 5",
             "SELECT building_id FROM analytics.v_energy_hourly WHERE hour_ts > DATE '2026-08-01' LIMIT 5",
             // positional placeholder
             "SELECT building_id FROM analytics.v_energy_hourly WHERE kwh > ? LIMIT 5",

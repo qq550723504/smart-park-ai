@@ -5,6 +5,7 @@ import com.example.smartpark.analytics.model.QueryPlan;
 import com.example.smartpark.analytics.model.ValidatedSql;
 import net.sf.jsqlparser.expression.BinaryExpression;
 import net.sf.jsqlparser.expression.Expression;
+import net.sf.jsqlparser.expression.ExpressionVisitorAdapter;
 import net.sf.jsqlparser.expression.ExtractExpression;
 import net.sf.jsqlparser.expression.JdbcNamedParameter;
 import net.sf.jsqlparser.expression.TimezoneExpression;
@@ -50,6 +51,8 @@ public final class SqlPlanGuard {
 
         PlainSelect resultQuery = resultQuery(select);
         List<Branch> branches = consumedBranches(select, resultQuery);
+        validateSourceGrain(plan);
+        validateConsumedBranchLineage(resultQuery, branches, plan);
 
         for (MetricDefinition metric : plan.metrics()) {
             List<Branch> sourceBranches = branches.stream()
@@ -76,6 +79,71 @@ public final class SqlPlanGuard {
             }
         }
         validateProjection(resultQuery, plan);
+    }
+
+    /**
+     * A QueryPlan currently has one shared dimension list but no join-cardinality
+     * proof or per-source aggregation contract. Combining different fact views
+     * would therefore make row multiplication unverifiable. Refuse that plan
+     * shape until the plan model can represent independently aggregated sources.
+     */
+    private static void validateSourceGrain(QueryPlan plan) throws UnsafeSqlException {
+        long sourceViews = plan.metrics().stream()
+                .map(metric -> normalizeIdentifier(metric.sourceView()))
+                .distinct()
+                .count();
+        if (sourceViews > 1) {
+            throw reject("多事实视图查询缺少可验证的 source grain，禁止合并原始事实行");
+        }
+    }
+
+    private static void validateConsumedBranchLineage(PlainSelect resultQuery,
+                                                       List<Branch> branches,
+                                                       QueryPlan plan) throws UnsafeSqlException {
+        Set<String> approvedInputs = approvedSourceInputs(plan);
+        for (Branch branch : branches) {
+            if (branch.select() == resultQuery) continue;
+            for (var item : branch.select().getSelectItems()) {
+                Expression expression = unwrap(item.getExpression());
+                if (!(expression instanceof Column column)) {
+                    throw reject("CTE lineage 必须保持指标输入列不变，禁止中间计算: " + expression);
+                }
+                String input = column.getUnquotedColumnName().toLowerCase(Locale.ROOT);
+                if (!approvedInputs.contains(input)) {
+                    throw reject("CTE lineage 引用了计划之外的输入列: " + input);
+                }
+                if (item.getAlias() != null
+                        && !item.getAlias().getUnquotedName().equalsIgnoreCase(input)) {
+                    throw reject("CTE lineage 禁止重命名指标输入列: " + input);
+                }
+            }
+        }
+    }
+
+    private static Set<String> approvedSourceInputs(QueryPlan plan) throws UnsafeSqlException {
+        Set<String> columns = new LinkedHashSet<>(allowedDimensions(plan));
+        for (MetricDefinition metric : plan.metrics()) {
+            columns.add(metric.timeColumn().toLowerCase(Locale.ROOT));
+            collectColumns(parseExpression(metric.expression()), columns);
+            if (metric.condition() != null) {
+                try {
+                    collectColumns(CCJSqlParserUtil.parseCondExpression(metric.condition()), columns);
+                } catch (Exception exception) {
+                    throw reject("指标目录包含无法解析的固定条件");
+                }
+            }
+        }
+        return Set.copyOf(columns);
+    }
+
+    private static void collectColumns(Expression expression, Set<String> columns) {
+        expression.accept(new ExpressionVisitorAdapter<Void>() {
+            @Override
+            public <S> Void visit(Column column, S context) {
+                columns.add(column.getUnquotedColumnName().toLowerCase(Locale.ROOT));
+                return super.visit(column, context);
+            }
+        });
     }
 
     private static Statement parse(String sql) throws UnsafeSqlException {
@@ -214,8 +282,6 @@ public final class SqlPlanGuard {
     private static Set<String> allowedDimensions(QueryPlan plan) {
         Set<String> dimensions = new LinkedHashSet<>();
         plan.dimensions().forEach(value -> dimensions.add(value.toLowerCase(Locale.ROOT)));
-        plan.metrics().forEach(metric -> metric.allowedDimensions().forEach(value ->
-                dimensions.add(value.toLowerCase(Locale.ROOT))));
         return dimensions;
     }
 

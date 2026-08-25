@@ -141,9 +141,11 @@ public class OperationsAnalysisService {
                         .orElse("");
                 AnalyticsModelClient.RequestedTimeRange requestedTimeRange = pending.understanding() == null
                         ? null : pending.understanding().requestedTimeRange();
+                List<String> requestedDimensions = pending.understanding() == null
+                        ? List.of() : pending.understanding().requestedDimensions();
                 pinned = new AnalyticsModelClient.QuestionUnderstanding(
                         current.question(), safeSelections.stream().map(MetricSelection::metric).toList(),
-                        List.of(), requestedTimeRange);
+                        List.of(), requestedTimeRange, requestedDimensions);
                 store.put(rerunningRecord(runId));
                 pendingClarifications.remove(runId);
             }

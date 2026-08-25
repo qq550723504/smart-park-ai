@@ -47,6 +47,20 @@ class QueryPlanTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void rejectsDimensionsNotApprovedByEverySelectedMetric() {
+        MetricDefinition energy = metric("energy_kwh");
+        MetricDefinition parking = new MetricDefinition("parking_entries", "parking_entries",
+                java.util.Set.of("停车"), "辆", "analytics.v_parking_daily",
+                java.util.Set.of("parking_zone", "stat_date"), "SUM(entries)", 7);
+
+        assertThatThrownBy(() -> new QueryPlan("q", List.of(energy, parking),
+                List.of("building_id"), Map.of(),
+                new QueryPlan.TimeRange(now.minusSeconds(60), now), 100))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("building_id");
+    }
+
     private void planWithLimit(int limit) {
         new QueryPlan("q", List.of(metric("energy_kwh")), List.of(), Map.of(),
                 new QueryPlan.TimeRange(now.minusSeconds(60), now), limit);

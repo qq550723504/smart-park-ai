@@ -47,4 +47,13 @@ class AnalysisSummaryValidatorTest {
         assertThatThrownBy(() -> new AnalysisSummaryValidator().validate("  ", plan, result))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void rejectsConclusionThatBindsEachEntityToTheWrongResultValue() {
+        String reversed = "B1 总计 1444.25 kWh，B2 总计 1820.5 kWh。";
+
+        assertThatThrownBy(() -> new AnalysisSummaryValidator().validate(reversed, plan, result))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("对应");
+    }
 }

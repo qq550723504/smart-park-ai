@@ -28,18 +28,27 @@ public interface AnalyticsModelClient {
             String normalizedQuestion,
             List<String> metricTerms,
             List<String> clarificationQuestions,
-            RequestedTimeRange requestedTimeRange) {
+            RequestedTimeRange requestedTimeRange,
+            List<String> requestedDimensions) {
 
         public QuestionUnderstanding(String normalizedQuestion,
                                      List<String> metricTerms,
                                      List<String> clarificationQuestions) {
-            this(normalizedQuestion, metricTerms, clarificationQuestions, null);
+            this(normalizedQuestion, metricTerms, clarificationQuestions, null, List.of());
+        }
+
+        public QuestionUnderstanding(String normalizedQuestion,
+                                     List<String> metricTerms,
+                                     List<String> clarificationQuestions,
+                                     RequestedTimeRange requestedTimeRange) {
+            this(normalizedQuestion, metricTerms, clarificationQuestions, requestedTimeRange, List.of());
         }
 
         public QuestionUnderstanding {
             normalizedQuestion = normalizedQuestion == null ? "" : normalizedQuestion.strip();
             metricTerms = List.copyOf(metricTerms == null ? List.of() : metricTerms);
             clarificationQuestions = List.copyOf(clarificationQuestions == null ? List.of() : clarificationQuestions);
+            requestedDimensions = List.copyOf(requestedDimensions == null ? List.of() : requestedDimensions);
         }
 
         public boolean needsClarification() {

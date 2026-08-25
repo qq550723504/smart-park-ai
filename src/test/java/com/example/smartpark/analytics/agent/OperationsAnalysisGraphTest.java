@@ -95,7 +95,8 @@ class OperationsAnalysisGraphTest {
     @Test
     void runsEveryNodeInOrderAndCompletesWithRealResults() {
         modelClient.reset(
-                new AnalyticsModelClient.QuestionUnderstanding("上周各楼宇能耗对比", List.of("能耗"), List.of()),
+                new AnalyticsModelClient.QuestionUnderstanding("上周各楼宇能耗对比", List.of("能耗"), List.of(),
+                        null, List.of("building_id")),
                 List.of(GOOD_SQL),
                 new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("total"), "", "kWh"),
                 "共 3 行结果。");
@@ -126,7 +127,7 @@ class OperationsAnalysisGraphTest {
         modelClient.reset(
                 new AnalyticsModelClient.QuestionUnderstanding(
                         "过去30天各楼宇能耗", List.of("能耗"), List.of(),
-                        new AnalyticsModelClient.RequestedTimeRange(from, to)),
+                        new AnalyticsModelClient.RequestedTimeRange(from, to), List.of("building_id")),
                 List.of(GOOD_SQL),
                 new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("total"), "", "kWh"),
                 "共 3 行结果。");
@@ -139,6 +140,22 @@ class OperationsAnalysisGraphTest {
         assertThat(lastExecutionParameters)
                 .containsEntry("fromTs", Timestamp.from(from))
                 .containsEntry("toTs", Timestamp.from(to));
+    }
+
+    @Test
+    void carriesOnlyUserRequestedDimensionsIntoTheQueryPlan() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding(
+                        "过去30天各楼宇能耗", List.of("能耗"), List.of(), null,
+                        List.of("building_id")),
+                List.of(GOOD_SQL),
+                new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("total"), "", "kWh"),
+                "共 3 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "过去30天各楼宇能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().dimensions()).containsExactly("building_id");
     }
 
     @Test
@@ -158,7 +175,8 @@ class OperationsAnalysisGraphTest {
     @Test
     void emitsTheDeclaredSqlLifecycleEventTypesOnTheHappyPath() {
         modelClient.reset(
-                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of()),
+                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of(),
+                        null, List.of("building_id")),
                 List.of(GOOD_SQL),
                 new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("total"), "", "kWh"),
                 "共 3 行结果。");
@@ -182,7 +200,8 @@ class OperationsAnalysisGraphTest {
     @Test
     void publishesSqlRejectedWhenGeneratedSqlFailsValidation() {
         modelClient.reset(
-                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of()),
+                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of(),
+                        null, List.of("building_id")),
                 List.of(LIMIT_LESS_SQL, GOOD_SQL),
                 null,
                 "共 3 行结果。");
@@ -236,7 +255,8 @@ class OperationsAnalysisGraphTest {
     @Test
     void resumedRunPublishesResumedInsteadOfASecondRunStarted() {
         modelClient.reset(
-                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of()),
+                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of(),
+                        null, List.of("building_id")),
                 List.of(GOOD_SQL),
                 new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("total"), "", "kWh"),
                 "共 3 行结果。");
@@ -265,7 +285,8 @@ class OperationsAnalysisGraphTest {
     @Test
     void unsafeSqlIsRepairedExactlyOnceThenSucceeds() {
         modelClient.reset(
-                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of()),
+                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of(),
+                        null, List.of("building_id")),
                 List.of(LIMIT_LESS_SQL, GOOD_SQL),
                 null,
                 "共 3 行结果。");
@@ -280,7 +301,8 @@ class OperationsAnalysisGraphTest {
     @Test
     void secondUnsafeSqlFailureTerminatesTheRun() {
         modelClient.reset(
-                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of()),
+                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of(),
+                        null, List.of("building_id")),
                 List.of(LIMIT_LESS_SQL, LIMIT_LESS_SQL),
                 null, null);
 
@@ -294,7 +316,8 @@ class OperationsAnalysisGraphTest {
     @Test
     void invalidChartProposalFallsBackToRealTableColumns() {
         modelClient.reset(
-                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of()),
+                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of(),
+                        null, List.of("building_id")),
                 List.of(GOOD_SQL),
                 new ChartSpec.Proposal("LINE", "趋势", "not_a_column", List.of("also_missing"), "", "kWh"),
                 "共 3 行结果。");
@@ -308,7 +331,8 @@ class OperationsAnalysisGraphTest {
     @Test
     void hallucinatedSummaryNumbersAreRejectedButResultSurvives() {
         modelClient.reset(
-                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of()),
+                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of(),
+                        null, List.of("building_id")),
                 List.of(GOOD_SQL),
                 new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("total"), "", "kWh"),
                 "总计高达 99999.99 kWh，环比上升 37%。");

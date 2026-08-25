@@ -4,6 +4,8 @@ import com.example.smartpark.analytics.catalog.MetricDefinition;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -28,7 +30,20 @@ public record QueryPlan(
         if (metrics.isEmpty()) {
             throw new IllegalArgumentException("plan requires at least one metric");
         }
-        dimensions = List.copyOf(Objects.requireNonNullElse(dimensions, List.of()));
+        LinkedHashSet<String> normalizedDimensions = new LinkedHashSet<>();
+        for (String dimension : Objects.requireNonNullElse(dimensions, List.<String>of())) {
+            if (dimension == null || dimension.isBlank()) {
+                throw new IllegalArgumentException("dimension must not be blank");
+            }
+            String normalized = dimension.strip().toLowerCase(Locale.ROOT);
+            boolean allowedByEveryMetric = metrics.stream().allMatch(metric ->
+                    metric.allowedDimensions().stream().anyMatch(value -> value.equalsIgnoreCase(normalized)));
+            if (!allowedByEveryMetric) {
+                throw new IllegalArgumentException("dimension is not approved by every metric: " + dimension);
+            }
+            normalizedDimensions.add(normalized);
+        }
+        dimensions = List.copyOf(normalizedDimensions);
         filters = Map.copyOf(Objects.requireNonNullElse(filters, Map.of()));
         Objects.requireNonNull(timeRange, "timeRange");
         if (!timeRange.isOrdered()) {

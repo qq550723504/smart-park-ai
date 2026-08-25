@@ -407,7 +407,7 @@ public class OperationsAnalysisGraph {
         ctx.plan = new QueryPlan(
                 ctx.understanding.normalizedQuestion(),
                 ctx.metrics,
-                ctx.metrics.stream().flatMap(m -> m.allowedDimensions().stream()).distinct().toList(),
+                validatedRequestedDimensions(ctx),
                 Map.of(),
                 timeRange,
                 200);
@@ -418,6 +418,24 @@ public class OperationsAnalysisGraph {
                 "toTs", java.sql.Timestamp.from(ctx.plan.timeRange().to()));
         nodeCompleted(ctx, runId, ExecutionStage.PLANNING, "查询计划就绪", null);
         return Map.of();
+    }
+
+    private static List<String> validatedRequestedDimensions(RunContext ctx) {
+        LinkedHashSet<String> requested = new LinkedHashSet<>();
+        for (String dimension : ctx.understanding.requestedDimensions()) {
+            if (dimension == null || dimension.isBlank()) {
+                throw new IllegalArgumentException("请求维度不能为空");
+            }
+            String normalized = dimension.strip().toLowerCase(java.util.Locale.ROOT);
+            boolean allowedByEveryMetric = ctx.metrics.stream()
+                    .allMatch(metric -> metric.allowedDimensions().stream()
+                            .anyMatch(allowed -> allowed.equalsIgnoreCase(normalized)));
+            if (!allowedByEveryMetric) {
+                throw new IllegalArgumentException("请求维度未获所有指标目录批准: " + dimension);
+            }
+            requested.add(normalized);
+        }
+        return List.copyOf(requested);
     }
 
     Map<String, Object> generateSql(OverAllState state) {

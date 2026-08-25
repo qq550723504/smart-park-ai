@@ -54,6 +54,7 @@ public class LlmAnalyticsModelClient implements AnalyticsModelClient {
         String system = """
                 你是园区运营分析的理解模块。只输出 JSON 对象，字段:
                 normalizedQuestion (字符串), metricTerms (name 数组), clarificationQuestions (字符串数组),
+                requestedDimensions (用户明确要求的目录维度 name 数组；总计查询为空数组),
                 requestedTimeRange (没有时间要求时为 null；否则为对象，包含 ISO-8601 UTC 字段
                 fromInclusive 与 toExclusive)。所有相对时间都以当前时刻和园区时区解释。
                 当前时刻: %s；园区时区: Asia/Shanghai；园区当地时间: %s。
@@ -63,7 +64,8 @@ public class LlmAnalyticsModelClient implements AnalyticsModelClient {
                 text(json, "normalizedQuestion"),
                 stringList(json, "metricTerms"),
                 stringList(json, "clarificationQuestions"),
-                requestedTimeRange(json));
+                requestedTimeRange(json),
+                stringList(json, "requestedDimensions"));
     }
 
     @Override

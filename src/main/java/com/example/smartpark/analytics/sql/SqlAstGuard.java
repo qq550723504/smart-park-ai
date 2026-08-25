@@ -2,6 +2,8 @@ package com.example.smartpark.analytics.sql;
 
 import com.example.smartpark.analytics.model.ValidatedSql;
 import net.sf.jsqlparser.expression.DateValue;
+import net.sf.jsqlparser.expression.CastExpression;
+import net.sf.jsqlparser.expression.BinaryExpression;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.ExpressionVisitorAdapter;
 import net.sf.jsqlparser.expression.Function;
@@ -12,6 +14,13 @@ import net.sf.jsqlparser.expression.TimeValue;
 import net.sf.jsqlparser.expression.TimestampValue;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.schema.Table;
+import net.sf.jsqlparser.schema.Column;
+import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
+import net.sf.jsqlparser.expression.operators.relational.GreaterThan;
+import net.sf.jsqlparser.expression.operators.relational.GreaterThanEquals;
+import net.sf.jsqlparser.expression.operators.relational.MinorThan;
+import net.sf.jsqlparser.expression.operators.relational.MinorThanEquals;
+import net.sf.jsqlparser.expression.operators.relational.NotEqualsTo;
 import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.select.Limit;
 import net.sf.jsqlparser.statement.select.PlainSelect;
@@ -46,6 +55,9 @@ public final class SqlAstGuard {
 
     /** Upper row bound shared with the analytics configuration contract. */
     public static final int MAX_ROWS = 500;
+
+    private static final Set<String> TEMPORAL_COLUMNS = Set.of(
+            "hour_ts", "occurred_at", "snapshot_at", "stat_date");
 
     private SqlAstGuard() {
     }
@@ -254,6 +266,90 @@ public final class SqlAstGuard {
                 throw new IllegalStateException("时间边界必须是绑定参数，不允许字面量日期");
             }
             return super.visit(value, context);
+        }
+
+        @Override
+        public <S> Void visit(CastExpression cast, S context) {
+            if ((cast.isDate() || cast.isTime() || cast.isTimeStamp())
+                    && unwrap(cast.getLeftExpression()) instanceof net.sf.jsqlparser.expression.StringValue) {
+                throw new IllegalStateException("时间边界必须是绑定参数，不允许字符串转换为时间类型");
+            }
+            return super.visit(cast, context);
+        }
+
+        @Override
+        public <S> Void visit(EqualsTo comparison, S context) {
+            rejectImplicitTemporalLiteral(comparison);
+            return super.visit(comparison, context);
+        }
+
+        @Override
+        public <S> Void visit(NotEqualsTo comparison, S context) {
+            rejectImplicitTemporalLiteral(comparison);
+            return super.visit(comparison, context);
+        }
+
+        @Override
+        public <S> Void visit(GreaterThan comparison, S context) {
+            rejectImplicitTemporalLiteral(comparison);
+            return super.visit(comparison, context);
+        }
+
+        @Override
+        public <S> Void visit(GreaterThanEquals comparison, S context) {
+            rejectImplicitTemporalLiteral(comparison);
+            return super.visit(comparison, context);
+        }
+
+        @Override
+        public <S> Void visit(MinorThan comparison, S context) {
+            rejectImplicitTemporalLiteral(comparison);
+            return super.visit(comparison, context);
+        }
+
+        @Override
+        public <S> Void visit(MinorThanEquals comparison, S context) {
+            rejectImplicitTemporalLiteral(comparison);
+            return super.visit(comparison, context);
+        }
+
+        private static void rejectImplicitTemporalLiteral(BinaryExpression comparison) {
+            Expression left = unwrap(comparison.getLeftExpression());
+            Expression right = unwrap(comparison.getRightExpression());
+            if ((isTemporalExpression(left) && isStringLiteral(right))
+                    || (isTemporalExpression(right) && isStringLiteral(left))) {
+                throw new IllegalStateException("时间边界必须是绑定参数，不允许字符串隐式转换为时间类型");
+            }
+        }
+
+        private static boolean isTemporalExpression(Expression expression) {
+            boolean[] temporal = {false};
+            expression.accept(new ExpressionVisitorAdapter<Void>() {
+                @Override
+                public <S> Void visit(Column column, S context) {
+                    if (TEMPORAL_COLUMNS.contains(
+                            column.getUnquotedColumnName().toLowerCase(Locale.ROOT))) {
+                        temporal[0] = true;
+                    }
+                    return super.visit(column, context);
+                }
+            });
+            return temporal[0];
+        }
+
+        private static boolean isStringLiteral(Expression expression) {
+            if (expression instanceof net.sf.jsqlparser.expression.StringValue) return true;
+            return expression instanceof CastExpression cast
+                    && unwrap(cast.getLeftExpression()) instanceof net.sf.jsqlparser.expression.StringValue;
+        }
+
+        private static Expression unwrap(Expression expression) {
+            Expression value = expression;
+            while (value instanceof net.sf.jsqlparser.expression.operators.relational.ParenthesedExpressionList<?> list
+                    && list.size() == 1) {
+                value = list.get(0);
+            }
+            return value;
         }
 
         @Override

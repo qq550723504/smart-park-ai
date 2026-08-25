@@ -4,7 +4,12 @@ import com.example.smartpark.analytics.model.QueryPlan;
 import com.example.smartpark.analytics.model.TabularResult;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Guards the conclusion stage: every number the model mentions must be
@@ -48,6 +53,7 @@ public class AnalysisSummaryValidator {
         if (!unknownEntities.isEmpty()) {
             throw new IllegalArgumentException("结论包含结果数据中不存在的实体: " + unknownEntities);
         }
+        validateEntityFigureRelationships(conclusion, result);
         List<String> supported = supportedFigures(result);
         java.util.regex.Matcher matcher = NUMBER.matcher(conclusion);
         List<String> unsupported = new ArrayList<>();
@@ -61,6 +67,54 @@ public class AnalysisSummaryValidator {
             throw new IllegalArgumentException("结论包含结果数据不支持的数字: " + unsupported);
         }
         return conclusion.strip();
+    }
+
+    private void validateEntityFigureRelationships(String conclusion, TabularResult result) {
+        Map<String, Set<String>> figuresByEntity = figuresByEntity(result);
+        if (figuresByEntity.isEmpty()) return;
+        for (String clause : conclusion.split("(?:[，,；;。！？?\\n]+|(?<!\\d)[.!](?!\\d))")) {
+            LinkedHashSet<String> entities = new LinkedHashSet<>();
+            java.util.regex.Matcher entityMatcher = DIGIT_IDENTIFIER.matcher(clause);
+            while (entityMatcher.find()) {
+                String normalized = entityMatcher.group().toLowerCase(Locale.ROOT);
+                if (figuresByEntity.containsKey(normalized)) entities.add(normalized);
+            }
+            java.util.regex.Matcher figureMatcher = NUMBER.matcher(clause);
+            List<String> figures = new ArrayList<>();
+            while (figureMatcher.find()) figures.add(normalize(figureMatcher.group()));
+            if (entities.isEmpty() || figures.isEmpty()) continue;
+            if (entities.size() != 1) {
+                throw new IllegalArgumentException("结论中的实体与数字对应关系不明确: " + clause.strip());
+            }
+            String entity = entities.iterator().next();
+            if (!figuresByEntity.get(entity).containsAll(figures)) {
+                throw new IllegalArgumentException("结论中的实体与数字对应关系不受结果行支持: " + clause.strip());
+            }
+        }
+    }
+
+    private Map<String, Set<String>> figuresByEntity(TabularResult result) {
+        Map<String, Set<String>> relationships = new LinkedHashMap<>();
+        for (List<Object> row : result.rows()) {
+            Set<String> entities = new LinkedHashSet<>();
+            Set<String> figures = new LinkedHashSet<>();
+            for (Object value : row) {
+                if (value == null) continue;
+                java.util.regex.Matcher entityMatcher = DIGIT_IDENTIFIER.matcher(value.toString());
+                while (entityMatcher.find()) {
+                    entities.add(entityMatcher.group().toLowerCase(Locale.ROOT));
+                }
+                if (value instanceof Number number) {
+                    figures.add(normalize(stripTrailingZeros(number)));
+                } else if (NUMBER.matcher(value.toString()).matches()) {
+                    figures.add(normalize(value.toString()));
+                }
+            }
+            for (String entity : entities) {
+                relationships.computeIfAbsent(entity, ignored -> new LinkedHashSet<>()).addAll(figures);
+            }
+        }
+        return relationships;
     }
 
     private List<String> supportedValues(TabularResult result) {
