@@ -38,6 +38,7 @@ class CollaborationRuntimeConfigurationTest {
             assertThat(context.getBean(ExpertCollaborationService.class)).isNotNull();
             var executor = context.getBean("collaborationExecutor", ExecutorService.class);
             assertThat(((ThreadPoolExecutor) executor).getMaximumPoolSize()).isEqualTo(2);
+            assertThat(((ThreadPoolExecutor) executor).getQueue().remainingCapacity()).isEqualTo(2);
             var runExecutor = (ThreadPoolExecutor) context.getBean("collaborationRunExecutor", ExecutorService.class);
             assertThat(runExecutor.getQueue().remainingCapacity()).isEqualTo(2);
         });

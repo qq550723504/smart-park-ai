@@ -5,6 +5,7 @@
 DO $$
 BEGIN
     EXECUTE format('REVOKE ALL ON DATABASE %I FROM PUBLIC', current_database());
+    EXECUTE format('REVOKE ALL ON DATABASE %I FROM %I', current_database(), 'smartpark_analytics_ro');
     EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), 'smartpark_analytics_ro');
 END
 $$;

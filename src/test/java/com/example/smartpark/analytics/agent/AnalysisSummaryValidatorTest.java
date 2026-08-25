@@ -91,6 +91,30 @@ class AnalysisSummaryValidatorTest {
     }
 
     @Test
+    void bindsEachMetricClaimToItsOwnResultColumn() {
+        var energy = new com.example.smartpark.analytics.catalog.MetricDefinition(
+                "energy_kwh", "能耗", java.util.Set.of("能耗"), "kWh",
+                "analytics.v_energy_hourly", java.util.Set.of("building_id", "hour_ts"),
+                "SUM(kwh)", "hour_ts", 7, null);
+        var deviation = new com.example.smartpark.analytics.catalog.MetricDefinition(
+                "energy_deviation_pct", "能耗偏差", java.util.Set.of("偏差"), "%",
+                "analytics.v_energy_hourly", java.util.Set.of("building_id", "hour_ts"),
+                "AVG(deviation_pct)", "hour_ts", 7, null);
+        QueryPlan multiMetricPlan = new QueryPlan("楼栋能耗和偏差", List.of(energy, deviation),
+                List.of("building_id"), Map.of(), plan.timeRange(), 100);
+        TabularResult multiMetricResult = new TabularResult(
+                List.of("building_id", "energy_kwh", "energy_deviation_pct"),
+                List.of(List.of("B1", 10, 5)), false, 12);
+
+        assertThatThrownBy(() -> new AnalysisSummaryValidator().validate(
+                "B1 使用 5 kWh，能耗偏差为 10%。", multiMetricPlan, multiMetricResult))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("对应");
+        assertThat(new AnalysisSummaryValidator().validate(
+                "B1 使用 10 kWh，能耗偏差为 5%。", multiMetricPlan, multiMetricResult)).isNotBlank();
+    }
+
+    @Test
     void doesNotMistakeADataFigureForMetadataWhenItEqualsTheRowCount() {
         QueryPlan riskPlan = new QueryPlan("按风险等级统计告警",
                 List.of(new com.example.smartpark.analytics.catalog.MetricDefinition(

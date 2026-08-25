@@ -182,6 +182,7 @@ class AnalyticsSchemaMigrationTest {
                 exec(admin, "CREATE TABLE public.public_leak(secret text)");
                 exec(admin, "INSERT INTO public.public_leak VALUES ('must-not-leak')");
                 exec(admin, "GRANT SELECT ON public.public_leak TO PUBLIC");
+                exec(admin, "GRANT CONNECT, CREATE, TEMPORARY ON DATABASE analytics_upgrade TO " + RO_USER);
             }
             try (Connection ro = DriverManager.getConnection(
                     upgradeDatabase.getJdbcUrl(), RO_USER, RO_PASSWORD);
@@ -208,6 +209,12 @@ class AnalyticsSchemaMigrationTest {
                         .isInstanceOf(IllegalStateException.class)
                         .hasMessageContaining("permission denied");
                 assertThatThrownBy(() -> exec(ro, "CREATE TABLE analytics.evil(id int)"))
+                        .isInstanceOf(IllegalStateException.class)
+                        .hasMessageContaining("permission denied");
+                assertThatThrownBy(() -> exec(ro, "CREATE SCHEMA direct_privilege_leak"))
+                        .isInstanceOf(IllegalStateException.class)
+                        .hasMessageContaining("permission denied");
+                assertThatThrownBy(() -> exec(ro, "CREATE TEMP TABLE direct_temp_leak(id int)"))
                         .isInstanceOf(IllegalStateException.class)
                         .hasMessageContaining("permission denied");
                 assertThatThrownBy(() -> exec(ro, "SELECT * FROM analytics.energy_hourly_raw"))

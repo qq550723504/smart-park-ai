@@ -51,7 +51,9 @@ public class CollaborationRuntimeConfiguration {
     @Bean(destroyMethod = "shutdownNow")
     @Qualifier("collaborationExecutor")
     ExecutorService collaborationExecutor(ExpertCollaborationProperties properties) {
-        return Executors.newFixedThreadPool(properties.getMaxParallel());
+        int maxParallel = properties.getMaxParallel();
+        return new ThreadPoolExecutor(maxParallel, maxParallel, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(maxParallel), new ThreadPoolExecutor.AbortPolicy());
     }
 
     @Bean(destroyMethod = "shutdownNow")

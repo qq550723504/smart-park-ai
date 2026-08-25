@@ -23,7 +23,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.Executor;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.RejectedExecutionException;
 
 /** Dynamic fan-out runtime. Only selected experts receive work and selected branches execute concurrently. */
 public final class ExpertCollaborationGraph {
@@ -71,9 +74,17 @@ public final class ExpertCollaborationGraph {
         List<BranchTask> tasks = plan.selectedDomains().stream()
                 .map(domain -> {
                     publishBranchHandoff(runId, domain, "supervisor -> " + domain.name().toLowerCase(), null);
-                    FutureTask<ExpertFinding> task = new FutureTask<>(
+                    Future<ExpertFinding> task = new FutureTask<>(
                             () -> invoke(domain, plan.assignments().get(domain)));
-                    executor.execute(task);
+                    try {
+                        executor.execute((Runnable) task);
+                    } catch (RejectedExecutionException rejected) {
+                        // Admission failure is local to this expert branch. Keep
+                        // the other selected experts useful and expose the
+                        // rejected branch as an explicit failed finding.
+                        task = CompletableFuture.completedFuture(
+                                failed(domain, "expert queue is full"));
+                    }
                     return new BranchTask(domain, task);
                 })
                 .toList();
@@ -130,7 +141,7 @@ public final class ExpertCollaborationGraph {
         }
     }
 
-    private record BranchTask(ExpertDomain domain, FutureTask<ExpertFinding> task) { }
+    private record BranchTask(ExpertDomain domain, Future<ExpertFinding> task) { }
 
     @FunctionalInterface
     public interface Expert {

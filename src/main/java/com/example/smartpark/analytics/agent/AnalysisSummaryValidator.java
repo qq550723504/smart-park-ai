@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -88,7 +89,7 @@ public class AnalysisSummaryValidator {
         for (Mention mention : mentions) {
             if (!mention.numeric()) {
                 if (!figures.isEmpty()) {
-                    validateRowGroup(dimensions, figures, rowFacts);
+                    validateRowGroup(dimensions, figures, rowFacts, plan, conclusion);
                     dimensions.clear();
                     figures.clear();
                 }
@@ -98,7 +99,7 @@ public class AnalysisSummaryValidator {
 
             if (mention.dimensionCandidate() && (dimensions.isEmpty() || !figures.isEmpty())) {
                 if (!figures.isEmpty()) {
-                    validateRowGroup(dimensions, figures, rowFacts);
+                    validateRowGroup(dimensions, figures, rowFacts, plan, conclusion);
                     dimensions.clear();
                     figures.clear();
                 }
@@ -113,16 +114,88 @@ public class AnalysisSummaryValidator {
             }
             figures.add(mention.value());
         }
-        if (!figures.isEmpty()) validateRowGroup(dimensions, figures, rowFacts);
+        if (!figures.isEmpty()) validateRowGroup(dimensions, figures, rowFacts, plan, conclusion);
     }
 
-    private void validateRowGroup(Set<String> dimensions, Set<String> figures, List<RowFact> rowFacts) {
+    private void validateRowGroup(Set<String> dimensions, Set<String> figures, List<RowFact> rowFacts,
+                                  QueryPlan plan, String conclusion) {
         boolean supportedByOneRow = rowFacts.stream().anyMatch(row ->
-                row.dimensionValues().containsAll(dimensions) && row.figures().containsAll(figures));
+                row.dimensionValues().containsAll(dimensions)
+                        && figures.stream().allMatch(figure -> figureMatchesRow(
+                        figure, row, plan, conclusion)));
         if (!supportedByOneRow) {
             throw new IllegalArgumentException(
                     "结论中的实体与数字对应关系不受结果行支持: " + dimensions + " -> " + figures);
         }
+    }
+
+    private boolean figureMatchesRow(String figure, RowFact row, QueryPlan plan, String conclusion) {
+        Set<String> columns = row.columnsForFigure(figure);
+        if (columns.isEmpty()) return false;
+        for (Mention mention : numericMentions(conclusion, figure)) {
+            Set<String> expectedColumns = expectedMetricColumns(mention, row, plan, conclusion);
+            if (!expectedColumns.isEmpty() && java.util.Collections.disjoint(columns, expectedColumns)) {
+                return false;
+            }
+            if (expectedColumns.isEmpty() && columns.size() > 1) {
+                // A value repeated in multiple metric columns is not safely
+                // attributable without an explicit metric/unit claim.
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private Set<String> expectedMetricColumns(Mention mention, RowFact row,
+                                               QueryPlan plan, String conclusion) {
+        int localStart = Math.max(0, mention.start() - 3);
+        int localEnd = Math.min(conclusion.length(), mention.end() + 5);
+        String localWindow = conclusion.substring(localStart, localEnd).toLowerCase(Locale.ROOT);
+        List<com.example.smartpark.analytics.catalog.MetricDefinition> unitHinted = plan.metrics().stream()
+                .filter(metric -> metric.unit() != null && !metric.unit().isBlank()
+                        && localWindow.contains(metric.unit().toLowerCase(Locale.ROOT)))
+                .toList();
+        List<com.example.smartpark.analytics.catalog.MetricDefinition> hinted = unitHinted.isEmpty()
+                ? plan.metrics().stream()
+                .filter(metric -> mentionsMetric(conclusion, mention, metric))
+                .toList()
+                : unitHinted;
+        if (hinted.isEmpty()) return Set.of();
+        Set<String> expected = new LinkedHashSet<>();
+        for (var metric : hinted) {
+            row.figuresByColumn().keySet().stream()
+                    .filter(column -> column.equalsIgnoreCase(metric.name()))
+                    .findFirst()
+                    .ifPresent(expected::add);
+        }
+        if (expected.isEmpty() && plan.metrics().size() == 1) {
+            expected.addAll(row.numericColumns());
+        }
+        return expected;
+    }
+
+    private boolean mentionsMetric(String conclusion, Mention mention,
+                                   com.example.smartpark.analytics.catalog.MetricDefinition metric) {
+        int start = Math.max(0, mention.start() - 32);
+        int end = Math.min(conclusion.length(), mention.end() + 32);
+        String window = conclusion.substring(start, end).toLowerCase(Locale.ROOT);
+        return java.util.stream.Stream.concat(
+                        java.util.stream.Stream.of(metric.name(), metric.displayName(), metric.unit()),
+                        metric.aliases().stream())
+                .filter(term -> term != null && !term.isBlank())
+                .map(term -> term.toLowerCase(Locale.ROOT))
+                .anyMatch(window::contains);
+    }
+
+    private List<Mention> numericMentions(String conclusion, String figure) {
+        List<Mention> mentions = new ArrayList<>();
+        java.util.regex.Matcher matcher = NUMBER.matcher(conclusion);
+        while (matcher.find()) {
+            if (normalize(matcher.group()).equals(figure)) {
+                mentions.add(new Mention(matcher.start(), matcher.end(), figure, false, true));
+            }
+        }
+        return mentions;
     }
 
     private boolean isMetadataFigure(String conclusion, Mention figure, TabularResult result) {
@@ -185,7 +258,7 @@ public class AnalysisSummaryValidator {
         List<RowFact> facts = new ArrayList<>();
         for (List<Object> row : result.rows()) {
             Set<String> dimensions = new LinkedHashSet<>();
-            Set<String> figures = new LinkedHashSet<>();
+            Map<String, Set<String>> figuresByColumn = new java.util.LinkedHashMap<>();
             for (int index : dimensionIndexes) {
                 if (index < row.size() && row.get(index) != null) {
                     String value = row.get(index).toString().strip().toLowerCase(Locale.ROOT);
@@ -197,12 +270,16 @@ public class AnalysisSummaryValidator {
                 Object value = row.get(index);
                 if (value == null) continue;
                 if (value instanceof Number number) {
-                    figures.add(normalize(stripTrailingZeros(number)));
+                    figuresByColumn.computeIfAbsent(result.columnNames().get(index), ignored -> new LinkedHashSet<>())
+                            .add(normalize(stripTrailingZeros(number)));
                 } else if (NUMBER.matcher(value.toString()).matches()) {
-                    figures.add(normalize(value.toString()));
+                    figuresByColumn.computeIfAbsent(result.columnNames().get(index), ignored -> new LinkedHashSet<>())
+                            .add(normalize(value.toString()));
                 }
             }
-            facts.add(new RowFact(Set.copyOf(dimensions), Set.copyOf(figures)));
+            facts.add(new RowFact(Set.copyOf(dimensions), figuresByColumn.entrySet().stream()
+                    .collect(java.util.stream.Collectors.toUnmodifiableMap(Map.Entry::getKey,
+                            entry -> Set.copyOf(entry.getValue())))));
         }
         return List.copyOf(facts);
     }
@@ -216,7 +293,20 @@ public class AnalysisSummaryValidator {
         return java.util.regex.Pattern.compile(java.util.regex.Pattern.quote(normalizedValue));
     }
 
-    private record RowFact(Set<String> dimensionValues, Set<String> figures) { }
+    private record RowFact(Set<String> dimensionValues, Map<String, Set<String>> figuresByColumn) {
+        Set<String> figures() {
+            return figuresByColumn.values().stream().flatMap(Set::stream).collect(java.util.stream.Collectors.toSet());
+        }
+
+        Set<String> columnsForFigure(String figure) {
+            return figuresByColumn.entrySet().stream()
+                    .filter(entry -> entry.getValue().contains(figure))
+                    .map(Map.Entry::getKey)
+                    .collect(java.util.stream.Collectors.toSet());
+        }
+
+        Set<String> numericColumns() { return figuresByColumn.keySet(); }
+    }
 
     private record Mention(int start, int end, String value,
                            boolean dimensionCandidate, boolean numeric) { }

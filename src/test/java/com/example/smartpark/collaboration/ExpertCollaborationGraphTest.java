@@ -15,6 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -142,6 +143,22 @@ class ExpertCollaborationGraphTest {
         SupervisorPlan plan = new SupervisorPlan("cross", EnumSet.of(ExpertDomain.ENERGY, ExpertDomain.DEVICE),
                 Map.of(ExpertDomain.ENERGY, "ok", ExpertDomain.DEVICE, "fail"), "cross");
         assertThat(graph.execute(plan)).extracting(ExpertFinding::status)
+                .containsExactly(FindingStatus.SUPPORTED, FindingStatus.FAILED);
+    }
+
+    @Test void turnsARejectedExpertBranchIntoAFailedFinding() {
+        EnumMap<ExpertDomain, ExpertCollaborationGraph.Expert> experts = new EnumMap<>(ExpertDomain.class);
+        for (ExpertDomain domain : ExpertDomain.values()) experts.put(domain, assignment -> finding(domain));
+        java.util.concurrent.atomic.AtomicInteger submissions = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.Executor rejectingAfterOne = command -> {
+            if (submissions.getAndIncrement() == 0) command.run();
+            else throw new RejectedExecutionException("expert queue full");
+        };
+
+        var findings = new ExpertCollaborationGraph(experts, rejectingAfterOne)
+                .execute(plan(ExpertDomain.ENERGY, ExpertDomain.DEVICE));
+
+        assertThat(findings).extracting(ExpertFinding::status)
                 .containsExactly(FindingStatus.SUPPORTED, FindingStatus.FAILED);
     }
 
