@@ -6,6 +6,7 @@ import com.example.smartpark.collaboration.model.FindingStatus;
 import com.example.smartpark.collaboration.model.SupervisorPlan;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.List;
@@ -46,6 +47,30 @@ class ExpertCollaborationGraphTest {
         caller.shutdownNow();
     }
 
+    @Test void preservesOtherFindingsWhenOneExpertTimesOut() {
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            EnumMap<ExpertDomain, ExpertCollaborationGraph.Expert> experts = new EnumMap<>(ExpertDomain.class);
+            experts.put(ExpertDomain.ENERGY, assignment -> {
+                try { Thread.sleep(100); } catch (InterruptedException ex) { Thread.currentThread().interrupt(); }
+                return finding(ExpertDomain.ENERGY);
+            });
+            experts.put(ExpertDomain.DEVICE, assignment -> finding(ExpertDomain.DEVICE));
+            experts.put(ExpertDomain.SECURITY, assignment -> finding(ExpertDomain.SECURITY));
+            var graph = new ExpertCollaborationGraph(experts, executor, Duration.ofMillis(10));
+
+            var findings = graph.execute(new SupervisorPlan("energy and device",
+                    EnumSet.of(ExpertDomain.ENERGY, ExpertDomain.DEVICE),
+                    Map.of(ExpertDomain.ENERGY, "energy", ExpertDomain.DEVICE, "device"), "two domains"));
+
+            assertThat(findings).extracting(ExpertFinding::domain)
+                    .containsExactly(ExpertDomain.ENERGY, ExpertDomain.DEVICE);
+            assertThat(findings.get(0).status()).isEqualTo(FindingStatus.FAILED);
+            assertThat(findings.get(1).status()).isEqualTo(FindingStatus.SUPPORTED);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
     @Test void retainsSuccessfulFindingsWhenOneExpertFails() {
         Map<ExpertDomain, Integer> calls = new ConcurrentHashMap<>();
         ExpertCollaborationGraph graph = graph(calls, (domain, assignment) -> {

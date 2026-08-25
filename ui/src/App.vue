@@ -8,6 +8,7 @@ import EventTimeline from './components/EventTimeline.vue'
 import CustomerServiceConsole from './components/CustomerServiceConsole.vue'
 import ExecutionTraceRail from './components/execution/ExecutionTraceRail.vue'
 import OperationsAnalysisPage from './components/analytics/OperationsAnalysisPage.vue'
+import ExpertCollaborationPage from './components/ExpertCollaborationPage.vue'
 import { demoAlerts, type DemoRole } from './types/workflow'
 import { useWorkflow } from './composables/useWorkflow'
 import { useExecutionTrace } from './composables/useExecutionTrace'
@@ -28,7 +29,7 @@ onMounted(() => {
     .catch(() => { capabilities.value = null })
 })
 const selectedAlertId = ref(demoAlerts[0].id)
-const activeView = ref<'workflow' | 'customer' | 'analytics'>('workflow')
+const activeView = ref<'workflow' | 'customer' | 'collaboration' | 'analytics'>('workflow')
 const role = ref<DemoRole>('ADMIN')
 const reviewer = ref('')
 const comment = ref('')
@@ -148,7 +149,7 @@ function confidence(value?: number) {
           <button :class="{ active: activeView === 'workflow' }" @click="activeView = 'workflow'">告警工作流</button>
           <button :class="{ active: activeView === 'customer' }" @click="activeView = 'customer'">园区客服</button>
           <button type="button" disabled title="实时语音助手将在 P1 后续切片开放">实时语音</button>
-          <button type="button" disabled title="专家协作将在 P1 后续切片开放">专家协作</button>
+          <button :class="{ active: activeView === 'collaboration' }" @click="activeView = 'collaboration'">专家协作</button>
           <button :class="{ active: activeView === 'analytics' }" @click="activeView = 'analytics'">运营分析</button>
         </nav>
         <div class="system-status"><span class="status-pulse"></span><span>模拟园区系统</span><span class="divider"></span><span class="muted">知识检索 {{ capabilityLabels?.knowledge ?? '--' }} · 客服回答 {{ capabilityLabels?.customer ?? '--' }} · 索引存储 {{ capabilityLabels?.vector ?? '--' }}</span></div>
@@ -164,6 +165,10 @@ function confidence(value?: number) {
     <main v-else-if="activeView === 'customer'" class="main-content customer-main">
       <section class="hero-row customer-hero"><div><span class="eyebrow">园区服务 · 02</span><h2>园区服务问题<br /><em>快速响应与有序转人工</em></h2><p class="hero-copy">基于模拟园区知识回答常见咨询，报修或知识不足时自动生成客服工单。</p></div></section>
       <CustomerServiceConsole :role="role" />
+    </main>
+
+    <main v-else-if="activeView === 'collaboration'" class="main-content">
+      <ExpertCollaborationPage :trace="trace" />
     </main>
 
     <main v-else class="main-content">

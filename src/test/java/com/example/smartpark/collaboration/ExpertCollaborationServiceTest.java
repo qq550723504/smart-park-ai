@@ -39,6 +39,22 @@ class ExpertCollaborationServiceTest {
                 .containsExactly(ExecutionEventType.RUN_STARTED, ExecutionEventType.NODE_STARTED, ExecutionEventType.FAILED);
     }
 
+    @Test void lateCompletionCannotOverwriteOverallTimeout() throws Exception {
+        var publisher = new InMemoryExecutionEventPublisher();
+        var releasePlanner = new java.util.concurrent.CountDownLatch(1);
+        var service = service(publisher, (q) -> {
+            try { releasePlanner.await(); }
+            catch (InterruptedException ex) { Thread.currentThread().interrupt(); }
+            return plan();
+        }, (p, f) -> new Synthesis(FindingStatus.SUPPORTED, "energy supported", List.of("energy:1"), .8, List.of()), Duration.ofMillis(30));
+        var run = service.start("energy consumption");
+        waitFor(() -> service.get(run.runId()).status() == CollaborationRun.RunStatus.FAILED);
+        releasePlanner.countDown();
+        Thread.sleep(100);
+        assertThat(service.get(run.runId()).status()).isEqualTo(CollaborationRun.RunStatus.FAILED);
+        assertThat(publisher.history(run.runId())).extracting(e -> e.eventType())
+                .containsExactly(ExecutionEventType.RUN_STARTED, ExecutionEventType.NODE_STARTED, ExecutionEventType.FAILED);
+    }
     @Test void marksRunFailedWhenOverallTimeoutExpires() throws Exception {
         var publisher = new InMemoryExecutionEventPublisher();
         var service = service(publisher, (q) -> {
@@ -50,6 +66,7 @@ class ExpertCollaborationServiceTest {
         waitFor(() -> service.get(run.runId()).status() == CollaborationRun.RunStatus.FAILED);
         assertThat(publisher.history(run.runId())).last().extracting(e -> e.eventType()).isEqualTo(ExecutionEventType.FAILED);
     }
+
 
     private static ExpertCollaborationService service(InMemoryExecutionEventPublisher publisher,
             ExpertCollaborationService.Planner planner, ExpertCollaborationService.Synthesizer synthesizer) {

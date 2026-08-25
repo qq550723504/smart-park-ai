@@ -44,6 +44,10 @@ smartpark:
       password: ${SMARTPARK_ANALYTICS_DB_PASSWORD:}
       admin-username: ${SMARTPARK_ANALYTICS_DB_ADMIN_USER:}
       admin-password: ${SMARTPARK_ANALYTICS_DB_ADMIN_PASSWORD:}
+  collaboration:
+    expert-timeout: ${SMARTPARK_EXPERT_TIMEOUT:15s}
+    run-timeout: ${SMARTPARK_EXPERT_RUN_TIMEOUT:40s}
+    max-parallel: ${SMARTPARK_EXPERT_MAX_PARALLEL:3}
   customer:
     minimum-knowledge-score: ${SMARTPARK_CUSTOMER_MINIMUM_KNOWLEDGE_SCORE:0.70}
   mcp:

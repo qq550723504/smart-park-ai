@@ -52,9 +52,16 @@ public final class ExpertCollaborationService {
             publish(id, "Supervisor", ExecutionStage.PLANNING, ExecutionEventType.EXPERT_HANDOFF, ExecutionStatus.RUNNING, "Selected " + plan.selectedDomains());
             var findings = graph.execute(plan);
             Synthesis synthesis = synthesizer.synthesize(plan, findings);
-            store.save(new CollaborationRun(id, question, CollaborationRun.RunStatus.COMPLETED, plan, findings, synthesis, null, Instant.now(clock)));
-            publish(id, "Supervisor", ExecutionStage.COMPLETION, ExecutionEventType.COMPLETED, ExecutionStatus.SUCCEEDED, "Expert collaboration completed");
+            completeIfRunning(id, question, plan, findings, synthesis);
         } catch (Exception ex) { failIfRunning(id, "expert collaboration failed"); }
+    }
+
+    private synchronized void completeIfRunning(UUID id, String question, SupervisorPlan plan,
+            List<com.example.smartpark.collaboration.model.ExpertFinding> findings, Synthesis synthesis) {
+        CollaborationRun current = store.get(id);
+        if (current.status() != CollaborationRun.RunStatus.RUNNING) return;
+        store.save(new CollaborationRun(id, question, CollaborationRun.RunStatus.COMPLETED, plan, findings, synthesis, null, Instant.now(clock)));
+        publish(id, "Supervisor", ExecutionStage.COMPLETION, ExecutionEventType.COMPLETED, ExecutionStatus.SUCCEEDED, "Expert collaboration completed");
     }
 
     private synchronized void failIfRunning(UUID id, String message) {

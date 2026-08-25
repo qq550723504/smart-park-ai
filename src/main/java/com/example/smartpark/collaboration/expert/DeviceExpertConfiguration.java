@@ -6,6 +6,7 @@ import com.example.smartpark.tool.knowledge.ParkKnowledgeTool;
 import com.example.smartpark.tool.workorder.WorkOrderTool;
 import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.ToolCallback;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -13,6 +14,7 @@ import java.util.List;
 import java.util.stream.Stream;
 
 @Configuration
+@ConditionalOnBean({DeviceQueryTool.class, AlertQueryTool.class, WorkOrderTool.class, ParkKnowledgeTool.class})
 public class DeviceExpertConfiguration {
     @Bean(name = "deviceExpertTools")
     ExpertToolSet deviceExpertTools(DeviceQueryTool device, AlertQueryTool alert,
