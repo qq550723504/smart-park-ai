@@ -32,6 +32,18 @@ class SupervisorPlanValidatorTest {
     }
 
     @Test
+    void routesMeterEntityQuestionsToEnergy() {
+        assertThat(validator.expectedDomains("电表 MTR-1-1 当前读数是多少"))
+                .isEqualTo(Set.of(ExpertDomain.ENERGY));
+    }
+
+    @Test
+    void routesDeviceIdentifierQuestionsToDevice() {
+        assertThat(validator.expectedDomains("DEV-POWER-001 当前状态"))
+                .isEqualTo(Set.of(ExpertDomain.DEVICE));
+    }
+
+    @Test
     void genericDeviceAlertQuestionsDoNotRequireTheSecurityExpert() {
         // 冷机离线告警 is a device alert; requiring SECURITY would dispatch an
         // expert whose only tool looks up security events.

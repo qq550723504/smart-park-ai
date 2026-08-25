@@ -19,6 +19,12 @@ class QueryPlanTest {
                 "analytics.v_energy_hourly", java.util.Set.of("building_id", "hour_ts"), "SUM(kwh)", 7);
     }
 
+    private MetricDefinition alertMetric() {
+        return new MetricDefinition("alert_count", "告警数量", java.util.Set.of("告警数量"), "条",
+                "analytics.v_alert_fact", java.util.Set.of("category", "risk_level", "status", "occurred_at"),
+                "COUNT(*)", "occurred_at", 7, null);
+    }
+
     @Test
     void acceptsPlanWithinContractBounds() {
         QueryPlan plan = new QueryPlan("B1 上周能耗", List.of(metric("energy_kwh")),
@@ -45,6 +51,14 @@ class QueryPlanTest {
                 new QueryPlan.TimeRange(now.minusSeconds(60), now), 100))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("original question");
+    }
+
+    @Test
+    void categoricalFilterValuesMayMatchQuestionCaseInsensitively() {
+        QueryPlan plan = new QueryPlan("open 状态的告警数量", List.of(alertMetric()), List.of(),
+                Map.of("status", "OPEN"), new QueryPlan.TimeRange(now.minusSeconds(60), now), 100);
+
+        assertThat(plan.filters()).containsEntry("status", "OPEN");
     }
 
     @Test

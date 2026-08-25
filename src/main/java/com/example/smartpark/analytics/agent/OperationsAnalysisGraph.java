@@ -24,9 +24,13 @@ import com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy;
 import reactor.core.publisher.Flux;
 
 import java.time.Clock;
+import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -53,6 +57,21 @@ public class OperationsAnalysisGraph {
     private static final int MAX_SQL_ATTEMPTS = 2; // one original try, at most one repair
     private static final ZoneId PARK_ZONE = ZoneId.of("Asia/Shanghai");
     private static final long MODEL_TIME_SKEW_TOLERANCE_SECONDS = 300;
+    private static final java.util.regex.Pattern CALENDAR_DATE_RANGE = java.util.regex.Pattern.compile(
+            "(\\d{4}-\\d{2}-\\d{2})\\s*(?:到|至|~|～)\\s*(\\d{4}-\\d{2}-\\d{2})");
+    private static final Map<String, Map<String, String>> CATEGORICAL_FILTER_TERMS = Map.of(
+            "status", Map.ofEntries(
+                    Map.entry("open", "OPEN"), Map.entry("未处理", "OPEN"),
+                    Map.entry("resolved", "RESOLVED"), Map.entry("已解决", "RESOLVED"), Map.entry("已处理", "RESOLVED")),
+            "risk_level", Map.ofEntries(
+                    Map.entry("high", "HIGH"), Map.entry("高风险", "HIGH"),
+                    Map.entry("medium", "MEDIUM"), Map.entry("中风险", "MEDIUM"),
+                    Map.entry("low", "LOW"), Map.entry("低风险", "LOW")),
+            "category", Map.ofEntries(
+                    Map.entry("temperature", "TEMPERATURE"), Map.entry("温度", "TEMPERATURE"),
+                    Map.entry("power", "POWER"), Map.entry("用电", "POWER"), Map.entry("电力", "POWER"),
+                    Map.entry("配电", "POWER"), Map.entry("humidity", "HUMIDITY"), Map.entry("湿度", "HUMIDITY"),
+                    Map.entry("access", "ACCESS"), Map.entry("门禁", "ACCESS"), Map.entry("安防", "ACCESS")));
 
     private final MetricCatalog catalog;
     private final AnalyticsModelClient modelClient;
@@ -335,12 +354,15 @@ public class OperationsAnalysisGraph {
         RunContext ctx = contexts.get(runId);
         String question = text(state, STATE_QUESTION);
         nodeStarted(ctx, runId, ExecutionStage.PLANNING, "解析指标与维度");
+        LinkedHashSet<String> selectedNames = new LinkedHashSet<>();
         List<com.example.smartpark.analytics.catalog.MetricDefinition> selected = new ArrayList<>();
         for (String term : ctx.understanding.metricTerms()) {
             MetricResolution resolution = catalog.resolve(term);
             if (resolution instanceof MetricResolution.Resolved resolved) {
                 if (metricMentionedInQuestion(resolved.metric(), question)) {
-                    selected.add(resolved.metric());
+                    if (selectedNames.add(resolved.metric().name())) {
+                        selected.add(resolved.metric());
+                    }
                 } else {
                     ctx.clarificationOptions.add(catalog.all().stream().map(m -> m.name()).toList());
                     ctx.clarificationQuestions.add("模型选择的指标 “" + resolved.metric().name()
@@ -423,7 +445,7 @@ public class OperationsAnalysisGraph {
                 originalQuestion,
                 ctx.metrics,
                 validatedRequestedDimensions(ctx, originalQuestion),
-                ctx.understanding.requestedFilters(),
+                validatedRequestedFilters(ctx, originalQuestion),
                 timeRange,
                 200);
         // One shared binding set travels through both gates and execution.
@@ -466,11 +488,52 @@ public class OperationsAnalysisGraph {
         return List.copyOf(requested);
     }
 
+    private static Map<String, String> validatedRequestedFilters(RunContext ctx, String question) {
+        java.util.LinkedHashMap<String, String> filters = new java.util.LinkedHashMap<>();
+        for (var entry : ctx.understanding.requestedFilters().entrySet()) {
+            String dimension = entry.getKey() == null ? "" : entry.getKey().strip().toLowerCase(java.util.Locale.ROOT);
+            String value = canonicalCategoricalValue(dimension, entry.getValue());
+            filters.put(dimension, value);
+        }
+        for (var dimensionEntry : CATEGORICAL_FILTER_TERMS.entrySet()) {
+            String dimension = dimensionEntry.getKey();
+            boolean allowedByEveryMetric = ctx.metrics.stream()
+                    .allMatch(metric -> metric.allowedDimensions().stream()
+                            .anyMatch(allowed -> allowed.equalsIgnoreCase(dimension)));
+            if (!allowedByEveryMetric || filters.containsKey(dimension)) continue;
+            for (var termEntry : dimensionEntry.getValue().entrySet()) {
+                if (question.toLowerCase(java.util.Locale.ROOT).contains(termEntry.getKey().toLowerCase(java.util.Locale.ROOT))) {
+                    filters.put(dimension, termEntry.getValue());
+                    break;
+                }
+            }
+        }
+        return java.util.Collections.unmodifiableMap(filters);
+    }
+
+    private static String canonicalCategoricalValue(String dimension, String value) {
+        if (value == null) return null;
+        Map<String, String> vocabulary = CATEGORICAL_FILTER_TERMS.get(dimension);
+        if (vocabulary == null) return value;
+        return vocabulary.getOrDefault(value.toLowerCase(java.util.Locale.ROOT), value);
+    }
+
     private static List<String> inferredAggregationDimensions(RunContext ctx, String question) {
-        List<String> dimensions = List.of(
-                "building_id", "meter_id", "hour_ts", "occurred_at", "snapshot_at",
-                "stat_date", "risk_level", "category", "status", "device_type", "parking_zone");
         List<String> inferred = new ArrayList<>();
+        if (timeAggregationMentionedInQuestion(question)) {
+            for (var metric : ctx.metrics) {
+                String timeColumn = metric.timeColumn();
+                if (!ctx.metrics.stream().allMatch(selected -> selected.allowedDimensions().stream()
+                        .anyMatch(allowed -> allowed.equalsIgnoreCase(timeColumn)))) {
+                    throw new IllegalArgumentException("原始问题要求的时间聚合列未获所有指标目录批准: " + timeColumn);
+                }
+                if (!inferred.contains(timeColumn)) {
+                    inferred.add(timeColumn);
+                }
+            }
+        }
+        List<String> dimensions = List.of(
+                "building_id", "meter_id", "risk_level", "category", "status", "device_type", "parking_zone");
         for (String dimension : dimensions) {
             if (!aggregationDimensionMentionedInQuestion(dimension, question)) continue;
             boolean allowedByEveryMetric = ctx.metrics.stream()
@@ -493,8 +556,6 @@ public class OperationsAnalysisGraph {
                     "按表计", "各表计", "每个表计", "分表计", "按电表", "各电表");
             case "hour_ts" -> containsAny(normalized,
                     "按小时", "逐时", "每小时", "逐小时", "小时趋势");
-            case "occurred_at", "stat_date", "snapshot_at" -> containsAny(normalized,
-                    "按日", "每天", "每日", "按日期", "按时间");
             case "risk_level" -> containsAny(normalized, "按风险", "各风险", "按风险等级");
             case "category" -> containsAny(normalized, "按类别", "各类别", "按分类", "各分类", "按类型", "各类型");
             case "status" -> containsAny(normalized, "按状态", "各状态");
@@ -502,6 +563,11 @@ public class OperationsAnalysisGraph {
             case "parking_zone" -> containsAny(normalized, "按区域", "各区域", "按车区", "各车区");
             default -> false;
         };
+    }
+
+    private static boolean timeAggregationMentionedInQuestion(String question) {
+        return containsAny(question == null ? "" : question.toLowerCase(java.util.Locale.ROOT),
+                "按日", "每天", "每日", "按日期", "按时间");
     }
 
     private static boolean dimensionMentionedInQuestion(String dimension, String question) {
@@ -552,6 +618,15 @@ public class OperationsAnalysisGraph {
     }
 
     private static QueryPlan.TimeRange expectedTimeRange(String question, Instant now) {
+        java.util.regex.Matcher calendarRange = CALENDAR_DATE_RANGE.matcher(question);
+        if (calendarRange.find()) {
+            LocalDate from = LocalDate.parse(calendarRange.group(1), DateTimeFormatter.ISO_LOCAL_DATE);
+            LocalDate to = LocalDate.parse(calendarRange.group(2), DateTimeFormatter.ISO_LOCAL_DATE);
+            if (to.isBefore(from)) {
+                throw new IllegalArgumentException("原始问题的日期范围顺序无效");
+            }
+            return localDateRange(from, to.plusDays(1));
+        }
         java.util.regex.Matcher days = java.util.regex.Pattern.compile("(?:过去|最近|近)(\\d+)(?:天|日)")
                 .matcher(question);
         if (days.find()) {
@@ -568,10 +643,21 @@ public class OperationsAnalysisGraph {
                     .atStartOfDay(PARK_ZONE).toInstant();
             return new QueryPlan.TimeRange(today, now);
         }
-        if (question.contains("上周") || question.contains("过去一周") || question.contains("最近一周")) {
+        if (question.contains("上周")) {
+            LocalDate currentWeekStart = now.atZone(PARK_ZONE).toLocalDate()
+                    .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+            return localDateRange(currentWeekStart.minusWeeks(1), currentWeekStart);
+        }
+        if (question.contains("过去一周") || question.contains("最近一周")) {
             return new QueryPlan.TimeRange(now.minus(Duration.ofDays(7)), now);
         }
         return null;
+    }
+
+    private static QueryPlan.TimeRange localDateRange(LocalDate fromInclusive, LocalDate toExclusive) {
+        return new QueryPlan.TimeRange(
+                fromInclusive.atStartOfDay(PARK_ZONE).toInstant(),
+                toExclusive.atStartOfDay(PARK_ZONE).toInstant());
     }
 
     Map<String, Object> generateSql(OverAllState state) {

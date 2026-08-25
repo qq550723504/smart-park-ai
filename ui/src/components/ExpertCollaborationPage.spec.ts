@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { ref } from 'vue'
 import ExpertCollaborationPage from './ExpertCollaborationPage.vue'
@@ -12,10 +12,10 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 }
 
-function traceStub(events: ExecutionEvent[] = []): ExecutionTrace {
+function traceStub(events: ExecutionEvent[] = [], subscribe = vi.fn()): ExecutionTrace {
   return {
     events: ref(events), status: ref('streaming'), error: ref(''), lastSequence: ref(events.length),
-    isTerminal: ref(false), subscribe: () => undefined, reset: () => undefined,
+    isTerminal: ref(false), subscribe, reset: () => undefined,
   }
 }
 
@@ -98,6 +98,31 @@ describe('ExpertCollaborationPage', () => {
       '设备 DEV-HVAC-001 当前状态如何，是否存在关联告警',
       '电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联',
     ])
+    wrapper.unmount()
+  })
+
+  it('resubscribes to the existing run when its view becomes active again', async () => {
+    const subscribe = vi.fn()
+    const wrapper = mount(ExpertCollaborationPage, {
+      props: { trace: traceStub([], subscribe), active: true },
+      global: {
+        stubs: {
+          'el-tag': { template: '<span><slot /></span>' },
+          'el-input': { props: ['modelValue'], emits: ['update:modelValue'], template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />' },
+          'el-button': { props: ['loading', 'disabled'], template: '<button :disabled="disabled"><slot /></button>' },
+        },
+      },
+    })
+
+    await wrapper.find('form').trigger('submit')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const subscriptionsAfterStart = subscribe.mock.calls.length
+
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+
+    expect(subscribe.mock.calls.length).toBe(subscriptionsAfterStart + 1)
+    expect(subscribe).toHaveBeenLastCalledWith(RUN_ID)
     wrapper.unmount()
   })
 })

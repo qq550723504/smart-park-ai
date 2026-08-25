@@ -70,7 +70,7 @@ public record QueryPlan(
                 throw new IllegalArgumentException("filter value is incompatible with dimension "
                         + dimension + ": " + value);
             }
-            if (!question.contains(value)) {
+            if (!valueAppearsInQuestion(question, dimension, value)) {
                 throw new IllegalArgumentException("filter value must appear in the original question: " + value);
             }
             if (normalizedFilters.putIfAbsent(dimension, value) != null) {
@@ -110,6 +110,13 @@ public record QueryPlan(
             case "alert_id" -> value.matches("(?i)ALT-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+");
             default -> true;
         };
+    }
+
+    private static boolean valueAppearsInQuestion(String question, String dimension, String value) {
+        if (Set.of("status", "risk_level", "category").contains(dimension)) {
+            return question.toLowerCase(Locale.ROOT).contains(value.toLowerCase(Locale.ROOT));
+        }
+        return question.contains(value);
     }
 
     public static String filterParameterName(String dimension) {

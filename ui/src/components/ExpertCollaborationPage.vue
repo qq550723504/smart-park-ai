@@ -6,7 +6,7 @@ import { useExpertCollaboration } from '../composables/useExpertCollaboration'
 import type { ExpertDomain } from '../types/collaboration'
 import type { ExecutionTrace } from '../composables/useExecutionTrace'
 
-const props = defineProps<{ trace: ExecutionTrace }>()
+const props = withDefaults(defineProps<{ trace: ExecutionTrace; active?: boolean }>(), { active: true })
 const question = ref('电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联')
 const presets = [
   '电表 DEV-ENERGY-001 当前能耗是否高于基线',
@@ -18,7 +18,11 @@ const domainLabels: Record<ExpertDomain, string> = { ENERGY: '能耗专家', DEV
 const domains = computed(() => run.value?.plan?.selectedDomains ?? [])
 const handoffs = computed(() => props.trace.events.value.filter((event) => event.eventType === 'EXPERT_HANDOFF'))
 
-watch(() => run.value?.runId, (runId) => { if (runId) props.trace.subscribe(runId) })
+watch(
+  () => [props.active, run.value?.runId] as const,
+  ([active, runId]) => { if (active && runId) props.trace.subscribe(runId) },
+  { immediate: true },
+)
 
 function selectPreset(value: string) { question.value = value }
 

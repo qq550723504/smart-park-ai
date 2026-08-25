@@ -5,6 +5,7 @@ import com.example.smartpark.execution.InMemoryExecutionEventPublisher;
 import com.example.smartpark.execution.model.ExecutionEvent;
 import com.example.smartpark.execution.model.ExecutionEventType;
 import com.example.smartpark.analytics.model.ChartSpec;
+import com.example.smartpark.analytics.model.QueryPlan;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -185,6 +186,39 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
+    void mapsDailyGroupingToTheSelectedMetricsTimeColumn() {
+        String parkingSql = """
+                SELECT stat_date, SUM(entries) AS parking_entries FROM analytics.v_parking_daily
+                WHERE stat_date >= :fromTs AND stat_date < :toTs
+                GROUP BY stat_date LIMIT 200""";
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("按日查看停车进场量", List.of("停车进场量"), List.of()),
+                List.of(parkingSql),
+                new ChartSpec.Proposal("LINE", "每日停车进场量", "stat_date", List.of("parking_entries"), "", "辆"),
+                "共 2 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "按日查看停车进场量");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().dimensions()).containsExactly("stat_date");
+    }
+
+    @Test
+    void deduplicatesMetricsAfterCanonicalCatalogResolution() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("能耗和用电量", List.of("能耗", "用电量"), List.of()),
+                List.of(GOOD_TOTAL_SQL),
+                new ChartSpec.Proposal("TABLE", "能耗", "energy_kwh", List.of(), "", "kWh"),
+                "共 1 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "能耗和用电量");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().metrics()).extracting(metric -> metric.name())
+                .containsExactly("energy_kwh");
+    }
+
+    @Test
     void usesMetricDefaultLookbackWhenQuestionHasNoRequestedTimeRange() {
         modelClient.reset(
                 new AnalyticsModelClient.QuestionUnderstanding("能耗", List.of("能耗"), List.of()),
@@ -196,6 +230,77 @@ class OperationsAnalysisGraphTest {
                 .isEqualTo(new com.example.smartpark.analytics.model.QueryPlan.TimeRange(
                         Instant.parse("2026-08-17T00:00:00Z"),
                         Instant.parse("2026-08-24T00:00:00Z")));
+    }
+
+    @Test
+    void interpretsPreviousWeekUsingParkLocalCalendarBoundaries() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of()),
+                List.of(GOOD_TOTAL_SQL),
+                new ChartSpec.Proposal("TABLE", "上周能耗", "energy_kwh", List.of(), "", "kWh"),
+                "共 1 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "上周能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().timeRange())
+                .isEqualTo(new QueryPlan.TimeRange(
+                        Instant.parse("2026-08-16T16:00:00Z"),
+                        Instant.parse("2026-08-23T16:00:00Z")));
+    }
+
+    @Test
+    void acceptsModelRangeForExplicitCalendarDates() {
+        String question = "2026-08-01 到 2026-08-05 能耗";
+        Instant from = Instant.parse("2026-07-31T16:00:00Z");
+        Instant to = Instant.parse("2026-08-05T16:00:00Z");
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding(question, List.of("能耗"), List.of(),
+                        new AnalyticsModelClient.RequestedTimeRange(from, to)),
+                List.of(GOOD_TOTAL_SQL),
+                new ChartSpec.Proposal("TABLE", "指定日期能耗", "energy_kwh", List.of(), "", "kWh"),
+                "共 1 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), question);
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().timeRange()).isEqualTo(new QueryPlan.TimeRange(from, to));
+    }
+
+    @Test
+    void usesExplicitCalendarDatesWhenModelOmitsTheRange() {
+        String question = "2026-08-01 到 2026-08-05 能耗";
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding(question, List.of("能耗"), List.of()),
+                List.of(GOOD_TOTAL_SQL),
+                new ChartSpec.Proposal("TABLE", "指定日期能耗", "energy_kwh", List.of(), "", "kWh"),
+                "共 1 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), question);
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().timeRange()).isEqualTo(new QueryPlan.TimeRange(
+                Instant.parse("2026-07-31T16:00:00Z"), Instant.parse("2026-08-05T16:00:00Z")));
+    }
+
+    @Test
+    void preservesCategoricalStatusFilterWhenModelOmitsIt() {
+        String question = "OPEN 状态的告警数量";
+        String filteredAlertSql = """
+                SELECT COUNT(*) AS alert_count FROM analytics.v_alert_fact
+                WHERE occurred_at >= :fromTs AND occurred_at < :toTs
+                  AND status = :filter_status LIMIT 200""";
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding(question, List.of("告警数量"), List.of()),
+                List.of(filteredAlertSql),
+                new ChartSpec.Proposal("TABLE", "OPEN 告警数量", "alert_count", List.of(), "", "条"),
+                "共 1 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), question);
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().filters()).containsEntry("status", "OPEN");
+        assertThat(lastExecutionParameters).containsEntry("filter_status", "OPEN");
     }
 
     @Test
