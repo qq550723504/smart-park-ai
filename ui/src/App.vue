@@ -7,6 +7,7 @@ import DemoConsole from './components/DemoConsole.vue'
 import EventTimeline from './components/EventTimeline.vue'
 import CustomerServiceConsole from './components/CustomerServiceConsole.vue'
 import ExecutionTraceRail from './components/execution/ExecutionTraceRail.vue'
+import OperationsAnalysisPage from './components/analytics/OperationsAnalysisPage.vue'
 import { demoAlerts, type DemoRole } from './types/workflow'
 import { useWorkflow } from './composables/useWorkflow'
 import { useExecutionTrace } from './composables/useExecutionTrace'
@@ -27,7 +28,7 @@ onMounted(() => {
     .catch(() => { capabilities.value = null })
 })
 const selectedAlertId = ref(demoAlerts[0].id)
-const activeView = ref<'workflow' | 'customer'>('workflow')
+const activeView = ref<'workflow' | 'customer' | 'analytics'>('workflow')
 const role = ref<DemoRole>('ADMIN')
 const reviewer = ref('')
 const comment = ref('')
@@ -148,14 +149,19 @@ function confidence(value?: number) {
           <button :class="{ active: activeView === 'customer' }" @click="activeView = 'customer'">园区客服</button>
           <button type="button" disabled title="实时语音助手将在 P1 后续切片开放">实时语音</button>
           <button type="button" disabled title="专家协作将在 P1 后续切片开放">专家协作</button>
-          <button type="button" disabled title="运营分析将在 P1 后续切片开放">运营分析</button>
+          <button :class="{ active: activeView === 'analytics' }" @click="activeView = 'analytics'">运营分析</button>
         </nav>
         <div class="system-status"><span class="status-pulse"></span><span>模拟园区系统</span><span class="divider"></span><span class="muted">知识检索 {{ capabilityLabels?.knowledge ?? '--' }} · 客服回答 {{ capabilityLabels?.customer ?? '--' }} · 索引存储 {{ capabilityLabels?.vector ?? '--' }}</span></div>
       </div>
     </header>
 
     <div class="workspace">
-    <main v-if="activeView === 'customer'" class="main-content customer-main">
+    <main v-if="activeView === 'analytics'" class="main-content">
+      <section class="hero-row"><div><span class="eyebrow">运营分析 · 03</span><h2>自然语言直达<br /><em>真实只读数据</em></h2><p class="hero-copy">问题解析、指标口径、AST 安全校验、EXPLAIN 成本与只读执行全程可见。</p></div></section>
+      <OperationsAnalysisPage :trace="trace" @run-started="(id: string) => trace.subscribe(id)" />
+    </main>
+
+    <main v-else-if="activeView === 'customer'" class="main-content customer-main">
       <section class="hero-row customer-hero"><div><span class="eyebrow">园区服务 · 02</span><h2>园区服务问题<br /><em>快速响应与有序转人工</em></h2><p class="hero-copy">基于模拟园区知识回答常见咨询，报修或知识不足时自动生成客服工单。</p></div></section>
       <CustomerServiceConsole :role="role" />
     </main>
