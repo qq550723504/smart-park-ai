@@ -65,6 +65,15 @@ class AnalyticsPropertiesTest {
     }
 
     @Test
+    void analyticsExecutorUsesAReachableBoundedQueue() {
+        runner.withPropertyValues(FULL_DATASOURCE)
+                .run(context -> {
+                    var executor = (java.util.concurrent.ThreadPoolExecutor) context.getBean("analyticsExecutor");
+                    assertThat(executor.getQueue().remainingCapacity()).isLessThan(Integer.MAX_VALUE);
+                });
+    }
+
+    @Test
     void demoSnapshotRefreshRequiresExplicitOptIn() {
         runner.withPropertyValues(FULL_DATASOURCE)
                 .withPropertyValues("smartpark.analytics.demo-data-refresh-enabled=true")

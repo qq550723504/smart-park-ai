@@ -111,7 +111,7 @@ public class InMemoryExecutionEventPublisher implements ExecutionEventPublisher 
             return "UNKNOWN";
         }
         ExecutionEvent last = snapshot.get(snapshot.size() - 1);
-        return last.isTerminal() ? last.eventType().name() : "RUNNING";
+        return last.isTerminal() ? last.eventType().name() : last.status().name();
     }
 
     @Override

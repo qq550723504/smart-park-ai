@@ -22,8 +22,10 @@ import com.example.smartpark.analytics.sql.ReadOnlyQueryExecutor;
 import javax.sql.DataSource;
 
 import java.time.Clock;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Registers the complete governed analytics runtime only when the capability
@@ -60,7 +62,11 @@ public class AnalyticsConfiguration {
 
     @Bean(destroyMethod = "shutdown")
     ExecutorService analyticsExecutor() {
-        return Executors.newFixedThreadPool(2);
+        // Timed-out provider calls may ignore interruption. A bounded queue
+        // makes overload visible instead of retaining cancelled analyses until
+        // an uncooperative worker eventually returns.
+        return new ThreadPoolExecutor(2, 2, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(2), new ThreadPoolExecutor.AbortPolicy());
     }
 
     @Bean

@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 @Component
 @ConditionalOnProperty(name = "spring.ai.dashscope.enabled", havingValue = "true", matchIfMissing = true)
@@ -31,7 +32,10 @@ public class WorkOrderTool {
         if (normalizedWorkflowId.isEmpty()) {
             return new WorkOrderLookupResult(normalizedWorkflowId, List.of(), "workflowId must not be blank", MOCK_NOTICE);
         }
-        return new WorkOrderLookupResult(normalizedWorkflowId, workOrderPort.findByWorkflowId(normalizedWorkflowId), null, MOCK_NOTICE);
+        List<PublicWorkOrder> projected = workOrderPort.findByWorkflowId(normalizedWorkflowId).stream()
+                .map(PublicWorkOrder::from)
+                .toList();
+        return new WorkOrderLookupResult(normalizedWorkflowId, projected, null, MOCK_NOTICE);
     }
 
     @Tool(name = "createWorkOrder", description = "Create a mock work order for the workflow. Preserves workflowId idempotency and does not control real park devices.")
@@ -75,7 +79,7 @@ public class WorkOrderTool {
         return value == null ? "" : value.trim();
     }
 
-    public record WorkOrderLookupResult(String workflowId, List<WorkOrder> workOrders, String error, String notice) {
+    public record WorkOrderLookupResult(String workflowId, List<PublicWorkOrder> workOrders, String error, String notice) {
 
         public WorkOrderLookupResult {
             workflowId = normalize(workflowId);
@@ -85,6 +89,60 @@ public class WorkOrderTool {
             if (error == null) {
                 workflowId = requireText(workflowId, "workflowId");
             }
+        }
+    }
+
+    /** Public read-only projection; internal approval keys and work-order content never cross the tool boundary. */
+    public record PublicWorkOrder(
+            String id,
+            String workflowId,
+            String parkId,
+            String buildingId,
+            String deviceId,
+            String alertId,
+            String summary,
+            String riskLevel,
+            String status,
+            PublicApproval approval,
+            List<String> evidence,
+            java.time.Instant createdAt,
+            java.time.Instant updatedAt) {
+
+        private static final String REDACTED = "REDACTED";
+        private static final Pattern SAFE_IDENTIFIER = Pattern.compile("[A-Za-z0-9][A-Za-z0-9_-]{0,63}");
+
+        public PublicWorkOrder {
+            evidence = List.copyOf(Objects.requireNonNull(evidence, "evidence"));
+            createdAt = Objects.requireNonNull(createdAt, "createdAt");
+            updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
+        }
+
+        static PublicWorkOrder from(WorkOrder workOrder) {
+            return new PublicWorkOrder(
+                    safeIdentifier(workOrder.id()),
+                    safeIdentifier(workOrder.workflowId()),
+                    safeIdentifier(workOrder.parkId()),
+                    safeIdentifier(workOrder.buildingId()),
+                    safeIdentifier(workOrder.deviceId()),
+                    safeIdentifier(workOrder.alertId()),
+                    "Work order content withheld",
+                    workOrder.riskLevel().name(),
+                    workOrder.status().name(),
+                    workOrder.approvalDecision().map(PublicApproval::from).orElse(null),
+                    workOrder.evidence().isEmpty() ? List.of() : List.of("Work order content withheld"),
+                    workOrder.createdAt(),
+                    workOrder.updatedAt());
+        }
+
+        private static String safeIdentifier(String value) {
+            return value != null && SAFE_IDENTIFIER.matcher(value).matches() ? value : REDACTED;
+        }
+    }
+
+    public record PublicApproval(String decision, String reviewer, String comment, java.time.Instant decidedAt) {
+        static PublicApproval from(com.example.smartpark.model.common.ApprovalDecision approval) {
+            return new PublicApproval(approval.decision().name(),
+                    "Operator identity withheld", "Operator comment recorded", approval.decidedAt());
         }
     }
 

@@ -1,4 +1,4 @@
-import { computed, ref, watch } from 'vue'
+import { computed, onScopeDispose, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import type { AnalysisStatusDto } from '../types/analytics'
 import { isTerminalAnalysisStatus } from '../types/analytics'
@@ -43,6 +43,44 @@ export function useOperationsAnalysis(
   const runId = ref<string | null>(null)
   const chart = ref<DisplayPayload | null>(null)
   const selections = ref<Array<{ term: string; metric: string }>>([])
+  let clarificationPollTimer: ReturnType<typeof setTimeout> | undefined
+  let clarificationPollGeneration = 0
+
+  function stopClarificationPolling(): void {
+    clarificationPollGeneration += 1
+    if (clarificationPollTimer !== undefined) {
+      clearTimeout(clarificationPollTimer)
+      clarificationPollTimer = undefined
+    }
+  }
+
+  function pollClarificationExpiry(): void {
+    const generation = clarificationPollGeneration
+    const scheduleNext = () => {
+      if (generation === clarificationPollGeneration) {
+        clarificationPollTimer = setTimeout(pollClarificationExpiry, pollIntervalMs)
+      }
+    }
+
+    clarificationPollTimer = undefined
+    void getAnalysisStatus(runId.value!).then((current) => {
+      if (generation !== clarificationPollGeneration) return
+      dto.value = current
+      if (isTerminalAnalysisStatus(current.status)) {
+        applyTerminal(current)
+        return
+      }
+      scheduleNext()
+    }).catch(() => {
+      // A transient status failure must not disable expiry detection.
+      scheduleNext()
+    })
+  }
+
+  function startClarificationPolling(): void {
+    stopClarificationPolling()
+    clarificationPollTimer = setTimeout(pollClarificationExpiry, pollIntervalMs)
+  }
 
   if (options.trace) {
     watch(options.trace.events, (events) => {
@@ -80,6 +118,7 @@ export function useOperationsAnalysis(
     } else if (current.status === 'NEEDS_CLARIFICATION') {
       phase.value = 'clarification'
       selections.value = []
+      startClarificationPolling()
     } else {
       error.value = `分析失败：${current.failureStage ?? '未知阶段'}`
       phase.value = 'failed'
@@ -92,6 +131,7 @@ export function useOperationsAnalysis(
       return
     }
     error.value = ''
+    stopClarificationPolling()
     chart.value = null
     dto.value = null
     phase.value = 'running'
@@ -113,6 +153,7 @@ export function useOperationsAnalysis(
       return
     }
     error.value = ''
+    stopClarificationPolling()
     chart.value = null
     phase.value = 'running'
     try {
@@ -127,5 +168,6 @@ export function useOperationsAnalysis(
 
   const isBusy = computed(() => phase.value === 'running')
   void isBusy
+  onScopeDispose(stopClarificationPolling)
   return { phase, dto, error, runId, chart, selections, submit, clarify }
 }

@@ -41,10 +41,21 @@ public final class SupervisorSynthesizer {
             if (!plan.selectedDomains().containsAll(selectedDomains)) {
                 throw new IllegalArgumentException("synthesis selected a domain outside the supervisor plan");
             }
+            double modelConfidence = root.path("confidence").asDouble(Double.NaN);
+            if (!Double.isFinite(modelConfidence) || modelConfidence < 0 || modelConfidence > 1) {
+                throw new IllegalArgumentException("confidence must be between 0 and 1");
+            }
             String conclusion = deterministicConclusion(status, selectedDomains, safeFindings);
+            double derivedConfidence = status == FindingStatus.SUPPORTED
+                    ? safeFindings.stream()
+                    .filter(finding -> selectedDomains.contains(finding.domain()))
+                    .mapToDouble(ExpertFinding::confidence)
+                    .min()
+                    .orElse(0.0)
+                    : 0.0;
             Synthesis synthesis = new Synthesis(
                     status, conclusion, strings(root.get("evidenceRefs")),
-                    root.path("confidence").asDouble(Double.NaN), strings(root.get("uncertainties")));
+                    derivedConfidence, strings(root.get("uncertainties")));
             return validator.validate(synthesis, safeFindings, selectedDomains);
         } catch (RuntimeException ex) {
             throw ex;

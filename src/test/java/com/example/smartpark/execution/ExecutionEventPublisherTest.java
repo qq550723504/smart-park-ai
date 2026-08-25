@@ -112,6 +112,17 @@ class ExecutionEventPublisherTest {
     }
 
     @Test
+    void reportsClarificationPauseInsteadOfGenericRunningStatus() {
+        UUID runId = UUID.randomUUID();
+        publisher.publish(new ExecutionEvent(UUID.randomUUID(), runId, 0, Instant.now(),
+                ExecutionScenario.OPERATIONS_ANALYSIS, "analytics", ExecutionStage.UNDERSTANDING,
+                ExecutionEventType.PAUSED, ExecutionStatus.NEEDS_CLARIFICATION,
+                "需要澄清", null));
+
+        assertThat(publisher.status(runId)).isEqualTo("NEEDS_CLARIFICATION");
+    }
+
+    @Test
     void historyQueryDoesNotCreateUnknownRuns() {
         UUID unknown = UUID.randomUUID();
         assertThat(publisher.history(unknown)).isEmpty();

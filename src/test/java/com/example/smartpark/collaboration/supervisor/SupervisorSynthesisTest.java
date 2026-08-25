@@ -75,6 +75,19 @@ class SupervisorSynthesisTest {
     }
 
     @Test
+    void capsSupportedConfidenceAtTheWeakestValidatedFinding() {
+        ExpertFinding weak = new ExpertFinding(ExpertDomain.DEVICE, FindingStatus.SUPPORTED,
+                "device D-2 is offline", List.of("device:D-2"), .1, List.of());
+
+        var result = synthesizer.parseAndValidate("""
+                {"status":"SUPPORTED","selectedDomains":["ENERGY","DEVICE"],
+                 "evidenceRefs":["energy:MTR-2","device:D-2"],"confidence":1.0,"uncertainties":[]}
+                """, plan(), List.of(supported(), weak));
+
+        assertThat(result.confidence()).isEqualTo(.1);
+    }
+
+    @Test
     void rejectsEvidenceFromAnUnselectedFinding() {
         ExpertFinding device = new ExpertFinding(ExpertDomain.DEVICE, FindingStatus.SUPPORTED,
                 "device D-2 is offline", List.of("device:D-2"), .7, List.of());

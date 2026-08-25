@@ -96,6 +96,33 @@ describe('useOperationsAnalysis', () => {
     expect(clarified).toBe(true)
   })
 
+  it('continues checking a paused run so clarification expiry reaches the UI', async () => {
+    const trace = fakeTrace()
+    let statusCalls = 0
+    handler = (url, init) => {
+      if (init?.method === 'POST') return jsonResponse({ runId: RUN_ID }, 202)
+      if (/\/runs\/[0-9a-f-]+$/.test(url)) {
+        statusCalls += 1
+        return jsonResponse({
+          runId: RUN_ID,
+          status: statusCalls === 1 ? 'NEEDS_CLARIFICATION' : 'FAILED',
+          failureStage: statusCalls === 1 ? undefined : 'CLARIFICATION_TIMEOUT',
+          createdAt: '',
+        })
+      }
+      return jsonResponse({}, 404)
+    }
+
+    const analysis = useOperationsAnalysis({ trace, pollIntervalMs: 1 })
+    await analysis.submit('告警情况')
+    expect(analysis.phase.value).toBe('clarification')
+
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(statusCalls).toBeGreaterThan(1)
+    expect(analysis.phase.value).toBe('failed')
+    expect(analysis.dto.value?.failureStage).toBe('CLARIFICATION_TIMEOUT')
+  })
+
   it('reports backend failures without fabricating results', async () => {
     handler = (_url) => jsonResponse({ message: 'boom' }, 400)
     const analysis = useOperationsAnalysis({ pollIntervalMs: 1 })

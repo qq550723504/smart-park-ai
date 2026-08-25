@@ -157,21 +157,21 @@ function confidence(value?: number) {
     </header>
 
     <div class="workspace">
-    <main v-if="activeView === 'analytics'" class="main-content">
+    <main v-show="activeView === 'analytics'" class="main-content">
       <section class="hero-row"><div><span class="eyebrow">运营分析 · 03</span><h2>自然语言直达<br /><em>真实只读数据</em></h2><p class="hero-copy">问题解析、指标口径、AST 安全校验、EXPLAIN 成本与只读执行全程可见。</p></div></section>
       <OperationsAnalysisPage :trace="trace" @run-started="(id: string) => trace.subscribe(id)" />
     </main>
 
-    <main v-else-if="activeView === 'customer'" class="main-content customer-main">
+    <main v-show="activeView === 'customer'" class="main-content customer-main">
       <section class="hero-row customer-hero"><div><span class="eyebrow">园区服务 · 02</span><h2>园区服务问题<br /><em>快速响应与有序转人工</em></h2><p class="hero-copy">基于模拟园区知识回答常见咨询，报修或知识不足时自动生成客服工单。</p></div></section>
       <CustomerServiceConsole :role="role" />
     </main>
 
-    <main v-else-if="activeView === 'collaboration'" class="main-content">
+    <main v-show="activeView === 'collaboration'" class="main-content">
       <ExpertCollaborationPage :trace="trace" />
     </main>
 
-    <main v-else class="main-content">
+    <main v-show="activeView === 'workflow'" class="main-content">
       <section class="hero-row">
         <div>
           <span class="eyebrow">运营工作流 · 01</span>
