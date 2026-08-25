@@ -90,6 +90,60 @@ class SqlPlanGuardTest {
         assertThatCode(() -> SqlPlanGuard.validate(sql, plan)).doesNotThrowAnyException();
     }
 
+    @Test
+    void rejectsProjectionThatDoesNotImplementCatalogMetricExpression() throws UnsafeSqlException {
+        QueryPlan plan = plan("energy_kwh");
+        ValidatedSql sql = SqlAstGuard.validate("""
+                SELECT COUNT(*) FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs LIMIT 100""");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("SUM(kwh)");
+    }
+
+    @Test
+    void rejectsProjectionDimensionOutsideMetricCatalog() throws UnsafeSqlException {
+        QueryPlan plan = plan("energy_kwh");
+        ValidatedSql sql = SqlAstGuard.validate("""
+                SELECT customer_id, SUM(kwh) FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                GROUP BY customer_id LIMIT 100""");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("customer_id");
+    }
+
+    @Test
+    void rejectsTimeBoundsHiddenInUnusedCte() throws UnsafeSqlException {
+        QueryPlan plan = plan("energy_kwh");
+        ValidatedSql sql = SqlAstGuard.validate("""
+                WITH bounded AS (
+                    SELECT kwh FROM analytics.v_energy_hourly
+                    WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                )
+                SELECT COUNT(*) FROM analytics.v_energy_hourly LIMIT 100""");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(sql, plan))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("CTE");
+    }
+
+    @Test
+    void validatesPredicatesInsideTheCteThatProducesTheResult() throws UnsafeSqlException {
+        QueryPlan plan = plan("energy_kwh");
+        ValidatedSql sql = SqlAstGuard.validate("""
+                WITH recent AS (
+                    SELECT building_id, kwh FROM analytics.v_energy_hourly
+                    WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                )
+                SELECT building_id, SUM(kwh) FROM recent
+                GROUP BY building_id LIMIT 100""");
+
+        assertThatCode(() -> SqlPlanGuard.validate(sql, plan)).doesNotThrowAnyException();
+    }
+
     private QueryPlan plan(String metricName) {
         MetricDefinition metric = catalog.findByName(metricName).orElseThrow();
         return new QueryPlan("test", List.of(metric), List.copyOf(metric.allowedDimensions()), Map.of(),

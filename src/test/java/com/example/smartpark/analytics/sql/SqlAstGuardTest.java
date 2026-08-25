@@ -80,6 +80,10 @@ class SqlAstGuardTest {
             """
             SELECT building_id, COUNT(*) FROM analytics.v_energy_hourly
             GROUP BY building_id, (CASE WHEN pg_sleep(0) IS NULL THEN 1 ELSE 2 END) LIMIT 10""",
+            // dangerous function hidden in an otherwise unused CTE
+            """
+            WITH sneaky AS (SELECT pg_sleep(0) FROM analytics.v_alert_fact)
+            SELECT alert_id FROM analytics.v_alert_fact LIMIT 10""",
             // unbounded query
             "SELECT building_id FROM analytics.v_energy_hourly",
             // limit beyond contract

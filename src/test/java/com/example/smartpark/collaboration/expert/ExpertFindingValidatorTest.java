@@ -33,4 +33,17 @@ class ExpertFindingValidatorTest {
                 "failed to query device", java.util.List.of(), 0, java.util.List.of("retry"));
         assertThat(validator.validate(finding, Set.of())).isEqualTo(finding);
     }
+
+    @Test void downgradesFindingThatContradictsTheStructuredToolResult() {
+        ExpertFinding finding = new ExpertFinding(ExpertDomain.DEVICE, FindingStatus.SUPPORTED,
+                "device is offline", java.util.List.of("tool:device:1"), .9, java.util.List.of());
+        EvidenceLedger ledger = new EvidenceLedger();
+        ledger.record("tool:device:1", "{\"deviceId\":\"D-1\",\"status\":\"ONLINE\"}");
+
+        ExpertFinding validated = validator.validateWithObservations(finding, ledger.snapshotObservations());
+
+        assertThat(validated.status()).isEqualTo(FindingStatus.INSUFFICIENT_EVIDENCE);
+        assertThat(validated.evidenceRefs()).isEmpty();
+        assertThat(validated.confidence()).isZero();
+    }
 }

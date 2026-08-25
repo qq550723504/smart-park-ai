@@ -136,8 +136,11 @@ public class OperationsAnalysisService {
                         .map(MetricSelection::metric)
                         .reduce((a, b) -> a + ", " + b)
                         .orElse("");
+                AnalyticsModelClient.RequestedTimeRange requestedTimeRange = pending.understanding() == null
+                        ? null : pending.understanding().requestedTimeRange();
                 pinned = new AnalyticsModelClient.QuestionUnderstanding(
-                        current.question(), safeSelections.stream().map(MetricSelection::metric).toList(), List.of());
+                        current.question(), safeSelections.stream().map(MetricSelection::metric).toList(),
+                        List.of(), requestedTimeRange);
                 store.put(rerunningRecord(runId));
                 pendingClarifications.remove(runId);
             }
@@ -265,6 +268,7 @@ public class OperationsAnalysisService {
                     pendingClarifications.put(runId, new PendingClarification(
                             List.copyOf(outcome.clarificationQuestions()),
                             outcome.clarificationOptions().stream().map(Set::copyOf).toList(),
+                            outcome.understanding(),
                             now.plus(clarificationTimeout)));
                     yield new AnalysisRunStore.RunRecord(runId, question, "NEEDS_CLARIFICATION",
                             List.copyOf(outcome.clarificationQuestions()),
@@ -359,6 +363,7 @@ public class OperationsAnalysisService {
 
     private record PendingClarification(List<String> questions,
                                         List<Set<String>> candidates,
+                                        AnalyticsModelClient.QuestionUnderstanding understanding,
                                         Instant expiresAt) {
         PendingClarification {
             questions = List.copyOf(questions);

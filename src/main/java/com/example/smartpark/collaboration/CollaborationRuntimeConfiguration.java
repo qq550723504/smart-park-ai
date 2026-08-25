@@ -3,6 +3,7 @@ package com.example.smartpark.collaboration;
 import com.example.smartpark.collaboration.expert.ExpertFindingParser;
 import com.example.smartpark.collaboration.expert.ExpertFindingValidator;
 import com.example.smartpark.collaboration.expert.ExpertToolSet;
+import com.example.smartpark.collaboration.expert.EvidenceLedger;
 import com.example.smartpark.collaboration.model.ExpertDomain;
 import com.example.smartpark.collaboration.model.ExpertFinding;
 import com.example.smartpark.collaboration.model.SupervisorPlan;
@@ -26,10 +27,8 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.EnumMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -103,17 +102,17 @@ public class CollaborationRuntimeConfiguration {
 
     private static ExpertCollaborationGraph.Expert expert(ChatModel model, ExpertDomain domain, ExpertToolSet toolSet) {
         return assignment -> {
-            Set<String> observed = new HashSet<>();
+            EvidenceLedger observed = new EvidenceLedger();
             ToolCallback[] callbacks = audited(toolSet.callbacks(), observed);
             String response = modelTextWithTools(model,
                     "You are the " + domain.name() + " park expert. Analyze only your assigned domain. Return only JSON with domain, status, conclusion, evidenceRefs, confidence, nextChecks. Cite evidence references ONLY by copying the [[evidence:...]] markers returned with each successful tool result; never invent or reuse a marker from another call.",
                     assignment, callbacks);
             ExpertFinding finding = new ExpertFindingParser().parse(response, domain);
-            return new ExpertFindingValidator().validate(finding, observed);
+            return new ExpertFindingValidator().validateWithObservations(finding, observed.snapshotObservations());
         };
     }
 
-    private static ToolCallback[] audited(ToolCallback[] callbacks, Set<String> observed) {
+    private static ToolCallback[] audited(ToolCallback[] callbacks, EvidenceLedger observed) {
         return java.util.Arrays.stream(callbacks).map(callback -> new AuditedCallback(callback, observed)).toArray(ToolCallback[]::new);
     }
 
@@ -143,7 +142,7 @@ public class CollaborationRuntimeConfiguration {
      * the tool output so the model can copy the precise reference into its
      * finding; generic names or failed calls authorize nothing.
      */
-    private record AuditedCallback(ToolCallback delegate, Set<String> observed) implements ToolCallback {
+    private record AuditedCallback(ToolCallback delegate, EvidenceLedger observed) implements ToolCallback {
         @Override public org.springframework.ai.tool.metadata.ToolMetadata getToolMetadata() { return delegate.getToolMetadata(); }
         @Override public org.springframework.ai.tool.definition.ToolDefinition getToolDefinition() { return delegate.getToolDefinition(); }
         @Override public String call(String input) { return invoke(input, arguments -> delegate.call(arguments)); }
@@ -154,7 +153,7 @@ public class CollaborationRuntimeConfiguration {
         private String invoke(String input, java.util.function.UnaryOperator<String> action) {
             String result = action.apply(input);
             String ref = "tool:" + delegate.getToolDefinition().name() + "#" + digest(input);
-            observed.add(ref);
+            observed.record(ref, result);
             return result + "\n[[evidence:" + ref + "]]";
         }
     }

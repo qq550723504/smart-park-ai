@@ -141,13 +141,21 @@ public final class SqlAstGuard {
         }
 
         // Hard row bound: explicit LIMIT within the contract.
-        Limit limit = plainSelects.get(0).getLimit();
+        Limit limit = resultLimit(select);
         if (limit == null || limit.getRowCount() == null || !(limit.getRowCount() instanceof LongValue rowCount)
                 || rowCount.getValue() < 1 || rowCount.getValue() > MAX_ROWS) {
             throw reject("必须携带 1..500 的 LIMIT 子句");
         }
 
         return new ValidatedSql(sql.strip(), new ArrayList<>(policy.namedParameters), (int) rowCount.getValue());
+    }
+
+    private static Limit resultLimit(Select select) throws UnsafeSqlException {
+        if (select instanceof PlainSelect plain) return plain.getLimit();
+        if (select instanceof net.sf.jsqlparser.statement.select.ParenthesedSelect parenthesed) {
+            return resultLimit(parenthesed.getSelect());
+        }
+        throw reject("不支持的查询结构");
     }
 
     private static void walk(Expression expression, ExpressionPolicy policy) throws UnsafeSqlException {
@@ -177,16 +185,37 @@ public final class SqlAstGuard {
         if (depth > 8) {
             throw reject("查询嵌套过深，已拒绝");
         }
-        if (node instanceof PlainSelect plain) {
-            into.add(plain);
-        } else if (node instanceof WithItem<?> withItem) {
+        if (node instanceof WithItem<?> withItem) {
             collect(withItem.getParenthesedStatement(), into, depth + 1);
         } else if (node instanceof net.sf.jsqlparser.statement.select.ParenthesedSelect parenthesed) {
             collect(parenthesed.getSelect(), into, depth + 1);
+        } else if (node instanceof Select select) {
+            // A CTE belongs to the SELECT that declares it. Walking only the
+            // outer PlainSelect would let a forbidden function hide in an
+            // unused or nested CTE body.
+            for (WithItem<?> withItem : withItems(select)) {
+                collect(withItem, into, depth + 1);
+            }
+            if (select instanceof PlainSelect plain) {
+                into.add(plain);
+                if (plain.getFromItem() instanceof net.sf.jsqlparser.statement.select.ParenthesedSelect nested) {
+                    collect(nested, into, depth + 1);
+                }
+                if (plain.getJoins() != null) {
+                    for (var join : plain.getJoins()) {
+                        if (join.getRightItem() instanceof net.sf.jsqlparser.statement.select.ParenthesedSelect nested) {
+                            collect(nested, into, depth + 1);
+                        }
+                    }
+                }
+            } else {
+                throw reject("不支持的查询结构");
+            }
         } else {
             throw reject("不支持的查询结构");
         }
     }
+
 
     private static String normalizeIdentifier(String name) {
         return name.replace("`", "").replace("\"", "").toLowerCase(Locale.ROOT);

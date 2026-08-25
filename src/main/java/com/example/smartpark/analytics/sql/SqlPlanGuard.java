@@ -21,11 +21,17 @@ import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.select.ParenthesedSelect;
 import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.Select;
-import net.sf.jsqlparser.util.TablesNamesFinder;
+import net.sf.jsqlparser.statement.select.WithItem;
+import net.sf.jsqlparser.schema.Table;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
 import java.util.LinkedHashSet;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -42,26 +48,34 @@ public final class SqlPlanGuard {
             throw reject("查询计划只能应用于 SELECT");
         }
 
-        Set<String> actualTables = actualTables(statement, select);
-        List<Expression> conjuncts = new ArrayList<>();
-        for (PlainSelect plain : plainSelects(select)) {
-            flattenAnd(plain.getWhere(), conjuncts);
-        }
+        PlainSelect resultQuery = resultQuery(select);
+        List<Branch> branches = consumedBranches(select, resultQuery);
 
         for (MetricDefinition metric : plan.metrics()) {
-            if (!actualTables.contains(normalizeIdentifier(metric.sourceView()))) {
+            List<Branch> sourceBranches = branches.stream()
+                    .filter(branch -> branch.tables().contains(normalizeIdentifier(metric.sourceView())))
+                    .toList();
+            if (sourceBranches.isEmpty()) {
                 throw reject("查询缺少计划要求的数据视图 " + metric.sourceView());
             }
-            if (!hasLowerBound(conjuncts, metric.timeColumn())) {
+            if (!sourceBranches.stream().anyMatch(branch -> hasLowerBound(branch.terms(), metric.timeColumn()))) {
                 throw reject("时间列 " + metric.timeColumn() + " 缺少 :fromTs 包含下界");
             }
-            if (!hasUpperBound(conjuncts, metric.timeColumn())) {
+            if (!sourceBranches.stream().anyMatch(branch -> hasUpperBound(branch.terms(), metric.timeColumn()))) {
                 throw reject("时间列 " + metric.timeColumn() + " 缺少 :toTs 排除上界");
             }
-            if (metric.condition() != null && !hasFixedCondition(conjuncts, metric.condition())) {
-                throw reject("查询缺少指标的固定条件，请按口径过滤");
+            if (metric.condition() != null) {
+                boolean conditionPresent = false;
+                for (Branch branch : sourceBranches) {
+                    if (hasFixedCondition(branch.terms(), metric.condition())) {
+                        conditionPresent = true;
+                        break;
+                    }
+                }
+                if (!conditionPresent) throw reject("查询缺少指标的固定条件，请按口径过滤");
             }
         }
+        validateProjection(resultQuery, plan);
     }
 
     private static Statement parse(String sql) throws UnsafeSqlException {
@@ -72,50 +86,142 @@ public final class SqlPlanGuard {
         }
     }
 
-    private static Set<String> actualTables(Statement statement, Select select) {
-        Set<String> aliases = new LinkedHashSet<>();
-        if (select.getWithItemsList() != null) {
-            select.getWithItemsList().forEach(item -> aliases.add(normalizeIdentifier(item.getAliasName())));
+    private static PlainSelect resultQuery(Select select) throws UnsafeSqlException {
+        if (select instanceof PlainSelect plain) return plain;
+        if (select instanceof ParenthesedSelect parenthesed) return resultQuery(parenthesed.getSelect());
+        throw reject("查询计划只允许单一结果 SELECT");
+    }
+
+    private static List<Branch> consumedBranches(Select root, PlainSelect resultQuery)
+            throws UnsafeSqlException {
+        Map<String, WithItem<?>> ctes = new HashMap<>();
+        if (root.getWithItemsList() != null) {
+            for (WithItem<?> item : root.getWithItemsList()) {
+                ctes.put(normalizeIdentifier(item.getAliasName()), item);
+            }
         }
+        List<Branch> branches = new ArrayList<>();
+        Deque<PendingBranch> pending = new ArrayDeque<>();
+        pending.add(new PendingBranch(resultQuery, List.of()));
+        Set<String> usedCtes = new HashSet<>();
+        Set<Select> expanded = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        while (!pending.isEmpty()) {
+            PendingBranch current = pending.removeFirst();
+            PlainSelect plain = current.select() instanceof ParenthesedSelect parenthesed
+                    ? resultQuery(parenthesed.getSelect()) : (PlainSelect) current.select();
+            if (!expanded.add(current.select())) continue;
+            List<Expression> terms = new ArrayList<>(current.inheritedTerms());
+            flattenAnd(plain.getWhere(), terms);
+            branches.add(new Branch(plain, List.copyOf(terms), sourceTables(plain)));
+            enqueue(plain.getFromItem(), terms, ctes, usedCtes, pending);
+            if (plain.getJoins() != null) {
+                for (var join : plain.getJoins()) {
+                    enqueue(join.getRightItem(), terms, ctes, usedCtes, pending);
+                }
+            }
+        }
+        if (!usedCtes.containsAll(ctes.keySet())) {
+            throw reject("未参与结果查询的 CTE 被拒绝，不能用于拼接指标约束");
+        }
+        return List.copyOf(branches);
+    }
+
+    private static void enqueue(Object fromItem, List<Expression> inheritedTerms,
+                                Map<String, WithItem<?>> ctes, Set<String> usedCtes,
+                                Deque<PendingBranch> pending) {
+        if (fromItem instanceof Table table) {
+            String name = normalizeIdentifier(table.getFullyQualifiedName());
+            WithItem<?> cte = ctes.get(name);
+            if (cte != null && usedCtes.add(name)) {
+                pending.addLast(new PendingBranch(cte.getSelect(), inheritedTerms));
+            }
+        } else if (fromItem instanceof ParenthesedSelect nested) {
+            pending.addLast(new PendingBranch(nested, inheritedTerms));
+        }
+    }
+
+    private static Set<String> sourceTables(PlainSelect plain) {
         Set<String> tables = new LinkedHashSet<>();
-        new TablesNamesFinder<Void>().getTables(statement).stream()
-                .map(SqlPlanGuard::normalizeIdentifier)
-                .filter(name -> !aliases.contains(name))
-                .forEach(tables::add);
-        return tables;
-    }
-
-    private static List<PlainSelect> plainSelects(Select select) {
-        List<PlainSelect> result = new ArrayList<>();
-        collect(select, result);
-        return result;
-    }
-
-    private static void collect(Select select, List<PlainSelect> result) {
-        if (select.getWithItemsList() != null) {
-            select.getWithItemsList().stream()
-                    .map(item -> item.getSelect())
-                    .filter(java.util.Objects::nonNull)
-                    .forEach(item -> collect(item, result));
-        }
-        if (select instanceof ParenthesedSelect parenthesed) {
-            collect(parenthesed.getSelect(), result);
-            return;
-        }
-        if (!(select instanceof PlainSelect plain)) {
-            return;
-        }
-        result.add(plain);
-        if (plain.getFromItem() instanceof ParenthesedSelect nested) {
-            collect(nested, result);
-        }
+        addSourceTable(plain.getFromItem(), tables);
         if (plain.getJoins() != null) {
-            plain.getJoins().stream()
-                    .map(join -> join.getRightItem())
-                    .filter(ParenthesedSelect.class::isInstance)
-                    .map(ParenthesedSelect.class::cast)
-                    .forEach(nested -> collect(nested, result));
+            for (var join : plain.getJoins()) addSourceTable(join.getRightItem(), tables);
         }
+        return Set.copyOf(tables);
+    }
+
+    private static void addSourceTable(Object item, Set<String> tables) {
+        if (item instanceof Table table) tables.add(normalizeIdentifier(table.getFullyQualifiedName()));
+    }
+
+    private record PendingBranch(Select select, List<Expression> inheritedTerms) { }
+
+    private record Branch(PlainSelect select, List<Expression> terms, Set<String> tables) { }
+
+    private static void validateProjection(PlainSelect resultQuery, QueryPlan plan)
+            throws UnsafeSqlException {
+        Set<String> metricExpressions = new LinkedHashSet<>();
+        for (MetricDefinition metric : plan.metrics()) {
+            try {
+                metricExpressions.add(canonicalProjection(CCJSqlParserUtil.parseExpression(metric.expression())));
+            } catch (Exception exception) {
+                throw reject("指标目录包含无法解析的聚合表达式 " + metric.expression());
+            }
+        }
+        Set<String> projected = new LinkedHashSet<>();
+        List<String> invalidProjections = new ArrayList<>();
+        for (var item : resultQuery.getSelectItems()) {
+            Expression expression = item.getExpression();
+            String canonical = canonicalProjection(expression);
+            projected.add(canonical);
+            if (metricExpressions.contains(canonical)) continue;
+            if (expression instanceof Column column) {
+                if (!allowedDimensions(plan).contains(column.getUnquotedColumnName().toLowerCase(Locale.ROOT))) {
+                    throw reject("查询选择了未获指标目录批准的维度 " + column.getUnquotedColumnName());
+                }
+                continue;
+            }
+            invalidProjections.add(expression.toString());
+        }
+        for (MetricDefinition metric : plan.metrics()) {
+            String expected = canonicalProjection(parseExpression(metric.expression()));
+            if (!projected.contains(expected)) {
+                throw reject("指标 " + metric.name() + " 必须投影目录表达式 " + metric.expression());
+            }
+        }
+        if (!invalidProjections.isEmpty()) {
+            throw reject("查询包含未获指标目录批准的投影 " + invalidProjections);
+        }
+        if (resultQuery.getGroupBy() != null) {
+            var groupBy = resultQuery.getGroupBy().getGroupByExpressionList();
+            for (int i = 0; i < groupBy.size(); i++) {
+                Expression expression = (Expression) groupBy.get(i);
+                if (!(expression instanceof Column column)
+                        || !allowedDimensions(plan).contains(column.getUnquotedColumnName().toLowerCase(Locale.ROOT))) {
+                    throw reject("GROUP BY 使用了未获指标目录批准的维度 " + expression);
+                }
+            }
+        }
+    }
+
+    private static Expression parseExpression(String expression) throws UnsafeSqlException {
+        try {
+            return CCJSqlParserUtil.parseExpression(expression);
+        } catch (Exception exception) {
+            throw reject("指标目录包含无法解析的聚合表达式");
+        }
+    }
+
+    private static Set<String> allowedDimensions(QueryPlan plan) {
+        Set<String> dimensions = new LinkedHashSet<>();
+        plan.dimensions().forEach(value -> dimensions.add(value.toLowerCase(Locale.ROOT)));
+        plan.metrics().forEach(metric -> metric.allowedDimensions().forEach(value ->
+                dimensions.add(value.toLowerCase(Locale.ROOT))));
+        return dimensions;
+    }
+
+    private static String canonicalProjection(Expression expression) {
+        return expression.toString().replaceAll("\\s+", "").toLowerCase(Locale.ROOT)
+                .replaceAll("\\b[a-z_][a-z0-9_]*\\.", "");
     }
 
     private static void flattenAnd(Expression expression, List<Expression> result) {

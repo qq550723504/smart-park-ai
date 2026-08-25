@@ -83,14 +83,27 @@ public class OperationsAnalysisGraph {
             ChartSpec chart,
             TabularResult result,
             String summary,
+            AnalyticsModelClient.QuestionUnderstanding understanding,
             String failureStage) {
 
-        static AnalysisRunResult failed(UUID runId, String stage) {
-            return new AnalysisRunResult(runId, RunOutcome.FAILED, List.of(), List.of(), null, null, null, stage);
+        public AnalysisRunResult(UUID runId, RunOutcome outcome,
+                                 List<String> clarificationQuestions,
+                                 List<List<String>> clarificationOptions,
+                                 ChartSpec chart, TabularResult result,
+                                 String summary, String failureStage) {
+            this(runId, outcome, clarificationQuestions, clarificationOptions,
+                    chart, result, summary, null, failureStage);
         }
 
-        static AnalysisRunResult needsClarification(UUID runId, List<String> questions, List<List<String>> options) {
-            return new AnalysisRunResult(runId, RunOutcome.NEEDS_CLARIFICATION, questions, options, null, null, null, null);
+        static AnalysisRunResult failed(UUID runId, String stage) {
+            return new AnalysisRunResult(runId, RunOutcome.FAILED, List.of(), List.of(), null, null, null, null, stage);
+        }
+
+        static AnalysisRunResult needsClarification(UUID runId, List<String> questions,
+                                                    List<List<String>> options,
+                                                    AnalyticsModelClient.QuestionUnderstanding understanding) {
+            return new AnalysisRunResult(runId, RunOutcome.NEEDS_CLARIFICATION, questions, options,
+                    null, null, null, understanding, null);
         }
     }
 
@@ -275,7 +288,7 @@ public class OperationsAnalysisGraph {
                 publish(ctx, runId, ExecutionStage.UNDERSTANDING, ExecutionEventType.PAUSED,
                         ExecutionStatus.NEEDS_CLARIFICATION, "需要澄清后再继续", null);
                 return AnalysisRunResult.needsClarification(runId, ctx.clarificationQuestions,
-                        List.copyOf(ctx.clarificationOptions));
+                        List.copyOf(ctx.clarificationOptions), ctx.understanding);
             }
             case "FAILED" -> {
                 // The failing stage already published its terminal event; do not double-terminate.
