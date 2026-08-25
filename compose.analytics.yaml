@@ -1,7 +1,9 @@
 services:
   analytics-postgres:
     environment:
-      POSTGRES_HOST_AUTH_METHOD: null
+      # Override the local demo-only trust value explicitly. Do not rely on a
+      # null merge: Compose can retain the inherited mapping value.
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
       POSTGRES_PASSWORD: ${SMARTPARK_ANALYTICS_DB_ADMIN_PASSWORD:?set SMARTPARK_ANALYTICS_DB_ADMIN_PASSWORD in .env before enabling analytics}
 
   backend:
