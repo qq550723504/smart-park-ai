@@ -72,6 +72,8 @@ export interface OperationsCapabilities {
   knowledgeMode: 'mock' | 'rag'
   customerAnswerMode: 'mock' | 'dashscope'
   vectorStore: 'none' | 'simple-vector-store'
+  analyticsEnabled: boolean
+  collaborationEnabled: boolean
 }
 
 export function getOperationsCapabilities() {

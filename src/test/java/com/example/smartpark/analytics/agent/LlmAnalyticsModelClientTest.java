@@ -1,0 +1,119 @@
+package com.example.smartpark.analytics.agent;
+
+import com.example.smartpark.agent.TestChatModel;
+import com.example.smartpark.analytics.catalog.MetricCatalog;
+import org.junit.jupiter.api.Test;
+
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+class LlmAnalyticsModelClientTest {
+
+    private static final Instant NOW = Instant.parse("2026-08-24T00:00:00Z");
+
+    @Test
+    void parsesAbsoluteRequestedTimeRangeFromStructuredUnderstanding() {
+        TestChatModel model = new TestChatModel("""
+                {
+                  "normalizedQuestion": "过去30天各楼宇能耗",
+                  "metricTerms": ["energy_consumption"],
+                  "clarificationQuestions": [],
+                  "requestedDimensions": ["building_id"],
+                  "requestedTimeRange": {
+                    "fromInclusive": "2026-07-25T00:00:00Z",
+                    "toExclusive": "2026-08-24T00:00:00Z"
+                  }
+                }
+                """);
+        var client = new LlmAnalyticsModelClient(
+                model, new MetricCatalog(), Clock.fixed(NOW, ZoneOffset.UTC));
+
+        var understanding = client.understandQuestion("过去30天各楼宇能耗");
+
+        assertThat(understanding.requestedTimeRange()).isEqualTo(
+                new AnalyticsModelClient.RequestedTimeRange(
+                        Instant.parse("2026-07-25T00:00:00Z"), NOW));
+        assertThat(understanding.requestedDimensions()).containsExactly("building_id");
+        assertThat(model.lastPrompt().getSystemMessage().getText())
+                .contains("2026-08-24T00:00:00Z", "Asia/Shanghai", "requestedTimeRange");
+    }
+
+    @Test
+    void understandingContractIncludesTypedEntityFilters() throws Exception {
+        var accessor = AnalyticsModelClient.QuestionUnderstanding.class.getMethod("requestedFilters");
+        assertThat(accessor.getReturnType()).isEqualTo(java.util.Map.class);
+    }
+
+    @Test
+    void parsesEntityFiltersAsAStringMap() {
+        TestChatModel model = new TestChatModel("""
+                {
+                  "normalizedQuestion": "B1楼宇的能耗",
+                  "metricTerms": ["energy_kwh"],
+                  "clarificationQuestions": [],
+                  "requestedDimensions": [],
+                  "requestedFilters": {"building_id": "B1"},
+                  "requestedTimeRange": null
+                }
+                """);
+        var client = new LlmAnalyticsModelClient(
+                model, new MetricCatalog(), Clock.fixed(NOW, ZoneOffset.UTC));
+
+        var understanding = client.understandQuestion("B1楼宇的能耗");
+
+        assertThat(understanding.requestedFilters()).containsExactlyEntriesOf(
+                java.util.Map.of("building_id", "B1"));
+        assertThat(model.lastPrompt().getSystemMessage().getText()).contains("requestedFilters");
+    }
+
+    @Test
+    void preservesTheOriginalQuestionWhenTheModelDropsEntityScope() {
+        TestChatModel model = new TestChatModel("""
+                {
+                  "normalizedQuestion": "能耗",
+                  "metricTerms": ["energy_kwh"],
+                  "clarificationQuestions": [],
+                  "requestedDimensions": [],
+                  "requestedFilters": {},
+                  "requestedTimeRange": null
+                }
+                """);
+        var client = new LlmAnalyticsModelClient(
+                model, new MetricCatalog(), Clock.fixed(NOW, ZoneOffset.UTC));
+
+        var understanding = client.understandQuestion("  B1楼宇的能耗  ");
+
+        assertThat(understanding.normalizedQuestion()).isEqualTo("B1楼宇的能耗");
+    }
+
+    @Test
+    void rejectsPartialRequestedTimeRangeInsteadOfSilentlyUsingDefault() {
+        TestChatModel model = new TestChatModel("""
+                {
+                  "normalizedQuestion": "过去30天各楼宇能耗",
+                  "metricTerms": ["energy_consumption"],
+                  "clarificationQuestions": [],
+                  "requestedTimeRange": {"fromInclusive": "2026-07-25T00:00:00Z"}
+                }
+                """);
+        var client = new LlmAnalyticsModelClient(
+                model, new MetricCatalog(), Clock.fixed(NOW, ZoneOffset.UTC));
+
+        assertThatThrownBy(() -> client.understandQuestion("过去30天各楼宇能耗"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("requestedTimeRange");
+    }
+
+    @Test
+    void sqlPromptAdvertisesThePlanRowLimit() {
+        String prompt = LlmAnalyticsModelClient.sqlSystemPrompt(200);
+
+        assertThat(prompt).contains("LIMIT");
+        assertThat(prompt).contains("200");
+        assertThat(prompt).doesNotContain("500");
+    }
+}

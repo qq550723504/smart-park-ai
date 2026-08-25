@@ -1,0 +1,407 @@
+package com.example.smartpark.collaboration.expert;
+
+import com.example.smartpark.collaboration.model.ExpertFinding;
+import com.example.smartpark.collaboration.model.FindingStatus;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.util.HashSet;
+import java.util.Collection;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+
+/** Enforces that supported findings are derived from results observed during this invocation. */
+public final class ExpertFindingValidator {
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final List<String> SUPPORTED_NEXT_CHECKS = List.of();
+    private static final List<String> INSUFFICIENT_EVIDENCE_NEXT_CHECKS =
+            List.of("repeat the domain tool lookup");
+    private static final List<String> FAILED_NEXT_CHECKS =
+            List.of("retry the domain tool lookup");
+
+    public ExpertFinding validate(ExpertFinding finding, Set<String> observedEvidenceRefs) {
+        Objects.requireNonNull(finding, "finding");
+        Set<String> observed = Set.copyOf(Objects.requireNonNull(observedEvidenceRefs, "observedEvidenceRefs"));
+        List<EvidenceLedger.Observation> observations = observed.stream()
+                .map(ref -> new EvidenceLedger.Observation(ref, ""))
+                .toList();
+        return validateWithObservations(finding, observations);
+    }
+
+    public ExpertFinding validateWithObservations(ExpertFinding finding,
+                                                  Collection<EvidenceLedger.Observation> observations) {
+        return validateWithObservations(finding, observations, null);
+    }
+
+    /** Validates that cited tool calls stayed within the exact entity scope assigned to the expert. */
+    public ExpertFinding validateWithObservations(ExpertFinding finding,
+                                                  Collection<EvidenceLedger.Observation> observations,
+                                                  String assignment) {
+        Objects.requireNonNull(finding, "finding");
+        Map<String, EvidenceLedger.Observation> observed = Objects.requireNonNull(observations,
+                        "observations").stream()
+                .collect(java.util.stream.Collectors.toUnmodifiableMap(
+                        EvidenceLedger.Observation::ref, value -> value, (left, right) -> right));
+        List<String> refs = finding.evidenceRefs();
+        if (assignment != null) {
+            List<String> scopedRefs = refs.stream()
+                    .filter(ref -> observed.containsKey(ref)
+                            && evidenceWithinAssignment(List.of(ref), observed, assignment))
+                    .toList();
+            if (finding.status() == FindingStatus.SUPPORTED && scopedRefs.size() != refs.size()) {
+                return insufficientEvidence(finding);
+            }
+            refs = scopedRefs;
+        }
+        boolean validRefs = !refs.isEmpty() && new HashSet<>(observed.keySet()).containsAll(refs);
+        if (finding.status() == FindingStatus.SUPPORTED) {
+            boolean usableResults = validRefs && refs.stream()
+                    .map(observed::get)
+                    .allMatch(ExpertFindingValidator::isUsableObservation);
+            boolean supportedClaim = usableResults && claimMatchesToolResults(finding, refs, observed);
+            if (!supportedClaim) {
+                return new ExpertFinding(finding.domain(), FindingStatus.INSUFFICIENT_EVIDENCE,
+                        "Insufficient evidence: the finding is not supported by the cited tool results.",
+                        List.of(), 0, INSUFFICIENT_EVIDENCE_NEXT_CHECKS);
+            }
+            // Free-form model prose cannot be validated generically. Replace it
+            // with an exact, deterministic rendering of the cited observations
+            // so no uncited quantitative or qualitative claim reaches synthesis.
+            return new ExpertFinding(finding.domain(), finding.status(),
+                    groundedConclusion(refs, observed), refs, finding.confidence(), SUPPORTED_NEXT_CHECKS);
+        }
+        // INSUFFICIENT_EVIDENCE and FAILED findings face the same disclosure
+        // boundary: a model response can invent tool:* references it never
+        // received and free-form factual prose that no observation backs, yet
+        // ExpertCard.vue renders both as evidence and conclusion. Keep only
+        // references that were actually observed in this invocation, and let
+        // the conclusion be exactly the grounded rendering of those verified
+        // observations (or a fixed public-safe status message when none are).
+        List<String> verifiedRefs = refs.stream()
+                .filter(observed::containsKey)
+                .toList();
+        String conclusion = verifiedRefs.isEmpty()
+                ? publicStatusMessage(finding.status())
+                : groundedConclusion(verifiedRefs, observed);
+        return new ExpertFinding(finding.domain(), finding.status(),
+                conclusion, verifiedRefs, finding.confidence(), publicNextChecks(finding.status()));
+    }
+
+    /**
+     * Follow-up checks are rendered by the public collaboration UI. They must
+     * therefore be a server-owned, bounded contract rather than model prose.
+     */
+    private static List<String> publicNextChecks(FindingStatus status) {
+        return switch (status) {
+            case SUPPORTED -> SUPPORTED_NEXT_CHECKS;
+            case INSUFFICIENT_EVIDENCE -> INSUFFICIENT_EVIDENCE_NEXT_CHECKS;
+            case FAILED -> FAILED_NEXT_CHECKS;
+        };
+    }
+
+    private static String publicStatusMessage(FindingStatus status) {
+        return switch (status) {
+            case FAILED -> "专家执行失败，原始输出不可公开验证，已隐藏。";
+            case INSUFFICIENT_EVIDENCE -> "证据不足：未能从本次调用观察到的工具结果中得出结论。";
+            default -> "结论不可公开验证。";
+        };
+    }
+
+    private ExpertFinding insufficientEvidence(ExpertFinding finding) {
+        return new ExpertFinding(finding.domain(), FindingStatus.INSUFFICIENT_EVIDENCE,
+                "Insufficient evidence: the cited tool call escaped the assigned entity scope.",
+                List.of(), 0, List.of("repeat the domain tool lookup for the assigned entity"));
+    }
+
+    private boolean evidenceWithinAssignment(List<String> refs,
+                                             Map<String, EvidenceLedger.Observation> observed,
+                                             String assignment) {
+        for (String ref : refs) {
+            EvidenceLedger.Observation observation = observed.get(ref);
+            if (observation == null || observation.input().isBlank()) return false;
+            try {
+                JsonNode root = JSON.readTree(observation.input());
+                if (!argumentsWithinAssignment(root, assignment)) return false;
+            } catch (Exception malformedInput) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean argumentsWithinAssignment(JsonNode node, String assignment) {
+        if (node == null) return true;
+        if (node.isObject()) {
+            var fields = node.fields();
+            while (fields.hasNext()) {
+                var entry = fields.next();
+                String key = entry.getKey().toLowerCase(Locale.ROOT);
+                JsonNode value = entry.getValue();
+                if (value.isTextual() && (key.endsWith("id") || key.endsWith("_id")
+                        || key.contains("zone"))) {
+                    if (!containsToken(assignment, value.asText().strip())) return false;
+                }
+                if (!argumentsWithinAssignment(value, assignment)) return false;
+            }
+        } else if (node.isArray()) {
+            for (JsonNode value : node) if (!argumentsWithinAssignment(value, assignment)) return false;
+        }
+        return true;
+    }
+
+    private boolean containsToken(String text, String token) {
+        if (token == null || token.isBlank()) return true;
+        return java.util.regex.Pattern.compile("(?i)(?<![A-Za-z0-9_-])"
+                        + java.util.regex.Pattern.quote(token)
+                        + "(?![A-Za-z0-9_-])")
+                .matcher(text == null ? "" : text).find();
+    }
+
+    private boolean claimMatchesToolResults(ExpertFinding finding, List<String> refs,
+                                            Map<String, EvidenceLedger.Observation> observed) {
+        StatusClaim claim = StatusClaim.from(finding.conclusion());
+        if (claim == StatusClaim.NONE) return true;
+
+        // Bind each claimed status to its own cited entity: "D1 offline while
+        // D2 online" is valid even though one global enum contradicts one of
+        // the two observations. Entities are the device identifiers that also
+        // appear in the cited results.
+        Map<String, Set<String>> statusesByEntity = statusesByEntity(refs, observed);
+        Map<String, StatusClaim> entityClaims = entityClaims(finding.conclusion(), statusesByEntity.keySet());
+        if (!entityClaims.isEmpty()) {
+            for (var entry : entityClaims.entrySet()) {
+                Set<String> actual = statusesByEntity.get(entry.getKey());
+                if (actual == null || actual.isEmpty() || !actual.stream().allMatch(entry.getValue()::matches)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // No per-entity binding was possible — keep the conservative global check.
+        boolean foundStatus = false;
+        for (String ref : refs) {
+            for (String status : statuses(observed.get(ref).result())) {
+                foundStatus = true;
+                if (!claim.matches(status)) return false;
+            }
+        }
+        return foundStatus;
+    }
+
+    /** Maps each device identifier found in cited results to its observed status values. */
+    private Map<String, Set<String>> statusesByEntity(List<String> refs,
+                                                      Map<String, EvidenceLedger.Observation> observed) {
+        Map<String, Set<String>> byEntity = new java.util.LinkedHashMap<>();
+        for (String ref : refs) {
+            try {
+                JsonNode root = JSON.readTree(observed.get(ref).result());
+                collectEntityStatuses(root, byEntity);
+            } catch (Exception ignored) {
+                // Non-JSON results cannot establish entity-bound claims.
+            }
+        }
+        return byEntity;
+    }
+
+    private void collectEntityStatuses(JsonNode node, Map<String, Set<String>> byEntity) {
+        if (node == null) return;
+        if (node.isObject()) {
+            String entityId = null;
+            String status = null;
+            var fields = node.fields();
+            while (fields.hasNext()) {
+                var entry = fields.next();
+                String key = entry.getKey().toLowerCase(Locale.ROOT);
+                JsonNode value = entry.getValue();
+                if (("deviceid".equals(key) || "device_id".equals(key)) && value.isTextual()) {
+                    entityId = value.asText().trim();
+                } else if ("status".equals(key) && value.isTextual()) {
+                    status = value.asText().trim().toUpperCase(Locale.ROOT);
+                }
+                collectEntityStatuses(value, byEntity);
+            }
+            if (entityId != null && status != null && !status.isBlank()) {
+                byEntity.computeIfAbsent(entityId, ignored -> new java.util.LinkedHashSet<>()).add(status);
+            }
+        } else if (node.isArray()) {
+            node.forEach(value -> collectEntityStatuses(value, byEntity));
+        }
+    }
+
+    /**
+     * Extracts per-entity status claims: each clause of the conclusion that
+     * names a known entity and carries a status keyword yields entity→claim.
+     */
+    private Map<String, StatusClaim> entityClaims(String conclusion, Set<String> entities) {
+        Map<String, StatusClaim> claims = new java.util.LinkedHashMap<>();
+        for (String clause : conclusion.split("；|;|。|\\n|，|,|while|而")) {
+            String normalized = clause.toLowerCase(Locale.ROOT);
+            for (String entity : entities) {
+                if (!normalized.contains(entity.toLowerCase(Locale.ROOT))) continue;
+                StatusClaim claim = StatusClaim.from(clause);
+                if (claim != StatusClaim.NONE) claims.putIfAbsent(entity, claim);
+            }
+        }
+        return claims;
+    }
+
+    private static boolean isUsableObservation(EvidenceLedger.Observation observation) {
+        if (observation == null || observation.result().isBlank()) return false;
+        String raw = observation.result().strip();
+        try {
+            JsonNode root = JSON.readTree(raw);
+            return root != null && !root.isNull() && !root.isMissingNode() && !containsError(root);
+        } catch (Exception notJson) {
+            String lowered = raw.toLowerCase(Locale.ROOT);
+            return !(lowered.startsWith("error") || lowered.startsWith("failed")
+                    || lowered.startsWith("failure") || lowered.startsWith("错误")
+                    || lowered.startsWith("失败"));
+        }
+    }
+
+    private static boolean containsError(JsonNode node) {
+        if (node.isObject()) {
+            var fields = node.fields();
+            while (fields.hasNext()) {
+                var field = fields.next();
+                String key = field.getKey().toLowerCase(Locale.ROOT);
+                JsonNode value = field.getValue();
+                if (("error".equals(key) || "errors".equals(key)) && hasErrorValue(value)) return true;
+                if ("success".equals(key) && value.isBoolean() && !value.booleanValue()) return true;
+                if ("status".equals(key) && value.isTextual()
+                        && Set.of("ERROR", "FAILED", "FAILURE").contains(
+                                value.asText().strip().toUpperCase(Locale.ROOT))) return true;
+                if (containsError(value)) return true;
+            }
+        } else if (node.isArray()) {
+            for (JsonNode value : node) if (containsError(value)) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasErrorValue(JsonNode value) {
+        if (value == null || value.isNull() || value.isMissingNode()) return false;
+        if (value.isArray() || value.isObject()) return !value.isEmpty();
+        if (value.isTextual()) return !value.asText().isBlank();
+        if (value.isBoolean()) return value.booleanValue();
+        return true;
+    }
+
+    private static String groundedConclusion(List<String> refs,
+                                             Map<String, EvidenceLedger.Observation> observed) {
+        return refs.stream()
+                .map(ref -> "已验证工具结果[" + ref + "]: "
+                        + publicResult(ref, observed.get(ref).result()))
+                .collect(java.util.stream.Collectors.joining("；"));
+    }
+
+    /**
+     * Public findings are a separate disclosure boundary from internal tool
+     * observations. Known public-safe tool contracts retain their structured
+     * result; knowledge search is projected to metadata only, and any future
+     * unregistered tool fails closed instead of exposing its raw payload.
+     */
+    private static String publicResult(String ref, String result) {
+        String toolName = ref.startsWith("tool:") && ref.contains("#")
+                ? ref.substring("tool:".length(), ref.indexOf('#')) : "";
+        return switch (toolName) {
+            case "searchParkKnowledge" -> publicKnowledgeResult(result);
+            case "lookupEnergyConsumption", "lookupDeviceStatus", "lookupSecurityEvent",
+                    "lookupAlert", "lookupAlertHistory", "lookupWorkOrders" -> canonicalResult(result);
+            default -> "{\"notice\":\"tool result withheld from public output\"}";
+        };
+    }
+
+    private static String publicKnowledgeResult(String result) {
+        try {
+            JsonNode root = JSON.readTree(result.strip());
+            if (root == null || !root.isObject()) {
+                return "{\"notice\":\"knowledge result withheld from public output\"}";
+            }
+            com.fasterxml.jackson.databind.node.ObjectNode safe = JSON.createObjectNode();
+            copyField(root, safe, "query");
+            com.fasterxml.jackson.databind.node.ArrayNode documents = safe.putArray("documents");
+            JsonNode rawDocuments = root.get("documents");
+            if (rawDocuments != null && rawDocuments.isArray()) {
+                for (JsonNode document : rawDocuments) {
+                    if (!document.isObject()) continue;
+                    com.fasterxml.jackson.databind.node.ObjectNode metadata = documents.addObject();
+                    for (String field : List.of("id", "domain", "title", "tags", "updatedAt")) {
+                        copyField(document, metadata, field);
+                    }
+                }
+            }
+            copyField(root, safe, "error");
+            copyField(root, safe, "notice");
+            return JSON.writeValueAsString(safe);
+        } catch (Exception malformed) {
+            return "{\"notice\":\"knowledge result withheld from public output\"}";
+        }
+    }
+
+    private static void copyField(JsonNode source,
+                                  com.fasterxml.jackson.databind.node.ObjectNode target,
+                                  String field) {
+        JsonNode value = source.get(field);
+        if (value != null) target.set(field, value.deepCopy());
+    }
+
+    private static String canonicalResult(String result) {
+        String raw = result.strip();
+        try {
+            return JSON.writeValueAsString(JSON.readTree(raw));
+        } catch (Exception notJson) {
+            return raw;
+        }
+    }
+
+    private static Set<String> statuses(String result) {
+        Set<String> statuses = new java.util.LinkedHashSet<>();
+        try {
+            JsonNode root = JSON.readTree(result);
+            collectStatusValues(root, statuses);
+        } catch (Exception ignored) {
+            // A non-JSON result cannot establish a structured status claim.
+        }
+        return Set.copyOf(statuses);
+    }
+
+    private static void collectStatusValues(JsonNode node, Set<String> statuses) {
+        if (node == null) return;
+        if (node.isObject()) {
+            node.fields().forEachRemaining(entry -> {
+                if ("status".equalsIgnoreCase(entry.getKey()) && entry.getValue().isTextual()) {
+                    statuses.add(entry.getValue().asText().trim().toUpperCase(Locale.ROOT));
+                }
+                collectStatusValues(entry.getValue(), statuses);
+            });
+        } else if (node.isArray()) {
+            node.forEach(value -> collectStatusValues(value, statuses));
+        }
+    }
+
+    private enum StatusClaim {
+        ONLINE, OFFLINE, UNKNOWN, NONE;
+
+        static StatusClaim from(String conclusion) {
+            String normalized = conclusion.toLowerCase(Locale.ROOT);
+            if (normalized.matches(".*(\\boffline\\b|离线|脱机|不可用).*")) return OFFLINE;
+            if (normalized.matches(".*(\\bonline\\b|在线|正常运行).*")) return ONLINE;
+            if (normalized.matches(".*(\\bunknown\\b|未知|无法确定).*")) return UNKNOWN;
+            return NONE;
+        }
+
+        boolean matches(String actual) {
+            return switch (this) {
+                case ONLINE -> "ONLINE".equals(actual);
+                case OFFLINE -> "OFFLINE".equals(actual);
+                case UNKNOWN -> "UNKNOWN".equals(actual);
+                case NONE -> true;
+            };
+        }
+    }
+}

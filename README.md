@@ -1,6 +1,8 @@
 # 智慧园区 AI 工作流示例
 
-这是一个基于 Spring Boot、Spring AI Alibaba 和 Vue 3 的智慧园区示例项目。它把告警处置、能耗分析、安防事件复核、园区客服、知识管理和运营审计串成可运行的垂直切片。
+这是一个基于 Spring Boot 4、Spring AI Alibaba 2.0 和 Vue 3 的智慧园区示例项目。它把告警处置、能耗分析、安防事件复核、园区客服、知识管理和运营审计串成可运行的垂直切片。
+
+> **版本与真实链路要求：** 当前基线为 Spring Boot `4.0.0` + Spring AI `2.0.0-M1` + Spring AI Alibaba `2.0.0-M1.1`，属于 milestone 预发布版本。运行时只走在线真实链路，不提供 Mock/离线模型降级路径：体验告警工作流等真实模型能力时必须配置有效的 DashScope API Key。默认自动化测试不访问外网。
 
 项目默认使用内存 Mock 数据，适合本地体验和架构学习。告警工作流可以接入 DashScope `qwen-plus`；客服检索与回答则可以分别在 Mock 和 DashScope/RAG 实现之间切换。
 
@@ -129,6 +131,13 @@ curl "http://localhost:8080/api/workflows/replace-with-workflow-id"
 | `SMARTPARK_CUSTOMER_SERVICE_ANSWER_MODE` | `mock` | `mock` 使用确定性回答；`dashscope` 使用结构化模型回答 |
 | `SMARTPARK_KNOWLEDGE_MIN_SIMILARITY_SCORE` | `0.65` | RAG 结果最低相似度 |
 | `SMARTPARK_CUSTOMER_MINIMUM_KNOWLEDGE_SCORE` | `0.70` | 客服接受知识结果的最低分数 |
+| `SMARTPARK_ANALYTICS_ENABLED` | `false` | 是否启用真实只读 PostgreSQL 分析链路 |
+| `SMARTPARK_ANALYTICS_DEMO_DATA_REFRESH_ENABLED` | `false` | 仅在持久化演示库中把 V1 的时间窗口夹具（能耗、告警、设备快照、停车）重新锚定到当前时间；真实数据必须保持关闭 |
+| `SMARTPARK_ANALYTICS_DB_URL` | 空 | 专用分析数据库 JDBC URL；不能复用业务数据库 |
+| `SMARTPARK_ANALYTICS_DB_ADMIN_USER` | 空 | 仅供 Flyway 和演示快照刷新使用的对象所有者账号 |
+| `SMARTPARK_ANALYTICS_DB_ADMIN_PASSWORD` | 空 | 分析数据库对象所有者密码 |
+| `SMARTPARK_ANALYTICS_DB_USER` | 空 | 运行时只读账号，固定使用 `smartpark_analytics_ro` |
+| `SMARTPARK_ANALYTICS_DB_RO_PASSWORD` | 空 | 只读账号密码；Flyway 创建账号与运行时连接必须一致。含单引号的密码会被安全转义后再嵌入迁移 SQL |
 | `SPRING_AI_DASHSCOPE_BASE_URL` | DashScope 官方地址 | 覆盖模型客户端地址，用于兼容网关 |
 | `AI_DASHSCOPE_API_KEY` | 空 | DashScope 密钥，仅从进程环境变量读取 |
 
@@ -142,6 +151,8 @@ $env:SMARTPARK_CUSTOMER_SERVICE_ANSWER_MODE = 'dashscope'
 ```
 
 这两个模式都需要有效的 `AI_DASHSCOPE_API_KEY` 和网络连接。RAG 索引只存在于当前进程中，应用重启后会从种子文档重新建立。
+
+真实运营分析必须使用独立 PostgreSQL 数据库，不能与业务表或其他应用共库。数据库迁移会撤销该数据库中 `PUBLIC` 的数据库、`public`/`analytics` schema 及对象权限，再仅向 `smartpark_analytics_ro` 授予四个分析视图的 `SELECT` 权限；这是阻断 PostgreSQL 隐式公共权限旁路所必需的安全边界。管理员账号只用于迁移和演示数据刷新，应用查询始终使用只读账号。
 
 如需使用兼容网关，只覆盖当前进程的 URL：
 

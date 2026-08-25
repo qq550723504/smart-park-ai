@@ -67,8 +67,10 @@ class AlertWorkflowRuntimeConfiguration {
     }
 
     @Bean
-    WorkflowEventPublisher workflowEventPublisher() {
-        return WorkflowEventPublisher.inMemory();
+    WorkflowEventPublisher workflowEventPublisher(
+            com.example.smartpark.execution.LegacyWorkflowEventAdapter adapter) {
+        return new com.example.smartpark.execution.ProjectedWorkflowEventPublisher(
+                WorkflowEventPublisher.inMemory(), adapter);
     }
 
     @Bean

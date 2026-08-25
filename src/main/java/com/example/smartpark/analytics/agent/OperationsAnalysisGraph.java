@@ -1,0 +1,773 @@
+package com.example.smartpark.analytics.agent;
+
+import com.example.smartpark.analytics.catalog.MetricCatalog;
+import com.example.smartpark.analytics.catalog.MetricResolution;
+import com.example.smartpark.analytics.model.ChartSpec;
+import com.example.smartpark.analytics.model.QueryPlan;
+import com.example.smartpark.analytics.model.TabularResult;
+import com.example.smartpark.analytics.model.ValidatedSql;
+import com.example.smartpark.analytics.sql.UnsafeSqlException;
+import com.example.smartpark.execution.ExecutionEventPublisher;
+import com.example.smartpark.execution.InMemoryExecutionEventPublisher;
+import com.example.smartpark.execution.model.DisplayPayload;
+import com.example.smartpark.execution.model.ExecutionEvent;
+import com.example.smartpark.execution.model.ExecutionEventType;
+import com.example.smartpark.execution.model.ExecutionScenario;
+import com.example.smartpark.execution.model.ExecutionStage;
+import com.example.smartpark.execution.model.ExecutionStatus;
+import com.alibaba.cloud.ai.graph.CompiledGraph;
+import com.alibaba.cloud.ai.graph.OverAllState;
+import com.alibaba.cloud.ai.graph.StateGraph;
+import com.alibaba.cloud.ai.graph.action.AsyncEdgeAction;
+import com.alibaba.cloud.ai.graph.action.AsyncNodeAction;
+import com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy;
+import reactor.core.publisher.Flux;
+
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Nine-node analysis workflow on the native 2.0 StateGraph:
+ * understandQuestion → resolveMetricAndDimensions → recallAllowedSchema →
+ * buildQueryPlan → generateSql → validateSqlAst → explainAndCheckCost →
+ * executeReadOnlyQuery → buildChartSpec → summarizeFromResult.
+ *
+ * The graph owns routing and ordering; typed payloads travel through a
+ * per-run context so no serialization round-trips can drop business objects.
+ * SQL is only carried forward after AST validation, at most one repair is
+ * allowed, and the conclusion is validated against executed results.
+ */
+public class OperationsAnalysisGraph {
+
+    private static final String STATE_QUESTION = "question";
+    private static final String STATE_RUN_ID = "runId";
+    private static final int MAX_SQL_ATTEMPTS = 2; // one original try, at most one repair
+    private static final ZoneId PARK_ZONE = ZoneId.of("Asia/Shanghai");
+    private static final long MODEL_TIME_SKEW_TOLERANCE_SECONDS = 300;
+
+    private final MetricCatalog catalog;
+    private final AnalyticsModelClient modelClient;
+    private final CostGate costGate;
+    private final ExecutionGate executionGate;
+    private final ExecutionEventPublisher publisher;
+    private final AnalysisSummaryValidator summaryValidator;
+    private final Clock clock;
+    private final Duration executionTimeout;
+    private final CompiledGraph compiled;
+    private final ConcurrentHashMap<UUID, RunContext> contexts = new ConcurrentHashMap<>();
+
+    /** Cost boundary abstraction backed by QueryCostGuard in production wiring. */
+    public interface CostGate {
+        void check(ValidatedSql sql, java.util.Map<String, Object> parameters) throws UnsafeSqlException;
+    }
+
+    /** Execution boundary abstraction backed by ReadOnlyQueryExecutor in production wiring. */
+    public interface ExecutionGate {
+        TabularResult execute(ValidatedSql sql, java.util.Map<String, Object> parameters) throws UnsafeSqlException;
+    }
+
+    public enum RunOutcome { COMPLETED, NEEDS_CLARIFICATION, FAILED }
+
+    public record AnalysisRunResult(
+            UUID runId,
+            RunOutcome outcome,
+            List<String> clarificationQuestions,
+            /** Structured candidate metric names, one candidate set per pending question. */
+            List<List<String>> clarificationOptions,
+            ChartSpec chart,
+            TabularResult result,
+            String summary,
+            AnalyticsModelClient.QuestionUnderstanding understanding,
+            String failureStage) {
+
+        public AnalysisRunResult(UUID runId, RunOutcome outcome,
+                                 List<String> clarificationQuestions,
+                                 List<List<String>> clarificationOptions,
+                                 ChartSpec chart, TabularResult result,
+                                 String summary, String failureStage) {
+            this(runId, outcome, clarificationQuestions, clarificationOptions,
+                    chart, result, summary, null, failureStage);
+        }
+
+        static AnalysisRunResult failed(UUID runId, String stage) {
+            return new AnalysisRunResult(runId, RunOutcome.FAILED, List.of(), List.of(), null, null, null, null, stage);
+        }
+
+        static AnalysisRunResult needsClarification(UUID runId, List<String> questions,
+                                                    List<List<String>> options,
+                                                    AnalyticsModelClient.QuestionUnderstanding understanding) {
+            return new AnalysisRunResult(runId, RunOutcome.NEEDS_CLARIFICATION, questions, options,
+                    null, null, null, understanding, null);
+        }
+    }
+
+    private static final class RunContext {
+        AnalyticsModelClient.QuestionUnderstanding understanding;
+        AnalyticsModelClient.QuestionUnderstanding pinnedUnderstanding;
+        List<com.example.smartpark.analytics.catalog.MetricDefinition> metrics = List.of();
+        String schemaDescription = "";
+        QueryPlan plan;
+        int sqlAttempts;
+        String rejectionReason;
+        String sqlDraft;
+        ValidatedSql validatedSql;
+        /** Named-parameter values bound identically into the cost check and execution. */
+        Map<String, Object> parameters = Map.of();
+        TabularResult result;
+        ChartSpec chart;
+        String summary = "";
+        volatile String status = "RUNNING";
+        String failureStage;
+        final List<String> clarificationQuestions = new ArrayList<>();
+        final List<List<String>> clarificationOptions = new ArrayList<>();
+    }
+
+    public OperationsAnalysisGraph(MetricCatalog catalog,
+                                   AnalyticsModelClient modelClient,
+                                   CostGate costGate,
+                                   ExecutionGate executionGate,
+                                   ExecutionEventPublisher publisher,
+                                   AnalysisSummaryValidator summaryValidator,
+                                   Clock clock) {
+        this(catalog, modelClient, costGate, executionGate, publisher, summaryValidator, clock,
+                Duration.ofSeconds(60));
+    }
+
+    public OperationsAnalysisGraph(MetricCatalog catalog,
+                                   AnalyticsModelClient modelClient,
+                                   CostGate costGate,
+                                   ExecutionGate executionGate,
+                                   ExecutionEventPublisher publisher,
+                                   AnalysisSummaryValidator summaryValidator,
+                                   Clock clock,
+                                   Duration executionTimeout) {
+        this.catalog = catalog;
+        this.modelClient = modelClient;
+        this.costGate = costGate;
+        this.executionGate = executionGate;
+        this.publisher = publisher == null ? new InMemoryExecutionEventPublisher() : publisher;
+        this.summaryValidator = summaryValidator;
+        this.clock = clock;
+        if (executionTimeout == null || executionTimeout.isZero() || executionTimeout.isNegative()) {
+            throw new IllegalArgumentException("executionTimeout must be positive");
+        }
+        this.executionTimeout = executionTimeout;
+        try {
+            this.compiled = build();
+        } catch (Exception exception) {
+            throw new IllegalStateException("unable to compile operations analysis graph", exception);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private CompiledGraph build() throws Exception {
+        StateGraph graph = new StateGraph(() -> {
+            Map<String, com.alibaba.cloud.ai.graph.KeyStrategy> strategies = new HashMap<>();
+            for (String key : List.of(STATE_QUESTION, STATE_RUN_ID)) {
+                strategies.put(key, new ReplaceStrategy());
+            }
+            return strategies;
+        });
+
+        graph.addNode("understandQuestion", AsyncNodeAction.node_async(this::understandQuestion));
+        graph.addNode("resolveMetricAndDimensions", AsyncNodeAction.node_async(this::resolveMetricAndDimensions));
+        graph.addNode("recallAllowedSchema", AsyncNodeAction.node_async(this::recallAllowedSchema));
+        graph.addNode("buildQueryPlan", AsyncNodeAction.node_async(this::buildQueryPlan));
+        graph.addNode("generateSql", AsyncNodeAction.node_async(this::generateSql));
+        graph.addNode("validateSqlAst", AsyncNodeAction.node_async(this::validateSqlAst));
+        graph.addNode("explainAndCheckCost", AsyncNodeAction.node_async(this::explainAndCheckCost));
+        graph.addNode("executeReadOnlyQuery", AsyncNodeAction.node_async(this::executeReadOnlyQueryNode));
+        graph.addNode("buildChartSpec", AsyncNodeAction.node_async(this::buildChartSpecNode));
+        graph.addNode("summarizeFromResult", AsyncNodeAction.node_async(this::summarizeFromResult));
+
+        graph.addEdge(StateGraph.START, "understandQuestion");
+        graph.addConditionalEdges("understandQuestion", AsyncEdgeAction.edge_async(state ->
+                        needsClarification(state) ? "END" : "resolveMetricAndDimensions"),
+                Map.of("END", StateGraph.END, "resolveMetricAndDimensions", "resolveMetricAndDimensions"));
+        graph.addConditionalEdges("resolveMetricAndDimensions", AsyncEdgeAction.edge_async(state ->
+                        needsClarification(state) ? "END" : "recallAllowedSchema"),
+                Map.of("END", StateGraph.END, "recallAllowedSchema", "recallAllowedSchema"));
+        graph.addEdge("recallAllowedSchema", "buildQueryPlan");
+        graph.addEdge("buildQueryPlan", "generateSql");
+        graph.addEdge("generateSql", "validateSqlAst");
+        graph.addConditionalEdges("validateSqlAst", AsyncEdgeAction.edge_async(this::routeAfterSqlCheck), Map.of(
+                "explainAndCheckCost", "explainAndCheckCost",
+                "generateSql", "generateSql",
+                "END", StateGraph.END));
+        graph.addConditionalEdges("explainAndCheckCost", AsyncEdgeAction.edge_async(this::routeAfterSqlCheck), Map.of(
+                "executeReadOnlyQuery", "executeReadOnlyQuery",
+                "generateSql", "generateSql",
+                "END", StateGraph.END));
+        // A failed query execution is terminal: never feed a null result into
+        // the chart node (which would raise a second, generic failure).
+        graph.addConditionalEdges("executeReadOnlyQuery", AsyncEdgeAction.edge_async(this::routeAfterQueryExecution),
+                Map.of("buildChartSpec", "buildChartSpec", "END", StateGraph.END));
+        graph.addEdge("buildChartSpec", "summarizeFromResult");
+        graph.addEdge("summarizeFromResult", StateGraph.END);
+        return graph.compile();
+    }
+
+    /**
+     * Shared routing for both SQL check nodes; the context status carries which
+     * check passed: OK → cost check next, OK_COST → execution next.
+     */
+    private String routeAfterSqlCheck(OverAllState state) {
+        RunContext ctx = contexts.get(runId(state));
+        if (ctx == null) {
+            return "END";
+        }
+        return switch (ctx.status) {
+            case "OK" -> "explainAndCheckCost";
+            case "OK_COST" -> "executeReadOnlyQuery";
+            case "RETRY_SQL" -> "generateSql";
+            default -> "END";
+        };
+    }
+
+    /** Routing after the read-only execution: failures end the run immediately. */
+    private String routeAfterQueryExecution(OverAllState state) {
+        RunContext ctx = contexts.get(runId(state));
+        if (ctx == null || "FAILED".equals(ctx.status)) {
+            return "END";
+        }
+        return "buildChartSpec";
+    }
+
+    /** Runs the full workflow for one question; blocks until the terminal event. */
+    public AnalysisRunResult run(UUID runId, String question) {
+        return run(runId, question, null);
+    }
+
+    /** Runs the workflow with a pinned understanding (operator's structured clarification). */
+    public AnalysisRunResult run(UUID runId, String question,
+                                 AnalyticsModelClient.QuestionUnderstanding pinnedUnderstanding) {
+        RunContext ctx = new RunContext();
+        ctx.pinnedUnderstanding = pinnedUnderstanding;
+        contexts.put(runId, ctx);
+        // Lifecycle registration (RUN_STARTED/RESUMED) and every terminal event
+        // are owned by OperationsAnalysisService: registration happens before
+        // the queued task exposes the run ID, and terminal publication happens
+        // only after the outcome wins the lifecycle transition — so a racing
+        // timeout can never pair a completed trace with a failed status.
+        try {
+            Flux.from(compiled.stream(Map.of(
+                            STATE_QUESTION, question,
+                            STATE_RUN_ID, runId.toString())))
+                    .blockLast(executionTimeout);
+        } catch (RuntimeException exception) {
+            ctx.status = "FAILED";
+            ctx.failureStage = "ANALYSIS_ABORTED";
+            return AnalysisRunResult.failed(runId, ctx.failureStage);
+        } finally {
+            // Unconditional removal: even a raced terminal publish must never
+            // leak the run context (which can retain result rows).
+            contexts.remove(runId);
+        }
+        return buildOutcome(runId, ctx);
+    }
+
+    /** Test visibility: proves no run context leaks after terminal paths. */
+    int trackedContextCount() {
+        return contexts.size();
+    }
+
+    private AnalysisRunResult buildOutcome(UUID runId, RunContext ctx) {
+        switch (ctx.status) {
+            case "NEEDS_CLARIFICATION" -> {
+                // A clarification pause is not terminal: the run resumes on the
+                // same ID, so the trace must stay open (a terminal event would
+                // close the publisher and break every later resumption).
+                publish(ctx, runId, ExecutionStage.UNDERSTANDING, ExecutionEventType.PAUSED,
+                        ExecutionStatus.NEEDS_CLARIFICATION, "需要澄清后再继续", null);
+                return AnalysisRunResult.needsClarification(runId, ctx.clarificationQuestions,
+                        List.copyOf(ctx.clarificationOptions), ctx.understanding);
+            }
+            case "FAILED" -> {
+                // Terminal publication is owned by the service after the
+                // outcome wins the lifecycle transition; the graph only records state.
+                return AnalysisRunResult.failed(runId, ctx.failureStage);
+            }
+            default -> {
+                return new AnalysisRunResult(runId, RunOutcome.COMPLETED, List.of(), List.of(),
+                        ctx.chart, ctx.result, ctx.summary, null);
+            }
+        }
+    }
+
+    // ---- nodes -------------------------------------------------------------
+
+    Map<String, Object> understandQuestion(OverAllState state) {
+        UUID runId = runId(state);
+        RunContext ctx = contexts.get(runId);
+        nodeStarted(ctx, runId, ExecutionStage.UNDERSTANDING, "理解问题");
+        String question = text(state, STATE_QUESTION);
+        // Clarified runs carry the operator's structured selection as the understanding;
+        // the model is not consulted again for metric resolution.
+        ctx.understanding = ctx.pinnedUnderstanding != null
+                ? ctx.pinnedUnderstanding
+                : modelClient.understandQuestion(question);
+        if (ctx.understanding.needsClarification()) {
+            ctx.clarificationQuestions.addAll(ctx.understanding.clarificationQuestions());
+            // No structured candidates from the model: the operator picks from
+            // the full catalog for each pending question.
+            List<String> allNames = catalog.all().stream().map(m -> m.name()).toList();
+            for (int i = 0; i < ctx.understanding.clarificationQuestions().size(); i++) {
+                ctx.clarificationOptions.add(allNames);
+            }
+            ctx.status = "NEEDS_CLARIFICATION";
+        }
+        nodeCompleted(ctx, runId, ExecutionStage.UNDERSTANDING, "问题理解完成",
+                DisplayPayload.text(ctx.understanding.normalizedQuestion(), false));
+        return Map.of();
+    }
+
+    Map<String, Object> resolveMetricAndDimensions(OverAllState state) {
+        UUID runId = runId(state);
+        RunContext ctx = contexts.get(runId);
+        String question = text(state, STATE_QUESTION);
+        nodeStarted(ctx, runId, ExecutionStage.PLANNING, "解析指标与维度");
+        List<com.example.smartpark.analytics.catalog.MetricDefinition> selected = new ArrayList<>();
+        for (String term : ctx.understanding.metricTerms()) {
+            MetricResolution resolution = catalog.resolve(term);
+            if (resolution instanceof MetricResolution.Resolved resolved) {
+                if (metricMentionedInQuestion(resolved.metric(), question)) {
+                    selected.add(resolved.metric());
+                } else {
+                    ctx.clarificationOptions.add(catalog.all().stream().map(m -> m.name()).toList());
+                    ctx.clarificationQuestions.add("模型选择的指标 “" + resolved.metric().name()
+                            + "” 未出现在原始问题术语中，请确认指标口径");
+                }
+            } else if (resolution instanceof MetricResolution.Ambiguous ambiguous) {
+                ctx.clarificationOptions.add(ambiguous.candidates().stream().map(m -> m.name()).toList());
+                ctx.clarificationQuestions.add("“" + term + "”可以指: "
+                        + ambiguous.candidates().stream()
+                                .map(m -> m.displayName() + "(" + m.name() + ")")
+                                .reduce((a, b) -> a + " / " + b).orElse("") + "，请明确指标口径");
+            } else {
+                // Unknown term: the operator may choose any catalog metric.
+                ctx.clarificationOptions.add(catalog.all().stream().map(m -> m.name()).toList());
+                ctx.clarificationQuestions.add("无法识别指标 “" + term + "”，请从指标目录中选择");
+            }
+        }
+        if (!ctx.clarificationQuestions.isEmpty()) {
+            ctx.status = "NEEDS_CLARIFICATION";
+            nodeCompleted(ctx, runId, ExecutionStage.PLANNING, "需要澄清指标口径",
+                    DisplayPayload.text(String.join("; ", ctx.clarificationQuestions), false));
+            return Map.of();
+        }
+        ctx.metrics = List.copyOf(selected);
+        nodeCompleted(ctx, runId, ExecutionStage.PLANNING, "指标解析完成: "
+                + selected.stream().map(m -> m.name()).reduce((a, b) -> a + ", " + b).orElse(""), null);
+        return Map.of();
+    }
+
+    private static boolean metricMentionedInQuestion(
+            com.example.smartpark.analytics.catalog.MetricDefinition metric, String question) {
+        String normalizedQuestion = question == null ? "" : question.toLowerCase(java.util.Locale.ROOT);
+        return java.util.stream.Stream.concat(
+                        java.util.stream.Stream.of(metric.name(), metric.displayName()), metric.aliases().stream())
+                .filter(term -> term != null && !term.isBlank())
+                .map(term -> term.toLowerCase(java.util.Locale.ROOT))
+                .anyMatch(normalizedQuestion::contains);
+    }
+
+    Map<String, Object> recallAllowedSchema(OverAllState state) {
+        UUID runId = runId(state);
+        RunContext ctx = contexts.get(runId);
+        nodeStarted(ctx, runId, ExecutionStage.PLANNING, "召回白名单 Schema");
+        LinkedHashSet<String> views = new LinkedHashSet<>();
+        StringBuilder description = new StringBuilder();
+        for (var metric : ctx.metrics) {
+            if (views.add(metric.sourceView())) {
+                description.append(metric.sourceView())
+                        .append(" 维度: ").append(String.join(", ", metric.allowedDimensions()));
+                if (metric.condition() != null) {
+                    description.append(" 固定条件: ").append(metric.condition());
+                }
+                description.append('\n');
+            }
+        }
+        ctx.schemaDescription = description.toString();
+        nodeCompleted(ctx, runId, ExecutionStage.PLANNING, "Schema 召回完成", null);
+        return Map.of();
+    }
+
+    Map<String, Object> buildQueryPlan(OverAllState state) {
+        UUID runId = runId(state);
+        RunContext ctx = contexts.get(runId);
+        nodeStarted(ctx, runId, ExecutionStage.PLANNING, "构建查询计划");
+        Instant now = Instant.now(clock);
+        int lookbackDays = ctx.metrics.stream().mapToInt(m -> m.defaultLookbackDays()).max().orElse(7);
+        AnalyticsModelClient.RequestedTimeRange requested = ctx.understanding.requestedTimeRange();
+        String originalQuestion = text(state, STATE_QUESTION).strip();
+        validateRequestedTimeRange(originalQuestion, requested, now);
+        // Relative time is a server-owned contract. The model prompt and this
+        // node run at different instants, so never copy its rolling endpoints
+        // into SQL; derive them once from the same reference instant here.
+        QueryPlan.TimeRange recognizedTime = expectedTimeRange(originalQuestion.toLowerCase(java.util.Locale.ROOT), now);
+        QueryPlan.TimeRange timeRange = recognizedTime != null
+                ? recognizedTime
+                : requested == null
+                ? new QueryPlan.TimeRange(now.minus(Duration.ofDays(lookbackDays)), now)
+                : new QueryPlan.TimeRange(requested.fromInclusive(), requested.toExclusive());
+        ctx.plan = new QueryPlan(
+                originalQuestion,
+                ctx.metrics,
+                validatedRequestedDimensions(ctx, originalQuestion),
+                ctx.understanding.requestedFilters(),
+                timeRange,
+                200);
+        // One shared binding set travels through both gates and execution.
+        // Entity values are never copied into SQL literals.
+        java.util.LinkedHashMap<String, Object> parameters = new java.util.LinkedHashMap<>();
+        parameters.put("fromTs", java.sql.Timestamp.from(ctx.plan.timeRange().from()));
+        parameters.put("toTs", java.sql.Timestamp.from(ctx.plan.timeRange().to()));
+        ctx.plan.filters().forEach((dimension, value) ->
+                parameters.put(QueryPlan.filterParameterName(dimension), value));
+        ctx.parameters = java.util.Collections.unmodifiableMap(parameters);
+        nodeCompleted(ctx, runId, ExecutionStage.PLANNING, "查询计划就绪", null);
+        return Map.of();
+    }
+
+    private static List<String> validatedRequestedDimensions(RunContext ctx, String originalQuestion) {
+        LinkedHashSet<String> requested = new LinkedHashSet<>();
+        for (String dimension : ctx.understanding.requestedDimensions()) {
+            if (dimension == null || dimension.isBlank()) {
+                throw new IllegalArgumentException("请求维度不能为空");
+            }
+            String normalized = dimension.strip().toLowerCase(java.util.Locale.ROOT);
+            boolean allowedByEveryMetric = ctx.metrics.stream()
+                    .allMatch(metric -> metric.allowedDimensions().stream()
+                            .anyMatch(allowed -> allowed.equalsIgnoreCase(normalized)));
+            if (!allowedByEveryMetric) {
+                throw new IllegalArgumentException("请求维度未获所有指标目录批准: " + dimension);
+            }
+            if (!dimensionMentionedInQuestion(normalized, originalQuestion)) {
+                throw new IllegalArgumentException("请求维度未出现在原始问题意图中: " + dimension);
+            }
+            requested.add(normalized);
+        }
+        // A missing model dimension must not silently change an explicit
+        // aggregation into a total. Infer only unambiguous aggregation
+        // phrases ("按楼宇", "各楼宇", ...); entity mentions such as "B1楼宇"
+        // remain filters, not grouping dimensions.
+        for (String dimension : inferredAggregationDimensions(ctx, originalQuestion)) {
+            requested.add(dimension);
+        }
+        return List.copyOf(requested);
+    }
+
+    private static List<String> inferredAggregationDimensions(RunContext ctx, String question) {
+        List<String> dimensions = List.of(
+                "building_id", "meter_id", "hour_ts", "occurred_at", "snapshot_at",
+                "stat_date", "risk_level", "category", "status", "device_type", "parking_zone");
+        List<String> inferred = new ArrayList<>();
+        for (String dimension : dimensions) {
+            if (!aggregationDimensionMentionedInQuestion(dimension, question)) continue;
+            boolean allowedByEveryMetric = ctx.metrics.stream()
+                    .allMatch(metric -> metric.allowedDimensions().stream()
+                            .anyMatch(allowed -> allowed.equalsIgnoreCase(dimension)));
+            if (!allowedByEveryMetric) {
+                throw new IllegalArgumentException("原始问题要求的聚合维度未获所有指标目录批准: " + dimension);
+            }
+            inferred.add(dimension);
+        }
+        return List.copyOf(inferred);
+    }
+
+    private static boolean aggregationDimensionMentionedInQuestion(String dimension, String question) {
+        String normalized = question == null ? "" : question.toLowerCase(java.util.Locale.ROOT);
+        return switch (dimension) {
+            case "building_id" -> containsAny(normalized,
+                    "按楼宇", "各楼宇", "每个楼宇", "分楼宇", "楼宇对比", "按楼栋", "各楼栋", "每栋", "各栋");
+            case "meter_id" -> containsAny(normalized,
+                    "按表计", "各表计", "每个表计", "分表计", "按电表", "各电表");
+            case "hour_ts" -> containsAny(normalized,
+                    "按小时", "逐时", "每小时", "逐小时", "小时趋势");
+            case "occurred_at", "stat_date", "snapshot_at" -> containsAny(normalized,
+                    "按日", "每天", "每日", "按日期", "按时间");
+            case "risk_level" -> containsAny(normalized, "按风险", "各风险", "按风险等级");
+            case "category" -> containsAny(normalized, "按类别", "各类别", "按分类", "各分类", "按类型", "各类型");
+            case "status" -> containsAny(normalized, "按状态", "各状态");
+            case "device_type" -> containsAny(normalized, "按设备类型", "各设备类型");
+            case "parking_zone" -> containsAny(normalized, "按区域", "各区域", "按车区", "各车区");
+            default -> false;
+        };
+    }
+
+    private static boolean dimensionMentionedInQuestion(String dimension, String question) {
+        String normalized = question == null ? "" : question.toLowerCase(java.util.Locale.ROOT);
+        return switch (dimension) {
+            case "building_id" -> containsAny(normalized, "building", "楼宇", "楼栋", "建筑", "栋", "各楼");
+            case "meter_id" -> containsAny(normalized, "meter", "表计", "电表", "表号");
+            case "hour_ts" -> containsAny(normalized, "hour", "小时", "逐时", "按小时", "每小时");
+            case "occurred_at" -> containsAny(normalized, "occurred", "发生时间", "时间", "按日", "日期");
+            case "snapshot_at" -> containsAny(normalized, "snapshot", "快照", "时间");
+            case "stat_date" -> containsAny(normalized, "stat", "日期", "按日", "每天", "每日");
+            case "risk_level" -> containsAny(normalized, "risk", "风险", "风险等级");
+            case "category" -> containsAny(normalized, "category", "类别", "分类", "类型");
+            case "status" -> containsAny(normalized, "status", "状态");
+            case "device_type" -> containsAny(normalized, "device", "设备", "设备类型");
+            case "parking_zone" -> containsAny(normalized, "parking", "停车", "车区", "区域");
+            default -> normalized.contains(dimension.toLowerCase(java.util.Locale.ROOT));
+        };
+    }
+
+    private static boolean containsAny(String text, String... terms) {
+        for (String term : terms) if (text.contains(term.toLowerCase(java.util.Locale.ROOT))) return true;
+        return false;
+    }
+
+    private static void validateRequestedTimeRange(String question,
+                                                    AnalyticsModelClient.RequestedTimeRange requested,
+                                                    Instant now) {
+        if (requested == null) return;
+        String normalized = question.toLowerCase(java.util.Locale.ROOT);
+        QueryPlan.TimeRange expected = expectedTimeRange(normalized, now);
+        if (expected == null || !temporallyConsistent(expected, requested, normalized)) {
+            throw new IllegalArgumentException("模型时间范围未被原始问题支持");
+        }
+    }
+
+    private static boolean temporallyConsistent(QueryPlan.TimeRange expected,
+                                                AnalyticsModelClient.RequestedTimeRange requested,
+                                                String question) {
+        long endSkew = Math.abs(Duration.between(requested.toExclusive(), expected.to()).toSeconds());
+        if (endSkew > MODEL_TIME_SKEW_TOLERANCE_SECONDS) return false;
+        if (question.contains("今天") || question.contains("今日")) {
+            return requested.fromInclusive().equals(expected.from());
+        }
+        Duration expectedWidth = Duration.between(expected.from(), expected.to());
+        Duration requestedWidth = Duration.between(requested.fromInclusive(), requested.toExclusive());
+        return expectedWidth.equals(requestedWidth);
+    }
+
+    private static QueryPlan.TimeRange expectedTimeRange(String question, Instant now) {
+        java.util.regex.Matcher days = java.util.regex.Pattern.compile("(?:过去|最近|近)(\\d+)(?:天|日)")
+                .matcher(question);
+        if (days.find()) {
+            long count = Long.parseLong(days.group(1));
+            return new QueryPlan.TimeRange(now.minus(Duration.ofDays(count)), now);
+        }
+        if (question.contains("昨天") || question.contains("昨日")) {
+            java.time.Instant today = now.atZone(PARK_ZONE).toLocalDate()
+                    .atStartOfDay(PARK_ZONE).toInstant();
+            return new QueryPlan.TimeRange(today.minus(Duration.ofDays(1)), today);
+        }
+        if (question.contains("今天") || question.contains("今日")) {
+            java.time.Instant today = now.atZone(PARK_ZONE).toLocalDate()
+                    .atStartOfDay(PARK_ZONE).toInstant();
+            return new QueryPlan.TimeRange(today, now);
+        }
+        if (question.contains("上周") || question.contains("过去一周") || question.contains("最近一周")) {
+            return new QueryPlan.TimeRange(now.minus(Duration.ofDays(7)), now);
+        }
+        return null;
+    }
+
+    Map<String, Object> generateSql(OverAllState state) {
+        UUID runId = runId(state);
+        RunContext ctx = contexts.get(runId);
+        nodeStarted(ctx, runId, ExecutionStage.ANALYSIS, "生成 SQL");
+        ctx.sqlDraft = modelClient.generateSql(new AnalyticsModelClient.SqlGenerationRequest(
+                ctx.plan, ctx.schemaDescription, ctx.rejectionReason));
+        ctx.rejectionReason = null;
+        nodeCompleted(ctx, runId, ExecutionStage.ANALYSIS, "SQL 草案生成", null);
+        // A model draft is untrusted until both AST and plan validation pass.
+        // Publish only a lifecycle marker here; SQL text first enters the event
+        // stream in SQL_VALIDATED below.
+        publish(ctx, runId, ExecutionStage.ANALYSIS, ExecutionEventType.SQL_GENERATED,
+                ExecutionStatus.RUNNING, "SQL 草案已生成",
+                DisplayPayload.text("SQL 草案已生成，等待安全校验", false));
+        return Map.of();
+    }
+
+    Map<String, Object> validateSqlAst(OverAllState state) {
+        UUID runId = runId(state);
+        RunContext ctx = contexts.get(runId);
+        nodeStarted(ctx, runId, ExecutionStage.SQL_VALIDATION, "AST 安全校验");
+        try {
+            ctx.validatedSql = SqlAstGuardAccess.validate(ctx.sqlDraft);
+            com.example.smartpark.analytics.sql.SqlPlanGuard.validate(ctx.validatedSql, ctx.plan);
+            for (String name : ctx.validatedSql.namedParameters()) {
+                if (!ctx.parameters.containsKey(name)) {
+                    throw new UnsafeSqlException("SQL_POLICY_REJECTED",
+                            "使用了查询计划未提供的绑定参数");
+                }
+            }
+            ctx.status = "OK";
+            nodeCompleted(ctx, runId, ExecutionStage.SQL_VALIDATION, "SQL 通过 AST 校验",
+                    new DisplayPayload.SqlPayload(ctx.validatedSql.sql(),
+                            ctx.validatedSql.namedParameters(), "PASSED"));
+            publish(ctx, runId, ExecutionStage.SQL_VALIDATION, ExecutionEventType.SQL_VALIDATED,
+                    ExecutionStatus.RUNNING, "SQL 校验通过",
+                    new DisplayPayload.SqlPayload(ctx.validatedSql.sql(),
+                            ctx.validatedSql.namedParameters(), "PASSED"));
+        } catch (UnsafeSqlException rejection) {
+            handleSqlRejection(ctx, runId, "validateSqlAst", rejection.getMessage());
+        }
+        return Map.of();
+    }
+
+    Map<String, Object> explainAndCheckCost(OverAllState state) {
+        UUID runId = runId(state);
+        RunContext ctx = contexts.get(runId);
+        nodeStarted(ctx, runId, ExecutionStage.SQL_VALIDATION, "EXPLAIN 成本检查");
+        try {
+            costGate.check(ctx.validatedSql, ctx.parameters);
+            ctx.status = "OK_COST";
+            nodeCompleted(ctx, runId, ExecutionStage.SQL_VALIDATION, "成本检查通过", null);
+        } catch (UnsafeSqlException rejection) {
+            handleSqlRejection(ctx, runId, "explainAndCheckCost", rejection.getMessage());
+        }
+        return Map.of();
+    }
+
+    private void handleSqlRejection(RunContext ctx, UUID runId, String stage, String safeMessage) {
+        // Rejections surface on the dedicated declared event type before the
+        // retry (or terminal failure) proceeds.
+        publish(ctx, runId, ExecutionStage.SQL_VALIDATION, ExecutionEventType.SQL_REJECTED,
+                ExecutionStatus.RUNNING, "SQL 被拒绝: " + safeMessage,
+                DisplayPayload.error(ExecutionStage.SQL_VALIDATION, "SQL_POLICY_REJECTED", false,
+                        safeMessage == null ? "" : safeMessage));
+        if (ctx.sqlAttempts >= MAX_SQL_ATTEMPTS - 1) {
+            ctx.status = "FAILED";
+            ctx.failureStage = stage;
+            // Terminal publication is owned by the service after persistence.
+        } else {
+            ctx.sqlAttempts++;
+            ctx.rejectionReason = safeMessage;
+            ctx.status = "RETRY_SQL";
+            nodeCompleted(ctx, runId, ExecutionStage.SQL_VALIDATION,
+                    "SQL 被拒绝，允许一次修复: " + safeMessage, null);
+        }
+    }
+
+    Map<String, Object> executeReadOnlyQueryNode(OverAllState state) {
+        UUID runId = runId(state);
+        RunContext ctx = contexts.get(runId);
+        nodeStarted(ctx, runId, ExecutionStage.QUERY_EXECUTION, "只读执行查询");
+        try {
+            ctx.result = executionGate.execute(ctx.validatedSql, ctx.parameters);
+            ctx.status = "OK_RESULT";
+            nodeCompleted(ctx, runId, ExecutionStage.QUERY_EXECUTION,
+                    "查询完成: " + ctx.result.rowCount() + " 行" + (ctx.result.truncated() ? "（已截断）" : ""),
+                    DisplayPayload.text("返回 " + ctx.result.rowCount() + " 行数据", false));
+            publish(ctx, runId, ExecutionStage.QUERY_EXECUTION, ExecutionEventType.QUERY_EXECUTED,
+                    ExecutionStatus.RUNNING,
+                    "查询执行完成: " + ctx.result.rowCount() + " 行",
+                    DisplayPayload.text("返回 " + ctx.result.rowCount() + " 行数据"
+                            + (ctx.result.truncated() ? "（已按上限截断）" : ""), false));
+        } catch (UnsafeSqlException failure) {
+            ctx.status = "FAILED";
+            ctx.failureStage = "executeReadOnlyQuery";
+            // Terminal publication is owned by the service after persistence.
+        }
+        return Map.of();
+    }
+
+    Map<String, Object> buildChartSpecNode(OverAllState state) {
+        UUID runId = runId(state);
+        RunContext ctx = contexts.get(runId);
+        nodeStarted(ctx, runId, ExecutionStage.RENDERING, "生成图表规格");
+        ChartSpec.Proposal proposal = null;
+        try {
+            proposal = modelClient.proposeChart(new AnalyticsModelClient.ChartContext(
+                    strip(text(state, STATE_QUESTION)), ctx.plan, ctx.result));
+        } catch (RuntimeException modelFailure) {
+            // degrade below
+        }
+        ctx.chart = ChartSpec.fromProposal(proposal, ctx.result, unitByColumn(ctx.plan));
+        // The chart payload travels on the dedicated CHART_SPECIFIED event type
+        // defined by the public execution contract; the frontend captures it there.
+        publish(ctx, runId, ExecutionStage.RENDERING, ExecutionEventType.CHART_SPECIFIED,
+                ExecutionStatus.RUNNING, "图表规格: " + ctx.chart.type(),
+                new DisplayPayload.ChartPayload(ctx.chart.type().name(), ctx.chart.title(), ctx.chart.xField(),
+                        ctx.chart.yFields(), ctx.chart.seriesField(), ctx.chart.unit()));
+        return Map.of();
+    }
+
+    Map<String, Object> summarizeFromResult(OverAllState state) {
+        UUID runId = runId(state);
+        RunContext ctx = contexts.get(runId);
+        nodeStarted(ctx, runId, ExecutionStage.RESPONSE_DELIVERY, "基于结果总结");
+        try {
+            String conclusion = modelClient.summarize(new AnalyticsModelClient.SummaryContext(
+                    strip(text(state, STATE_QUESTION)), ctx.plan, ctx.result, ctx.chart));
+            ctx.summary = summaryValidator.validate(conclusion, ctx.plan, ctx.result);
+            nodeCompleted(ctx, runId, ExecutionStage.RESPONSE_DELIVERY, "结论生成完成",
+                    DisplayPayload.text(ctx.summary, false));
+        } catch (RuntimeException summaryFailure) {
+            // Conclusion failures keep SQL + result table alive without a summary.
+            nodeCompleted(ctx, runId, ExecutionStage.RESPONSE_DELIVERY, "结论生成失败，保留 SQL 与结果表", null);
+        }
+        ctx.status = "COMPLETED";
+        return Map.of();
+    }
+
+    // ---- helpers -----------------------------------------------------------
+
+    /**
+     * Column→catalog-unit map derived from the executed plan. Chart unit
+     * labels must come from these metric definitions, never from the model's
+     * proposal — one wrong label would misread kWh as a percentage.
+     */
+    private static Map<String, String> unitByColumn(QueryPlan plan) {
+        Map<String, String> unitByColumn = new java.util.LinkedHashMap<>();
+        for (var metric : plan.metrics()) {
+            unitByColumn.putIfAbsent(metric.name().toLowerCase(java.util.Locale.ROOT), metric.unit());
+        }
+        return unitByColumn;
+    }
+
+    private boolean needsClarification(OverAllState state) {
+        UUID runId = runId(state);
+        RunContext ctx = contexts.get(runId);
+        return ctx != null && "NEEDS_CLARIFICATION".equals(ctx.status);
+    }
+
+    private UUID runId(OverAllState state) {
+        return UUID.fromString(state.value(STATE_RUN_ID, String.class).orElseThrow());
+    }
+
+    private static String text(OverAllState state, String key) {
+        return state.value(key, String.class).orElse("");
+    }
+
+    private void nodeStarted(RunContext ctx, UUID runId, ExecutionStage stage, String summary) {
+        publish(ctx, runId, stage, ExecutionEventType.NODE_STARTED, ExecutionStatus.RUNNING, summary, null);
+    }
+
+    private void nodeCompleted(RunContext ctx, UUID runId, ExecutionStage stage, String summary, DisplayPayload payload) {
+        publish(ctx, runId, stage, ExecutionEventType.NODE_COMPLETED, ExecutionStatus.RUNNING, summary, payload);
+    }
+
+    private void publish(RunContext ignoredCtx, UUID runId, ExecutionStage stage, ExecutionEventType type,
+                         ExecutionStatus status, String summary, DisplayPayload payload) {
+        publisher.publish(new ExecutionEvent(UUID.randomUUID(), runId, 0, Instant.now(clock),
+                ExecutionScenario.OPERATIONS_ANALYSIS, "analytics", stage, type, status,
+                summary == null ? "" : summary, payload));
+    }
+
+    private static String strip(String value) {
+        return value == null ? "" : value.strip();
+    }
+
+    /**
+     * Indirection over the static guard keeping JSqlParser details out of the graph.
+     */
+    private static final class SqlAstGuardAccess {
+        static ValidatedSql validate(String sql) throws UnsafeSqlException {
+            return com.example.smartpark.analytics.sql.SqlAstGuard.validate(sql);
+        }
+    }
+}
