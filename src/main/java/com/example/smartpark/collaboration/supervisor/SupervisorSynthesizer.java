@@ -1,5 +1,6 @@
 package com.example.smartpark.collaboration.supervisor;
 
+import com.example.smartpark.collaboration.model.ExpertDomain;
 import com.example.smartpark.collaboration.model.ExpertFinding;
 import com.example.smartpark.collaboration.model.FindingStatus;
 import com.example.smartpark.collaboration.model.SupervisorPlan;
@@ -8,8 +9,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /** Supervisor synthesis is deliberately tool-free and can only consume validated findings. */
 public final class SupervisorSynthesizer {
@@ -31,11 +36,16 @@ public final class SupervisorSynthesizer {
         try {
             JsonNode root = JSON.readTree(modelJson);
             if (root == null || !root.isObject()) throw new IllegalArgumentException("synthesis must be a JSON object");
+            FindingStatus status = FindingStatus.valueOf(required(root, "status").toUpperCase());
+            Set<ExpertDomain> selectedDomains = domains(root.get("selectedDomains"));
+            if (!plan.selectedDomains().containsAll(selectedDomains)) {
+                throw new IllegalArgumentException("synthesis selected a domain outside the supervisor plan");
+            }
+            String conclusion = deterministicConclusion(status, selectedDomains, safeFindings);
             Synthesis synthesis = new Synthesis(
-                    FindingStatus.valueOf(required(root, "status").toUpperCase()),
-                    required(root, "conclusion"), strings(root.get("evidenceRefs")),
+                    status, conclusion, strings(root.get("evidenceRefs")),
                     root.path("confidence").asDouble(Double.NaN), strings(root.get("uncertainties")));
-            return validator.validate(synthesis, safeFindings);
+            return validator.validate(synthesis, safeFindings, selectedDomains);
         } catch (RuntimeException ex) {
             throw ex;
         } catch (Exception ex) {
@@ -57,5 +67,37 @@ public final class SupervisorSynthesizer {
             values.add(item.asText().trim());
         }
         return List.copyOf(values);
+    }
+
+    private static Set<ExpertDomain> domains(JsonNode node) {
+        if (node == null || !node.isArray()) {
+            throw new IllegalArgumentException("selectedDomains must be an array");
+        }
+        EnumSet<ExpertDomain> domains = EnumSet.noneOf(ExpertDomain.class);
+        for (JsonNode item : node) {
+            if (!item.isTextual() || item.asText().isBlank()) {
+                throw new IllegalArgumentException("selectedDomains require non-empty strings");
+            }
+            ExpertDomain domain = ExpertDomain.valueOf(item.asText().trim().toUpperCase());
+            if (!domains.add(domain)) {
+                throw new IllegalArgumentException("selectedDomains must not contain duplicates");
+            }
+        }
+        return Set.copyOf(domains);
+    }
+
+    private static String deterministicConclusion(FindingStatus status,
+                                                  Set<ExpertDomain> selectedDomains,
+                                                  List<ExpertFinding> findings) {
+        String conclusion = findings.stream()
+                .filter(finding -> selectedDomains.contains(finding.domain()))
+                .filter(finding -> finding.status() == FindingStatus.SUPPORTED)
+                .sorted(Comparator.comparing(ExpertFinding::domain))
+                .map(ExpertFinding::conclusion)
+                .collect(Collectors.joining("；"));
+        if (!conclusion.isBlank()) {
+            return conclusion;
+        }
+        return status == FindingStatus.FAILED ? "专家协作失败" : "没有可验证的专家结论";
     }
 }

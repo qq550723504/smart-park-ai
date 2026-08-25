@@ -1,56 +1,82 @@
 package com.example.smartpark.collaboration.supervisor;
 
+import com.example.smartpark.collaboration.model.ExpertDomain;
 import com.example.smartpark.collaboration.model.ExpertFinding;
 import com.example.smartpark.collaboration.model.FindingStatus;
 import com.example.smartpark.collaboration.model.Synthesis;
 
-import java.util.HashSet;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
+/** Validates synthesis selection and provenance without interpreting free text. */
 public final class SynthesisValidator {
-    private static final Pattern FACT_TOKEN = Pattern.compile("(?<![A-Za-z0-9])[0-9]+(?:\\.[0-9]+)?(?![A-Za-z0-9])|\\b[A-Z]{2,}[A-Z0-9-]*[0-9][A-Z0-9-]*\\b");
 
-    public Synthesis validate(Synthesis synthesis, List<ExpertFinding> findings) {
-        // Evidence and facts may only come from findings that survived
-        // evidence validation: FAILED / INSUFFICIENT_EVIDENCE branches are
-        // allowed to retain arbitrary references and must not leak into a
-        // supported synthesis.
-        Set<String> allowedRefs = new HashSet<>();
-        Set<String> allowedFacts = new HashSet<>();
-        for (ExpertFinding finding : findings) {
-            if (finding.status() == FindingStatus.SUPPORTED) {
-                allowedRefs.addAll(finding.evidenceRefs());
-                collectFacts(finding.conclusion(), allowedFacts);
+    public Synthesis validate(Synthesis synthesis,
+                              List<ExpertFinding> findings,
+                              Set<ExpertDomain> selectedDomains) {
+        List<ExpertFinding> safeFindings = List.copyOf(findings);
+        Set<ExpertDomain> safeSelection = Set.copyOf(selectedDomains);
+        Map<ExpertDomain, ExpertFinding> byDomain = indexByDomain(safeFindings);
+
+        if (synthesis.status() == FindingStatus.SUPPORTED && safeSelection.isEmpty()) {
+            throw new IllegalArgumentException("supported synthesis requires a selected SUPPORTED finding");
+        }
+        if (synthesis.status() != FindingStatus.SUPPORTED && !safeSelection.isEmpty()) {
+            throw new IllegalArgumentException("non-supported synthesis cannot select findings");
+        }
+        for (ExpertDomain domain : safeSelection) {
+            ExpertFinding finding = byDomain.get(domain);
+            if (finding == null || finding.status() != FindingStatus.SUPPORTED) {
+                throw new IllegalArgumentException("selected domain must have a SUPPORTED finding: " + domain);
             }
         }
+
+        Set<String> allowedRefs = safeSelection.stream()
+                .map(byDomain::get)
+                .flatMap(finding -> finding.evidenceRefs().stream())
+                .collect(Collectors.toSet());
         if (!allowedRefs.containsAll(synthesis.evidenceRefs())) {
-            throw new IllegalArgumentException("synthesis contains evidence not present in validated findings");
-        }
-        Set<String> synthesisFacts = new HashSet<>();
-        collectFacts(synthesis.conclusion(), synthesisFacts);
-        synthesisFacts.removeAll(allowedFacts);
-        if (!synthesisFacts.isEmpty()) {
-            throw new IllegalArgumentException("synthesis contains unsupported facts: " + synthesisFacts);
-        }
-        boolean hasSupported = findings.stream().anyMatch(f -> f.status() == FindingStatus.SUPPORTED);
-        if (!hasSupported && synthesis.status() == FindingStatus.SUPPORTED) {
-            throw new IllegalArgumentException("synthesis cannot be supported without a supported finding");
+            throw new IllegalArgumentException("synthesis evidence must come from selected findings");
         }
         if (synthesis.status() == FindingStatus.SUPPORTED && synthesis.evidenceRefs().isEmpty()) {
-            throw new IllegalArgumentException("supported synthesis must cite validated evidence references");
+            throw new IllegalArgumentException("supported synthesis must cite selected findings");
         }
-        boolean hasUncertainty = findings.stream().anyMatch(f -> f.status() != FindingStatus.SUPPORTED);
+        if (synthesis.status() != FindingStatus.SUPPORTED && !synthesis.evidenceRefs().isEmpty()) {
+            throw new IllegalArgumentException("non-supported synthesis cannot cite evidence");
+        }
+
+        String expectedConclusion = safeSelection.stream()
+                .map(byDomain::get)
+                .sorted(Comparator.comparing(ExpertFinding::domain))
+                .map(ExpertFinding::conclusion)
+                .collect(Collectors.joining("；"));
+        if (expectedConclusion.isBlank()) {
+            expectedConclusion = synthesis.status() == FindingStatus.FAILED
+                    ? "专家协作失败" : "没有可验证的专家结论";
+        }
+        if (!expectedConclusion.equals(synthesis.conclusion())) {
+            throw new IllegalArgumentException("synthesis conclusion must be derived from selected findings");
+        }
+
+        boolean hasUncertainty = safeFindings.stream()
+                .anyMatch(finding -> finding.status() != FindingStatus.SUPPORTED);
         if (hasUncertainty && synthesis.uncertainties().isEmpty()) {
             throw new IllegalArgumentException("partial failures or insufficient evidence must be disclosed");
         }
         return synthesis;
     }
 
-    private static void collectFacts(String text, Set<String> target) {
-        Matcher matcher = FACT_TOKEN.matcher(text == null ? "" : text);
-        while (matcher.find()) target.add(matcher.group());
+    private static Map<ExpertDomain, ExpertFinding> indexByDomain(List<ExpertFinding> findings) {
+        Map<ExpertDomain, ExpertFinding> byDomain = new HashMap<>();
+        for (ExpertFinding finding : findings) {
+            if (byDomain.put(finding.domain(), finding) != null) {
+                throw new IllegalArgumentException("duplicate finding domain: " + finding.domain());
+            }
+        }
+        return byDomain;
     }
 }

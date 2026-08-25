@@ -135,7 +135,7 @@ class CollaborationRuntimeConfigurationTest {
                 String domain = system.substring(system.indexOf("the ") + 4, system.indexOf(" park expert"));
                 json = "{\"domain\":\"" + domain + "\",\"status\":\"INSUFFICIENT_EVIDENCE\",\"conclusion\":\"insufficient evidence\",\"evidenceRefs\":[],\"confidence\":0,\"nextChecks\":[\"collect evidence\"]}";
             } else {
-                json = "{\"status\":\"INSUFFICIENT_EVIDENCE\",\"conclusion\":\"insufficient evidence\",\"evidenceRefs\":[],\"confidence\":0,\"uncertainties\":[\"more evidence needed\"]}";
+                json = "{\"status\":\"INSUFFICIENT_EVIDENCE\",\"selectedDomains\":[],\"evidenceRefs\":[],\"confidence\":0,\"uncertainties\":[\"more evidence needed\"]}";
             }
             return new ChatResponse(List.of(new Generation(new AssistantMessage(json))));
         }

@@ -96,7 +96,7 @@ public class CollaborationRuntimeConfiguration {
                         "You are the park collaboration supervisor. Return only JSON with normalizedQuestion, selectedDomains, assignments, selectionReason. Select only domains required by the question.", question)),
                 graph,
                 (plan, findings) -> synthesizer.parseAndValidate(modelText(model,
-                        "You are a tool-free supervisor. Return only JSON with status, conclusion, evidenceRefs, confidence, uncertainties. Use only the supplied findings and evidence references.",
+                        "You are a tool-free supervisor. Return only JSON with status, selectedDomains, evidenceRefs, confidence, uncertainties. Select only SUPPORTED findings and copy only their evidence references. Do not write a conclusion; the service derives it verbatim from selected findings.",
                         "plan=" + plan + "\nfindings=" + findings), plan, findings),
                 new CollaborationRunStore(), events, runExecutor, properties.getRunTimeout(), Clock.systemUTC());
     }
