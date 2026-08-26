@@ -52,7 +52,7 @@ class SpringAiAlibaba2CapabilityTest {
     }
 
     @Test
-    void keepsFlywayBoundToTheCanonicalAnalyticsProperty() throws IOException {
+    void enablesFlywayFromTheComposeAnalyticsEnvironment() throws IOException {
         String application = Files.readString(Path.of("src/main/resources/application.yml"));
 
         int flywayStart = application.indexOf("  flyway:");
@@ -60,8 +60,8 @@ class SpringAiAlibaba2CapabilityTest {
         String flyway = application.substring(flywayStart, autoconfigureStart);
 
         assertThat(flyway)
-                .as("Flyway must follow the canonical smartpark.analytics.enabled property")
-                .contains("enabled: ${smartpark.analytics.enabled:false}");
+                .as("Flyway must follow the same explicit analytics environment flag as the Compose profile")
+                .contains("enabled: ${SMARTPARK_ANALYTICS_ENABLED:false}");
     }
 
     @Test
