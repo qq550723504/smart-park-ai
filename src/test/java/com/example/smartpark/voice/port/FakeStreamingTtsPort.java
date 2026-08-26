@@ -18,6 +18,7 @@ public final class FakeStreamingTtsPort implements StreamingTtsPort {
     private final Map<String, Listener> listenersBySession = new ConcurrentHashMap<>();
     private final Map<String, List<String>> textsBySession = new ConcurrentHashMap<>();
     private final AtomicInteger sequenceCounter = new AtomicInteger();
+    private final List<String> interrupted = new CopyOnWriteArrayList<>();
 
     private final Map<String, String> activeTurnBySession = new ConcurrentHashMap<>();
 
@@ -48,6 +49,7 @@ public final class FakeStreamingTtsPort implements StreamingTtsPort {
         if (!turnId.equals(activeTurnBySession.get(sessionId))) {
             return; // unknown or superseded turn: idempotent no-op
         }
+        interrupted.add(turnId);
         withActiveListener(sessionId, l -> l.onInterrupted(sessionId, turnId));
         listenersBySession.remove(sessionId);
         activeTurnBySession.remove(sessionId);
@@ -56,6 +58,10 @@ public final class FakeStreamingTtsPort implements StreamingTtsPort {
     public void emitChunk(String sessionId, String turnId, byte[] audio) {
         withActiveListener(sessionId, l ->
                 l.onAudioChunk(sessionId, turnId, sequenceCounter.incrementAndGet(), audio.clone()));
+    }
+
+    public List<String> cancelledTurns() {
+        return List.copyOf(interrupted);
     }
 
     public List<String> requestedTexts(String sessionId) {

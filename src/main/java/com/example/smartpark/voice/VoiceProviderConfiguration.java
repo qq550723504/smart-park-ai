@@ -1,8 +1,11 @@
 package com.example.smartpark.voice;
 
 import com.alibaba.cloud.ai.dashscope.audio.transcription.DashScopeAudioTranscriptionModel;
+import com.alibaba.cloud.ai.dashscope.audio.tts.DashScopeAudioSpeechModel;
 import com.example.smartpark.voice.adapter.dashscope.DashScopeStreamingAsrAdapter;
+import com.example.smartpark.voice.adapter.dashscope.DashScopeStreamingTtsAdapter;
 import com.example.smartpark.voice.port.StreamingAsrPort;
+import com.example.smartpark.voice.port.StreamingTtsPort;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Condition;
 import org.springframework.context.annotation.ConditionContext;
@@ -23,6 +26,12 @@ public class VoiceProviderConfiguration {
     @Conditional(RealVoiceCredentialCondition.class)
     public StreamingAsrPort dashScopeStreamingAsrPort(DashScopeAudioTranscriptionModel model) {
         return new DashScopeStreamingAsrAdapter(model);
+    }
+
+    @Bean
+    @Conditional(RealVoiceCredentialCondition.class)
+    public StreamingTtsPort dashScopeStreamingTtsPort(DashScopeAudioSpeechModel speechModel) {
+        return new DashScopeStreamingTtsAdapter(speechModel);
     }
 
     /**
