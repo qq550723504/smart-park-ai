@@ -90,7 +90,8 @@ describe('App view persistence', () => {
     await nextTick()
 
     const children = Array.from((wrapper.find('.workspace').element as HTMLElement).children)
-    expect(children.filter((child) => child.classList.contains('main-content'))).toHaveLength(4)
+    // 4 个既有场景页 + 语音助手页（voice）。
+    expect(children.filter((child) => child.classList.contains('main-content'))).toHaveLength(5)
     expect(children.some((child) => child.classList.contains('global-rail'))).toBe(true)
     wrapper.unmount()
   })
