@@ -1,468 +1,366 @@
-# 智慧园区告警工作流架构
+# 智慧园区 AI 工作流项目架构
 
-## 1. 文档范围
+> 文档基线：当前 `main` 分支实现。本文描述已经存在于代码库中的运行链路，不把未合并分支中的能力当作当前功能。
 
-本文档描述当前项目 `springaialibaba` 的运行时架构、代码分层、告警处理流程、数据边界和扩展方式。文档以 `src/main/java/com/example/smartpark` 的当前实现为准，示例数据来自 Mock 适配器。
+## 1. 项目定位与当前能力
 
-项目当前定位是一个可学习、可替换外部系统的智慧园区告警与能耗异常处理样例，重点演示以下能力：
+项目是一个基于 Spring Boot、Spring AI Alibaba 和 Vue 3 的智慧园区 AI 工作流示例。当前 `main` 已形成四条可以独立运行的业务链路，其中告警处置、运营分析和专家协作接入统一执行轨迹，客服使用独立的会话与工单状态链路：
 
-- 使用 Spring Boot 承载应用和 HTTP 接口
-- 使用 Spring AI DashScope ChatModel 完成告警分诊和诊断
-- 使用 Alibaba Cloud AI Graph 编排可恢复、可暂停的工作流
-- 通过端口接口隔离告警、设备、能耗、知识库和工单系统
-- 通过人工审批控制高风险或证据不足的自动化动作
-- 通过 REST 查询状态，通过 SSE 订阅工作流事件
-- 在对外响应和事件流中隐藏敏感诊断内容
+- 告警处置：告警分诊、园区上下文收集、知识检索、AI 诊断、风险门禁、人工审批和工单创建。
+- 园区客服：基于园区知识回答停车、访客和能耗问题；报修、知识不足或策略限制时转人工。
+- 运营分析：自然语言解析为受指标目录约束的查询计划，生成并校验只读 SQL，执行真实分析数据库查询，返回表格、图表和证据约束的结论。
+- 专家协作：主管根据问题选择能耗、设备、安防专家，分支并行取证，经过证据校验后汇总结论。
+
+此外，项目还提供按领域隔离的知识管理、统一执行事件流、角色边界、审计、反馈和只读 MCP 工具生态演示。
+
+当前实现的默认目标是本地学习、演示和自动化测试。它不是生产控制系统：默认外部园区数据为 Mock，工作流和会话状态主要保存在进程内，也没有生产级身份认证、租户隔离和设备控制能力。
 
 ## 2. 总体架构
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│                         Web API 层                          │
-│ AlertWorkflowController / ApprovalController                │
-│ WorkflowEventController / CustomerServiceController          │
-│ ApiExceptionHandler                                          │
-└───────────────┬───────────────────────────────┬─────────────┘
-                │ REST 状态、审批                │ SSE 事件
-                ▼                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     工作流编排层                            │
-│ AlertWorkflow                                                │
-│  ├─ StateGraph / CompiledGraph                               │
-│  ├─ AlertWorkflowNodes                                       │
-│  ├─ AlertWorkflowState                                       │
-│  ├─ WorkflowExecutionStore                                   │
-│  └─ WorkflowEventPublisher                                   │
-└───────────────┬─────────────────────────────────────────────┘
-                │ 调用领域服务、Agent 和端口
+┌──────────────────────────────────────────────────────────────┐
+│ Vue 3 智慧园区运营控制台                                     │
+│ 告警工作流 │ 园区客服 │ 专家协作 │ 运营分析 │ 统一执行轨迹栏 │
+└──────────────────────────────┬───────────────────────────────┘
+                               │ REST / SSE
+                               ▼
+┌──────────────────────────────────────────────────────────────┐
+│ Web/API 边界                                                   │
+│ Alert / CustomerService / ExpertCollaboration / Operations     │
+│ KnowledgeAdmin / Audit / Feedback / ExecutionEvent Controllers  │
+└───────────────┬───────────────────────┬────────────────────────┘
+                │                       │
+                ▼                       ▼
+┌─────────────────────────┐   ┌────────────────────────────────┐
+│ 业务工作流与能力运行时    │   │ 横切运行时                       │
+│ AlertWorkflow            │   │ ExecutionEventPublisher         │
+│ CustomerServiceWorkflow  │   │ AuditTrail / FeedbackService    │
+│ OperationsAnalysisGraph  │   │ Demo metrics / fault injector   │
+│ ExpertCollaborationGraph │   └────────────────────────────────┘
+└───────────────┬─────────┘
+                │ 领域模型、Agent、只读工具、端口
                 ▼
-┌──────────────────────┐  ┌───────────────────────────────────┐
-│ Agent 与工具层        │  │ 领域模型层                         │
-│ AlertTriageAgent      │  │ Alert / Diagnosis / Device         │
-│ AlertDiagnosisAgent   │  │ KnowledgeDocument / WorkOrder      │
-│ PromptCatalog         │  │ EnergyReading / ParkContext        │
-│ AlertQueryTool        │  │ RiskLevel / WorkflowStatus         │
-│ DeviceQueryTool       │  │ ApprovalDecision 等                │
-│ EnergyQueryTool 等    │  └───────────────────────────────────┘
-└───────────────┬──────┘
-                │ 只通过 Port 读取或写入
+┌──────────────────────────────────────────────────────────────┐
+│ 领域与端口                                                     │
+│ Alert / Device / Energy / Security / Knowledge / WorkOrder     │
+│ Customer session / Customer ticket / analysis typed models      │
+└───────────────┬───────────────────────────────────────────────┘
+                │ 适配器实现
                 ▼
-┌─────────────────────────────────────────────────────────────┐
-│                         端口层                               │
-│ AlertPort / DevicePort / EnergyPort / KnowledgePort          │
-│ WorkOrderPort / SecurityPort / CustomerSessionStore           │
-│ CustomerTicketPort                                           │
-└───────────────┬─────────────────────────────────────────────┘
-                │ 当前实现
-                ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      Mock 适配器层                           │
-│ MockAlertAdapter / MockDeviceAdapter / MockEnergyAdapter     │
-│ MockKnowledgeAdapter / MockWorkOrderAdapter                  │
-│ InMemoryCustomerSessionStore / InMemoryCustomerTicketAdapter  │
-│ MockParkDataStore / MockParkConfiguration                     │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ 外部能力                                                       │
+│ Mock 内存数据 │ SimpleVectorStore/RAG │ DashScope │ PostgreSQL  │
+│ 只读 MCP Server                                                  │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-### 2.1 启动与 Bean 装配
+依赖方向保持为：`Web/API → 能力运行时 → 领域模型/端口 → 适配器`。工作流、Agent 和工具不直接依赖 Mock 存储、具体数据库或外部厂商协议。
 
-应用入口是 `SmartParkApplication`。Spring Boot 扫描组件并装配以下核心 Bean：
+## 3. 技术栈与启动装配
 
-- `MockParkConfiguration`：提供 Mock 园区适配器，与 DashScope 模型开关解耦
-- Agent：`AlertTriageAgent`、`AlertDiagnosisAgent`
-- 工具：告警、设备、能耗、知识库和工单查询工具
-- `AlertWorkflow`：构建并编译状态图
-- Web Controller：暴露工作流启动、状态查询、审批、SSE 事件和客服会话接口
+当前版本基线为：
 
-Mock 适配器当前用于替代真实园区系统。替换为生产系统时，应实现对应 `Port`，而不是修改工作流节点和领域模型。
+| 层次 | 实现 |
+| --- | --- |
+| 后端 | Java、Spring Boot `4.0.0` |
+| AI 与编排 | Spring AI `2.0.0-M1`、Spring AI Alibaba `2.0.0-M1.1`、Alibaba Cloud AI Graph |
+| Web | Spring MVC、Reactor Flux、REST、SSE |
+| 前端 | Vue 3、TypeScript、Vite、Element Plus |
+| 分析数据库 | PostgreSQL、Flyway、JDBC；仅分析链路使用 |
+| SQL 安全 | JSqlParser AST 校验、查询计划校验、`EXPLAIN` 成本检查 |
+| 集成协议 | Spring AI MCP Server；默认关闭 |
 
-## 3. 代码分层与职责
+`SmartParkApplication` 启动后由 Spring 条件装配以下能力：
 
-### 3.1 `model`：领域模型
+- Mock 园区适配器：告警、设备、能耗、安防、知识、工单和客服存储。
+- DashScope ChatModel 及告警 Agent；关闭 `spring.ai.dashscope.enabled` 后，告警工作流及依赖它的工具和 Controller 不注册。
+- 客服回答模式：`mock` 使用确定性回答，`dashscope` 使用结构化模型回答。
+- 知识模式：`mock` 使用内存关键词检索，`rag` 使用 DashScope Embedding 和进程内 `SimpleVectorStore`。
+- 运营分析：只有 `smartpark.analytics.enabled=true` 时尝试装配；若分析数据库、管理员账号、只读账号或 ChatModel 配置缺失，启动期间会抛出明确错误。
+- 专家协作：只有 ChatModel、三个专家工具集和协作运行时都可用时装配；能力接口据此返回 `collaborationEnabled`。
+- MCP：只有 `smartpark.mcp.enabled=true` 时装配；协议和网络边界仍需由部署环境负责。
 
-领域模型使用不可变类型表达工作流中的业务事实和结果：
+## 4. 代码分层与模块职责
 
-| 包 | 主要类型 | 职责 |
-|---|---|---|
-| `model.alert` | `Alert`、`AlertClassification` | 告警及告警分类 |
-| `model.common` | `Device` | 设备信息 |
-| `model.alert` | `ParkContext` | 告警诊断上下文 |
-| `model.common` | `Diagnosis`、`KnowledgeDocument` | 诊断结果和知识文档 |
-| `model.common` | `WorkOrder`、`ApprovalDecision` | 工单和人工审批决定 |
-| `model.common` | `RiskLevel`、`WorkflowStatus` | 风险和工作流状态 |
-| `model.energy` | `EnergyReading` | 电能表读数、基线及偏差 |
-| `model.customer` | `CustomerServiceResult`、`CustomerTicket` | 客服答复、知识来源和转人工工单结果 |
+### 4.1 领域模型 `model`
 
-领域模型负责基本的不变量校验，例如必填字段、枚举值和置信度范围。它不依赖 Spring Web、具体数据库或 Mock 实现。
+领域对象用不可变类型表达业务事实、状态和结果，负责必填字段、枚举、标识符、置信度和知识标签等边界校验，不依赖 Web、数据库或 Mock 实现。
 
-知识文档必须显式声明 `KnowledgeDomain`；`KnowledgeDocument` 统一校验安全文档 ID、标题、正文长度以及标签数量、单标签长度和标签总长度。标签约束在领域模型边界生效，Web DTO 只做提前反馈，RAG 适配器在拼接 embedding 输入前仍保留存储侧总长度保护。检索结果只使用 `model.common.KnowledgeMatch`，不再提供默认 CUSTOMER_SERVICE 的无领域检索入口，避免调用方绕过领域边界。
+| 包 | 代表类型 | 作用 |
+| --- | --- | --- |
+| `model.alert` | `Alert`、`AlertClassification`、`ParkContext` | 告警、分类和诊断上下文 |
+| `model.common` | `Diagnosis`、`Device`、`KnowledgeDocument`、`KnowledgeMatch` | 通用诊断、设备和知识模型 |
+| `model.common` | `WorkOrder`、`ApprovalDecision`、`RiskLevel`、`WorkflowStatus` | 工单、审批、风险和工作流状态 |
+| `model.customer` | `CustomerServiceResult`、`CustomerTicket`、`KnowledgeCitation` | 客服回答、引用和人工工单 |
+| `model.energy` | `EnergyReading` | 当前读数、基线、峰值和偏差 |
+| `model.security` | `SecurityEvent` | 脱敏安防事件摘要 |
 
-### 3.2 `port`：外部能力边界
+运营分析和专家协作拥有独立的类型模型，分别位于 `analytics.model` 与 `collaboration.model`，避免把分析计划或专家发现混入告警领域对象。
 
-端口是应用层依赖的最小接口：
+### 4.2 端口 `port`
 
-- `AlertPort`：查询当前告警和设备告警历史
-- `DevicePort`：查询设备状态和设备信息
-- `EnergyPort`：查询最新能耗读数
-- `KnowledgePort`：按 `KnowledgeDomain` 检索知识文档；`rankedSearch` 返回包含文档和相似度分数的内部结果
-- `WorkOrderPort`：按工作流查询工单并创建工单
-- `SecurityPort`：安全事件能力边界，当前主要用于架构和边界验证
-- `CustomerSessionStore`（`port.customer`）：创建、读取和更新客服会话，保存按操作与目标会话隔离的幂等记录，并报告 TTL/容量淘汰
-- `CustomerTicketPort`（`port.customer`）：作为客服工单的唯一来源，创建、查询、推进工单，并按已淘汰会话删除工单
+端口表达应用真正需要的最小外部能力：
 
-工作流和工具依赖端口，而不直接依赖适配器。该设计允许把 Mock 数据替换为数据库、园区平台 API、消息系统或其他外部服务。
+- `AlertPort`：读取告警及设备历史告警。
+- `DevicePort`：读取设备状态。
+- `EnergyPort`：读取最新能耗读数。
+- `SecurityPort`：读取安全事件的脱敏摘要。
+- `KnowledgePort`：按 `KnowledgeDomain` 检索知识及相似度结果。
+- `KnowledgeAdminPort`：查看元数据、新增文档、启停文档；不改变工作流的只读检索依赖。
+- `WorkOrderPort`：查询和创建工单。
+- `CustomerSessionStore`、`CustomerTicketPort`、`CustomerAnswerPort`：隔离客服会话、工单和回答能力。
 
-### 3.3 `adapter.mock`：Mock 外部系统
+分析链路的端口由 `AnalyticsModelClient`、`OperationsAnalysisService.CostGate` 和 `ExecutionGate` 表达；专家协作的规划、专家分支、证据账本和汇总均通过独立类型和接口隔离。
 
-`MockParkDataStore` 持有设备、能耗、告警、历史告警、知识文档和工作订单数据。各 Mock Adapter 对外实现一个端口，并把访问转发给数据存储。客服存储由 `adapter.mock.InMemoryCustomerSessionStore` 和 `adapter.mock.InMemoryCustomerTicketAdapter` 分别实现 `port.customer.CustomerSessionStore` 与 `port.customer.CustomerTicketPort`；`CustomerServiceWorkflow` 只依赖这些端口。
+### 4.3 Mock 与 RAG 适配器 `adapter`
 
-Mock 数据具备以下特征：
+`adapter.mock` 提供固定时间基准、四类演示告警、设备历史、能耗基线、安防摘要、知识文档和内存工单。Mock 能源读取和 MCP 工具都是只读的，不会访问或控制真实设备。
 
-- 固定时间基准，测试结果可重复
-- 覆盖温度、配电和能耗三类告警
-- 包含设备历史、知识文档和能耗基线
-- 工单按 `workflowId` 幂等创建
-- 能耗读取是只读操作，不会控制真实设备
+`adapter.rag` 为 `CUSTOMER_SERVICE` 与 `ALERT_OPERATIONS` 分别维护进程内向量索引。种子文档来自 `src/main/resources/knowledge/`；检索默认最多返回五条结果，并按相似度阈值过滤。知识元数据和正文写入有独立边界：管理接口只返回元数据，MCP 只返回匹配元数据，不暴露正文。
 
-### 3.4 `adapter.rag`：Spring AI 向量检索
+RAG 索引和客服会话都属于当前进程状态。应用重启后，RAG 重新加载种子文档；该实现不等价于多实例生产知识库。
 
-启用 `smartpark.knowledge.mode=rag` 后，`RagKnowledgeConfiguration` 为 `CUSTOMER_SERVICE` 与 `ALERT_OPERATIONS` 分别创建 Spring AI `SimpleVectorStore`，并由 `RagKnowledgeAdapter` 将它们适配为带领域参数的 `KnowledgePort` 与 `KnowledgeAdminPort`。种子知识从 `src/main/resources/knowledge/` 加载，新增或停用文档只影响其所属领域的当前进程内索引。
+### 4.4 Agent 与只读工具 `agent`、`tool`
 
-RAG 检索默认最多返回 5 条结果，并使用 `smartpark.knowledge.min-similarity-score`（默认 `0.65`）过滤低相关结果。索引元数据和向量更新由同一读写协调保护：搜索或元数据列表不会读取到跨领域迁移、启停操作的半更新状态；重复 seed ID 在启动建索引前直接失败。索引和会话一样只存在于当前进程；应用重启后会重新加载种子文档。该实现用于学习和 Mock 验证，不是多实例生产存储。
+告警链路包含 `AlertTriageAgent` 和 `AlertDiagnosisAgent`：
 
-### 3.5 `agent`：模型调用和结构化输出
+- 分诊 Agent 返回严格结构化的分类、优先级、风险级别和置信度。
+- 诊断 Agent 只获得告警、设备、历史告警、能耗、知识和已有工单查询工具。
+- Agent 输出经 JSON、枚举、关联 ID、证据、时间和置信度校验后，才能进入工作流状态。
+- `createWorkOrder` 不作为诊断 Agent 工具暴露；副作用由工作流节点在风险闸门之后执行。
 
-`AlertTriageAgent` 负责告警分诊，要求模型严格返回：
+专家分支使用 `AlertQueryTool`、`DeviceQueryTool`、`EnergyQueryTool`、`SecurityQueryTool`、`ParkKnowledgeTool` 和 `WorkOrderTool` 的只读/受控工具集。每次成功工具调用生成绑定具体调用参数的证据引用，专家结论必须引用真实成功调用的证据；失败调用不授权任何结论。
 
-```json
-{
-  "category": "AlertClassification 枚举值",
-  "priority": "LOW | MEDIUM | HIGH",
-  "riskLevel": "RiskLevel 枚举值",
-  "confidence": 0.0
-}
-```
+## 5. 四条业务运行链路
 
-`AlertDiagnosisAgent` 负责在已有告警、园区上下文和知识文档基础上进行诊断。它向模型提供只读工具回调，工具包括：
-
-- `lookupDeviceStatus`
-- `lookupAlert`
-- `lookupAlertHistory`
-- `lookupEnergyConsumption`
-- `lookupWorkOrders`
-- `searchParkKnowledge`
-
-Agent 在模型响应返回后使用 Jackson 解析 JSON，并校验字段集合、类型、枚举、关联 ID、证据数组、时间格式和置信度。诊断阶段不会向模型暴露 `createWorkOrder` 工具。
-
-`PromptCatalog` 集中管理系统提示词和用户提示词，中文业务描述与英文程序字段并存：业务内容使用中文，JSON 字段名、枚举和工具名保持代码契约不变。
-
-### 3.5 `workflow`：状态图和运行时状态
-
-`AlertWorkflow` 在构造时创建并编译 `StateGraph`。图的节点和边由 `AlertWorkflowNodes` 提供，状态统一由 `AlertWorkflowState` 管理。
-
-`AlertWorkflowState` 保存工作流快照中的以下核心字段：
-
-```text
-workflowId
-alertId
-alert
-classification
-parkContext
-retrievedDocuments
-diagnosis
-riskLevel
-approval
-workOrder
-status
-errors
-eventSequence
-route
-resultSummary
-```
-
-状态序列化使用 `SpringAIJacksonStateSerializer`。枚举、时间、记录类型和集合在进入图状态或 HTTP 响应前转换为可序列化结构。
-
-## 4. 告警处理流程
-
-### 4.1 主流程
+### 5.1 告警处置工作流
 
 ```text
 START
-  │
-  ▼
-classifyAlert
-  │ 查询告警 + Agent 分诊
-  ▼
-collectParkContext
-  │ 查询设备、历史告警、已有工单
-  ▼
-retrieveKnowledge
-  │ 按分类检索知识文档
-  ▼
-diagnoseAlert
-  │ Agent 调用只读工具并生成诊断
-  ▼
-riskGate
-  ├─────────────── CREATE_WORK_ORDER ──> createWorkOrder ──┐
-  ├─────────────── WAIT_FOR_APPROVAL ──> humanApproval      │
-  └─────────────── REJECT ────────────> summarizeResult    │
-                                      ▲                    │
-                                      └────────────────────┘
-                                                   │
-                                                   ▼
-                                           summarizeResult
-                                                   │
-                                                  END
+  → classifyAlert
+  → collectParkContext
+  → retrieveKnowledge
+  → diagnoseAlert
+  → riskGate
+       ├─ CREATE_WORK_ORDER → createWorkOrder → summarizeResult → END
+       ├─ WAIT_FOR_APPROVAL → humanApproval ─┬→ createWorkOrder → summarizeResult
+       │                                      └→ summarizeResult
+       └─（人工拒绝后）REJECTED
 ```
 
-### 4.2 节点职责
+核心规则：风险提示高、分诊或诊断风险高、任一置信度低于 `0.75`、或没有知识证据时，必须进入人工审批。只有风险可接受且证据充分时，才允许直接创建工单。工单创建按 `workflowId` 查询已有结果，恢复或重试不会重复创建。
 
-1. `classifyAlert`
-   - 从 `AlertPort` 获取告警
-   - 调用 `AlertTriageAgent`
-   - 写入分类、优先级、风险级别和置信度
+工作流使用 Alibaba Cloud AI Graph 的 `StateGraph` 和 `MemorySaver`。公开快照只保留状态、标识符、时间、风险和流程跟踪字段；诊断原文、审批意见和工单业务正文通过 Web DTO 与事件层脱敏。
 
-2. `collectParkContext`
-   - 通过 `DevicePort` 获取设备
-   - 通过 `AlertPort` 获取设备历史告警
-   - 通过 `WorkOrderPort` 获取当前工作流已有工单
-   - 组装 `ParkContext`
+### 5.2 园区客服工作流
 
-3. `retrieveKnowledge`
-   - 根据分类枚举生成检索词
-   - 通过 `KnowledgePort` 查询匹配文档
-   - 没有匹配文档时保留空列表，后续风险闸门会视为证据不足
+客服工作流将请求分为停车、访客、公共区域能耗、报修和未知/不支持意图：
 
-4. `diagnoseAlert`
-   - 将告警、园区上下文和知识文档交给 `AlertDiagnosisAgent`
-   - Agent 可以查询设备、告警历史、能耗、知识和已有工单
-   - 写入结构化 `Diagnosis`
+1. 识别意图并按 `CUSTOMER_SERVICE` 领域检索知识。
+2. 有足够证据时返回带知识引用的回答。
+3. 报修意图直接确认并创建人工客服工单，不依赖知识检索成功。
+4. 知识不足、策略限制或检索故障时不生成泛化答复，按契约转人工或返回受控失败。
+5. 同一会话支持多轮提问；已进入人工处理的会话停止新的自动回答。
 
-5. `riskGate`
-   - 由 `AlertWorkflowNodes.RiskGate` 决定下一条路由
-   - 高风险、低置信度或无知识证据时进入人工审批
-   - 只有风险可接受且证据充分时才允许直接创建工单
+客服请求支持 `Idempotency-Key`。相同幂等键和相同请求体返回稳定结果，不同请求体返回冲突；同一会话使用串行协调，避免多轮消息丢失。默认会话存储是有界 TTL 内存实现，过期或容量淘汰时会协调清理关联内存工单。
 
-6. `humanApproval`
-   - 使用 Graph interruption 暂停工作流
-   - 状态为 `WAITING_APPROVAL`
-   - 审批接口提交后恢复原 Graph thread
-   - 同意进入工单创建，拒绝进入结果汇总
+### 5.3 自然语言运营分析
 
-7. `createWorkOrder`
-   - 先按 `workflowId` 查询已有工单
-   - 没有工单时调用 `WorkOrderPort.create`
-   - 重试或恢复时返回已有工单，避免重复写入
-
-8. `summarizeResult`
-   - 根据审批决定和工单结果生成最终状态
-   - 正常结束为 `COMPLETED`
-   - 审批拒绝为 `REJECTED`
-
-### 4.3 风险闸门规则
-
-默认置信度阈值是 `0.75`。以下任一条件成立，路由为 `WAIT_FOR_APPROVAL`：
-
-- 原始告警风险提示为高风险
-- 分诊风险级别为高风险
-- 诊断风险级别为高风险
-- 分诊置信度低于 `0.75`
-- 诊断置信度低于 `0.75`
-- 检索不到知识文档
-
-否则路由为 `CREATE_WORK_ORDER`。当前实现没有自动化的 `REJECT` 路由，拒绝主要由人工审批产生。
-
-## 5. 工作流生命周期与幂等
-
-### 5.1 启动
-
-`POST /api/alerts/{alertId}/workflows` 调用 `AlertWorkflow.start`：
-
-1. 校验告警编号
-2. 根据告警编号查询已有执行记录
-3. 如果已存在，直接返回已有快照
-4. 创建 `workflowId` 和 Graph thread ID
-5. 注册执行记录并发布 `STARTED` 事件
-6. 执行状态图，直到完成、暂停或失败
-
-### 5.2 暂停与恢复
-
-当风险闸门需要人工审批时，Graph 返回 `InterruptionMetadata`。执行记录保存中断信息，工作流状态更新为 `WAITING_APPROVAL`。
-
-`POST /api/workflows/{workflowId}/approval` 调用 `AlertWorkflow.approve`：
-
-- 只允许对 `WAITING_APPROVAL` 工作流审批
-- 使用 `idempotencyKey` 防止重复提交
-- 相同幂等键和相同请求体会返回当前结果
-- 相同幂等键但请求体不同会报冲突
-- 恢复原 Graph thread，继续创建工单或结束流程
-
-### 5.3 运行时存储
-
-当前 `WorkflowExecutionStore` 使用内存实现，Graph checkpoint 使用 `MemorySaver`。客服支持同一 `sessionId` 下的多轮消息和会话历史。每轮保存用户/助手消息及安全检索轨迹；检索轨迹只保留查询意图、知识文档 ID 和时间，不保留用户原始问题。会话进入人工处理后，自动客服拒绝新的自动回复，但同一幂等请求仍返回请求当时的稳定结果。客服工作流通过 `CustomerSessionStore` 和 `CustomerTicketPort` 访问这些数据，默认 Bean 分别是 `InMemoryCustomerSessionStore` 和 `InMemoryCustomerTicketAdapter`。
-
-客服工作流当前使用有界 TTL 内存会话存储，默认最多 10,000 条、TTL 24 小时；客服请求通过 `Idempotency-Key` 防止进程内重试重复建单，幂等作用域包含 `handle/reply` 操作和 reply 的目标会话。相同幂等键使用完成结果 reservation 协调，外部检索/回答调用不持有 workflow 实例 monitor；同一 session 的不同请求使用 session 级串行协调，避免多轮消息丢失。回答端口只能返回模型可选择的 `SUPPORTED`、`INSUFFICIENT_EVIDENCE` 或 `POLICY_LIMIT` 原因，`RETRIEVAL_UNAVAILABLE` 由工作流内部保留；工作流在端口边界再次校验该契约。工单创建、会话发布和淘汰清理在同一个客服状态写锁内完成，查询不会看到并删除尚未发布会话的孤儿工单。报修意图不依赖知识检索，检索故障不会覆盖确定的报修确认。历史请求结果保持不变，当前工单状态通过会话或以 `CustomerTicketPort` 为唯一来源的工单查询获得。会话过期或容量淘汰时，工作流会协调删除对应工单，避免不可达的内存工单。此次重构建立了 `CustomerSessionStore` 与 `CustomerTicketPort` 的替换边界，但没有提供持久化实现，也没有提供真实 Agent 系统；默认 Mock 分类和关键词检索仍是确定性的本地实现。当前实现适合本地学习、演示和测试，不适合直接作为多实例生产部署方案。
-
-生产化时应替换：
-
-- 内存执行存储为持久化数据库或工作流存储
-- `MemorySaver` 为持久化 checkpoint
-- 内存事件流为可持久化消息或事件存储
-- 单机幂等校验为跨实例一致的唯一约束或分布式锁
-- 客服内存适配器为持久化会话、工单和跨实例一致的客服处理系统
-- `SimpleVectorStore` 为 PostgreSQL/pgvector、Redis 或其他持久化向量存储，并增加文档切片、批量导入和索引版本管理
-- 确定性的 Mock 分类和关键词检索为经过约束、审计和人工兜底的生产 Agent 系统
-
-## 6. Web 接口与事件流
-
-### 6.1 REST 接口
-
-| 方法 | 路径 | 作用 |
-|---|---|---|
-| `POST` | `/api/alerts/{alertId}/workflows` | 启动或返回告警对应工作流 |
-| `GET` | `/api/workflows/{workflowId}` | 查询工作流快照 |
-| `POST` | `/api/workflows/{workflowId}/approval` | 提交人工审批 |
-| `GET` | `/api/workflows/{workflowId}/events` | 订阅工作流 SSE 事件 |
-| `POST` | `/api/customer-service/sessions` | 提交客服问题，支持 `Idempotency-Key` 请求头 |
-| `GET` | `/api/customer-service/sessions/{sessionId}` | 查询客服会话结果 |
-| `POST` | `/api/customer-service/sessions/{sessionId}/messages` | 在目标客服会话中继续提问，支持 `Idempotency-Key` 请求头 |
-| `GET` | `/api/customer-service/sessions/{sessionId}/conversation` | 查询客服消息历史和安全检索轨迹 |
-| `GET` | `/api/customer-service/tickets` | 客服坐席查询人工工单队列 |
-| `PATCH` | `/api/customer-service/tickets/{ticketId}` | 按状态机推进客服工单 |
-| `GET` | `/api/workflows/{workflowId}/observability` | 查看安全事件、工具调用和失败节点汇总 |
-| `POST` | `/api/demo/faults` | 管理员注入一次性演示故障 |
-| `GET` | `/api/knowledge` | 管理员查看知识文档元数据 |
-| `POST` | `/api/knowledge` | 管理员新增知识文档 |
-| `PATCH` | `/api/knowledge/{documentId}/active` | 管理员启用或停用知识文档 |
-| `POST` | `/api/feedback` | 坐席、审批人或管理员提交枚举化反馈 |
-| `GET` | `/api/feedback` | 管理员查看反馈记录 |
-| `GET` | `/api/operations/metrics` | 查看工作流、客服、知识、反馈和审计聚合数量 |
-| `GET` | `/api/audit` | 管理员查看脱敏审计记录 |
-
-### 6.2 演示角色、观测与故障
-
-前端通过 `X-Demo-Role` 展示 `VIEWER`、`OPERATOR`、`APPROVER`、`CUSTOMER_AGENT` 和 `ADMIN` 的操作边界。客服工单操作要求坐席或管理员角色，显式携带角色的审批请求要求审批人或管理员角色，故障注入只允许管理员。该请求头只是本地演示机制，不构成身份认证或生产授权。
-
-风险门禁把触发审批的具体原因写入公开 DTO，例如高风险、置信度低于阈值或知识证据为空。观测接口只聚合已经脱敏的工作流事件，展示事件数量、工具调用和失败节点。故障注入当前支持让下一次 Mock 知识检索失败，用于演示工作流错误包装和失败事件。
-
-知识管理能力通过独立的 `KnowledgeAdminPort` 扩展普通 `KnowledgePort`。工作流仍只依赖只读检索端口；管理员接口可查看元数据、新增文档和启停文档。元数据响应不包含知识正文，停用状态会直接影响检索结果。反馈服务只接受目标类型、资源 ID、角色和评价枚举，不接受自由文本；运营统计汇总知识启用数量、反馈总数和正向反馈数。
-
-### 6.3 SSE 事件
-
-`WorkflowEventPublisher` 为每个工作流维护一个 Reactor `Sinks.Many`，事件流使用 replay-all，因此订阅者可以收到已经发布的历史事件。
-
-典型事件类型包括：
-
-- `STARTED`
-- `NODE_STARTED`
-- `TOOL_CALLED`
-- `NODE_COMPLETED`
-- `PAUSED`
-- `RESUMED`
-- `COMPLETED`
-- `FAILED`
-
-事件包含工作流编号、序号、事件类型、节点、时间戳和安全摘要。事件摘要经过 `WorkflowEvent.redact` 处理。
-
-审计记录与工作流事件分离：工作流事件描述系统执行节点和工具，审计记录描述角色对资源执行的动作。客服会话、客服工单、审批和故障注入会记录安全元数据；审计不会记录用户问题、审批评论或诊断正文。
-
-
-### 7.1 Agent 工具边界
-
-诊断 Agent 只接收只读工具。工单写入由工作流节点控制，并且必须经过风险闸门；高风险或证据不足的流程必须先等待人工审批。
-
-### 7.2 对外响应脱敏
-
-`WebDtos` 对诊断、审批和工单内容使用固定的脱敏文本：
-
-- 诊断根因、摘要、证据和建议不直接返回原文
-- 审批人身份和审批评论不直接返回原文
-- 工单摘要和证据不直接返回原文
-- 标识符、状态、时间和事件序号保留用于跟踪流程
-
-`WorkflowEvent` 对 API key、secret、token、password 等敏感字段进行脱敏。`SensitiveDataTest`、`SecurityBoundaryTest` 和 `CapabilityPackageTest` 用于验证这些边界不会被意外突破。
-
-### 7.3 当前安全假设
-
-当前项目没有实现用户认证、授权、租户隔离或生产级密钥管理。DashScope API Key 通过 Spring 配置和环境变量提供，真实部署时应接入密钥管理服务，并在网关或应用层补充身份认证和权限校验。
-
-## 8. 可替换点与生产化路径
-
-### 8.1 外部系统接入
-
-新增真实系统时实现对应端口，例如：
+运营分析仅查询专用分析数据库，主流程由 `OperationsAnalysisGraph` 编排：
 
 ```text
-第三方告警平台 -> AlertPort
-设备管理平台   -> DevicePort
-能耗平台       -> EnergyPort
-知识库/搜索服务 -> KnowledgePort
-工单平台       -> WorkOrderPort
-安全平台       -> SecurityPort
+understandQuestion
+  → resolveMetricAndDimensions
+  → recallAllowedSchema
+  → buildQueryPlan
+  → generateSql
+  → validateSqlAst
+  → explainAndCheckCost
+  → executeReadOnlyQuery
+  → buildChartSpec
+  → summarizeFromResult
 ```
 
-适配器应负责协议转换、超时、重试、外部错误映射和数据格式转换。工作流节点只处理领域语义和流程路由。
+实现要点：
 
-### 8.2 持久化和多实例
+- 问题先解析为受 `MetricCatalog` 和分类词汇约束的指标、维度、过滤条件和时间范围。
+- 指标目录和允许视图限制可查询数据范围；未确定的指标口径会暂停并要求结构化澄清。
+- 模型生成的 SQL 视为不可信输入，必须通过 SQL AST、查询计划、参数绑定和时间边界校验。
+- `EXPLAIN` 成本超限或安全策略拒绝时，最多允许一次受控修复；仍不合规则终止分析。
+- 查询使用只读事务、超时、最大行数和最大结果字节数限制；查询失败不会伪造图表或结论。
+- 图表单位来自指标目录而不是模型自由填写；最终总结必须能被已执行结果验证。
 
-生产部署至少需要持久化以下内容：
+分析运行支持“启动—澄清—恢复—完成/失败”生命周期，状态和终态保留采用进程内 `AnalysisRunStore`。前端展示查询计划、SQL 安全状态、结果表、图表和结论。
 
-- 工作流状态和 Graph checkpoint
-- 工作流与告警的唯一关联
-- 审批请求及幂等键
-- 工单创建结果
-- 工作流事件和事件序号
+### 5.4 Supervisor 专家协作
 
-多实例场景下，启动、审批和工单创建必须使用数据库唯一约束、事务或分布式协调机制保证一致性。
+专家协作由 `ExpertCollaborationService` 和 `ExpertCollaborationGraph` 组成：
 
-### 8.3 可观测性
+1. Supervisor 将自然语言问题解析为规范问题、必要专家领域和每个领域的任务。
+2. 只选择实际需要的 `ENERGY`、`DEVICE`、`SECURITY` 分支。
+3. 选中的分支共享一个截止时间并行执行；默认最大并行度为 `3`。
+4. 每个专家只能调用本领域工具，并提交结构化发现、状态、结论、证据引用、置信度和后续检查。
+5. `ExpertFindingValidator` 和 `SynthesisValidator` 检查领域、证据、状态和引用范围；主管不能凭空补写结论。
+6. 部分分支失败会保留已完成发现；全部分支失败、汇总失败或超时则显式终止为失败。
 
-建议为每次工作流统一记录：
+每次运行以 UUID 标识，运行状态和专家发现写入 `CollaborationRunStore`，工具调用、专家交接和终态进入统一执行事件流。
 
-- `workflowId`、`alertId`、`graphThreadId`
-- 节点开始、结束和耗时
-- 外部端口调用耗时与失败原因
-- Agent 调用模型、令牌用量和结构化输出校验结果
-- 风险闸门输入和最终路由
-- 审批人、审批时间和幂等结果
+## 6. 统一执行事件与前端控制台
 
-日志中不得记录 API Key、完整模型提示词中的敏感字段或未脱敏的诊断内容。
+`execution` 包为告警、运营分析和专家协作提供统一的 `ExecutionEvent`：
 
-## 9. 测试策略
-
-测试按架构边界分组：
-
-- `model`：验证领域对象不变量和序列化行为
-- `adapter.mock`：验证 Mock 数据和端口边界
-- `agent`：使用 `TestChatModel` 验证提示词、工具列表和结构化输出校验
-- `tool`：验证空参数、未知资源和结构化错误结果
-- `workflow`：验证正常路径、风险闸门、人工审批、幂等、失败恢复和能耗流程
-- `customer service`：验证意图分类、未知问题转人工、会话 TTL/容量、并发幂等和客服 HTTP 状态码
-- `web`：验证 REST DTO、状态码、SSE 格式和响应脱敏
-- `architecture`：验证能力包依赖和安全边界
-- `integration`：可选验证真实 DashScope 连通性
-
-运行全部测试：
-
-```bash
-./mvnw test
+```text
+eventId / runId / sequence / timestamp
+scenario / actor / stage / eventType / status
+safeSummary / typed displayPayload
 ```
 
-Windows PowerShell：
+当前事件场景包括 `ALERT_WORKFLOW`、`OPERATIONS_ANALYSIS` 和 `EXPERT_COLLABORATION`。事件类型覆盖运行启动、节点开始/完成、工具调用、专家交接、SQL 生成/校验/拒绝、查询完成、图表规格、暂停/恢复、失败和完成。
+
+`InMemoryExecutionEventPublisher` 为每个运行保存历史并支持订阅；统一接口 `GET /api/executions/{runId}/events` 以 SSE 重放历史并继续推送实时事件，直到终态关闭。告警旧 SSE 接口由 `ProjectedWorkflowEventPublisher` 适配到统一事件层，保持兼容。
+
+`DisplayPayload` 是受控的类型化展示负载：文本、工具调用、专家交接、SQL、图表、音频状态和错误分别使用不同结构。SQL 只发送经过校验的安全版本；音频负载当前只表示状态元数据。事件模型为未来语音场景预留了 `VOICE` 和音频事件枚举，但当前 `main` 分支没有语音 Session、WebSocket 或前端语音入口，不应视为当前已交付能力。
+
+Vue 3 控制台按场景切换页面：告警工作流、园区客服、专家协作和运营分析；右侧统一执行轨迹栏为告警、专家协作和运营分析通过 `runId` 订阅后端事件。客服当前通过会话消息和工单状态展示进展，不接入统一执行事件流。`X-Demo-Role` 用于本地演示查看者、操作员、审批人、客服坐席和管理员的 UI/API 操作边界，不是生产身份系统。
+
+## 7. 知识、审计、反馈和 MCP
+
+### 7.1 知识管理
+
+知识按 `CUSTOMER_SERVICE` 和 `ALERT_OPERATIONS` 分域。普通工作流只依赖 `KnowledgePort` 的检索；管理员通过 `KnowledgeAdminPort` 查看元数据、新增文档和启停文档。文档 ID、标题、正文和标签在领域边界校验，检索结果带相似度和文档 ID，避免调用方绕过知识领域。
+
+### 7.2 审计与反馈
+
+工作流事件描述系统如何执行，`AuditTrail` 描述角色对资源执行的动作，两者分离。客服会话、客服工单、审批、知识管理、反馈和演示故障等操作记录安全元数据，不记录用户原始问题、完整诊断正文、审批评论或敏感身份信息。反馈服务只接收目标类型、资源 ID、角色和枚举化评价。
+
+### 7.3 只读 MCP
+
+启用 `SMARTPARK_MCP_ENABLED=true` 后，MCP Server 暴露三个只读工具：
+
+| 工具 | 返回 |
+| --- | --- |
+| `smartpark_lookup_alert` | 告警 ID、园区/楼宇/设备、分类、风险提示和发生时间 |
+| `smartpark_lookup_energy` | 当前读数、基线、峰值功率、偏差和时间 |
+| `smartpark_search_knowledge` | 指定知识领域内最多五条文档元数据 |
+
+MCP 不提供知识正文、身份数据、工作流变更、工单写入、设备控制、Resources、Prompts 或 Completion。服务默认关闭，且当前没有认证、租户隔离和公网安全边界；仅适合可信本地演示。
+
+## 8. 数据与安全边界
+
+- **Agent 与副作用：** Agent 只读事实并提出判断；工单写入由风险门禁后的工作流节点负责。
+- **安防数据：** 只允许脱敏摘要进入通用链路，不包含原始视频、图片、人脸特征或身份证等人员原始记录。
+- **对外输出：** Web DTO 和统一事件只暴露流程跟踪所需的 ID、状态、时间、节点和安全摘要；诊断、审批、工单和知识正文不直接返回。
+- **SQL 分析：** 应用运行账号固定为 `smartpark_analytics_ro`，只授予四个白名单分析视图的 `SELECT`；管理员账号仅用于 Flyway 迁移和本地演示数据刷新。
+- **密钥：** DashScope Key 只从当前进程环境变量读取；真实部署应接入密钥管理服务，不写入源码、`.env`、命令行参数或 Git 历史。
+- **演示授权：** `X-Demo-Role` 仅用于本地演示边界，必须由网关/应用真实认证授权替换。
+
+## 9. API 与事件接口
+
+### 9.1 业务 API
+
+| 方法 | 路径 | 作用 |
+| --- | --- | --- |
+| `POST` | `/api/alerts/{alertId}/workflows` | 启动或复用告警工作流 |
+| `GET` | `/api/workflows/{workflowId}` | 查询告警工作流脱敏快照 |
+| `POST` | `/api/workflows/{workflowId}/approval` | 提交人工审批 |
+| `GET` | `/api/workflows/{workflowId}/events` | 兼容告警工作流 SSE |
+| `GET` | `/api/workflows/{workflowId}/observability` | 查询工具调用和失败节点汇总 |
+| `POST` | `/api/customer-service/sessions` | 创建客服会话 |
+| `POST` | `/api/customer-service/sessions/{sessionId}/messages` | 在会话中继续提问 |
+| `GET` | `/api/customer-service/sessions/{sessionId}/conversation` | 查询对话和安全检索轨迹 |
+| `GET/PATCH` | `/api/customer-service/tickets[/{ticketId}]` | 查询或推进人工客服工单 |
+| `POST` | `/api/expert-collaboration/runs` | 发起专家协作 |
+| `GET` | `/api/expert-collaboration/runs/{runId}` | 查询专家协作状态、发现和汇总 |
+| `POST` | `/api/operations-analysis/runs` | 发起自然语言运营分析 |
+| `POST` | `/api/operations-analysis/runs/{runId}/clarifications` | 提交指标口径澄清 |
+| `GET` | `/api/operations-analysis/runs/{runId}` | 查询运营分析状态和结果 |
+| `GET` | `/api/executions/{runId}` | 查询统一执行运行摘要 |
+| `GET` | `/api/executions/{runId}/events` | 订阅统一执行 SSE |
+
+### 9.2 运维与演示 API
+
+| 方法 | 路径 | 作用 |
+| --- | --- | --- |
+| `GET` | `/api/operations/capabilities` | 返回知识、客服、分析和专家协作能力状态 |
+| `GET` | `/api/operations/metrics` | 返回工作流、客服、知识、反馈和审计计数 |
+| `GET/POST/PATCH` | `/api/knowledge[/{documentId}/active]` | 管理知识元数据和启停状态 |
+| `GET/POST` | `/api/feedback` | 提交或查询枚举化反馈 |
+| `GET` | `/api/audit` | 查询脱敏审计记录 |
+| `POST` | `/api/demo/faults` | 注入一次性演示故障 |
+| `POST` | `/mcp` | 在显式启用时提供只读 MCP 工具 |
+
+## 10. 存储、配置与生产化边界
+
+### 10.1 当前存储
+
+当前实现的工作流快照、Graph checkpoint、统一执行事件、客服会话/工单、专家协作运行和反馈审计主要是进程内存储。RAG 使用进程内 `SimpleVectorStore`；运营分析的事实数据可来自独立 PostgreSQL，但分析运行状态本身仍由进程内 Store 管理。
+
+因此当前版本适合单进程演示和测试，不保证重启恢复、跨实例幂等或多实例事件一致性。
+
+### 10.2 主要配置
+
+| 配置 | 默认值 | 作用 |
+| --- | --- | --- |
+| `SPRING_AI_DASHSCOPE_ENABLED` | `true` | 注册告警模型、Agent、工具和工作流；离线演示通常显式设为 `false` |
+| `SMARTPARK_KNOWLEDGE_MODE` | `mock` | `mock` 关键词检索或 `rag` 进程内向量检索 |
+| `SMARTPARK_CUSTOMER_SERVICE_ANSWER_MODE` | `mock` | Mock 回答或 DashScope 结构化回答 |
+| `SMARTPARK_ANALYTICS_ENABLED` | `false` | 启用专用 PostgreSQL 只读分析链路 |
+| `SMARTPARK_ANALYTICS_DEMO_DATA_REFRESH_ENABLED` | `false` | 仅本地演示时刷新分析夹具时间窗口 |
+| `SMARTPARK_MCP_ENABLED` | `false` | 启用只读 MCP Server |
+| `SMARTPARK_EXPERT_TIMEOUT` | `15s` | 单个专家分支超时 |
+| `SMARTPARK_EXPERT_RUN_TIMEOUT` | `40s` | 专家协作总运行超时 |
+| `SMARTPARK_EXPERT_MAX_PARALLEL` | `3` | 专家分支和运行队列的并行上限 |
+
+Compose 默认栈以 Mock/离线模式运行；analytics overlay 才显式启用独立 PostgreSQL 分析数据库。真实 DashScope、RAG 和分析链路需要分别配置凭据、网络和数据源。
+
+### 10.3 生产化替换项
+
+生产接入至少需要：
+
+- 用持久化工作流存储和 Graph checkpoint 替换内存执行状态。
+- 为工作流、审批、工单、客服请求和分析恢复建立跨实例唯一约束及幂等机制。
+- 用持久化事件总线/事件存储替换进程内事件流，并设计事件序号和重放策略。
+- 用 PostgreSQL/pgvector、Redis 或其他持久化知识库替换 `SimpleVectorStore`，补齐切片、导入、版本和索引治理。
+- 用真实告警、设备、能耗、安防和工单平台适配器替换 Mock，并在端口层处理超时、重试、错误映射和审计。
+- 用生产身份认证、细粒度授权、租户隔离和密钥管理替换 `X-Demo-Role` 与环境变量演示方案。
+- 为分析数据库、MCP 和安防数据增加网络隔离、访问控制、审计和合规策略。
+
+## 11. 测试与验证策略
+
+测试按边界组织：
+
+- `model`：领域不变量、序列化和脱敏模型。
+- `adapter.mock`、`adapter.rag`、`adapter.mcp`：数据、检索、MCP 输出和错误边界。
+- `agent`、`tool`：提示词契约、工具列表、结构化输出和只读错误结果。
+- `workflow`：告警风险门禁、审批恢复、幂等、失败恢复和客服并发。
+- `analytics`：指标目录、澄清、SQL AST/计划/成本安全、只读执行和结果总结约束。
+- `collaboration`：动态选专家、并行分支、证据绑定、超时和汇总校验。
+- `execution`、`web`：事件序号、终态关闭、SSE、DTO 和脱敏。
+- `architecture`：依赖方向、能力包和安全边界。
+- `integration`：显式配置时验证真实 DashScope 或 PostgreSQL 连接。
+
+Windows PowerShell 运行后端测试：
 
 ```powershell
 .\mvnw.cmd test
 ```
 
-真实 DashScope 测试需要配置 `AI_DASHSCOPE_API_KEY`，否则仅运行 Mock 和离线测试。
+前端验证：
 
-## 10. 关键设计决策
+```powershell
+Set-Location ui
+npm ci
+npm run build
+```
 
-1. **工作流负责副作用，Agent 负责判断。** Agent 可以读取事实并提出诊断，但不能直接创建工单。
-2. **端口隔离外部系统。** 业务流程不绑定 Mock、数据库或具体厂商 API。
-3. **高风险默认人工确认。** 风险高、置信度低或证据为空时不自动创建工单。
-4. **状态和事件分离。** 状态用于查询当前结果，事件用于展示流程进度和审计轨迹。
-5. **输出默认脱敏。** 外部 API 保留流程跟踪所需字段，隐藏诊断、审批和工单业务内容。
-6. **当前实现优先可测试性。** 内存存储和固定 Mock 数据降低学习和测试成本，生产化时通过端口和存储接口替换。
-7. **客服默认保守转人工。** 无法识别意图或知识不足时不返回泛化答复；报修和未知问题创建人工客服工单。
-8. **客服请求具备有限生命周期和幂等约束。** 演示环境使用有界 TTL 内存存储，生产环境必须替换为跨实例持久化实现。
+默认测试不访问外网，也不需要真实 API Key。真实模型连通性测试必须显式开启，并且不能把密钥写入仓库。
+
+## 12. 关键设计决策
+
+1. **工作流负责副作用，Agent 负责判断。** 读写边界清晰，风险门禁之后才允许工单写入。
+2. **端口隔离外部系统。** Mock、数据库和第三方平台可以替换，不把协议细节带入业务流程。
+3. **证据不足默认保守。** 高风险、低置信度、无知识证据或不支持的客服问题不会静默生成结果。
+4. **分析 SQL 默认不可信。** 目录、AST、计划、参数、成本和只读执行构成多道安全门。
+5. **统一事件服务于可解释性。** 不同业务链路共享 runId、事件格式和前端执行轨迹，同时保留旧告警接口兼容层。
+6. **对外输出默认脱敏。** 外部只能看到流程所需的安全摘要，敏感业务正文不进入公开 DTO、MCP 或事件。
+7. **演示能力与生产能力分开。** 内存存储、Mock 适配器、演示角色和默认关闭的可选链路降低本地体验成本，但不被当作生产保证。
