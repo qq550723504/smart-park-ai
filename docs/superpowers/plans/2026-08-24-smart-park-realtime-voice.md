@@ -28,18 +28,18 @@
 
 ## Task 1：定义可验证的协议与状态机
 
-- [ ] 先写 `VoiceSessionStateMachineTest.java`，覆盖：
+- [x] 先写 `VoiceSessionStateMachineTest.java`，覆盖：
 
   - `IDLE -> LISTENING -> ASR_FINALIZED -> REASONING/TOOL_CALLING -> ANSWER_STREAMING -> SPEAKING -> IDLE`；
   - `START_INPUT` 在 SPEAKING 时先中断再 LISTENING；
   - 非法二进制帧/控制帧顺序拒绝；
   - ERROR 可回到 IDLE；CLOSED 不可恢复。
 
-- [ ] 定义 client controls `START_INPUT|COMMIT_INPUT|INTERRUPT_OUTPUT|CLOSE_SESSION`；server frames `SESSION_STATE|ASR_PARTIAL|ASR_FINAL|TOOL_EVENT|ANSWER_DELTA|AUDIO_CHUNK|ERROR`。所有 JSON 帧含 `sessionId`、`messageId`、`sequence`。
+- [x] 定义 client controls `START_INPUT|COMMIT_INPUT|INTERRUPT_OUTPUT|CLOSE_SESSION`；server frames `SESSION_STATE|ASR_PARTIAL|ASR_FINAL|TOOL_EVENT|ANSWER_DELTA|AUDIO_CHUNK|ERROR`。所有 JSON 帧含 `sessionId`、`messageId`、`sequence`。
 
-- [ ] 实现纯 Java `VoiceSessionStateMachine`，不含网络和厂商 SDK。
+- [x] 实现纯 Java `VoiceSessionStateMachine`，不含网络和厂商 SDK。
 
-- [ ] 验证并提交：
+- [x] 验证并提交：
 
 ```powershell
 .\mvnw.cmd -B -Dtest=VoiceSessionStateMachineTest,VoiceProtocolTest test
@@ -49,13 +49,13 @@ git commit -m "feat: define realtime voice session protocol"
 
 ## Task 2：建立音频格式与内存边界
 
-- [ ] 写 `AudioFrameValidatorTest.java`，覆盖唯一接受的 PCM 规格、单帧字节上限、累计 10 秒上限、空音频、过快发送、状态不匹配；断言对象不保留完成 turn 的原始 byte[]。
+- [x] 写 `AudioFrameValidatorTest.java`，覆盖唯一接受的 PCM 规格、单帧字节上限、累计 10 秒上限、空音频、过快发送、状态不匹配；断言对象不保留完成 turn 的原始 byte[]。
 
-- [ ] 实现 `AudioFormatSpec(sampleRate=16000, channels=1, sampleSizeBits=16)`、frame validator 和仅内存 ring buffer；COMMIT 后把 buffer 所有权交给 ASR 并清零引用。
+- [x] 实现 `AudioFormatSpec(sampleRate=16000, channels=1, sampleSizeBits=16)`、frame validator 和仅内存 ring buffer；COMMIT 后把 buffer 所有权交给 ASR 并清零引用。
 
-- [ ] 在日志捕获测试中断言音频 base64/byte 内容不出现。
+- [x] 在日志捕获测试中断言音频 base64/byte 内容不出现。
 
-- [ ] 验证并提交：
+- [x] 验证并提交：
 
 ```powershell
 .\mvnw.cmd -B -Dtest=AudioFrameValidatorTest,VoiceAudioPrivacyTest test
