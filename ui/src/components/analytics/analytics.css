@@ -25,6 +25,30 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+.analytics-presets {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  color: #6b8581;
+  font-size: 11px;
+}
+.analytics-presets button {
+  border: 1px solid #b8d8d1;
+  border-radius: 999px;
+  background: #f3faf8;
+  color: #28776f;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.analytics-presets button:hover:not(:disabled) {
+  border-color: #087f78;
+  background: #e5f5f1;
+}
+.analytics-presets button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .analytics-error {
   margin: 0;
   padding: 10px 12px;

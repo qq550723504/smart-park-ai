@@ -32,6 +32,27 @@ describe('OperationsAnalysisPage', () => {
     wrapper.unmount()
   })
 
+  it('fills the question input when a recommended question is clicked', async () => {
+    const wrapper = mount(OperationsAnalysisPage)
+    const presets = wrapper.findAll('[aria-label="推荐问题"] button')
+
+    expect(wrapper.find('[aria-label="推荐问题"]').attributes('role')).toBe('group')
+    expect(presets.map((preset) => preset.text())).toEqual([
+      '能耗总量',
+      '各楼宇能耗对比',
+      '告警数量',
+      '高风险告警数量',
+      '停车进场量',
+      '设备离线数',
+    ])
+
+    await presets[1].trigger('click')
+
+    expect((wrapper.find('[aria-label="分析问题"]').element as HTMLInputElement).value)
+      .toBe('各楼宇能耗对比')
+    wrapper.unmount()
+  })
+
   it('shows real result table, row count and summary after completion', async () => {
     let polls = 0
     handler = (url, init) => {
