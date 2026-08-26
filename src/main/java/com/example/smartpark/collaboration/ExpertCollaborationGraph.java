@@ -12,6 +12,8 @@ import com.example.smartpark.execution.model.ExecutionEventType;
 import com.example.smartpark.execution.model.ExecutionScenario;
 import com.example.smartpark.execution.model.ExecutionStage;
 import com.example.smartpark.execution.model.ExecutionStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -30,6 +32,7 @@ import java.util.concurrent.RejectedExecutionException;
 
 /** Dynamic fan-out runtime. Only selected experts receive work and selected branches execute concurrently. */
 public final class ExpertCollaborationGraph {
+    private static final Logger log = LoggerFactory.getLogger(ExpertCollaborationGraph.class);
     private final Map<ExpertDomain, Expert> experts;
     private final Executor executor;
     private final Duration expertTimeout;
@@ -137,6 +140,8 @@ public final class ExpertCollaborationGraph {
     private ExpertFinding invoke(ExpertDomain domain, String assignment, UUID runId) {
         try { return experts.get(domain).analyze(assignment, runId); }
         catch (RuntimeException ex) {
+            log.warn("Expert branch failed: runId={}, domain={}, exceptionType={}",
+                    runId, domain, ex.getClass().getName());
             return failed(domain, "failed to analyze expert assignment");
         }
     }

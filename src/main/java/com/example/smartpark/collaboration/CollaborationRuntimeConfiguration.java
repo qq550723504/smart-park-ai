@@ -105,10 +105,10 @@ public class CollaborationRuntimeConfiguration {
         if (model == null || graph == null) return null;
         return new ExpertCollaborationService(
                 question -> planner.parseAndValidate(question, modelText(model,
-                        "You are the park collaboration supervisor. Return only JSON with normalizedQuestion, selectedDomains, assignments, selectionReason. Select only domains required by the question.", question)),
+                        "You are the park collaboration supervisor. Return only JSON with normalizedQuestion, selectedDomains, assignments, selectionReason. The only allowed domain literals are exactly ENERGY, DEVICE, SECURITY. Never output entity types, device IDs, or event IDs such as power, equipment, DEV-ENERGY-001, or SEC-ACCESS-001 as a domain. Select only domains required by the question.", question)),
                 graph,
                 (plan, findings) -> synthesizer.parseAndValidate(modelText(model,
-                        "You are a tool-free supervisor. Return only JSON with status, selectedDomains, evidenceRefs, confidence, uncertainties. Select only SUPPORTED findings and copy only their evidence references. Do not write a conclusion; the service derives it verbatim from selected findings.",
+                        "You are a tool-free supervisor. Return only JSON with status, selectedDomains, evidenceRefs, confidence, uncertainties. The status must be exactly SUPPORTED, INSUFFICIENT_EVIDENCE, or FAILED. If status is SUPPORTED, select every SUPPORTED finding and copy only its evidence references. If status is INSUFFICIENT_EVIDENCE or FAILED, selectedDomains and evidenceRefs must both be empty and confidence must be 0. Do not write a conclusion; the service derives it verbatim from selected findings.",
                         "plan=" + plan + "\nfindings=" + findings), plan, findings),
                 new CollaborationRunStore(), events, runExecutor, properties.getRunTimeout(), Clock.systemUTC());
     }
@@ -126,7 +126,7 @@ public class CollaborationRuntimeConfiguration {
                 EvidenceLedger observed = new EvidenceLedger();
                 ToolCallback[] callbacks = audited(toolSet.callbacks(), observed, events, runId);
                 String response = modelTextWithTools(model,
-                        "You are the " + domain.name() + " park expert. Analyze only your assigned domain. Return only JSON with domain, status, conclusion, evidenceRefs, confidence, nextChecks. Cite evidence references ONLY by copying the [[evidence:...]] markers returned with each successful tool result; never invent or reuse a marker from another call.",
+                        "You are the " + domain.name() + " park expert. Analyze only your assigned domain. Return only JSON with domain, status, conclusion, evidenceRefs, confidence, nextChecks. The domain must be exactly " + domain.name() + ". The status must be exactly one of SUPPORTED, INSUFFICIENT_EVIDENCE, FAILED; never use workflow states such as IN_PROGRESS or custom labels such as NO_ASSOCIATION_FOUND. Put a negative result in conclusion and keep the business status as SUPPORTED only when the cited tool result supports it. Cite evidence references ONLY by copying the [[evidence:...]] markers returned with each successful tool result; never invent or reuse a marker from another call.",
                         assignment, callbacks);
                 ExpertFinding finding = new ExpertFindingParser().parse(response, domain);
                 return new ExpertFindingValidator().validateWithObservations(

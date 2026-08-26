@@ -24,4 +24,20 @@ class ExpertFindingParserTest {
                 """, ExpertDomain.ENERGY)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> parser.parse("{}", ExpertDomain.ENERGY)).isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test void acceptsTheExplicitParkDomainAlias() {
+        var finding = parser.parse("""
+                {"domain":"DEVICE PARK","status":"INSUFFICIENT_EVIDENCE","conclusion":"x","evidenceRefs":[],"confidence":0,"nextChecks":[]}
+                """, ExpertDomain.DEVICE);
+
+        assertThat(finding.domain()).isEqualTo(ExpertDomain.DEVICE);
+    }
+
+    @Test void clearsConfidenceForNonSupportedFindings() {
+        var finding = parser.parse("""
+                {"domain":"SECURITY","status":"INSUFFICIENT_EVIDENCE","conclusion":"x","evidenceRefs":[],"confidence":0.9,"nextChecks":[]}
+                """, ExpertDomain.SECURITY);
+
+        assertThat(finding.confidence()).isZero();
+    }
 }

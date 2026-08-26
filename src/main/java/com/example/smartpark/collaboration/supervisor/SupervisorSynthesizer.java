@@ -37,10 +37,12 @@ public final class SupervisorSynthesizer {
             JsonNode root = JSON.readTree(modelJson);
             if (root == null || !root.isObject()) throw new IllegalArgumentException("synthesis must be a JSON object");
             FindingStatus status = FindingStatus.valueOf(required(root, "status").toUpperCase());
-            Set<ExpertDomain> selectedDomains = domains(root.get("selectedDomains"));
-            if (!plan.selectedDomains().containsAll(selectedDomains)) {
+            Set<ExpertDomain> modelSelectedDomains = domains(root.get("selectedDomains"));
+            if (!plan.selectedDomains().containsAll(modelSelectedDomains)) {
                 throw new IllegalArgumentException("synthesis selected a domain outside the supervisor plan");
             }
+            Set<ExpertDomain> selectedDomains = status == FindingStatus.SUPPORTED
+                    ? modelSelectedDomains : Set.of();
             double modelConfidence = root.path("confidence").asDouble(Double.NaN);
             if (!Double.isFinite(modelConfidence) || modelConfidence < 0 || modelConfidence > 1) {
                 throw new IllegalArgumentException("confidence must be between 0 and 1");
@@ -53,9 +55,18 @@ public final class SupervisorSynthesizer {
                     .min()
                     .orElse(0.0)
                     : 0.0;
+            List<String> uncertainties = strings(root.get("uncertainties"));
+            if (uncertainties.isEmpty() && safeFindings.stream()
+                    .anyMatch(finding -> finding.status() != FindingStatus.SUPPORTED)) {
+                uncertainties = safeFindings.stream()
+                        .filter(finding -> finding.status() != FindingStatus.SUPPORTED)
+                        .sorted(Comparator.comparing(ExpertFinding::domain))
+                        .map(finding -> finding.domain() + ": " + finding.conclusion())
+                        .toList();
+            }
             Synthesis synthesis = new Synthesis(
-                    status, conclusion, strings(root.get("evidenceRefs")),
-                    derivedConfidence, strings(root.get("uncertainties")));
+                    status, conclusion, status == FindingStatus.SUPPORTED ? strings(root.get("evidenceRefs")) : List.of(),
+                    derivedConfidence, uncertainties);
             return validator.validate(synthesis, safeFindings, selectedDomains);
         } catch (RuntimeException ex) {
             throw ex;
