@@ -377,6 +377,7 @@ $env:AI_DASHSCOPE_API_KEY = [System.Net.NetworkCredential]::new('', $secureDashS
 ```
 
 - [详细架构说明](docs/architecture.md)
+- [客户版能力展示](docs/customer-capabilities.md)
 - [前端开发说明](ui/README.md)
 - [设计与实施记录](docs/superpowers/)
 
