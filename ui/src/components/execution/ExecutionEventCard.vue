@@ -35,6 +35,15 @@ function statusLabel(status: string) {
   return statusLabels[status] ?? status
 }
 
+function formatRange(payload: { fromInclusive: string | null; toExclusive: string | null }) {
+  try {
+    const fmt = (iso: string) => new Date(iso).toLocaleString('zh-CN', { hour12: false })
+    return `${fmt(payload.fromInclusive ?? '')} ~ ${fmt(payload.toExclusive ?? '')}`
+  } catch {
+    return `${payload.fromInclusive ?? ''} ~ ${payload.toExclusive ?? ''}`
+  }
+}
+
 function timeLabel(timestamp: string) {
   try {
     return new Date(timestamp).toLocaleTimeString('zh-CN', { hour12: false })
@@ -97,6 +106,14 @@ function timeLabel(timestamp: string) {
     <div v-else-if="props.event.displayPayload?.payloadType === 'AUDIO'" class="payload payload-audio">
       <span>语音状态：{{ props.event.displayPayload.state }}</span>
       <span v-if="props.event.displayPayload.durationMs != null">时长 {{ props.event.displayPayload.durationMs }}ms</span>
+    </div>
+
+    <div v-else-if="props.event.displayPayload?.payloadType === 'TIME_RANGE'" class="payload payload-time-range">
+      <strong>时间范围（{{ props.event.displayPayload.empty ? '空' : props.event.displayPayload.status === 'PARSED' ? '已指定' : '未指定' }}）</strong>
+      <span v-if="!props.event.displayPayload.empty && props.event.displayPayload.fromInclusive">
+        {{ formatRange(props.event.displayPayload) }}
+      </span>
+      <span>{{ props.event.displayPayload.explanation }}</span>
     </div>
 
     <div v-else-if="props.event.displayPayload?.payloadType === 'ERROR'" class="payload payload-error">

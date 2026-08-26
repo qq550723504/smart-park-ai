@@ -17,6 +17,7 @@ public sealed interface DisplayPayload
                 DisplayPayload.ExpertHandoffPayload,
                 DisplayPayload.SqlPayload,
                 DisplayPayload.ChartPayload,
+                DisplayPayload.TimeRangePayload,
                 DisplayPayload.AudioPayload,
                 DisplayPayload.ErrorPayload {
 
@@ -75,6 +76,17 @@ public sealed interface DisplayPayload
             Objects.requireNonNull(safeSql, "safeSql");
             parameterNames = List.copyOf(Objects.requireNonNullElse(parameterNames, List.of()));
             Objects.requireNonNull(validationStatus, "validationStatus");
+        }
+    }
+
+    /** 用户可见的时间范围与来源；只含安全字段，不含任何解析器内部信息。 */
+    record TimeRangePayload(String status, String fromInclusive, String toExclusive,
+                            String source, String explanation, boolean empty)
+            implements DisplayPayload {
+        public TimeRangePayload {
+            Objects.requireNonNull(status, "status");
+            Objects.requireNonNull(source, "source");
+            explanation = Objects.requireNonNullElse(explanation, "");
         }
     }
 
