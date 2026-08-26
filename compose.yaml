@@ -1,0 +1,61 @@
+services:
+  analytics-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${SMARTPARK_ANALYTICS_DB_NAME:-smartpark_analytics}
+      POSTGRES_USER: smartpark_analytics_admin
+      # Local Mock/offline demo only. The analytics override replaces this with
+      # password authentication before it enables the analytics profile.
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - analytics-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smartpark_analytics_admin -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      SPRING_AI_DASHSCOPE_ENABLED: "false"
+      SMARTPARK_ANALYTICS_ENABLED: "false"
+      SMARTPARK_ANALYTICS_DEMO_DATA_REFRESH_ENABLED: "false"
+      SMARTPARK_ANALYTICS_DB_URL: jdbc:postgresql://analytics-postgres:5432/${SMARTPARK_ANALYTICS_DB_NAME:-smartpark_analytics}
+      SMARTPARK_ANALYTICS_DB_ADMIN_USER: smartpark_analytics_admin
+      SMARTPARK_ANALYTICS_DB_USER: smartpark_analytics_ro
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      analytics-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:8080/api/operations/capabilities >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    environment:
+      VITE_API_PROXY_TARGET: http://backend:8080
+    ports:
+      - "127.0.0.1:5173:5173"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:5173').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 10s
+
+volumes:
+  analytics-postgres-data:

@@ -2,7 +2,7 @@
 
 这是一个基于 Spring Boot 4、Spring AI Alibaba 2.0 和 Vue 3 的智慧园区示例项目。它把告警处置、能耗分析、安防事件复核、园区客服、知识管理和运营审计串成可运行的垂直切片。
 
-> **版本与真实链路要求：** 当前基线为 Spring Boot `4.0.0` + Spring AI `2.0.0-M1` + Spring AI Alibaba `2.0.0-M1.1`，属于 milestone 预发布版本。运行时只走在线真实链路，不提供 Mock/离线模型降级路径：体验告警工作流等真实模型能力时必须配置有效的 DashScope API Key。默认自动化测试不访问外网。
+> **版本与真实链路要求：** 当前基线为 Spring Boot `4.0.0` + Spring AI `2.0.0-M1` + Spring AI Alibaba `2.0.0-M1.1`，属于 milestone 预发布版本。默认 Compose 栈以 Mock/离线模式运行；体验告警工作流等在线真实模型能力时，必须显式启用 DashScope 并配置有效的 API Key。默认自动化测试不访问外网。
 
 项目默认使用内存 Mock 数据，适合本地体验和架构学习。告警工作流可以接入 DashScope `qwen-plus`；客服检索与回答则可以分别在 Mock 和 DashScope/RAG 实现之间切换。
 
@@ -61,7 +61,7 @@ SPRING_AI_DASHSCOPE_ENABLED=false ./mvnw spring-boot:run
 
 #### 方式 B：启动完整告警工作流
 
-完整模式会调用 DashScope `qwen-plus`。密钥只应放在当前进程的 `AI_DASHSCOPE_API_KEY` 环境变量中，不要写入源码、`.env`、命令行参数或 Git 历史。
+完整模式会调用 DashScope `qwen-plus`。密钥只应通过当前进程的 `AI_DASHSCOPE_API_KEY` 环境变量传入，不要写入源码、`.env`、命令行参数或 Git 历史。
 
 Windows PowerShell：
 
@@ -120,6 +120,54 @@ curl -X POST "http://localhost:8080/api/alerts/ALT-TEMP-001/workflows"
 curl "http://localhost:8080/api/workflows/replace-with-workflow-id"
 ```
 
+## Docker Compose 本地演示
+
+以下 Compose 配置仅用于本地演示，默认使用 Mock/离线能力，不需要 API Key。它不提供生产级认证、租户隔离或密钥管理；`X-Demo-Role` 仅是演示授权边界，不能作为生产认证方案。
+
+直接启动默认栈：
+
+```powershell
+docker compose --env-file .env.example up --build
+```
+
+默认栈启动 backend、frontend 和 analytics PostgreSQL 容器。前端入口为 <http://localhost:5173>；容器内 Vite 会把 `/api` 代理到 backend，因此可用 <http://localhost:5173/api/operations/capabilities> 查看当前能力。默认模式下 backend 暴露的同一 capabilities endpoint 也可直接通过 <http://localhost:8080/api/operations/capabilities> 访问。
+
+默认 Compose 端口只绑定本机回环：`127.0.0.1:5173:5173` 和 `127.0.0.1:8080:8080`。因此访问 URL 仍然是 <http://localhost:5173> 与 <http://localhost:8080>，但不会监听局域网或公网地址。
+
+常用生命周期命令：
+
+```powershell
+docker compose ps
+docker compose logs -f
+docker compose down
+```
+
+默认栈使用命名卷 `analytics-postgres-data` 保存离线演示库。`docker compose down` 不会删除它，因此普通停止/清理后其中的数据仍会保留；只有在明确需要重置默认离线演示数据时，才使用 `docker compose down -v`。
+
+### 显式启用 analytics
+
+analytics 使用独立 PostgreSQL 数据库；运行时查询角色固定为只读的 `smartpark_analytics_ro`，管理员角色只用于迁移和演示数据刷新。不要把真实值写进 README、源码或 Git 历史。
+
+在本地未跟踪且已被 `.gitignore` 排除的 `.env` 中填写以下三个必需变量，仅供本地演示，绝不提交；然后显式加载 analytics 覆盖文件和 profile：
+
+| 变量 | 用途 |
+| --- | --- |
+| `AI_DASHSCOPE_API_KEY` | 启用 DashScope 在线模型能力所需的 API Key |
+| `SMARTPARK_ANALYTICS_DB_ADMIN_PASSWORD` | analytics 独立 PostgreSQL 的管理员密码，仅用于迁移和演示数据刷新 |
+| `SMARTPARK_ANALYTICS_DB_RO_PASSWORD` | `smartpark_analytics_ro` 的只读运行时密码 |
+
+```powershell
+docker compose -f compose.yaml -f compose.analytics.yaml --profile analytics up --build
+```
+
+analytics overlay 会把 PostgreSQL 数据目录切换到独立命名卷 `analytics-postgres-analytics-data`，因此从默认栈切换到 analytics 栈时不需要手动修复旧卷上的认证方式。`docker compose down` 同样只会停止容器而保留该卷；如需重置 analytics 本地演示数据库，请运行：
+
+```powershell
+docker compose -f compose.yaml -f compose.analytics.yaml --profile analytics down -v
+```
+
+analytics 覆盖配置会将 PostgreSQL 改为密码认证并显式开启 `SMARTPARK_ANALYTICS_DEMO_DATA_REFRESH_ENABLED=true`，让持久化本地演示库中的 V1 时间窗口夹具按小时重新锚定到当前时间。这个自动刷新只适用于本地演示，不适用于真实数据或生产环境；默认栈中的 `SMARTPARK_ANALYTICS_DEMO_DATA_REFRESH_ENABLED=false` 保持不变。默认栈中为便于无凭据离线演示而使用的 `trust` 认证仅限本地演示，不能作为生产部署建议。
+
 ## 运行模式与配置
 
 项目把模型、知识检索和客服回答拆成三个独立开关：
@@ -132,7 +180,7 @@ curl "http://localhost:8080/api/workflows/replace-with-workflow-id"
 | `SMARTPARK_KNOWLEDGE_MIN_SIMILARITY_SCORE` | `0.65` | RAG 结果最低相似度 |
 | `SMARTPARK_CUSTOMER_MINIMUM_KNOWLEDGE_SCORE` | `0.70` | 客服接受知识结果的最低分数 |
 | `SMARTPARK_ANALYTICS_ENABLED` | `false` | 是否启用真实只读 PostgreSQL 分析链路 |
-| `SMARTPARK_ANALYTICS_DEMO_DATA_REFRESH_ENABLED` | `false` | 仅在持久化演示库中把 V1 的时间窗口夹具（能耗、告警、设备快照、停车）重新锚定到当前时间；真实数据必须保持关闭 |
+| `SMARTPARK_ANALYTICS_DEMO_DATA_REFRESH_ENABLED` | `false` | 默认关闭；analytics overlay 会把它显式覆盖为 `true`，仅用于持久化本地演示库按小时重锚定 V1 的时间窗口夹具（能耗、告警、设备快照、停车）。真实数据必须保持关闭 |
 | `SMARTPARK_ANALYTICS_DB_URL` | 空 | 专用分析数据库 JDBC URL；不能复用业务数据库 |
 | `SMARTPARK_ANALYTICS_DB_ADMIN_USER` | 空 | 仅供 Flyway 和演示快照刷新使用的对象所有者账号 |
 | `SMARTPARK_ANALYTICS_DB_ADMIN_PASSWORD` | 空 | 分析数据库对象所有者密码 |

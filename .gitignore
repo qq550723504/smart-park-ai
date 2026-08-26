@@ -13,3 +13,6 @@ Thumbs.db
 out/
 .superpowers/
 .docs/superpowers/
+.env
+.env.*
+!.env.example
