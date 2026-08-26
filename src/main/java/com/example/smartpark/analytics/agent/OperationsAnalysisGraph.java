@@ -68,7 +68,8 @@ public class OperationsAnalysisGraph {
                     + "(?:今天|今日|昨天|昨日|前天)|上周(?:[一二三四五六日天末])?|(?:本周|本月|上月)");
     private static final java.util.regex.Pattern EXPLICIT_TIME_HINT = java.util.regex.Pattern.compile(
             "(?:上上周|下周|下月|上上月|本季度|上季度|下季度|季度|今年|去年|本年|上半年|下半年|"
-                    + "明天|后天|未来|(?:过去|最近|近)(?:一|一个|\\d+)(?:天|日|周|星期|月|个月|季度)|"
+                    + "明天|后天|未来|(?:过去|最近|近)(?:[一二两三四五六七八九十百千万]+|\\d+)"
+                    + "(?:天|日|周|星期|月|个月|季度)|(?:\\d{4}年|\\d{1,2}月)|"
                     + "\\d{4}[-/.年]\\d{1,2}(?:[-/.月]\\d{1,2}日?)?|\\d{1,2}月\\d{1,2}日?)");
     private static final java.util.regex.Pattern TIME_EXPRESSION = java.util.regex.Pattern.compile(
             "(?:" + CALENDAR_DATE_RANGE.pattern() + "|"

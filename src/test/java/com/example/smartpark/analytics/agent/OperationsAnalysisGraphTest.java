@@ -780,6 +780,21 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
+    void rejectsUnparsedExplicitMonthYearAndChineseDurationInsteadOfUsingDefaultLookback() {
+        for (String question : List.of("8月能耗", "2026年能耗", "过去两周能耗")) {
+            modelClient.reset(
+                    new AnalyticsModelClient.QuestionUnderstanding(question, List.of("能耗"), List.of()),
+                    List.of(GOOD_TOTAL_SQL), null, null);
+
+            var outcome = graph.run(UUID.randomUUID(), question);
+
+            assertThat(outcome.outcome()).as(question)
+                    .isEqualTo(OperationsAnalysisGraph.RunOutcome.FAILED);
+            assertThat(modelClient.generateSqlInvocations()).as(question).isZero();
+        }
+    }
+
+    @Test
     void rejectsMultipleRelativeTimeRangesInsteadOfSelectingTheFirstOne() {
         String question = "对比昨天和上周的能耗";
         modelClient.reset(
