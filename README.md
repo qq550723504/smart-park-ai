@@ -160,11 +160,15 @@ analytics 使用独立 PostgreSQL 数据库；运行时查询角色固定为只�
 docker compose -f compose.yaml -f compose.analytics.yaml --profile analytics up --build
 ```
 
-analytics overlay 会把 PostgreSQL 数据目录切换到独立命名卷 `analytics-postgres-analytics-data`，因此从默认栈切换到 analytics 栈时不需要手动修复旧卷上的认证方式。`docker compose down` 同样只会停止容器而保留该卷；如需重置 analytics 本地演示数据库，请运行：
+analytics overlay 会把 PostgreSQL 数据目录切换到独立命名卷 `analytics-postgres-analytics-data`，因此从默认栈切换到 analytics 栈时不需要手动修复旧卷上的认证方式。`docker compose down` 同样只会停止容器而保留该卷；如需重置 analytics 本地演示数据库，请先用不加载 analytics 凭据的基础 Compose 文件停止并删除容器，再显式删除 analytics 卷：
 
 ```powershell
-docker compose -f compose.yaml -f compose.analytics.yaml --profile analytics down -v
+docker compose -f compose.yaml down
+$projectName = if ($env:COMPOSE_PROJECT_NAME) { $env:COMPOSE_PROJECT_NAME } else { "springaialibaba" }
+docker volume rm "${projectName}_analytics-postgres-analytics-data"
 ```
+
+上面的命令只删除 `analytics-postgres-analytics-data`，不会删除默认栈的 `analytics-postgres-data`，也不会读取 `compose.analytics.yaml` 中的必需凭据变量。如果启动时使用了 `docker compose -p <project-name>`，请把 `$projectName` 替换为同一个项目名。
 
 analytics 覆盖配置会将 PostgreSQL 改为密码认证并显式开启 `SMARTPARK_ANALYTICS_DEMO_DATA_REFRESH_ENABLED=true`，让持久化本地演示库中的 V1 时间窗口夹具按小时重新锚定到当前时间。这个自动刷新只适用于本地演示，不适用于真实数据或生产环境；默认栈中的 `SMARTPARK_ANALYTICS_DEMO_DATA_REFRESH_ENABLED=false` 保持不变。默认栈中为便于无凭据离线演示而使用的 `trust` 认证仅限本地演示，不能作为生产部署建议。
 

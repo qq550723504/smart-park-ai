@@ -27,4 +27,12 @@ class CategoricalFilterVocabularyTest {
         assertThat(CategoricalFilterVocabulary.matchingCanonicalValues("status", "open status 告警数量"))
                 .containsExactly("OPEN");
     }
+
+    @Test
+    void canonicalizesCategoricalValuesAfterTrimming() {
+        assertThat(CategoricalFilterVocabulary.canonicalValue("status", " open "))
+                .isEqualTo("OPEN");
+        assertThat(CategoricalFilterVocabulary.canonicalValue("status", " 未处理 "))
+                .isEqualTo("OPEN");
+    }
 }
