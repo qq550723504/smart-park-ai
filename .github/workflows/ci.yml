@@ -47,5 +47,9 @@ jobs:
           cache-dependency-path: ui/package-lock.json
       - name: Install frontend dependencies
         run: npm ci
+      - name: Run frontend unit tests
+        run: npm run test:unit
+      - name: Verify responsive layout in headless Chrome
+        run: node scripts/verify-layout.mjs
       - name: Build frontend
         run: npm run build
