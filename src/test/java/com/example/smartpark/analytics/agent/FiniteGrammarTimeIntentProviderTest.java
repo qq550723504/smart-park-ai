@@ -73,4 +73,22 @@ class FiniteGrammarTimeIntentProviderTest {
         assertThat(provider.resolve("对比本月和去年能耗", NOW).status())
                 .isEqualTo(TimeIntentResult.Status.MULTIPLE);
     }
+
+    @Test
+    void rejectsIncompleteHalfUnitDurationsInsteadOfTruncatingThem() {
+        assertThat(provider.resolve("近一年半能耗", NOW).status())
+                .isEqualTo(TimeIntentResult.Status.UNSUPPORTED);
+        assertThat(provider.resolve("过去半年能耗", NOW).status())
+                .isEqualTo(TimeIntentResult.Status.UNSUPPORTED);
+    }
+
+    @Test
+    void acceptsRepeatedEquivalentRangesAsOneSharedConstraint() {
+        TimeIntentResult result = provider.resolve("本月能耗与本月基线偏差", NOW);
+
+        assertThat(result.status()).isEqualTo(TimeIntentResult.Status.PARSED);
+        assertThat(result.mentions()).hasSize(2);
+        assertThat(result.timeRange()).isEqualTo(new QueryPlan.TimeRange(
+                Instant.parse("2026-07-31T16:00:00Z"), NOW));
+    }
 }

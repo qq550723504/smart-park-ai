@@ -56,6 +56,7 @@ final class FiniteGrammarTimeIntentProvider implements TimeIntentProvider {
             "(?<![A-Za-z0-9_-])(?:今天|今日|昨天|昨日|前天|明天|后天|本周|上周|下周|"
                     + "本月|上月|下月|本季度|上季度|下季度|今年|本年|去年|上半年|下半年|"
                     + "上午|下午|晚上|凌晨|早上|中午|傍晚|"
+                    + "(?:半年|(?:过去|最近|近)(?:(?:[0-9]+|[一二两三四五六七八九十百千万]+)年半|半年))|"
                     + "(?:过去|最近|近)(?:[0-9]+|[一二两三四五六七八九十百千万]+)"
                     + "(?:个?小时|个?月|个?季度|个?年|周|星期|天|日)|"
                     + "\\d{1,2}(?:日|号))(?![A-Za-z0-9_-])");
@@ -84,16 +85,22 @@ final class FiniteGrammarTimeIntentProvider implements TimeIntentProvider {
             mentions.addAll(residualCues);
             return unsupported(mentions, "时间表达式包含未消费的限定词");
         }
-        if (candidates.size() > 1) {
-            return new TimeIntentResult(TimeIntentResult.Status.MULTIPLE, selectedMentions,
-                    null, null, "原始问题包含多个时间范围");
-        }
         try {
-            Parsed parsed = parse(candidates.get(0), now);
-            return parsed == null
-                    ? unsupported(selectedMentions, "时间表达式暂不支持")
-                    : new TimeIntentResult(TimeIntentResult.Status.PARSED, selectedMentions,
-                            parsed.intent(), parsed.range(), "");
+            List<Parsed> parsedCandidates = candidates.stream()
+                    .map(candidate -> parse(candidate, now))
+                    .toList();
+            if (parsedCandidates.stream().anyMatch(parsed -> parsed == null)) {
+                return unsupported(selectedMentions, "时间表达式暂不支持");
+            }
+            Parsed parsed = parsedCandidates.get(0);
+            boolean oneSharedRange = parsedCandidates.stream()
+                    .allMatch(candidate -> candidate.range().equals(parsed.range()));
+            if (parsedCandidates.size() > 1 && !oneSharedRange) {
+                return new TimeIntentResult(TimeIntentResult.Status.MULTIPLE, selectedMentions,
+                        null, null, "原始问题包含多个时间范围");
+            }
+            return new TimeIntentResult(TimeIntentResult.Status.PARSED, selectedMentions,
+                    parsed.intent(), parsed.range(), "");
         } catch (DateTimeException | NumberFormatException | ArithmeticException invalidExpression) {
             return unsupported(selectedMentions, "时间表达式无效");
         }
