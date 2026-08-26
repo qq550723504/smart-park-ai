@@ -52,7 +52,7 @@ class SpringAiAlibaba2CapabilityTest {
     }
 
     @Test
-    void enablesFlywayFromTheComposeAnalyticsEnvironment() throws IOException {
+    void keepsFlywayBoundToTheCanonicalAnalyticsProperty() throws IOException {
         String application = Files.readString(Path.of("src/main/resources/application.yml"));
 
         int flywayStart = application.indexOf("  flyway:");
@@ -60,8 +60,8 @@ class SpringAiAlibaba2CapabilityTest {
         String flyway = application.substring(flywayStart, autoconfigureStart);
 
         assertThat(flyway)
-                .as("Flyway must follow the same explicit analytics environment flag as the Compose profile")
-                .contains("enabled: ${SMARTPARK_ANALYTICS_ENABLED:false}");
+                .as("Flyway must follow the canonical smartpark.analytics.enabled property")
+                .contains("enabled: ${smartpark.analytics.enabled:false}");
     }
 
     @Test
@@ -72,6 +72,22 @@ class SpringAiAlibaba2CapabilityTest {
         assertThat(configuration)
                 .contains("Flyway.configure()")
                 .contains("flyway.migrate()");
+    }
+
+    @Test
+    void provisionsAnalyticsRoleOnlyAfterFlywayMigration() throws IOException {
+        String configuration = Files.readString(
+                Path.of("src/main/java/com/example/smartpark/analytics/AnalyticsConfiguration.java"));
+
+        int runnerStart = configuration.indexOf("analyticsRolePasswordProvisioner");
+        int migrationResolution = configuration.indexOf("analyticsFlywayProvider.getIfAvailable()", runnerStart);
+        int provisioning = configuration.indexOf("provisioner.provision(properties)", runnerStart);
+
+        assertThat(runnerStart).isGreaterThanOrEqualTo(0);
+        assertThat(configuration.substring(runnerStart))
+                .contains("ObjectProvider<Flyway> analyticsFlywayProvider");
+        assertThat(migrationResolution).isGreaterThanOrEqualTo(0);
+        assertThat(provisioning).isGreaterThan(migrationResolution);
     }
 
     @Test

@@ -99,7 +99,8 @@ public class AnalyticsConfiguration {
 
     @Bean
     org.springframework.boot.ApplicationRunner analyticsRolePasswordProvisioner(
-            AnalyticsProperties properties, AnalyticsRoleCredentialProvisioner provisioner) {
+            AnalyticsProperties properties, AnalyticsRoleCredentialProvisioner provisioner,
+            ObjectProvider<Flyway> analyticsFlywayProvider) {
         // Binds the configured read-only credential to the role created
         // password-less by V1 — via the single audited quoting point, never
         // through migration SQL interpolation. Runs at application startup and
@@ -107,6 +108,10 @@ public class AnalyticsConfiguration {
         // provisioned; an analytics instance must never advertise a broken
         // database boundary.
         return args -> {
+            // Resolve Flyway before touching the role created by V1. This keeps
+            // lazy-initialized deployments from provisioning against an
+            // unmigrated database; isolated wiring tests may omit Flyway.
+            analyticsFlywayProvider.getIfAvailable();
             properties.validateUsable();
             provisioner.provision(properties);
         };
