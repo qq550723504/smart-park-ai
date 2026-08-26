@@ -140,15 +140,15 @@ git commit -m "feat: expose realtime voice sessions"
 
 ## Task 7：浏览器采集、播放与中断
 
-- [ ] 先写 `pcm-player.spec.ts` 和 `useVoiceSession.spec.ts`，mock AudioContext/WebSocket，覆盖采集帧、commit、partial/final、音频顺序播放、麦克风点击中断、晚到块丢弃、连接错误。
+- [x] 先写 `pcm-player.spec.ts` 和 `useVoiceSession.spec.ts`，mock AudioContext/WebSocket，覆盖采集帧、commit、partial/final、音频顺序播放、麦克风点击中断、晚到块丢弃、连接错误。
 
-- [ ] 创建 AudioWorklet：麦克风 float32 重采样为 16k mono int16，每 20ms 发送；主线程不得用已弃用 ScriptProcessorNode。
+- [x] 创建 AudioWorklet：麦克风 float32 重采样为 16k mono int16，每 20ms 发送；主线程不得用已弃用 ScriptProcessorNode。
 
-- [ ] 创建 player：解码服务器约定格式、按 sequence 排队、cancel 立即 stop 当前 source 且清空队列。
+- [x] 创建 player：解码服务器约定格式、按 sequence 排队、cancel 立即 stop 当前 source 且清空队列。
 
-- [ ] `useVoiceSession` 只根据服务器状态驱动 UI；本地点击只发 control，不直接把状态伪设为成功。
+- [x] `useVoiceSession` 只根据服务器状态驱动 UI；本地点击只发 control，不直接把状态伪设为成功。
 
-- [ ] 验证并提交：
+- [x] 验证并提交：
 
 ```powershell
 Push-Location ui
