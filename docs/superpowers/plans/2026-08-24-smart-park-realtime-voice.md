@@ -161,13 +161,13 @@ git commit -m "feat: capture and play realtime park voice audio"
 
 ## Task 8：语音展台页面
 
-- [ ] 写 `VoiceAssistantPage.spec.ts`，覆盖麦克风权限、状态文案、实时识别文本、工具卡、流式回答、TTS 状态、中断、明确错误与重试。
+- [x] 写 `VoiceAssistantPage.spec.ts`，覆盖麦克风权限、状态文案、实时识别文本、工具卡、流式回答、TTS 状态、中断、明确错误与重试。
 
-- [ ] 实现页面：中央麦克风主控、实时转写、回答字幕与证据；右侧共享轨迹；不得展示 raw audio、prompt 或隐含工具参数。
+- [x] 实现页面：中央麦克风主控、实时转写、回答字幕与证据；右侧共享轨迹；不得展示 raw audio、prompt 或隐含工具参数。
 
-- [ ] `App.vue` 加“实时语音”入口和共享 runId；离开页面发送 CLOSE 并释放 MediaStream tracks。
+- [x] `App.vue` 加“实时语音”入口和共享 runId；离开页面发送 CLOSE 并释放 MediaStream tracks。
 
-- [ ] 验证并提交：
+- [x] 验证并提交：
 
 ```powershell
 Push-Location ui
