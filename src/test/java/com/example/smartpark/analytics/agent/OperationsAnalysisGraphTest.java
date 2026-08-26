@@ -739,6 +739,78 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
+    void supportsChineseCalendarDateRangesInsteadOfUsingDefaultLookback() {
+        String question = "2026年8月1日到2026年8月5日能耗";
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding(question, List.of("能耗"), List.of()),
+                List.of(GOOD_TOTAL_SQL),
+                new ChartSpec.Proposal("TABLE", "指定日期能耗", "energy_kwh", List.of(), "", "kWh"),
+                "共 1 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), question);
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().timeRange()).isEqualTo(new QueryPlan.TimeRange(
+                Instant.parse("2026-07-31T16:00:00Z"),
+                Instant.parse("2026-08-05T16:00:00Z")));
+    }
+
+    @Test
+    void rejectsUnsupportedExplicitTimePhraseInsteadOfUsingDefaultLookback() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("本季度能耗", List.of("能耗"), List.of()),
+                List.of(GOOD_TOTAL_SQL), null, null);
+
+        var outcome = graph.run(UUID.randomUUID(), "本季度能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.FAILED);
+        assertThat(modelClient.generateSqlInvocations()).isZero();
+    }
+
+    @Test
+    void rejectsUnsupportedRelativeTimePhraseInsteadOfUsingDefaultLookback() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("最近一个月能耗", List.of("能耗"), List.of()),
+                List.of(GOOD_TOTAL_SQL), null, null);
+
+        var outcome = graph.run(UUID.randomUUID(), "最近一个月能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.FAILED);
+        assertThat(modelClient.generateSqlInvocations()).isZero();
+    }
+
+    @Test
+    void rejectsMultipleRelativeTimeRangesInsteadOfSelectingTheFirstOne() {
+        String question = "对比昨天和上周的能耗";
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding(question, List.of("能耗"), List.of()),
+                List.of(GOOD_TOTAL_SQL), null, null);
+
+        var outcome = graph.run(UUID.randomUUID(), question);
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.FAILED);
+        assertThat(modelClient.generateSqlInvocations()).isZero();
+    }
+
+    @Test
+    void carriesServerDerivedTimeRangeIntoClarificationForResume() {
+        Instant modelRangeFrom = Instant.parse("2026-08-17T00:00:00Z");
+        Instant modelRangeTo = Instant.parse("2026-08-24T00:00:00Z");
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of(), List.of("请明确指标"),
+                        new AnalyticsModelClient.RequestedTimeRange(modelRangeFrom, modelRangeTo)),
+                List.of(), null, null);
+
+        var outcome = graph.run(UUID.randomUUID(), "上周能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.NEEDS_CLARIFICATION);
+        assertThat(outcome.understanding().requestedTimeRange()).isEqualTo(
+                new AnalyticsModelClient.RequestedTimeRange(
+                        Instant.parse("2026-08-16T16:00:00Z"),
+                        Instant.parse("2026-08-23T16:00:00Z")));
+    }
+
+    @Test
     void rejectsModelDimensionThatTheOriginalQuestionDidNotRequest() {
         modelClient.reset(
                 new AnalyticsModelClient.QuestionUnderstanding("总能耗", List.of("能耗"), List.of(),
