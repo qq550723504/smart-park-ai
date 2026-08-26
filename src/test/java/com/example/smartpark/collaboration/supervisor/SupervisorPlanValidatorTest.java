@@ -32,9 +32,15 @@ class SupervisorPlanValidatorTest {
     }
 
     @Test
-    void routesMeterEntityQuestionsToEnergy() {
-        assertThat(validator.expectedDomains("电表 MTR-1-1 当前读数是多少"))
-                .isEqualTo(Set.of(ExpertDomain.ENERGY));
+    void rejectsAnalyticsOnlyMeterIdentifiersFromCollaborationRouting() {
+        var plan = new com.example.smartpark.collaboration.model.SupervisorPlan(
+                "电表 MTR-1-1 当前读数是多少", Set.of(ExpertDomain.ENERGY),
+                Map.of(ExpertDomain.ENERGY, "电表 MTR-1-1 当前读数是多少"), "energy meter");
+
+        assertThat(validator.expectedDomains("电表 MTR-1-1 当前读数是多少")).isEmpty();
+        assertThatThrownBy(() -> validator.validate(plan))
+                .isInstanceOf(SupervisorPlanValidator.SupervisorPlanValidationException.class)
+                .hasMessageContaining("outside expert collaboration scope");
     }
 
     @Test
@@ -52,7 +58,7 @@ class SupervisorPlanValidatorTest {
     @Test
     void recognizesEnergySubtypeIdentifiersWithoutExtraEnergyKeywords() {
         assertThat(validator.expectedDomains("DEV-ENERGY-001 当前状态"))
-                .isEqualTo(Set.of(ExpertDomain.ENERGY));
+                .isEqualTo(Set.of(ExpertDomain.ENERGY, ExpertDomain.DEVICE));
     }
 
     @Test

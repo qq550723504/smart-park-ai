@@ -42,7 +42,7 @@ public final class CategoricalFilterVocabulary {
         if (vocabulary == null || question == null) return Set.of();
         Set<String> matches = new LinkedHashSet<>();
         vocabulary.forEach((term, canonical) -> {
-            if (matchesTerm(question, term) && !isNegatedTerm(question, term)) {
+            if (matchesTerm(dimension, question, term) && !isNegatedTerm(question, term)) {
                 matches.add(canonical);
             }
         });
@@ -66,11 +66,16 @@ public final class CategoricalFilterVocabulary {
                 .matcher(question).find();
     }
 
-    private static boolean matchesTerm(String question, String term) {
+    private static boolean matchesTerm(String dimension, String question, String term) {
         String normalized = question.toLowerCase(Locale.ROOT);
         if (isAsciiToken(term)) {
             if (Set.of("high", "medium", "low").contains(term)
                     && !matchesRiskContext(normalized, term)) {
+                return false;
+            }
+            if ("status".equals(dimension)
+                    && !matchesStatusContext(normalized, term)
+                    && !containsStatusMarker(normalized)) {
                 return false;
             }
             return Pattern.compile("(?<![A-Za-z0-9_])" + Pattern.quote(term)
@@ -87,14 +92,38 @@ public final class CategoricalFilterVocabulary {
                 .matcher(question).find();
     }
 
+    private static boolean matchesStatusContext(String question, String status) {
+        String statusContext = "(?i)(?<![A-Za-z0-9_])(?:status|state)\\s*[:=]?\\s*"
+                + Pattern.quote(status) + "(?![A-Za-z0-9_])"
+                + "|(?<![A-Za-z0-9_])" + Pattern.quote(status)
+                + "\\s+(?:status|state)(?![A-Za-z0-9_])"
+                + "|(?<![A-Za-z0-9_])" + Pattern.quote(status)
+                + "\\s*(?:状态|状态为)"
+                + "|(?:状态|状态为)\\s*[:=]?\\s*" + Pattern.quote(status)
+                + "(?![A-Za-z0-9_])";
+        return Pattern.compile(statusContext).matcher(question).find();
+    }
+
+    private static boolean containsStatusMarker(String question) {
+        return Pattern.compile("(?i)(?<![A-Za-z0-9_])(?:status|state)(?![A-Za-z0-9_])|状态")
+                .matcher(question).find();
+    }
+
     private static boolean isNegatedTerm(String question, String term) {
-        if (!isAsciiToken(term)) return false;
         String normalized = question.toLowerCase(Locale.ROOT);
-        var matcher = Pattern.compile("(?<![A-Za-z0-9_])" + Pattern.quote(term)
-                        + "(?![A-Za-z0-9_])", Pattern.CASE_INSENSITIVE).matcher(normalized);
+        String termPattern = isAsciiToken(term)
+                ? "(?<![A-Za-z0-9_])" + Pattern.quote(term) + "(?![A-Za-z0-9_])"
+                : Pattern.quote(term);
+        var matcher = Pattern.compile(termPattern, Pattern.CASE_INSENSITIVE).matcher(normalized);
         while (matcher.find()) {
             String before = normalized.substring(0, matcher.start()).stripTrailing();
-            if (before.endsWith("not") || before.endsWith("no")) return true;
+            if (isAsciiToken(term)) {
+                if (before.endsWith("not") || before.endsWith("no")) return true;
+            }
+            else if (Pattern.compile("(?:非|不是|不属于|不为|不含|不包括|排除)\\s*$")
+                    .matcher(before).find()) {
+                return true;
+            }
         }
         return false;
     }

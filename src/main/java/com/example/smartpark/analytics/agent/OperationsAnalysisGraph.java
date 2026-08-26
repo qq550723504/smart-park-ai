@@ -629,6 +629,12 @@ public class OperationsAnalysisGraph {
     private static QueryPlan.TimeRange expectedTimeRange(String question, Instant now) {
         java.util.regex.Matcher calendarRange = CALENDAR_DATE_RANGE.matcher(question);
         if (calendarRange.find()) {
+            int firstRangeEnd = calendarRange.end();
+            java.util.regex.Matcher additionalRange = CALENDAR_DATE_RANGE.matcher(question);
+            additionalRange.region(firstRangeEnd, question.length());
+            if (additionalRange.find()) {
+                throw new IllegalArgumentException("原始问题包含多个日期范围，当前查询计划不支持范围对比");
+            }
             LocalDate from = LocalDate.parse(calendarRange.group(1), DateTimeFormatter.ISO_LOCAL_DATE);
             LocalDate to = LocalDate.parse(calendarRange.group(2), DateTimeFormatter.ISO_LOCAL_DATE);
             if (to.isBefore(from)) {

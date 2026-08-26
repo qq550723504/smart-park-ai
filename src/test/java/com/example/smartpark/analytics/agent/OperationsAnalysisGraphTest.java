@@ -350,6 +350,21 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
+    void rejectsQuestionsWithMultipleExplicitCalendarRanges() {
+        String question = "对比 2026-08-01 到 2026-08-05 与 2026-08-10 到 2026-08-15 的能耗";
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding(question, List.of("能耗"), List.of()),
+                List.of(GOOD_TOTAL_SQL),
+                new ChartSpec.Proposal("TABLE", "能耗对比", "energy_kwh", List.of(), "", "kWh"),
+                "不应静默选择一个日期范围。");
+
+        var outcome = graph.run(UUID.randomUUID(), question);
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.FAILED);
+        assertThat(modelClient.generateSqlInvocations()).isZero();
+    }
+
+    @Test
     void preservesCategoricalStatusFilterWhenModelOmitsIt() {
         String question = "OPEN 状态的告警数量";
         String filteredAlertSql = """
