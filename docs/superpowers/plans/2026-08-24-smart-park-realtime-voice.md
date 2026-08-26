@@ -101,13 +101,13 @@ git commit -m "feat: answer park voice queries with evidence"
 
 ## Task 5：实现 streaming TTS 和可取消播放流
 
-- [ ] 定义 `StreamingTtsPort`，写测试覆盖 text delta 合并、首块、后续块、完成、供应商错误、cancel 后不再发块。
+- [x] 定义 `StreamingTtsPort`，写测试覆盖 text delta 合并、首块、后续块、完成、供应商错误、cancel 后不再发块。
 
-- [ ] 实现 `DashScopeStreamingTtsAdapter`，包装 `StreamingInputTextToSpeechModel`；只接收已校验 VoiceAnswer 的文本流。
+- [x] 实现 `DashScopeStreamingTtsAdapter`，包装 `StreamingInputTextToSpeechModel`；只接收已校验 VoiceAnswer 的文本流。
 
-- [ ] 中断使用 per-turn cancellation token；取消同时停止供应商订阅、清空待发送块并发布 `OUTPUT_INTERRUPTED`。晚到 callback 必须按 turnId 丢弃。
+- [x] 中断使用 per-turn cancellation token；取消同时停止供应商订阅、清空待发送块并发布 `OUTPUT_INTERRUPTED`。晚到 callback 必须按 turnId 丢弃。
 
-- [ ] 验证并提交：
+- [x] 验证并提交：
 
 ```powershell
 .\mvnw.cmd -B -Dtest=StreamingTtsPortTest,DashScopeStreamingTtsAdapterTest,VoiceOutputCancellationTest test
