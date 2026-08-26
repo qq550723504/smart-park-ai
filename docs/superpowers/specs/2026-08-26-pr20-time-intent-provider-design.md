@@ -33,7 +33,7 @@ AMBIGUOUS   -> 在生成 SQL 前失败
 
 - `status`：`NONE`、`PARSED`、`UNSUPPORTED`、`MULTIPLE`、`AMBIGUOUS`；
 - `mentions`：原始时间 span、起止位置和安全错误原因；
-- `intent`：结构化时间语义，不保存模型生成的最终时间戳；
+- `intent`：结构化时间语义，不保存模型生成的最终时间戳；绝对日期区间必须保存 `fromDate` 和 `toDate` 两个端点；
 - `timeRange`：由服务端根据 `intent` 和 `Clock` 计算的范围。
 
 图谱只依赖该接口和结果状态，不再直接调用正则、`contains` 或模型时间戳。

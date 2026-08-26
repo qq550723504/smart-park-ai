@@ -32,7 +32,7 @@
 **Interfaces:**
 - `TimeIntentProvider.resolve(String question, Instant now)` returns `TimeIntentResult`.
 - `TimeIntentResult` contains `Status`, `List<TimeMention>`, nullable `TimeIntent`, nullable `QueryPlan.TimeRange`, and a safe `reason`.
-- `TimeIntent` contains `sourceText`, `Kind`, `amount`, `Unit`, nullable `LocalDate anchorDate`, and nullable `DayPart`; its constructor rejects invalid field combinations.
+- `TimeIntent` contains `sourceText`, `Kind`, `amount`, `Unit`, nullable `LocalDate fromDate`, nullable `LocalDate toDate`, and nullable `DayPart`; its constructor rejects invalid field combinations. `DATE_RANGE` uses both date endpoints so an absolute interval is not lossy.
 
 - [ ] **Step 1: Write the failing contract tests**
 
@@ -69,7 +69,7 @@ enum Unit { HOUR, DAY, WEEK, MONTH, QUARTER, YEAR, HALF_YEAR }
 enum DayPart { MORNING, AFTERNOON }
 ```
 
-Validate positive amounts for `ROLLING`, require `anchorDate` for date kinds, require `dayPart` for `DAY_PART`, and require both intent and range only for `PARSED` results.
+Validate positive amounts for `ROLLING`, require `fromDate` for `SINGLE_DATE` and both `fromDate`/`toDate` for `DATE_RANGE`, require `dayPart` for `DAY_PART`, and require both intent and range only for `PARSED` results.
 
 - [ ] **Step 4: Run the contract test to verify GREEN**
 
