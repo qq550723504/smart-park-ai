@@ -793,6 +793,19 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
+    void rejectsMixedSupportedAndUnsupportedTimeRangesInsteadOfSelectingTheFirstOne() {
+        String question = "对比本月和去年能耗";
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding(question, List.of("能耗"), List.of()),
+                List.of(GOOD_TOTAL_SQL), null, null);
+
+        var outcome = graph.run(UUID.randomUUID(), question);
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.FAILED);
+        assertThat(modelClient.generateSqlInvocations()).isZero();
+    }
+
+    @Test
     void carriesServerDerivedTimeRangeIntoClarificationForResume() {
         Instant modelRangeFrom = Instant.parse("2026-08-17T00:00:00Z");
         Instant modelRangeTo = Instant.parse("2026-08-24T00:00:00Z");

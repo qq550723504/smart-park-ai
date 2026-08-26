@@ -70,6 +70,11 @@ public class OperationsAnalysisGraph {
             "(?:上上周|下周|下月|上上月|本季度|上季度|下季度|季度|今年|去年|本年|上半年|下半年|"
                     + "明天|后天|未来|(?:过去|最近|近)(?:一|一个|\\d+)(?:天|日|周|星期|月|个月|季度)|"
                     + "\\d{4}[-/.年]\\d{1,2}(?:[-/.月]\\d{1,2}日?)?|\\d{1,2}月\\d{1,2}日?)");
+    private static final java.util.regex.Pattern TIME_EXPRESSION = java.util.regex.Pattern.compile(
+            "(?:" + CALENDAR_DATE_RANGE.pattern() + "|"
+                    + CHINESE_CALENDAR_DATE_RANGE.pattern() + "|"
+                    + RELATIVE_TIME_EXPRESSION.pattern() + "|"
+                    + EXPLICIT_TIME_HINT.pattern() + ")");
     private static final java.util.regex.Pattern QUALIFIED_PREVIOUS_WEEK = java.util.regex.Pattern.compile(
             "上周([一二三四五六日天末])");
     private final MetricCatalog catalog;
@@ -633,7 +638,7 @@ public class OperationsAnalysisGraph {
     }
 
     private static QueryPlan.TimeRange expectedTimeRange(String question, Instant now) {
-        rejectMultipleRelativeTimeRanges(question);
+        rejectMultipleTimeExpressions(question);
         if (question.contains("上上周") || question.contains("上上月")) {
             throw new IllegalArgumentException("原始问题包含暂不支持的时间范围表达式");
         }
@@ -733,13 +738,13 @@ public class OperationsAnalysisGraph {
         return null;
     }
 
-    private static void rejectMultipleRelativeTimeRanges(String question) {
-        java.util.regex.Matcher matcher = RELATIVE_TIME_EXPRESSION.matcher(question);
+    private static void rejectMultipleTimeExpressions(String question) {
+        java.util.regex.Matcher matcher = TIME_EXPRESSION.matcher(question);
         int matches = 0;
         while (matcher.find()) {
             matches++;
             if (matches > 1) {
-                throw new IllegalArgumentException("原始问题包含多个相对时间范围，当前查询计划不支持范围对比");
+                throw new IllegalArgumentException("原始问题包含多个时间范围，当前查询计划不支持范围对比");
             }
         }
     }
