@@ -58,7 +58,6 @@ public class OperationsAnalysisGraph {
     private static final String STATE_RUN_ID = "runId";
     private static final int MAX_SQL_ATTEMPTS = 2; // one original try, at most one repair
     private static final ZoneId PARK_ZONE = ZoneId.of("Asia/Shanghai");
-    private static final long MODEL_TIME_SKEW_TOLERANCE_SECONDS = 300;
     private static final java.util.regex.Pattern CALENDAR_DATE_RANGE = java.util.regex.Pattern.compile(
             "(\\d{4}-\\d{2}-\\d{2})\\s*(?:到|至|~|～)\\s*(\\d{4}-\\d{2}-\\d{2})");
     private static final java.util.regex.Pattern QUALIFIED_PREVIOUS_WEEK = java.util.regex.Pattern.compile(
@@ -419,18 +418,15 @@ public class OperationsAnalysisGraph {
         nodeStarted(ctx, runId, ExecutionStage.PLANNING, "构建查询计划");
         Instant now = Instant.now(clock);
         int lookbackDays = ctx.metrics.stream().mapToInt(m -> m.defaultLookbackDays()).max().orElse(7);
-        AnalyticsModelClient.RequestedTimeRange requested = ctx.understanding.requestedTimeRange();
         String originalQuestion = text(state, STATE_QUESTION).strip();
-        validateRequestedTimeRange(originalQuestion, requested, now);
-        // Relative time is a server-owned contract. The model prompt and this
-        // node run at different instants, so never copy its rolling endpoints
-        // into SQL; derive them once from the same reference instant here.
+        // The original question is the authority for time semantics. The model
+        // may return a range using a different locale or boundary convention,
+        // so never let that advisory value reject a valid request or widen the
+        // SQL window. Derive every recognized range once from the server clock.
         QueryPlan.TimeRange recognizedTime = expectedTimeRange(originalQuestion.toLowerCase(java.util.Locale.ROOT), now);
         QueryPlan.TimeRange timeRange = recognizedTime != null
                 ? recognizedTime
-                : requested == null
-                ? new QueryPlan.TimeRange(now.minus(Duration.ofDays(lookbackDays)), now)
-                : new QueryPlan.TimeRange(requested.fromInclusive(), requested.toExclusive());
+                : new QueryPlan.TimeRange(now.minus(Duration.ofDays(lookbackDays)), now);
         ctx.plan = new QueryPlan(
                 originalQuestion,
                 ctx.metrics,
@@ -600,30 +596,6 @@ public class OperationsAnalysisGraph {
     private static boolean containsAny(String text, String... terms) {
         for (String term : terms) if (text.contains(term.toLowerCase(java.util.Locale.ROOT))) return true;
         return false;
-    }
-
-    private static void validateRequestedTimeRange(String question,
-                                                    AnalyticsModelClient.RequestedTimeRange requested,
-                                                    Instant now) {
-        if (requested == null) return;
-        String normalized = question.toLowerCase(java.util.Locale.ROOT);
-        QueryPlan.TimeRange expected = expectedTimeRange(normalized, now);
-        if (expected == null || !temporallyConsistent(expected, requested, normalized)) {
-            throw new IllegalArgumentException("模型时间范围未被原始问题支持");
-        }
-    }
-
-    private static boolean temporallyConsistent(QueryPlan.TimeRange expected,
-                                                AnalyticsModelClient.RequestedTimeRange requested,
-                                                String question) {
-        long endSkew = Math.abs(Duration.between(requested.toExclusive(), expected.to()).toSeconds());
-        if (endSkew > MODEL_TIME_SKEW_TOLERANCE_SECONDS) return false;
-        if (question.contains("今天") || question.contains("今日")) {
-            return requested.fromInclusive().equals(expected.from());
-        }
-        Duration expectedWidth = Duration.between(expected.from(), expected.to());
-        Duration requestedWidth = Duration.between(requested.fromInclusive(), requested.toExclusive());
-        return expectedWidth.equals(requestedWidth);
     }
 
     private static QueryPlan.TimeRange expectedTimeRange(String question, Instant now) {

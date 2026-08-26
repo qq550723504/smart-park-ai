@@ -278,6 +278,65 @@ class OperationsAnalysisGraphTest {
         assertThat(modelClient.lastPlan().timeRange())
                 .isEqualTo(new QueryPlan.TimeRange(
                         Instant.parse("2026-08-16T16:00:00Z"),
+                        Instant.parse("2026-08-23T16:00:00Z")));
+    }
+
+    @Test
+    void usesServerPreviousWeekWhenModelReturnsDifferentCalendarRange() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of(),
+                        new AnalyticsModelClient.RequestedTimeRange(
+                                Instant.parse("2026-08-17T00:00:00Z"),
+                                Instant.parse("2026-08-24T00:00:00Z"))),
+                List.of(GOOD_TOTAL_SQL),
+                new ChartSpec.Proposal("TABLE", "上周能耗", "energy_kwh", List.of(), "", "kWh"),
+                "共 1 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "上周能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().timeRange()).isEqualTo(new QueryPlan.TimeRange(
+                Instant.parse("2026-08-16T16:00:00Z"),
+                Instant.parse("2026-08-23T16:00:00Z")));
+    }
+
+    @Test
+    void usesServerRollingSevenDaysWhenModelReturnsCalendarDays() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("最近7天能耗", List.of("能耗"), List.of(),
+                        new AnalyticsModelClient.RequestedTimeRange(
+                                Instant.parse("2026-08-17T16:00:00Z"),
+                                Instant.parse("2026-08-24T16:00:00Z"))),
+                List.of(GOOD_TOTAL_SQL),
+                new ChartSpec.Proposal("TABLE", "最近7天能耗", "energy_kwh", List.of(), "", "kWh"),
+                "共 1 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "最近7天能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().timeRange()).isEqualTo(new QueryPlan.TimeRange(
+                Instant.parse("2026-08-17T00:00:00Z"),
+                Instant.parse("2026-08-24T00:00:00Z")));
+    }
+
+    @Test
+    void usesServerPreviousWeekBeforeGeneratingBuildingComparisonSql() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("上周各楼宇能耗对比", List.of("能耗"), List.of(),
+                        new AnalyticsModelClient.RequestedTimeRange(
+                                Instant.parse("2026-08-17T00:00:00Z"),
+                                Instant.parse("2026-08-24T00:00:00Z")),
+                        List.of("building_id")),
+                List.of(GOOD_SQL),
+                new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("energy_kwh"), "", "kWh"),
+                "共 3 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "上周各楼宇能耗对比");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().dimensions()).containsExactly("building_id");
+        assertThat(modelClient.lastPlan().timeRange()).isEqualTo(new QueryPlan.TimeRange(
+                Instant.parse("2026-08-16T16:00:00Z"),
                 Instant.parse("2026-08-23T16:00:00Z")));
     }
 
@@ -661,17 +720,22 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
-    void rejectsModelTimeRangeThatTheOriginalQuestionDidNotRequest() {
+    void ignoresModelTimeRangeWhenServerCanParseTheOriginalQuestion() {
         modelClient.reset(
                 new AnalyticsModelClient.QuestionUnderstanding("昨天能耗", List.of("能耗"), List.of(),
                         new AnalyticsModelClient.RequestedTimeRange(
                                 Instant.parse("2026-07-01T00:00:00Z"), Instant.parse("2026-08-01T00:00:00Z")),
                         List.of()),
-                List.of(), null, null);
+                List.of(GOOD_TOTAL_SQL),
+                new ChartSpec.Proposal("TABLE", "昨日能耗", "energy_kwh", List.of(), "", "kWh"),
+                "共 1 行结果。");
 
         var outcome = graph.run(UUID.randomUUID(), "昨天能耗");
 
-        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.FAILED);
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().timeRange()).isEqualTo(new QueryPlan.TimeRange(
+                Instant.parse("2026-08-22T16:00:00Z"),
+                Instant.parse("2026-08-23T16:00:00Z")));
     }
 
     @Test
