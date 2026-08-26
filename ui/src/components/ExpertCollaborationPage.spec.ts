@@ -1,9 +1,11 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { ref } from 'vue'
 import ExpertCollaborationPage from './ExpertCollaborationPage.vue'
 import type { ExecutionEvent } from '../types/execution'
 import type { ExecutionTrace } from '../composables/useExecutionTrace'
+import { __resetSharedCollaborationState } from '../composables/useExpertCollaboration'
+import type { CollaborationRun } from '../types/collaboration'
 
 const RUN_ID = '11111111-2222-3333-4444-555555555555'
 let polls = 0
@@ -12,14 +14,15 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 }
 
-function traceStub(events: ExecutionEvent[] = []): ExecutionTrace {
+function traceStub(events: ExecutionEvent[] = [], subscribe = vi.fn()): ExecutionTrace {
   return {
     events: ref(events), status: ref('streaming'), error: ref(''), lastSequence: ref(events.length),
-    isTerminal: ref(false), subscribe: () => undefined, reset: () => undefined,
+    isTerminal: ref(false), subscribe, reset: () => undefined,
   }
 }
 
 beforeEach(() => {
+  __resetSharedCollaborationState()
   polls = 0
   globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
     if (init?.method === 'POST') return jsonResponse({ runId: RUN_ID, statusUrl: '/status', eventsUrl: '/events' }, 202)
@@ -98,6 +101,59 @@ describe('ExpertCollaborationPage', () => {
       '设备 DEV-HVAC-001 当前状态如何，是否存在关联告警',
       '电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联',
     ])
+    wrapper.unmount()
+  })
+
+  it('resubscribes to the existing run when its view becomes active again', async () => {
+    const subscribe = vi.fn()
+    const wrapper = mount(ExpertCollaborationPage, {
+      props: { trace: traceStub([], subscribe), active: true },
+      global: {
+        stubs: {
+          'el-tag': { template: '<span><slot /></span>' },
+          'el-input': { props: ['modelValue'], emits: ['update:modelValue'], template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />' },
+          'el-button': { props: ['loading', 'disabled'], template: '<button :disabled="disabled"><slot /></button>' },
+        },
+      },
+    })
+
+    await wrapper.find('form').trigger('submit')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const subscriptionsAfterStart = subscribe.mock.calls.length
+
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+
+    expect(subscribe.mock.calls.length).toBe(subscriptionsAfterStart + 1)
+    expect(subscribe).toHaveBeenLastCalledWith(RUN_ID)
+    wrapper.unmount()
+  })
+
+  it('does not resubscribe when polling updates the same run id', async () => {
+    const subscribe = vi.fn()
+    const wrapper = mount(ExpertCollaborationPage, {
+      props: { trace: traceStub([], subscribe), active: true },
+      global: {
+        stubs: {
+          'el-tag': { template: '<span><slot /></span>' },
+          'el-input': { props: ['modelValue'], emits: ['update:modelValue'], template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />' },
+          'el-button': { props: ['loading', 'disabled'], template: '<button :disabled="disabled"><slot /></button>' },
+        },
+      },
+    })
+    const running: CollaborationRun = {
+      runId: RUN_ID, question: 'q', status: 'RUNNING', plan: null,
+      findings: [], synthesis: null, error: null, updatedAt: '2026-08-25T00:00:00Z',
+    }
+
+    const sharedRun = wrapper.vm as unknown as { run: CollaborationRun | null }
+    sharedRun.run = running
+    await wrapper.vm.$nextTick()
+    const subscriptionsAfterRunId = subscribe.mock.calls.length
+    sharedRun.run = { ...running, updatedAt: '2026-08-25T00:00:01Z' }
+    await wrapper.vm.$nextTick()
+
+    expect(subscribe.mock.calls.length).toBe(subscriptionsAfterRunId)
     wrapper.unmount()
   })
 })

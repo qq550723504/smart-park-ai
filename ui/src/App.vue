@@ -168,7 +168,7 @@ function confidence(value?: number) {
     </main>
 
     <main v-show="activeView === 'collaboration'" class="main-content">
-      <ExpertCollaborationPage :trace="trace" />
+      <ExpertCollaborationPage :trace="trace" :active="activeView === 'collaboration'" />
     </main>
 
     <main v-show="activeView === 'workflow'" class="main-content">

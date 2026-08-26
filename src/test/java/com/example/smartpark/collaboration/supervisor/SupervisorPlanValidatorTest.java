@@ -32,6 +32,42 @@ class SupervisorPlanValidatorTest {
     }
 
     @Test
+    void rejectsAnalyticsOnlyMeterIdentifiersFromCollaborationRouting() {
+        var plan = new com.example.smartpark.collaboration.model.SupervisorPlan(
+                "电表 MTR-1-1 当前读数是多少", Set.of(ExpertDomain.ENERGY),
+                Map.of(ExpertDomain.ENERGY, "电表 MTR-1-1 当前读数是多少"), "energy meter");
+
+        assertThat(validator.expectedDomains("电表 MTR-1-1 当前读数是多少")).isEmpty();
+        assertThatThrownBy(() -> validator.validate(plan))
+                .isInstanceOf(SupervisorPlanValidator.SupervisorPlanValidationException.class)
+                .hasMessageContaining("outside expert collaboration scope");
+    }
+
+    @Test
+    void routesDeviceIdentifierQuestionsToDevice() {
+        assertThat(validator.expectedDomains("DEV-POWER-001 当前状态"))
+                .isEqualTo(Set.of(ExpertDomain.DEVICE));
+    }
+
+    @Test
+    void routesEnergySubtypeDeviceIdentifiersOnlyToEnergy() {
+        assertThat(validator.expectedDomains("电表 DEV-ENERGY-001 当前能耗是否高于基线"))
+                .isEqualTo(Set.of(ExpertDomain.ENERGY));
+    }
+
+    @Test
+    void recognizesEnergySubtypeIdentifiersWithoutExtraEnergyKeywords() {
+        assertThat(validator.expectedDomains("DEV-ENERGY-001 当前状态"))
+                .isEqualTo(Set.of(ExpertDomain.ENERGY, ExpertDomain.DEVICE));
+    }
+
+    @Test
+    void preservesNonEnergyDeviceIdentifiersInMixedQuestions() {
+        assertThat(validator.expectedDomains("compare energy baseline with DEV-HVAC-001 current status"))
+                .isEqualTo(Set.of(ExpertDomain.ENERGY, ExpertDomain.DEVICE));
+    }
+
+    @Test
     void genericDeviceAlertQuestionsDoNotRequireTheSecurityExpert() {
         // 冷机离线告警 is a device alert; requiring SECURITY would dispatch an
         // expert whose only tool looks up security events.

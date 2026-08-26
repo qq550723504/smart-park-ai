@@ -2,6 +2,7 @@ package com.example.smartpark.analytics.agent;
 
 import com.example.smartpark.analytics.catalog.MetricCatalog;
 import com.example.smartpark.analytics.catalog.MetricResolution;
+import com.example.smartpark.analytics.catalog.CategoricalFilterVocabulary;
 import com.example.smartpark.analytics.model.ChartSpec;
 import com.example.smartpark.analytics.model.QueryPlan;
 import com.example.smartpark.analytics.model.TabularResult;
@@ -24,14 +25,19 @@ import com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy;
 import reactor.core.publisher.Flux;
 
 import java.time.Clock;
+import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -53,7 +59,10 @@ public class OperationsAnalysisGraph {
     private static final int MAX_SQL_ATTEMPTS = 2; // one original try, at most one repair
     private static final ZoneId PARK_ZONE = ZoneId.of("Asia/Shanghai");
     private static final long MODEL_TIME_SKEW_TOLERANCE_SECONDS = 300;
-
+    private static final java.util.regex.Pattern CALENDAR_DATE_RANGE = java.util.regex.Pattern.compile(
+            "(\\d{4}-\\d{2}-\\d{2})\\s*(?:到|至|~|～)\\s*(\\d{4}-\\d{2}-\\d{2})");
+    private static final java.util.regex.Pattern QUALIFIED_PREVIOUS_WEEK = java.util.regex.Pattern.compile(
+            "上周([一二三四五六日天末])");
     private final MetricCatalog catalog;
     private final AnalyticsModelClient modelClient;
     private final CostGate costGate;
@@ -335,12 +344,15 @@ public class OperationsAnalysisGraph {
         RunContext ctx = contexts.get(runId);
         String question = text(state, STATE_QUESTION);
         nodeStarted(ctx, runId, ExecutionStage.PLANNING, "解析指标与维度");
+        LinkedHashSet<String> selectedNames = new LinkedHashSet<>();
         List<com.example.smartpark.analytics.catalog.MetricDefinition> selected = new ArrayList<>();
         for (String term : ctx.understanding.metricTerms()) {
             MetricResolution resolution = catalog.resolve(term);
             if (resolution instanceof MetricResolution.Resolved resolved) {
                 if (metricMentionedInQuestion(resolved.metric(), question)) {
-                    selected.add(resolved.metric());
+                    if (selectedNames.add(resolved.metric().name())) {
+                        selected.add(resolved.metric());
+                    }
                 } else {
                     ctx.clarificationOptions.add(catalog.all().stream().map(m -> m.name()).toList());
                     ctx.clarificationQuestions.add("模型选择的指标 “" + resolved.metric().name()
@@ -423,7 +435,7 @@ public class OperationsAnalysisGraph {
                 originalQuestion,
                 ctx.metrics,
                 validatedRequestedDimensions(ctx, originalQuestion),
-                ctx.understanding.requestedFilters(),
+                validatedRequestedFilters(ctx, originalQuestion),
                 timeRange,
                 200);
         // One shared binding set travels through both gates and execution.
@@ -466,11 +478,61 @@ public class OperationsAnalysisGraph {
         return List.copyOf(requested);
     }
 
+    private static Map<String, String> validatedRequestedFilters(RunContext ctx, String question) {
+        java.util.LinkedHashMap<String, String> filters = new java.util.LinkedHashMap<>();
+        for (var entry : ctx.understanding.requestedFilters().entrySet()) {
+            String dimension = entry.getKey() == null ? "" : entry.getKey().strip().toLowerCase(java.util.Locale.ROOT);
+            String value = canonicalCategoricalValue(dimension, entry.getValue());
+            filters.put(dimension, value);
+        }
+        for (String dimension : List.of("status", "risk_level", "category")) {
+            boolean allowedByEveryMetric = ctx.metrics.stream()
+                    .allMatch(metric -> metric.allowedDimensions().stream()
+                            .anyMatch(allowed -> allowed.equalsIgnoreCase(dimension)));
+            if (!allowedByEveryMetric) continue;
+            if (CategoricalFilterVocabulary.containsNegatedTerm(dimension, question)) {
+                throw new IllegalArgumentException("暂不支持分类条件的否定表达: " + dimension);
+            }
+            Set<String> matches = CategoricalFilterVocabulary.matchingCanonicalValues(dimension, question);
+            if (matches.size() > 1) {
+                throw new IllegalArgumentException("原始问题包含多个分类值，无法安全生成单值过滤条件: " + dimension);
+            }
+            if (!filters.containsKey(dimension) && matches.size() == 1) {
+                filters.put(dimension, matches.iterator().next());
+            }
+        }
+        return java.util.Collections.unmodifiableMap(filters);
+    }
+
+    private static String canonicalCategoricalValue(String dimension, String value) {
+        if (value == null) return null;
+        return CategoricalFilterVocabulary.canonicalValue(dimension, value);
+    }
+
     private static List<String> inferredAggregationDimensions(RunContext ctx, String question) {
-        List<String> dimensions = List.of(
-                "building_id", "meter_id", "hour_ts", "occurred_at", "snapshot_at",
-                "stat_date", "risk_level", "category", "status", "device_type", "parking_zone");
         List<String> inferred = new ArrayList<>();
+        if (dailyAggregationMentionedInQuestion(question)
+                && ctx.metrics.stream().anyMatch(metric -> !metric.timeColumn().equalsIgnoreCase("stat_date"))) {
+            throw new IllegalArgumentException("当前指标目录没有可验证的日粒度聚合表达式");
+        }
+        if (hourlyAggregationMentionedInQuestion(question)
+                && ctx.metrics.stream().anyMatch(metric -> !metric.timeColumn().equalsIgnoreCase("hour_ts"))) {
+            throw new IllegalArgumentException("当前指标目录没有可验证的小时粒度聚合表达式");
+        }
+        if (timeAggregationMentionedInQuestion(question)) {
+            for (var metric : ctx.metrics) {
+                String timeColumn = metric.timeColumn();
+                if (!ctx.metrics.stream().allMatch(selected -> selected.allowedDimensions().stream()
+                        .anyMatch(allowed -> allowed.equalsIgnoreCase(timeColumn)))) {
+                    throw new IllegalArgumentException("原始问题要求的时间聚合列未获所有指标目录批准: " + timeColumn);
+                }
+                if (!inferred.contains(timeColumn)) {
+                    inferred.add(timeColumn);
+                }
+            }
+        }
+        List<String> dimensions = List.of(
+                "building_id", "meter_id", "risk_level", "category", "status", "device_type", "parking_zone");
         for (String dimension : dimensions) {
             if (!aggregationDimensionMentionedInQuestion(dimension, question)) continue;
             boolean allowedByEveryMetric = ctx.metrics.stream()
@@ -493,8 +555,6 @@ public class OperationsAnalysisGraph {
                     "按表计", "各表计", "每个表计", "分表计", "按电表", "各电表");
             case "hour_ts" -> containsAny(normalized,
                     "按小时", "逐时", "每小时", "逐小时", "小时趋势");
-            case "occurred_at", "stat_date", "snapshot_at" -> containsAny(normalized,
-                    "按日", "每天", "每日", "按日期", "按时间");
             case "risk_level" -> containsAny(normalized, "按风险", "各风险", "按风险等级");
             case "category" -> containsAny(normalized, "按类别", "各类别", "按分类", "各分类", "按类型", "各类型");
             case "status" -> containsAny(normalized, "按状态", "各状态");
@@ -502,6 +562,21 @@ public class OperationsAnalysisGraph {
             case "parking_zone" -> containsAny(normalized, "按区域", "各区域", "按车区", "各车区");
             default -> false;
         };
+    }
+
+    private static boolean timeAggregationMentionedInQuestion(String question) {
+        return containsAny(question == null ? "" : question.toLowerCase(java.util.Locale.ROOT),
+                "按日", "每天", "每日", "按日期", "按时间", "按小时", "逐时", "每小时", "逐小时", "小时趋势");
+    }
+
+    private static boolean dailyAggregationMentionedInQuestion(String question) {
+        return containsAny(question == null ? "" : question.toLowerCase(java.util.Locale.ROOT),
+                "按日", "每天", "每日", "按日期");
+    }
+
+    private static boolean hourlyAggregationMentionedInQuestion(String question) {
+        return containsAny(question == null ? "" : question.toLowerCase(java.util.Locale.ROOT),
+                "按小时", "逐时", "每小时", "逐小时", "小时趋势");
     }
 
     private static boolean dimensionMentionedInQuestion(String dimension, String question) {
@@ -552,6 +627,21 @@ public class OperationsAnalysisGraph {
     }
 
     private static QueryPlan.TimeRange expectedTimeRange(String question, Instant now) {
+        java.util.regex.Matcher calendarRange = CALENDAR_DATE_RANGE.matcher(question);
+        if (calendarRange.find()) {
+            int firstRangeEnd = calendarRange.end();
+            java.util.regex.Matcher additionalRange = CALENDAR_DATE_RANGE.matcher(question);
+            additionalRange.region(firstRangeEnd, question.length());
+            if (additionalRange.find()) {
+                throw new IllegalArgumentException("原始问题包含多个日期范围，当前查询计划不支持范围对比");
+            }
+            LocalDate from = LocalDate.parse(calendarRange.group(1), DateTimeFormatter.ISO_LOCAL_DATE);
+            LocalDate to = LocalDate.parse(calendarRange.group(2), DateTimeFormatter.ISO_LOCAL_DATE);
+            if (to.isBefore(from)) {
+                throw new IllegalArgumentException("原始问题的日期范围顺序无效");
+            }
+            return localDateRange(from, to.plusDays(1));
+        }
         java.util.regex.Matcher days = java.util.regex.Pattern.compile("(?:过去|最近|近)(\\d+)(?:天|日)")
                 .matcher(question);
         if (days.find()) {
@@ -568,10 +658,43 @@ public class OperationsAnalysisGraph {
                     .atStartOfDay(PARK_ZONE).toInstant();
             return new QueryPlan.TimeRange(today, now);
         }
-        if (question.contains("上周") || question.contains("过去一周") || question.contains("最近一周")) {
+        java.util.regex.Matcher qualifiedWeek = QUALIFIED_PREVIOUS_WEEK.matcher(question);
+        if (qualifiedWeek.find()) {
+            LocalDate currentWeekStart = now.atZone(PARK_ZONE).toLocalDate()
+                    .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+            LocalDate previousWeekStart = currentWeekStart.minusWeeks(1);
+            String qualifier = qualifiedWeek.group(1);
+            if ("末".equals(qualifier)) {
+                return localDateRange(previousWeekStart.plusDays(5), currentWeekStart);
+            }
+            int dayOffset = switch (qualifier) {
+                case "一" -> 0;
+                case "二" -> 1;
+                case "三" -> 2;
+                case "四" -> 3;
+                case "五" -> 4;
+                case "六" -> 5;
+                case "日", "天" -> 6;
+                default -> throw new IllegalArgumentException("无法识别上周的日期限定: " + qualifier);
+            };
+            LocalDate day = previousWeekStart.plusDays(dayOffset);
+            return localDateRange(day, day.plusDays(1));
+        }
+        if (question.contains("上周")) {
+            LocalDate currentWeekStart = now.atZone(PARK_ZONE).toLocalDate()
+                    .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+            return localDateRange(currentWeekStart.minusWeeks(1), currentWeekStart);
+        }
+        if (question.contains("过去一周") || question.contains("最近一周")) {
             return new QueryPlan.TimeRange(now.minus(Duration.ofDays(7)), now);
         }
         return null;
+    }
+
+    private static QueryPlan.TimeRange localDateRange(LocalDate fromInclusive, LocalDate toExclusive) {
+        return new QueryPlan.TimeRange(
+                fromInclusive.atStartOfDay(PARK_ZONE).toInstant(),
+                toExclusive.atStartOfDay(PARK_ZONE).toInstant());
     }
 
     Map<String, Object> generateSql(OverAllState state) {

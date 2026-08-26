@@ -1,6 +1,7 @@
 package com.example.smartpark.analytics.model;
 
 import com.example.smartpark.analytics.catalog.MetricDefinition;
+import com.example.smartpark.analytics.catalog.CategoricalFilterVocabulary;
 
 import java.time.Instant;
 import java.util.List;
@@ -70,7 +71,7 @@ public record QueryPlan(
                 throw new IllegalArgumentException("filter value is incompatible with dimension "
                         + dimension + ": " + value);
             }
-            if (!question.contains(value)) {
+            if (!valueAppearsInQuestion(question, dimension, value)) {
                 throw new IllegalArgumentException("filter value must appear in the original question: " + value);
             }
             if (normalizedFilters.putIfAbsent(dimension, value) != null) {
@@ -110,6 +111,13 @@ public record QueryPlan(
             case "alert_id" -> value.matches("(?i)ALT-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+");
             default -> true;
         };
+    }
+
+    private static boolean valueAppearsInQuestion(String question, String dimension, String value) {
+        if (Set.of("status", "risk_level", "category").contains(dimension)) {
+            return CategoricalFilterVocabulary.valueAppearsInQuestion(dimension, value, question);
+        }
+        return question.contains(value);
     }
 
     public static String filterParameterName(String dimension) {

@@ -9,6 +9,9 @@ import java.util.Map;
 import java.util.Set;
 
 public final class SupervisorPlanValidator {
+    private static final java.util.regex.Pattern DEV_IDENTIFIER = java.util.regex.Pattern.compile(
+            "(?i)(?<![A-Z0-9_-])(DEV-[A-Z0-9]+(?:-[A-Z0-9]+)+)(?![A-Z0-9_-])");
+
     public SupervisorPlan validate(SupervisorPlan plan) {
         Set<ExpertDomain> expected = expectedDomains(plan.normalizedQuestion());
         if (expected.isEmpty()) {
@@ -28,10 +31,14 @@ public final class SupervisorPlanValidator {
     public Set<ExpertDomain> expectedDomains(String question) {
         String text = question == null ? "" : question.toLowerCase(Locale.ROOT);
         EnumSet<ExpertDomain> domains = EnumSet.noneOf(ExpertDomain.class);
-        if (containsAny(text, "energy", "consumption", "kwh", "baseline", "能耗", "用电", "电量")) {
+        boolean energyContext = containsAny(text, "energy", "consumption", "kwh", "baseline", "meter", "能耗", "用电", "电量")
+                || containsEnergyDeviceIdentifier(text);
+        if (energyContext) {
             domains.add(ExpertDomain.ENERGY);
         }
-        if (containsAny(text, "device", "offline", "hvac", "equipment", "冷机", "设备", "离线")) {
+        if (containsAny(text, "device", "offline", "hvac", "equipment", "冷机", "设备", "离线")
+                || containsNonEnergyDeviceIdentifier(text)
+                || (containsEnergyDeviceIdentifier(text) && containsDeviceStatusRequest(text))) {
             domains.add(ExpertDomain.DEVICE);
         }
         // Generic alert words (告警/alarm) must NOT route to SECURITY: ordinary
@@ -40,6 +47,9 @@ public final class SupervisorPlanValidator {
         // alert phrases select this domain.
         if (containsAny(text, "security", "access", "door", "intrusion",
                 "security alarm", "access alarm", "门禁", "安防", "安防告警", "门禁告警", "入侵告警", "安全告警")) {
+            domains.add(ExpertDomain.SECURITY);
+        }
+        if (containsEntityIdentifier(text, "SEC-")) {
             domains.add(ExpertDomain.SECURITY);
         }
         return Set.copyOf(domains);
@@ -67,6 +77,38 @@ public final class SupervisorPlanValidator {
 
     private static boolean isAsciiToken(String term) {
         return term.matches("[a-z0-9_]+");
+    }
+
+    private static boolean containsEntityIdentifier(String text, String prefix) {
+        return java.util.regex.Pattern.compile(
+                        "(?i)(?<![A-Z0-9_-])" + java.util.regex.Pattern.quote(prefix)
+                                + "[A-Z0-9]+(?:-[A-Z0-9]+)+(?![A-Z0-9_-])")
+                .matcher(text)
+                .find();
+    }
+
+    private static boolean containsNonEnergyDeviceIdentifier(String text) {
+        var matcher = DEV_IDENTIFIER.matcher(text);
+        while (matcher.find()) {
+            if (!matcher.group(1).toUpperCase(Locale.ROOT).startsWith("DEV-ENERGY-")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsEnergyDeviceIdentifier(String text) {
+        var matcher = DEV_IDENTIFIER.matcher(text);
+        while (matcher.find()) {
+            if (matcher.group(1).toUpperCase(Locale.ROOT).startsWith("DEV-ENERGY-")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsDeviceStatusRequest(String text) {
+        return containsAny(text, "status", "state", "online", "offline", "当前状态", "设备状态", "运行状态", "是否在线");
     }
 
     public static final class SupervisorPlanValidationException extends IllegalArgumentException {
