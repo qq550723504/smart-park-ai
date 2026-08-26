@@ -10,8 +10,10 @@ public class VoiceProperties {
     /** Opt-in switch; enabling voice without provider credentials fails startup. */
     private boolean enabled = false;
 
-    /** CORS origins allowed to open the voice WebSocket handshake. */
-    private java.util.List<String> allowedOrigins = java.util.List.of("*");
+    /** CORS origins allowed to open the voice WebSocket handshake.
+     *  Empty by default = fail-closed: Spring then permits same-origin only,
+     *  so deployments must opt in explicitly to cross-origin microphone access. */
+    private java.util.List<String> allowedOrigins = java.util.List.of();
 
     /** Hard cap for one inbound binary audio frame at the WS edge. */
     private int maxBinaryFrameBytes = 64 * 1024;

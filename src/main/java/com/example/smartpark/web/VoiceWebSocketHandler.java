@@ -19,7 +19,6 @@ import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 
 import java.io.IOException;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 
 /**
@@ -52,7 +51,9 @@ public class VoiceWebSocketHandler extends AbstractWebSocketHandler {
             return;
         }
         wsSession.getAttributes().put(SESSION_ATTR, sessionId);
-        service.attach(sessionId, publisherFor(wsSession));
+        if (!service.attach(sessionId, publisherFor(wsSession))) {
+            closeQuietly(wsSession, "session already attached");
+        }
     }
 
     @Override

@@ -75,22 +75,49 @@ public class VoiceSessionService {
     public record CreatedSession(String sessionId, String runId) {
     }
 
+    /** REST-created sessions get this long to attach a WS before being reclaimed. */
+    private static final java.time.Duration UNATTACHED_SESSION_TTL = Duration.ofSeconds(30);
+
     /** Creates a session bound to a connection publisher; publishes the initial state. */
     public CreatedSession createSession(VoiceFramePublisher publisher) {
         VoiceSession session = store.create();
         if (publisher != null) {
             publishers.put(session.sessionId(), publisher);
+        } else {
+            // Reclaim sessions that are created via REST but never attach a WS,
+            // so abusive or broken clients cannot exhaust memory.
+            DeadlineScheduler.Cancelable ttl = scheduler.schedule(
+                    () -> closeIfUnattached(session.sessionId()), UNATTACHED_SESSION_TTL);
+            session.trackDeadline(ttl);
         }
         publishState(session, null);
         return new CreatedSession(session.sessionId(), session.runId().toString());
     }
 
-    /** Registers the publisher of an already-created session (WS attach). */
-    public void attach(String sessionId, VoiceFramePublisher publisher) {
-        findLiveSession(sessionId).ifPresent(session -> {
-            publishers.put(sessionId, publisher);
-            publishState(session, null);
-        });
+    /** Registers the publisher of an already-created session (WS attach).
+     *  Returns false when the session is gone or already attached elsewhere. */
+    public boolean attach(String sessionId, VoiceFramePublisher publisher) {
+        return findLiveSession(sessionId)
+                .map(session -> {
+                    if (publishers.putIfAbsent(sessionId, publisher) != null) {
+                        // Second connection must not hijack the live audio stream.
+                        publisher.close();
+                        return false;
+                    }
+                    session.cancelTrackedDeadlines(); // cancels the unattached-TTL reclaim
+                    publishState(session, null);
+                    return true;
+                })
+                .orElse(false);
+    }
+
+    private void closeIfUnattached(String sessionId) {
+        if (publishers.containsKey(sessionId)) {
+            return; // attached in the meantime: nothing to reclaim
+        }
+        store.find(sessionId)
+                .filter(session -> !session.isClosed())
+                .ifPresent(session -> session.execute(() -> closeNow(session)));
     }
 
     public Optional<VoiceSessionStore.Snapshot> describe(String sessionId) {
@@ -108,9 +135,11 @@ public class VoiceSessionService {
         store.find(sessionId).ifPresent(session -> session.execute(() -> closeNow(session)));
     }
 
-    /** Network disconnect: same cleanup, tolerant when the session is gone. */
+    /** Network disconnect: same cleanup, tolerant when the session is gone.
+     *  Cleanup runs on the serial executor so it cannot race pending tasks. */
     public void handleDisconnect(String sessionId) {
-        store.remove(sessionId).ifPresent(session -> closeNow(session));
+        store.remove(sessionId)
+                .ifPresent(session -> session.execute(() -> closeNow(session)));
         publishers.remove(sessionId);
     }
 
@@ -145,7 +174,16 @@ public class VoiceSessionService {
                 session.ringBuffer().append(chunk);
                 String turnId = session.currentTurnId();
                 if (turnId != null) {
-                    asrPort.send(session.sessionId(), turnId, chunk.data());
+                    try {
+                        asrPort.send(session.sessionId(), turnId, chunk.data());
+                    } catch (RuntimeException ex) {
+                        // Provider feed failure must fail the turn explicitly,
+                        // never vanish into the executor's uncaught handler.
+                        log.warn("asr feed failed in {}: {}",
+                                sessionId, ex.getClass().getSimpleName());
+                        failTurn(session, VoiceErrorCode.PROVIDER_FAILURE,
+                                "语音识别暂时不可用，请重试");
+                    }
                 }
             } catch (AudioRejectionException rejection) {
                 log.debug("voice audio rejected in {}: {}", sessionId, rejection.reason());
@@ -309,6 +347,14 @@ public class VoiceSessionService {
                         failTurn(session, VoiceErrorCode.AUDIO_REJECTED, "未识别到语音内容，请重试");
                         return;
                     }
+                    // Idempotency guard: exactly one agent run per turn. A
+                    // duplicate provider final arrives after the answer phase
+                    // already started (REASONING/…/SPEAKING) and is dropped.
+                    VoiceSessionState current = session.state();
+                    if (current != VoiceSessionState.LISTENING
+                            && current != VoiceSessionState.ASR_FINALIZED) {
+                        return;
+                    }
                     publish(new com.example.smartpark.voice.model.AsrFinalFrame(
                             sessionId, messageId(sid), session.nextFrameSequence(), text));
                     startAnswerPhase(session, turnId, text);
@@ -392,7 +438,10 @@ public class VoiceSessionService {
             };
 
             try {
-                VoiceAnswer answer = answerAgent.answer(session.sessionId(), turnId, question, listener);
+                // Mic-click interrupt / session close cancels the LLM work
+                // cooperatively instead of letting it run to completion.
+                VoiceAnswer answer = answerAgent.answer(session.sessionId(), turnId, question,
+                        listener, () -> session.isClosed() || session.isTurnInterrupted());
                 session.execute(() -> deliverAnswer(session, turnId, answer.text()));
             } catch (RuntimeException ex) {
                 log.warn("voice answer failed in {}: {}", session.sessionId(), ex.getClass().getSimpleName());
@@ -589,10 +638,14 @@ public class VoiceSessionService {
         }
     }
 
-    private long sequenceCounterSeed = 0;
+    private final Map<String, java.util.concurrent.atomic.AtomicLong> messageCounters =
+            new ConcurrentHashMap<>();
 
-    private synchronized String messageId(String sessionId) {
-        return sessionId + "-m" + (++sequenceCounterSeed);
+    private String messageId(String sessionId) {
+        long n = messageCounters
+                .computeIfAbsent(sessionId, k -> new java.util.concurrent.atomic.AtomicLong())
+                .incrementAndGet();
+        return sessionId + "-m" + n;
     }
 
     private static String userMessageFor(VoiceErrorCode code) {

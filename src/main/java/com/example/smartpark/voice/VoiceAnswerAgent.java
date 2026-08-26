@@ -11,6 +11,8 @@ import com.example.smartpark.voice.model.VoiceAnswer;
 import com.example.smartpark.voice.model.VoiceIntent;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -31,6 +33,8 @@ import java.util.StringJoiner;
 @Component
 @ConditionalOnProperty(name = "spring.ai.dashscope.enabled", havingValue = "true", matchIfMissing = true)
 public class VoiceAnswerAgent {
+
+    private static final Logger log = LoggerFactory.getLogger(VoiceAnswerAgent.class);
 
     /** Real-time facts of one turn, published to WS and the unified event stream. */
     public interface Listener {
@@ -77,28 +81,46 @@ public class VoiceAnswerAgent {
     }
 
     public VoiceAnswer answer(String sessionId, String turnId, String question, Listener listener) {
+        return answer(sessionId, turnId, question, listener, () -> false);
+    }
+
+    /**
+     * @param cancelled cooperative cancellation flag; polled before each LLM call
+     *                  and on every stream delta so an interrupted turn stops
+     *                  consuming tokens immediately.
+     */
+    public VoiceAnswer answer(String sessionId, String turnId, String question, Listener listener,
+                              java.util.function.BooleanSupplier cancelled) {
         Objects.requireNonNull(listener, "listener");
+        if (cancelled.getAsBoolean()) {
+            throw new AnswerCancelledException();
+        }
         com.fasterxml.jackson.databind.JsonNode plan = parseClassification(classify(question));
+        if (cancelled.getAsBoolean()) {
+            throw new AnswerCancelledException();
+        }
         VoiceIntent intent = toIntent(plan.path("intent").asText(""));
 
         return switch (intent) {
             case WRITE_REQUEST -> templateAnswer(intent, WRITE_REFUSAL);
-            case ALERT -> handleAlert(plan, question, listener);
-            case ENERGY -> handleEnergy(plan, question, listener);
-            case PARKING_POLICY -> handleParkingPolicy(plan, question, listener);
-            case CHITCHAT -> streamGrounded(intent, question, List.of(), List.of(), List.of(), listener);
+            case ALERT -> handleAlert(plan, question, listener, cancelled);
+            case ENERGY -> handleEnergy(plan, question, listener, cancelled);
+            case PARKING_POLICY -> handleParkingPolicy(plan, question, listener, cancelled);
+            case CHITCHAT -> streamGrounded(intent, question, List.of(), List.of(), List.of(), listener, cancelled);
         };
     }
 
     private VoiceAnswer handleAlert(com.fasterxml.jackson.databind.JsonNode plan,
-                                    String question, Listener listener) {
+                                    String question, Listener listener,
+                                    java.util.function.BooleanSupplier cancelled) {
         String alertId = plan.path("alertId").asText("").trim();
         if (alertId.isEmpty()) {
             return templateAnswer(VoiceIntent.ALERT, ASK_ALERT_ID);
         }
         listener.onToolStarted("lookupAlert", "alertId=" + alertId);
         AlertQueryTool.AlertLookupResult result = alertQueryTool.lookupAlert(alertId);
-        listener.onToolCompleted("lookupAlert", true);
+        boolean lookupSucceeded = result.error() == null && result.alert() != null;
+        listener.onToolCompleted("lookupAlert", lookupSucceeded);
 
         ToolCallRecord call;
         List<String> refs;
@@ -117,18 +139,20 @@ public class VoiceAnswerAgent {
             refs = List.of(alert.id(), alert.deviceId(), alert.buildingId());
         }
         return streamGrounded(VoiceIntent.ALERT, question, refs,
-                List.of(call), List.of(evidenceLine(call)), listener);
+                List.of(call), List.of(evidenceLine(call)), listener, cancelled);
     }
 
     private VoiceAnswer handleEnergy(com.fasterxml.jackson.databind.JsonNode plan,
-                                     String question, Listener listener) {
+                                     String question, Listener listener,
+                                     java.util.function.BooleanSupplier cancelled) {
         String meterId = plan.path("meterId").asText("").trim();
         if (meterId.isEmpty()) {
             return templateAnswer(VoiceIntent.ENERGY, ASK_METER_ID);
         }
         listener.onToolStarted("lookupEnergyConsumption", "meterId=" + meterId);
         EnergyQueryTool.EnergyLookupResult result = energyQueryTool.lookupEnergyConsumption(meterId);
-        listener.onToolCompleted("lookupEnergyConsumption", true);
+        boolean lookupSucceeded = result.error() == null && result.reading() != null;
+        listener.onToolCompleted("lookupEnergyConsumption", lookupSucceeded);
 
         ToolCallRecord call;
         List<String> refs;
@@ -147,11 +171,12 @@ public class VoiceAnswerAgent {
             refs = List.of(reading.meterId(), reading.buildingId());
         }
         return streamGrounded(VoiceIntent.ENERGY, question, refs,
-                List.of(call), List.of(evidenceLine(call)), listener);
+                List.of(call), List.of(evidenceLine(call)), listener, cancelled);
     }
 
     private VoiceAnswer handleParkingPolicy(com.fasterxml.jackson.databind.JsonNode plan,
-                                            String question, Listener listener) {
+                                            String question, Listener listener,
+                                            java.util.function.BooleanSupplier cancelled) {
         String keyword = plan.path("keyword").asText("").trim();
         if (keyword.isEmpty()) {
             keyword = question;
@@ -171,7 +196,7 @@ public class VoiceAnswerAgent {
         ToolCallRecord call = new ToolCallRecord("searchVisitorGuide", "query=" + keyword,
                 digestJoiner.length() == 0 ? "error=no matching documents" : digestJoiner.toString());
         return streamGrounded(VoiceIntent.PARKING_POLICY, question, refs,
-                List.of(call), List.of(evidenceLine(call)), listener);
+                List.of(call), List.of(evidenceLine(call)), listener, cancelled);
     }
 
     private VoiceAnswer streamGrounded(VoiceIntent intent,
@@ -179,7 +204,8 @@ public class VoiceAnswerAgent {
                                        List<String> evidenceRefs,
                                        List<ToolCallRecord> toolCalls,
                                        List<String> evidenceLines,
-                                       Listener listener) {
+                                       Listener listener,
+                                       java.util.function.BooleanSupplier cancelled) {
         String evidenceBlock = evidenceLines.isEmpty()
                 ? "本轮证据：（无工具证据；请只做简短寒暄或说明需要更多信息，禁止给出任何数字或编号。）"
                 : "本轮证据：\n" + String.join("\n---\n", evidenceLines);
@@ -191,6 +217,10 @@ public class VoiceAnswerAgent {
                 .stream()
                 .content()
                 .doOnNext(delta -> {
+                    // Disposing the upstream mid-stream on interrupt saves tokens.
+                    if (cancelled.getAsBoolean()) {
+                        throw new AnswerCancelledException();
+                    }
                     text.append(delta);
                     listener.onTextDelta(delta);
                 })
@@ -211,6 +241,16 @@ public class VoiceAnswerAgent {
         return answer;
     }
 
+    /** Internal cooperative-cancellation signal; never crosses the port boundary. */
+    private static final class AnswerCancelledException extends RuntimeException {
+        private AnswerCancelledException() {
+            super(null, null, false, false);
+        }
+    }
+
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON_MAPPER =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
     private String classify(String question) {
         String content = chatClient.prompt()
                 .system(CLASSIFY_SYSTEM)
@@ -227,17 +267,17 @@ public class VoiceAnswerAgent {
             return readEmptyPlan();
         }
         try {
-            return new com.fasterxml.jackson.databind.ObjectMapper()
-                    .readTree(content.substring(start, end + 1));
+            return JSON_MAPPER.readTree(content.substring(start, end + 1));
         }
         catch (Exception ex) {
+            log.debug("unparseable classification payload shape; defaulting to chitchat");
             return readEmptyPlan();
         }
     }
 
     private static com.fasterxml.jackson.databind.JsonNode readEmptyPlan() {
         try {
-            return new com.fasterxml.jackson.databind.ObjectMapper().readTree("{}");
+            return JSON_MAPPER.readTree("{}");
         }
         catch (Exception impossible) {
             throw new IllegalStateException(impossible);

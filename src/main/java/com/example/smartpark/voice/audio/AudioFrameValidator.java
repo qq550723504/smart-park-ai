@@ -48,8 +48,10 @@ public final class AudioFrameValidator {
             throw reject(AudioRejectReason.MALFORMED_PCM);
         }
         long impliedDurationMs = pcm.length / spec.bytesPerMillisecond();
-        if (impliedDurationMs > maxFrameDurationMs
-                || (pcm.length % spec.bytesPerMillisecond() > 0 && pcm.length / spec.bytesPerMillisecond() == maxFrameDurationMs)) {
+        // Byte-exact comparison: integer division alone would round sub-ms
+        // overflow down and let slightly-too-long frames slip through.
+        if (pcm.length > maxFrameDurationMs * spec.bytesPerMillisecond()
+                || impliedDurationMs > maxFrameDurationMs) {
             throw reject(AudioRejectReason.EXCESSIVE_FRAME_DURATION);
         }
         if (pcm.length > maxFrameBytes) {

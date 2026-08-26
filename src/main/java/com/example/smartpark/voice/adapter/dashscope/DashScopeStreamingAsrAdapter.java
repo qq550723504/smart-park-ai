@@ -14,6 +14,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
 import java.nio.ByteBuffer;
+import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -83,12 +84,13 @@ public final class DashScopeStreamingAsrAdapter implements StreamingAsrPort, Dis
     @Override
     public void send(String sessionId, String turnId, byte[] pcmChunk) {
         TurnState state = requireActive(sessionId, turnId);
+        // Fast path first; busy-looping handler only spins on the rare
+        // FAIL_NON_SERIALIZED race instead of a hand-rolled yield retry loop.
         Sinks.EmitResult result = state.input.tryEmitNext(ByteBuffer.wrap(pcmChunk.clone()));
-        for (int retry = 0; retry < 3 && result == Sinks.EmitResult.FAIL_NON_SERIALIZED; retry++) {
-            Thread.yield();
-            result = state.input.tryEmitNext(ByteBuffer.wrap(pcmChunk.clone()));
-        }
-        if (result.isFailure()) {
+        if (result == Sinks.EmitResult.FAIL_NON_SERIALIZED) {
+            state.input.emitNext(ByteBuffer.wrap(pcmChunk.clone()),
+                    Sinks.EmitFailureHandler.busyLooping(Duration.ofSeconds(1)));
+        } else if (result.isFailure()) {
             throw new IllegalStateException("failed to feed ASR input: " + result);
         }
     }
@@ -147,9 +149,13 @@ public final class DashScopeStreamingAsrAdapter implements StreamingAsrPort, Dis
                         && Boolean.TRUE.equals(result.sentence().sentenceEnd());
         if (finalSentence) {
             TurnState state = activeTurnsBySession.get(sessionId);
-            if (state != null && state.turnId.equals(turnId)) {
+            if (state != null && state.turnId.equals(turnId) && !state.finalSent) {
+                // Exactly one final per turn: later finals are duplicates and
+                // must not reach the listener twice.
                 state.finalSent = true;
                 state.input.tryEmitComplete();
+            } else if (state != null && state.finalSent) {
+                return;
             }
             listener.onFinal(sessionId, turnId, text.trim());
         } else if (!isFinalAlreadySent(sessionId, turnId)) {
