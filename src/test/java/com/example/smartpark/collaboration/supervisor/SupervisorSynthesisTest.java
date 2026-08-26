@@ -67,11 +67,13 @@ class SupervisorSynthesisTest {
     }
 
     @Test
-    void requiresUncertaintyWhenAnExpertFailed() {
-        assertThatThrownBy(() -> synthesizer.parseAndValidate("""
+    void derivesUncertaintyWhenAnExpertFailed() {
+        var result = synthesizer.parseAndValidate("""
                 {"status":"SUPPORTED","selectedDomains":["ENERGY"],
                  "evidenceRefs":["energy:MTR-2"],"confidence":0.6,"uncertainties":[]}
-                """, plan(), List.of(supported(), failedDevice()))).hasMessageContaining("disclosed");
+                """, plan(), List.of(supported(), failedDevice()));
+
+        assertThat(result.uncertainties()).containsExactly("DEVICE: failed to query device");
     }
 
     @Test
@@ -119,6 +121,34 @@ class SupervisorSynthesisTest {
                 """, plan(), List.of(insufficient));
 
         assertThat(result.conclusion()).isEqualTo("没有可验证的专家结论");
+    }
+
+    @Test
+    void discardsModelSelectionsWhenSynthesisIsNotSupported() {
+        var insufficient = new ExpertFinding(ExpertDomain.ENERGY, FindingStatus.INSUFFICIENT_EVIDENCE,
+                "insufficient evidence", List.of(), 0, List.of("query meter"));
+
+        var result = synthesizer.parseAndValidate("""
+                {"status":"INSUFFICIENT_EVIDENCE","selectedDomains":["ENERGY"],
+                 "evidenceRefs":["energy:MTR-2"],"confidence":0.8,"uncertainties":["missing data"]}
+                """, plan(), List.of(insufficient));
+
+        assertThat(result.status()).isEqualTo(FindingStatus.INSUFFICIENT_EVIDENCE);
+        assertThat(result.evidenceRefs()).isEmpty();
+        assertThat(result.confidence()).isZero();
+    }
+
+    @Test
+    void derivesUncertaintiesWhenModelOmitsRequiredDisclosure() {
+        var insufficient = new ExpertFinding(ExpertDomain.ENERGY, FindingStatus.INSUFFICIENT_EVIDENCE,
+                "insufficient evidence", List.of(), 0, List.of("query meter"));
+
+        var result = synthesizer.parseAndValidate("""
+                {"status":"INSUFFICIENT_EVIDENCE","selectedDomains":[],
+                 "evidenceRefs":[],"confidence":0,"uncertainties":[]}
+                """, plan(), List.of(insufficient));
+
+        assertThat(result.uncertainties()).containsExactly("ENERGY: insufficient evidence");
     }
 
     private static ExpertFinding supported() {
