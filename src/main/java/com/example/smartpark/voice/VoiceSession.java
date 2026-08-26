@@ -13,6 +13,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Per-session state container: pure state machine, serial executor, audio
@@ -20,6 +22,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * {@link #execute(Runnable)} so callbacks from ASR/TTS ports serialize.
  */
 public final class VoiceSession implements AutoCloseable {
+
+    private static final Logger log = LoggerFactory.getLogger(VoiceSession.class);
 
     private final String sessionId;
     private final UUID runId = UUID.randomUUID();
@@ -60,7 +64,16 @@ public final class VoiceSession implements AutoCloseable {
             return;
         }
         try {
-            serialExecutor.execute(action);
+            serialExecutor.execute(() -> {
+                try {
+                    action.run();
+                } catch (RuntimeException ex) {
+                    // Never let a task exception silently kill the worker thread:
+                    // raw details stay server-side (log hygiene), no rethrow.
+                    log.warn("voice session task failed in {}: {}",
+                            sessionId, ex.getClass().getSimpleName());
+                }
+            });
         } catch (RejectedExecutionException ignored) {
             // session closing concurrently: drop the action
         }

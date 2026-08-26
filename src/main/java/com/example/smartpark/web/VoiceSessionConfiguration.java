@@ -97,7 +97,10 @@ public class VoiceSessionConfiguration {
     private void register(@NonNull org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry registry,
                           @NonNull VoiceWebSocketHandler handler,
                           @NonNull VoiceProperties properties) {
-        registry.addHandler(handler, "/ws/voice/sessions/**")
-                .setAllowedOrigins(properties.getAllowedOrigins().toArray(new String[0]));
+        var registration = registry.addHandler(handler, "/ws/voice/sessions/**");
+        if (!properties.getAllowedOrigins().isEmpty()) {
+            // Empty list = Spring's default same-origin policy (fail-closed).
+            registration.setAllowedOrigins(properties.getAllowedOrigins().toArray(new String[0]));
+        }
     }
 }

@@ -111,6 +111,7 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
   let controlSequence = 0
   let stream: MediaStream | null = null
   let suppressAudio = false
+  let intentionalClose = false
 
   function messageId(prefix: string): string {
     return `${prefix}-${Date.now()}-${++controlSequence}`
@@ -150,6 +151,12 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
     }
     socket.onclose = () => {
       socket = null
+      // Unexpected server-side drop surfaces as a failure; intentional
+      // local close() must not overwrite a clean shutdown state.
+      if (!intentionalClose && connectionPhase.value === 'connected') {
+        connectionPhase.value = 'failed'
+        errorMessage.value = '语音连接已断开'
+      }
     }
     await waitUntil(() => String(connectionPhase.value) !== 'connecting')
     if (String(connectionPhase.value) !== 'connected') {
@@ -170,6 +177,10 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
           reject(new Error('等待语音连接超时'))
         }
       }, 10)
+      // Timeout must not leak a half-open socket.
+      setTimeout(() => {
+        clearInterval(timer)
+      }, deadline - Date.now() + 100)
     })
   }
 
@@ -216,6 +227,9 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
         break
       case 'ERROR':
         errorMessage.value = `${frame.userMessage}`
+        // A rejected START_INPUT must not leave the post-cancel audio gate
+        // closed forever — otherwise every later chunk would be dropped.
+        suppressAudio = false
         break
     }
   }
@@ -230,8 +244,10 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
   }
 
   async function startListening(): Promise<void> {
-    sendControl('START_INPUT')
+    // Request the microphone BEFORE telling the backend to start the turn:
+    // a first-use permission prompt must not eat into the 10 s input budget.
     stream = await requestMicrophone()
+    sendControl('START_INPUT')
     await ensureCapture().start(stream, (pcm) => {
       // 服务器确认 LISTENING 之前不发音频，避免中断窗口期被拒。
       if (voicePhase.value === 'LISTENING') {
@@ -277,6 +293,7 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
   }
 
   function close(): void {
+    intentionalClose = true
     if (socket && sessionId.value) {
       const frame = buildControlFrame(
         sessionId.value,

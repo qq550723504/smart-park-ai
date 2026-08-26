@@ -15,8 +15,16 @@ public class VoiceSessionStore {
 
     private final Map<String, VoiceSession> sessions = new ConcurrentHashMap<>();
 
-    /** Creates and stores a new session with a fresh id and runId. */
+    /** Hard cap so abusive clients cannot exhaust memory with never-closed sessions. */
+    private static final int MAX_ACTIVE_SESSIONS = 200;
+
+    /** Creates and stores a new session with a fresh id and runId.
+     *  @throws IllegalStateException when the active-session cap is reached */
     public VoiceSession create() {
+        if (sessions.size() >= MAX_ACTIVE_SESSIONS) {
+            throw new IllegalStateException(
+                    "too many active voice sessions (cap " + MAX_ACTIVE_SESSIONS + ")");
+        }
         String sessionId = "vs-" + UUID.randomUUID();
         VoiceSession session = new VoiceSession(sessionId);
         sessions.put(sessionId, session);

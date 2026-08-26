@@ -1,6 +1,8 @@
 package com.example.smartpark.web;
 
 import com.example.smartpark.voice.VoiceSessionService;
+import com.example.smartpark.voice.VoiceSessionStore;
+import com.example.smartpark.voice.model.VoiceSessionState;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -11,6 +13,7 @@ import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * REST entry points of the realtime voice assistant. Session creation returns
@@ -41,11 +44,15 @@ public class VoiceSessionController {
     @GetMapping("/sessions/{sessionId}")
     @ResponseBody
     public ResponseEntity describe(@PathVariable String sessionId) {
-        return service.describe(sessionId)
-                .<ResponseEntity>map(snapshot -> ResponseEntity.ok(Map.of(
-                        "sessionId", snapshot.sessionId(),
-                        "runId", snapshot.runId().toString(),
-                        "state", snapshot.createdAt().toString())))
-                .orElseGet(() -> ResponseEntity.notFound().build());
+        Optional<VoiceSessionStore.Snapshot> snapshot = service.describe(sessionId);
+        Optional<VoiceSessionState> state = service.stateOf(sessionId);
+        if (snapshot.isEmpty() || state.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(Map.of(
+                "sessionId", snapshot.get().sessionId(),
+                "runId", snapshot.get().runId().toString(),
+                "createdAt", snapshot.get().createdAt().toString(),
+                "state", state.get().name()));
     }
 }

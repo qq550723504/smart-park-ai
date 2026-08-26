@@ -84,14 +84,26 @@ class VoiceWebSocketHandlerTest {
         assertThat(session.state()).isEqualTo(VoiceSessionState.LISTENING);
         assertThat(session.ringBuffer().sizeBytes()).isGreaterThan(0);
 
-        // 超大帧：直接关闭连接。
-        var oversized = mock(org.springframework.web.socket.WebSocketSession.class);
-        when(oversized.getUri()).thenReturn(URI.create("/ws/voice/sessions/" + created.sessionId()));
-        when(oversized.getAttributes()).thenReturn(new HashMap<>());
-        handler.afterConnectionEstablished(oversized);
+        // 超大帧：直接关闭连接。（新会话，避免触发“已被占用”的 attach 保护）
+        var oversized = support.service.createSession(null);
+        var oversizedWs = wsSession(oversized.sessionId());
+        handler.afterConnectionEstablished(oversizedWs);
         byte[] tooBig = new byte[64 * 1024 + 1];
-        handler.handleBinaryMessage(oversized, new BinaryMessage(ByteBuffer.wrap(tooBig)));
-        verify(oversized).close(CloseStatus.NOT_ACCEPTABLE.withReason("oversized audio frame"));
+        handler.handleBinaryMessage(oversizedWs, new BinaryMessage(ByteBuffer.wrap(tooBig)));
+        verify(oversizedWs).close(CloseStatus.NOT_ACCEPTABLE.withReason("oversized audio frame"));
+    }
+
+    @Test
+    void secondAttachToSameSessionIsRejected() throws Exception {
+        var created = support.service.createSession(null);
+        var first = wsSession(created.sessionId());
+        var second = wsSession(created.sessionId());
+
+        handler.afterConnectionEstablished(first);
+        handler.afterConnectionEstablished(second);
+
+        // 第二条连接不能劫持正在进行的音频流。
+        verify(second).close(CloseStatus.NOT_ACCEPTABLE.withReason("session already attached"));
     }
 
     private BinaryMessage smallAudio() {
