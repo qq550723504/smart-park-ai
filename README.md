@@ -164,7 +164,11 @@ analytics overlay 会把 PostgreSQL 数据目录切换到独立命名卷 `analyt
 
 ```powershell
 docker compose -f compose.yaml down
-$projectName = if ($env:COMPOSE_PROJECT_NAME) { $env:COMPOSE_PROJECT_NAME } else { "springaialibaba" }
+$projectName = if ($env:COMPOSE_PROJECT_NAME) {
+    $env:COMPOSE_PROJECT_NAME
+} else {
+    (Get-Item -LiteralPath .\compose.yaml).Directory.Name
+}
 docker volume rm "${projectName}_analytics-postgres-analytics-data"
 ```
 
