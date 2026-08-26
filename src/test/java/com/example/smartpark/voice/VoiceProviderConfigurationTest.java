@@ -25,6 +25,8 @@ class VoiceProviderConfigurationTest {
                 .withPropertyValues("spring.ai.dashscope.api-key=sk-test")
                 .withBean(DashScopeAudioTranscriptionModel.class,
                         () -> Mockito.mock(DashScopeAudioTranscriptionModel.class))
+                .withBean(com.alibaba.cloud.ai.dashscope.audio.tts.DashScopeAudioSpeechModel.class,
+                        () -> Mockito.mock(com.alibaba.cloud.ai.dashscope.audio.tts.DashScopeAudioSpeechModel.class))
                 .run(context -> {
                     assertThat(context).hasSingleBean(StreamingAsrPort.class);
                     assertThat(context.getBean(StreamingAsrPort.class))
