@@ -38,7 +38,7 @@ public final class SupervisorSynthesizer {
             if (root == null || !root.isObject()) throw new IllegalArgumentException("synthesis must be a JSON object");
             FindingStatus status = FindingStatus.valueOf(required(root, "status").toUpperCase());
             Set<ExpertDomain> modelSelectedDomains = domains(root.get("selectedDomains"));
-            if (!plan.selectedDomains().containsAll(modelSelectedDomains)) {
+            if (status == FindingStatus.SUPPORTED && !plan.selectedDomains().containsAll(modelSelectedDomains)) {
                 throw new IllegalArgumentException("synthesis selected a domain outside the supervisor plan");
             }
             Set<ExpertDomain> selectedDomains = status == FindingStatus.SUPPORTED

@@ -139,6 +139,23 @@ class SupervisorSynthesisTest {
     }
 
     @Test
+    void discardsOutOfPlanModelSelectionsWhenSynthesisIsNotSupported() {
+        var insufficient = new ExpertFinding(ExpertDomain.ENERGY, FindingStatus.INSUFFICIENT_EVIDENCE,
+                "insufficient evidence", List.of(), 0, List.of("query meter"));
+        var energyOnlyPlan = new SupervisorPlan("energy question", Set.of(ExpertDomain.ENERGY),
+                Map.of(ExpertDomain.ENERGY, "energy"), "energy-only");
+
+        var result = synthesizer.parseAndValidate("""
+                {"status":"INSUFFICIENT_EVIDENCE","selectedDomains":["SECURITY"],
+                 "evidenceRefs":["stale:ref"],"confidence":0.8,"uncertainties":["missing data"]}
+                """, energyOnlyPlan, List.of(insufficient));
+
+        assertThat(result.status()).isEqualTo(FindingStatus.INSUFFICIENT_EVIDENCE);
+        assertThat(result.evidenceRefs()).isEmpty();
+        assertThat(result.confidence()).isZero();
+    }
+
+    @Test
     void derivesUncertaintiesWhenModelOmitsRequiredDisclosure() {
         var insufficient = new ExpertFinding(ExpertDomain.ENERGY, FindingStatus.INSUFFICIENT_EVIDENCE,
                 "insufficient evidence", List.of(), 0, List.of("query meter"));

@@ -72,4 +72,16 @@ class SupervisorPlannerTest {
 
         assertThat(energyPlan.selectedDomains()).containsExactly(ExpertDomain.ENERGY);
     }
+
+    @Test
+    void prefersEnergyContextForPowerAliasWithEnergyMeterIdentifier() {
+        var energyPlan = planner.parseAndValidate("power consumption for DEV-ENERGY-001", """
+                {"normalizedQuestion":"power consumption for DEV-ENERGY-001",
+                 "selectedDomains":["power"],
+                 "assignments":{"power":"查能耗"},
+                 "selectionReason":"能耗问题"}
+                """);
+
+        assertThat(energyPlan.selectedDomains()).containsExactly(ExpertDomain.ENERGY);
+    }
 }
