@@ -115,6 +115,7 @@ public class OperationsAnalysisGraph {
         List<com.example.smartpark.analytics.catalog.MetricDefinition> metrics = List.of();
         String schemaDescription = "";
         QueryPlan.TimeRange serverTimeRange;
+        QueryPlan.TimeRangeSource timeRangeSource;
         QueryPlan plan;
         int sqlAttempts;
         String rejectionReason;
@@ -318,6 +319,9 @@ public class OperationsAnalysisGraph {
             throw new IllegalArgumentException("原始问题包含暂不支持的时间范围表达式: " + parsedTime.expression());
         }
         QueryPlan.TimeRange parsedServerTimeRange = parsedTime.timeRange();
+        ctx.timeRangeSource = parsedTime.status() == TimeRangeParser.Status.PARSED
+                ? QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE
+                : QueryPlan.TimeRangeSource.DEFAULT_METRIC_LOOKBACK;
         // Clarified runs carry the operator's structured selection as the understanding;
         // the model is not consulted again for metric resolution.
         AnalyticsModelClient.QuestionUnderstanding modelUnderstanding = ctx.pinnedUnderstanding != null
@@ -325,6 +329,7 @@ public class OperationsAnalysisGraph {
                 : modelClient.understandQuestion(question);
         if (ctx.pinnedUnderstanding != null && ctx.pinnedUnderstanding.requestedTimeRange() != null) {
             ctx.serverTimeRange = toTimeRange(ctx.pinnedUnderstanding.requestedTimeRange());
+            ctx.timeRangeSource = QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE;
         } else {
             if (parsedServerTimeRange == null && modelUnderstanding.requestedTimeRange() != null) {
                 throw new IllegalArgumentException("模型返回了原始问题未包含的时间范围");
@@ -440,13 +445,17 @@ public class OperationsAnalysisGraph {
         QueryPlan.TimeRange timeRange = ctx.serverTimeRange != null
                 ? ctx.serverTimeRange
                 : new QueryPlan.TimeRange(now.minus(Duration.ofDays(lookbackDays)), now);
+        QueryPlan.TimeRangeSource timeRangeSource = ctx.timeRangeSource != null
+                ? ctx.timeRangeSource
+                : QueryPlan.TimeRangeSource.DEFAULT_METRIC_LOOKBACK;
         ctx.plan = new QueryPlan(
                 originalQuestion,
                 ctx.metrics,
                 validatedRequestedDimensions(ctx, originalQuestion),
                 validatedRequestedFilters(ctx, originalQuestion),
                 timeRange,
-                200);
+                200,
+                timeRangeSource);
         // One shared binding set travels through both gates and execution.
         // Entity values are never copied into SQL literals.
         java.util.LinkedHashMap<String, Object> parameters = new java.util.LinkedHashMap<>();

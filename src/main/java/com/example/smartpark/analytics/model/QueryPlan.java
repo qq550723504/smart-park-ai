@@ -22,7 +22,14 @@ public record QueryPlan(
         List<String> dimensions,
         Map<String, String> filters,
         TimeRange timeRange,
-        int limit) {
+        int limit,
+        TimeRangeSource timeRangeSource) {
+
+    public QueryPlan(String question, List<MetricDefinition> metrics, List<String> dimensions,
+                     Map<String, String> filters, TimeRange timeRange, int limit) {
+        this(question, metrics, dimensions, filters, timeRange, limit,
+                TimeRangeSource.DEFAULT_METRIC_LOOKBACK);
+    }
 
     public QueryPlan {
         Objects.requireNonNull(question, "question");
@@ -91,6 +98,7 @@ public record QueryPlan(
         if (limit < 1 || limit > 500) {
             throw new IllegalArgumentException("limit must be 1..500");
         }
+        Objects.requireNonNull(timeRangeSource, "timeRangeSource");
     }
 
     /**
@@ -117,6 +125,11 @@ public record QueryPlan(
 
     public static String filterParameterName(String dimension) {
         return "filter_" + dimension.toLowerCase(Locale.ROOT);
+    }
+
+    public enum TimeRangeSource {
+        EXPLICIT_USER_RANGE,
+        DEFAULT_METRIC_LOOKBACK
     }
 
     public record TimeRange(Instant from, Instant to) {

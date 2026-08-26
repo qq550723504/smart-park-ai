@@ -262,6 +262,26 @@ class OperationsAnalysisGraphTest {
                 .isEqualTo(new com.example.smartpark.analytics.model.QueryPlan.TimeRange(
                         Instant.parse("2026-08-17T00:00:00Z"),
                         Instant.parse("2026-08-24T00:00:00Z")));
+        assertThat(modelClient.lastPlan().timeRangeSource())
+                .isEqualTo(QueryPlan.TimeRangeSource.DEFAULT_METRIC_LOOKBACK);
+    }
+
+    @Test
+    void carriesServerParsedHourlyRangeAsExplicitUserRange() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("过去24小时能耗", List.of("能耗"), List.of()),
+                List.of(GOOD_TOTAL_SQL),
+                new ChartSpec.Proposal("TABLE", "过去24小时能耗", "energy_kwh", List.of(), "", "kWh"),
+                "共 1 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "过去24小时能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().timeRange()).isEqualTo(new QueryPlan.TimeRange(
+                Instant.parse("2026-08-23T00:00:00Z"), Instant.parse("2026-08-24T00:00:00Z")));
+        assertThat(modelClient.lastPlan().timeRangeSource())
+                .isEqualTo(QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE);
+        assertThat(modelClient.generateSqlInvocations()).isEqualTo(1);
     }
 
     @Test
