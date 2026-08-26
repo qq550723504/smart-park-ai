@@ -24,10 +24,6 @@ public record QueryPlan(
         TimeRange timeRange,
         int limit) {
 
-    private static final java.util.regex.Pattern ENTITY_IDENTIFIER = java.util.regex.Pattern.compile(
-            "(?i)(?<![A-Za-z0-9_-])(?:[A-Za-z]\\d+|[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)+)"
-                    + "(?![A-Za-z0-9_-])");
-
     public QueryPlan {
         Objects.requireNonNull(question, "question");
         if (question.isBlank()) {
@@ -80,9 +76,8 @@ public record QueryPlan(
         }
         Set<String> filterValues = normalizedFilters.values().stream()
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
-        java.util.regex.Matcher scopedEntity = ENTITY_IDENTIFIER.matcher(question);
-        while (scopedEntity.find()) {
-            String identifier = scopedEntity.group();
+        for (QuestionTokenScanner.Token scopedEntity : QuestionTokenScanner.entityIdentifiers(question)) {
+            String identifier = scopedEntity.text();
             if (!filterValues.contains(identifier)) {
                 throw new IllegalArgumentException(
                         "query plan dropped entity identifier from original question: " + identifier);
