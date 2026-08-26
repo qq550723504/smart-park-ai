@@ -83,15 +83,15 @@ git commit -m "feat: stream voice input to dashscope asr"
 
 ## Task 4：实现证据约束的语音回答 Agent
 
-- [ ] 写 `VoiceAnswerAgentTest.java`，覆盖告警、能耗、停车政策三个问题。固定模型必须调用对应只读工具/知识；未调用工具却给出数据、引用不存在政策、尝试写操作均被拒绝。
+- [x] 写 `VoiceAnswerAgentTest.java`，覆盖告警、能耗、停车政策三个问题。固定模型必须调用对应只读工具/知识；未调用工具却给出数据、引用不存在政策、尝试写操作均被拒绝。
 
-- [ ] 构建 `VoiceAnswerAgent`：工具集合仅含 Alert/Device/Energy/Security/ParkKnowledge 的只读接口；停车政策必须有知识引用；实时值必须有本 turn 的 tool evidence。
+- [x] 构建 `VoiceAnswerAgent`：工具集合仅含 Alert/Device/Energy/Security/ParkKnowledge 的只读接口；停车政策必须有知识引用；实时值必须有本 turn 的 tool evidence。
 
-- [ ] 定义 `VoiceAnswer(text, evidenceRefs, toolCalls)`；`VoiceAnswerValidator` 在 TTS 前检查数字、告警/设备 ID 与引用均可追溯。校验失败显式结束，不生成“合理猜测”。
+- [x] 定义 `VoiceAnswer(text, evidenceRefs, toolCalls)`；`VoiceAnswerValidator` 在 TTS 前检查数字、告警/设备 ID 与引用均可追溯。校验失败显式结束，不生成“合理猜测”。
 
-- [ ] 真实工具开始/完成和文本 delta 发布到 WS 与统一事件；UI 工具事件由后端事实产生。
+- [x] 真实工具开始/完成和文本 delta 发布到 WS 与统一事件；UI 工具事件由后端事实产生。
 
-- [ ] 验证并提交：
+- [x] 验证并提交：
 
 ```powershell
 .\mvnw.cmd -B -Dtest=VoiceAnswerAgentTest,VoiceAnswerValidatorTest,ParkToolsTest test
