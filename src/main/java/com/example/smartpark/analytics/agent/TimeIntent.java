@@ -37,9 +37,13 @@ record TimeIntent(
             if (fromDate == null || toDate != null) {
                 throw new IllegalArgumentException("single-day intent requires one date");
             }
-        } else if (kind == Kind.CALENDAR_PERIOD || kind == Kind.DAY_PART) {
+        } else if (kind == Kind.CALENDAR_PERIOD) {
             if (fromDate == null || toDate == null || toDate.isBefore(fromDate)) {
                 throw new IllegalArgumentException("calendar intent requires ordered date endpoints");
+            }
+        } else if (kind == Kind.DAY_PART) {
+            if (fromDate == null || toDate != null) {
+                throw new IllegalArgumentException("day-part intent requires one date");
             }
         } else if (fromDate != null || toDate != null) {
             throw new IllegalArgumentException("dates are not valid for this intent kind");
