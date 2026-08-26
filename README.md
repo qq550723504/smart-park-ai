@@ -18,6 +18,9 @@
 | 园区客服 | 停车、访客、能耗问答，设施报修与知识不足时转人工 |
 | 知识管理 | 按客服与告警领域隔离的 Mock 检索或进程内向量 RAG |
 | 运营演示 | 角色边界、指标、审计、反馈和一次性故障注入 |
+| 专家协作 | Supervisor 动态分派领域专家，并行分析、展示证据和汇总结论；需满足在线能力开关 |
+| 运营分析 | 自然语言转真实只读 PostgreSQL 分析，展示查询结果、图表和结论；需显式启用分析链路 |
+| 实时语音 | P1 后续场景；当前 UI 已预留入口但仍禁用，暂不可体验 |
 
 ## 快速开始
 
@@ -374,6 +377,7 @@ $env:AI_DASHSCOPE_API_KEY = [System.Net.NetworkCredential]::new('', $secureDashS
 ```
 
 - [详细架构说明](docs/architecture.md)
+- [客户版能力展示](docs/customer-capabilities.md)
 - [前端开发说明](ui/README.md)
 - [设计与实施记录](docs/superpowers/)
 

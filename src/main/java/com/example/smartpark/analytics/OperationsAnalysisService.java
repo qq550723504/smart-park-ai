@@ -208,14 +208,18 @@ public class OperationsAnalysisService {
         PendingClarification rollbackPending = pendingForRollback;
         launch(runId, current.question() + "（已明确指标: " + pinnedTerms + "）", pinned, true,
                 () -> {
-                    store.put(rerunning);
-                    pendingClarifications.remove(runId);
-                    admittingClarifications.remove(runId);
+                    synchronized (lifecycleLock) {
+                        store.put(rerunning);
+                        pendingClarifications.remove(runId);
+                        admittingClarifications.remove(runId);
+                    }
                 },
                 () -> {
-                    store.put(current);
-                    pendingClarifications.put(runId, rollbackPending);
-                    admittingClarifications.remove(runId);
+                    synchronized (lifecycleLock) {
+                        store.put(current);
+                        pendingClarifications.put(runId, rollbackPending);
+                        admittingClarifications.remove(runId);
+                    }
                 }, false);
         return store.get(runId);
     }
