@@ -117,20 +117,20 @@ git commit -m "feat: stream interruptible dashscope speech output"
 
 ## Task 6：编排 session 生命周期、HTTP 与 WebSocket
 
-- [ ] 写 `VoiceSessionServiceTest.java`，覆盖完整 turn、ASR 空文本、输入/Agent/TTS 超时、中断、重复 commit、连接关闭、两个 session 隔离、清理后无音频引用。
+- [x] 写 `VoiceSessionServiceTest.java`，覆盖完整 turn、ASR 空文本、输入/Agent/TTS 超时、中断、重复 commit、连接关闭、两个 session 隔离、清理后无音频引用。
 
-- [ ] 写 `VoiceSessionControllerTest` 与 `VoiceWebSocketHandlerTest`，覆盖：
+- [x] 写 `VoiceSessionControllerTest` 与 `VoiceWebSocketHandlerTest`，覆盖：
 
   - `POST /api/voice/sessions`；
   - `GET /api/voice/sessions/{sessionId}`；
   - `/ws/voice/sessions/{sessionId}` 二进制和 JSON 帧；
   - 未知 session、超大 frame、非法 control、鉴权/Origin 策略。
 
-- [ ] 实现 service、store、controller、handler；同 session 通过 serial executor 处理；每个 turn 拥有独立 ID/cancellation；CLOSE/网络断开关闭 ASR/TTS 并移除 buffer。
+- [x] 实现 service、store、controller、handler；同 session 通过 serial executor 处理；每个 turn 拥有独立 ID/cancellation；CLOSE/网络断开关闭 ASR/TTS 并移除 buffer。
 
-- [ ] 所有状态转换同步发布统一事件，terminal session 完成事件流。
+- [x] 所有状态转换同步发布统一事件，terminal session 完成事件流。
 
-- [ ] 验证并提交：
+- [x] 验证并提交：
 
 ```powershell
 .\mvnw.cmd -B -Dtest=VoiceSessionServiceTest,VoiceSessionControllerTest,VoiceWebSocketHandlerTest test
