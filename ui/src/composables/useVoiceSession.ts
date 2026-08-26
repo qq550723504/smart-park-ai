@@ -53,6 +53,8 @@ export interface VoiceSessionBinding {
   toolEvents: Ref<ToolEventView[]>
   errorMessage: Ref<string>
   sessionId: Ref<string | null>
+  /** Backend run id; feeds the shared unified execution trace rail. */
+  runId: Ref<string | null>
   toggleMicrophone(): Promise<void>
   close(): void
 }
@@ -103,6 +105,7 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
   const toolEvents = ref<ToolEventView[]>([])
   const errorMessage = ref('')
   const sessionId = ref<string | null>(null)
+  const runId = ref<string | null>(null)
 
   let socket: WebSocketLike | null = null
   let controlSequence = 0
@@ -131,6 +134,7 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
     connectionPhase.value = 'connecting'
     const created = await api.createSession()
     sessionId.value = created.sessionId
+    runId.value = created.runId
     socket = openWebSocket(
       `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${created.wsPath}`,
     )
@@ -306,6 +310,7 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
     toolEvents,
     errorMessage,
     sessionId,
+    runId,
     toggleMicrophone,
     close,
   }
