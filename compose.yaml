@@ -28,7 +28,7 @@ services:
       SMARTPARK_ANALYTICS_DB_ADMIN_USER: smartpark_analytics_admin
       SMARTPARK_ANALYTICS_DB_USER: smartpark_analytics_ro
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     depends_on:
       analytics-postgres:
         condition: service_healthy
@@ -46,7 +46,7 @@ services:
     environment:
       VITE_API_PROXY_TARGET: http://backend:8080
     ports:
-      - "5173:5173"
+      - "127.0.0.1:5173:5173"
     depends_on:
       backend:
         condition: service_healthy

@@ -242,12 +242,13 @@ class SensitiveDataTest {
     }
 
     @Test
-    void repositoryPatternsCoverEqualsAndYamlAssignmentsWithoutTreatingPlaceholdersAsSecrets() {
+    void repositoryPatternsCoverInlineAndIndentedYamlAssignmentsWithoutTreatingPlaceholdersAsSecrets() {
         List<Pattern> patterns = forbiddenSecretPatterns();
         String keyName = "AI_" + "DASHSCOPE_API_KEY";
 
         assertThat(matchesAny(keyName + "=private-value-123", patterns)).isTrue();
         assertThat(matchesAny(keyName + ": private-value-456", patterns)).isTrue();
+        assertThat(matchesAny(keyName + ":\n  private-value-789", patterns)).isTrue();
         assertThat(matchesAny(keyName + " = '${" + keyName + ":}'", patterns)).isFalse();
         assertThat(matchesAny(keyName + ": <user-provided-key>", patterns)).isFalse();
     }
@@ -259,6 +260,19 @@ class SensitiveDataTest {
 
         assertThat(matchesAny(keyName + "=\nNEXT_VARIABLE_NAME=enabled", patterns)).isFalse();
         assertThat(matchesAny(keyName + "=private-value-123", patterns)).isTrue();
+    }
+
+    @Test
+    void repositoryPatternsCoverAnalyticsPasswordsWithoutTreatingEmptyValuesOrPlaceholdersAsSecrets() {
+        List<Pattern> patterns = forbiddenSecretPatterns();
+        String adminPassword = "SMARTPARK_ANALYTICS_DB_ADMIN_PASSWORD";
+        String readOnlyPassword = "SMARTPARK_ANALYTICS_DB_RO_PASSWORD";
+
+        assertThat(matchesAny(adminPassword + "=private-value-123", patterns)).isTrue();
+        assertThat(matchesAny(readOnlyPassword + ":\n  private-value-456", patterns)).isTrue();
+        assertThat(matchesAny(adminPassword + "=   ", patterns)).isFalse();
+        assertThat(matchesAny(readOnlyPassword + ": ${" + readOnlyPassword + "}", patterns)).isFalse();
+        assertThat(matchesAny(adminPassword + ": <placeholder>", patterns)).isFalse();
     }
 
     @Test
@@ -452,11 +466,17 @@ class SensitiveDataTest {
 
     private static List<Pattern> forbiddenSecretPatterns() {
         String dashScopeKey = "AI_" + "DASHSCOPE_API_KEY";
+        String analyticsAdminPassword = "SMARTPARK_ANALYTICS_DB_ADMIN_PASSWORD";
+        String analyticsReadOnlyPassword = "SMARTPARK_ANALYTICS_DB_RO_PASSWORD";
+        String assignmentKeys = "(?:" + dashScopeKey + "|" + analyticsAdminPassword + "|" + analyticsReadOnlyPassword
+                + ")";
         return List.of(
                 Pattern.compile("\\b" + "sk" + "-[A-Za-z0-9_-]{12,}"),
                 Pattern.compile("(?i)\\b" + "Bearer" + "\\s+[A-Za-z0-9._~+/=-]{12,}"),
-                Pattern.compile("(?im)^\\s*(?:\\$env:)?" + dashScopeKey
-                        + "[^\\S\\r\\n]*(?:=|:)[^\\S\\r\\n]*(?!['\"]?(?:\\$\\{|<|$))['\"]?[A-Za-z0-9_./+-]{8,}"),
+                Pattern.compile("(?im)^\\s*(?:\\$env:)?" + assignmentKeys
+                        + "(?:[^\\S\\r\\n]*=[^\\S\\r\\n]*(?!['\"]?(?:\\$\\{|<|$))['\"]?[A-Za-z0-9_./+-]{8,}"
+                        + "|[^\\S\\r\\n]*:[^\\S\\r\\n]*(?!['\"]?(?:\\$\\{|<|$))['\"]?[A-Za-z0-9_./+-]{8,}"
+                        + "|[^\\S\\r\\n]*:\\r?\\n[ \\t]+(?!['\"]?(?:\\$\\{|<|$))['\"]?[A-Za-z0-9_./+-]{8,})"),
                 Pattern.compile("\\bAKIA[A-Z0-9]{16}\\b"),
                 Pattern.compile("\\bAIza[A-Za-z0-9_-]{20,}\\b"),
                 Pattern.compile("\\bghp_[A-Za-z0-9]{20,}\\b"));

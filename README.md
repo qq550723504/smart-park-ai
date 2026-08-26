@@ -132,6 +132,8 @@ docker compose --env-file .env.example up --build
 
 默认栈启动 backend、frontend 和 analytics PostgreSQL 容器。前端入口为 <http://localhost:5173>；容器内 Vite 会把 `/api` 代理到 backend，因此可用 <http://localhost:5173/api/operations/capabilities> 查看当前能力。默认模式下 backend 暴露的同一 capabilities endpoint 也可直接通过 <http://localhost:8080/api/operations/capabilities> 访问。
 
+默认 Compose 端口只绑定本机回环：`127.0.0.1:5173:5173` 和 `127.0.0.1:8080:8080`。因此访问 URL 仍然是 <http://localhost:5173> 与 <http://localhost:8080>，但不会监听局域网或公网地址。
+
 常用生命周期命令：
 
 ```powershell
@@ -140,7 +142,7 @@ docker compose logs -f
 docker compose down
 ```
 
-`docker compose down` 不会删除命名卷 `analytics-postgres-data`，因此普通停止/清理后其中的数据仍会保留。只有在明确需要重置本地演示数据时，才使用 `docker compose down -v`。
+默认栈使用命名卷 `analytics-postgres-data` 保存离线演示库。`docker compose down` 不会删除它，因此普通停止/清理后其中的数据仍会保留；只有在明确需要重置默认离线演示数据时，才使用 `docker compose down -v`。
 
 ### 显式启用 analytics
 
@@ -158,7 +160,13 @@ analytics 使用独立 PostgreSQL 数据库；运行时查询角色固定为只�
 docker compose -f compose.yaml -f compose.analytics.yaml --profile analytics up --build
 ```
 
-analytics 覆盖配置会将 PostgreSQL 改为密码认证；默认栈中为便于无凭据离线演示而使用的 `trust` 认证仅限本地演示，不能作为生产部署建议。
+analytics overlay 会把 PostgreSQL 数据目录切换到独立命名卷 `analytics-postgres-analytics-data`，因此从默认栈切换到 analytics 栈时不需要手动修复旧卷上的认证方式。`docker compose down` 同样只会停止容器而保留该卷；如需重置 analytics 本地演示数据库，请运行：
+
+```powershell
+docker compose -f compose.yaml -f compose.analytics.yaml --profile analytics down -v
+```
+
+analytics 覆盖配置会将 PostgreSQL 改为密码认证并显式开启 `SMARTPARK_ANALYTICS_DEMO_DATA_REFRESH_ENABLED=true`，让持久化本地演示库中的 V1 时间窗口夹具按小时重新锚定到当前时间。这个自动刷新只适用于本地演示，不适用于真实数据或生产环境；默认栈中的 `SMARTPARK_ANALYTICS_DEMO_DATA_REFRESH_ENABLED=false` 保持不变。默认栈中为便于无凭据离线演示而使用的 `trust` 认证仅限本地演示，不能作为生产部署建议。
 
 ## 运行模式与配置
 
@@ -172,7 +180,7 @@ analytics 覆盖配置会将 PostgreSQL 改为密码认证；默认栈中为便�
 | `SMARTPARK_KNOWLEDGE_MIN_SIMILARITY_SCORE` | `0.65` | RAG 结果最低相似度 |
 | `SMARTPARK_CUSTOMER_MINIMUM_KNOWLEDGE_SCORE` | `0.70` | 客服接受知识结果的最低分数 |
 | `SMARTPARK_ANALYTICS_ENABLED` | `false` | 是否启用真实只读 PostgreSQL 分析链路 |
-| `SMARTPARK_ANALYTICS_DEMO_DATA_REFRESH_ENABLED` | `false` | 仅在持久化演示库中把 V1 的时间窗口夹具（能耗、告警、设备快照、停车）重新锚定到当前时间；真实数据必须保持关闭 |
+| `SMARTPARK_ANALYTICS_DEMO_DATA_REFRESH_ENABLED` | `false` | 默认关闭；analytics overlay 会把它显式覆盖为 `true`，仅用于持久化本地演示库按小时重锚定 V1 的时间窗口夹具（能耗、告警、设备快照、停车）。真实数据必须保持关闭 |
 | `SMARTPARK_ANALYTICS_DB_URL` | 空 | 专用分析数据库 JDBC URL；不能复用业务数据库 |
 | `SMARTPARK_ANALYTICS_DB_ADMIN_USER` | 空 | 仅供 Flyway 和演示快照刷新使用的对象所有者账号 |
 | `SMARTPARK_ANALYTICS_DB_ADMIN_PASSWORD` | 空 | 分析数据库对象所有者密码 |
