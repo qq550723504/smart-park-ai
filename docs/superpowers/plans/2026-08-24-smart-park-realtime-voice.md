@@ -65,15 +65,15 @@ git commit -m "feat: bound ephemeral voice audio buffers"
 
 ## Task 3：实现真实 DashScope streaming ASR 适配器
 
-- [ ] 定义 `StreamingAsrPort`，测试 fake port 的 partial/final/close/error 语义；应用代码不得依赖 mock 实现。
+- [x] 定义 `StreamingAsrPort`，测试 fake port 的 partial/final/close/error 语义；应用代码不得依赖 mock 实现。
 
-- [ ] 创建 `DashScopeStreamingAsrAdapter`，包装 2.0 的 `StreamingTranscriptionModel`/`DashScopeWebSocketAsrApi`。将 SDK callback 串行化为 session frame，供应商错误映射为安全错误码。
+- [x] 创建 `DashScopeStreamingAsrAdapter`，包装 2.0 的 `StreamingTranscriptionModel`/`DashScopeWebSocketAsrApi`。将 SDK callback 串行化为 session frame，供应商错误映射为安全错误码。
 
-- [ ] 写 adapter 合同测试，使用本地假的 SDK facade 验证音频传递、partial 顺序、commit、cancel、close；真正联网 smoke 放在加固计划，不进入默认单测。
+- [x] 写 adapter 合同测试，使用本地假的 SDK facade 验证音频传递、partial 顺序、commit、cancel、close；真正联网 smoke 放在加固计划，不进入默认单测。
 
-- [ ] 配置 bean 条件必须是“凭据存在则创建，否则应用启动失败”，不得注册 mock 替代品。
+- [x] 配置 bean 条件必须是“凭据存在则创建，否则应用启动失败”，不得注册 mock 替代品。
 
-- [ ] 验证并提交：
+- [x] 验证并提交：
 
 ```powershell
 .\mvnw.cmd -B -Dtest=StreamingAsrPortTest,DashScopeStreamingAsrAdapterTest,VoiceProviderConfigurationTest test
