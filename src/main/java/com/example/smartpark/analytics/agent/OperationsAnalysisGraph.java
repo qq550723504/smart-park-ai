@@ -25,13 +25,8 @@ import com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy;
 import reactor.core.publisher.Flux;
 
 import java.time.Clock;
-import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.LocalDate;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -42,7 +37,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Nine-node analysis workflow on the native 2.0 StateGraph:
+ * Ten-node analysis workflow on the native 2.0 StateGraph:
  * understandQuestion → resolveMetricAndDimensions → recallAllowedSchema →
  * buildQueryPlan → generateSql → validateSqlAst → explainAndCheckCost →
  * executeReadOnlyQuery → buildChartSpec → summarizeFromResult.
@@ -57,27 +52,6 @@ public class OperationsAnalysisGraph {
     private static final String STATE_QUESTION = "question";
     private static final String STATE_RUN_ID = "runId";
     private static final int MAX_SQL_ATTEMPTS = 2; // one original try, at most one repair
-    private static final ZoneId PARK_ZONE = ZoneId.of("Asia/Shanghai");
-    private static final java.util.regex.Pattern CALENDAR_DATE_RANGE = java.util.regex.Pattern.compile(
-            "(\\d{4}-\\d{2}-\\d{2})\\s*(?:到|至|~|～)\\s*(\\d{4}-\\d{2}-\\d{2})");
-    private static final java.util.regex.Pattern CHINESE_CALENDAR_DATE_RANGE = java.util.regex.Pattern.compile(
-            "(\\d{4})年(\\d{1,2})月(\\d{1,2})日\\s*(?:到|至|~|～)\\s*"
-                    + "(\\d{4})年(\\d{1,2})月(\\d{1,2})日");
-    private static final java.util.regex.Pattern RELATIVE_TIME_EXPRESSION = java.util.regex.Pattern.compile(
-            "(?:过去|最近|近)\\d+(?:天|日)|(?:过去一周|最近一周)|"
-                    + "(?:今天|今日|昨天|昨日|前天)|上周(?:[一二三四五六日天末])?|(?:本周|本月|上月)");
-    private static final java.util.regex.Pattern EXPLICIT_TIME_HINT = java.util.regex.Pattern.compile(
-            "(?:上上周|下周|下月|上上月|本季度|上季度|下季度|季度|今年|去年|本年|上半年|下半年|"
-                    + "明天|后天|未来|(?:过去|最近|近)(?:[一二两三四五六七八九十百千万]+|\\d+)"
-                    + "(?:天|日|周|星期|月|个月|季度)|(?:\\d{4}年|\\d{1,2}月)|"
-                    + "\\d{4}[-/.年]\\d{1,2}(?:[-/.月]\\d{1,2}日?)?|\\d{1,2}月\\d{1,2}日?)");
-    private static final java.util.regex.Pattern TIME_EXPRESSION = java.util.regex.Pattern.compile(
-            "(?:" + CALENDAR_DATE_RANGE.pattern() + "|"
-                    + CHINESE_CALENDAR_DATE_RANGE.pattern() + "|"
-                    + RELATIVE_TIME_EXPRESSION.pattern() + "|"
-                    + EXPLICIT_TIME_HINT.pattern() + ")");
-    private static final java.util.regex.Pattern QUALIFIED_PREVIOUS_WEEK = java.util.regex.Pattern.compile(
-            "上周([一二三四五六日天末])");
     private final MetricCatalog catalog;
     private final AnalyticsModelClient modelClient;
     private final CostGate costGate;
@@ -86,6 +60,7 @@ public class OperationsAnalysisGraph {
     private final AnalysisSummaryValidator summaryValidator;
     private final Clock clock;
     private final Duration executionTimeout;
+    private final TimeRangeParser timeRangeParser = new TimeRangeParser();
     private final CompiledGraph compiled;
     private final ConcurrentHashMap<UUID, RunContext> contexts = new ConcurrentHashMap<>();
 
@@ -335,7 +310,14 @@ public class OperationsAnalysisGraph {
         RunContext ctx = contexts.get(runId);
         nodeStarted(ctx, runId, ExecutionStage.UNDERSTANDING, "理解问题");
         String question = text(state, STATE_QUESTION);
-        QueryPlan.TimeRange parsedServerTimeRange = serverTimeRangeForQuestion(question, Instant.now(clock));
+        TimeRangeParser.ParseResult parsedTime = timeRangeParser.parse(question, Instant.now(clock));
+        if (parsedTime.status() == TimeRangeParser.Status.MULTIPLE) {
+            throw new IllegalArgumentException("原始问题包含多个时间范围，当前查询计划不支持范围对比");
+        }
+        if (parsedTime.status() == TimeRangeParser.Status.UNSUPPORTED) {
+            throw new IllegalArgumentException("原始问题包含暂不支持的时间范围表达式: " + parsedTime.expression());
+        }
+        QueryPlan.TimeRange parsedServerTimeRange = parsedTime.timeRange();
         // Clarified runs carry the operator's structured selection as the understanding;
         // the model is not consulted again for metric resolution.
         AnalyticsModelClient.QuestionUnderstanding modelUnderstanding = ctx.pinnedUnderstanding != null
@@ -629,127 +611,6 @@ public class OperationsAnalysisGraph {
         return false;
     }
 
-    private static QueryPlan.TimeRange serverTimeRangeForQuestion(String question, Instant now) {
-        String normalized = question == null ? "" : question.toLowerCase(java.util.Locale.ROOT);
-        QueryPlan.TimeRange parsed = expectedTimeRange(normalized, now);
-        if (parsed == null && EXPLICIT_TIME_HINT.matcher(normalized).find()) {
-            throw new IllegalArgumentException("原始问题包含暂不支持的时间范围表达式");
-        }
-        return parsed;
-    }
-
-    private static QueryPlan.TimeRange expectedTimeRange(String question, Instant now) {
-        rejectMultipleTimeExpressions(question);
-        if (question.contains("上上周") || question.contains("上上月")) {
-            throw new IllegalArgumentException("原始问题包含暂不支持的时间范围表达式");
-        }
-        java.util.regex.Matcher calendarRange = CALENDAR_DATE_RANGE.matcher(question);
-        if (calendarRange.find()) {
-            int firstRangeEnd = calendarRange.end();
-            java.util.regex.Matcher additionalRange = CALENDAR_DATE_RANGE.matcher(question);
-            additionalRange.region(firstRangeEnd, question.length());
-            if (additionalRange.find()) {
-                throw new IllegalArgumentException("原始问题包含多个日期范围，当前查询计划不支持范围对比");
-            }
-            LocalDate from = LocalDate.parse(calendarRange.group(1), DateTimeFormatter.ISO_LOCAL_DATE);
-            LocalDate to = LocalDate.parse(calendarRange.group(2), DateTimeFormatter.ISO_LOCAL_DATE);
-            if (to.isBefore(from)) {
-                throw new IllegalArgumentException("原始问题的日期范围顺序无效");
-            }
-            return localDateRange(from, to.plusDays(1));
-        }
-        java.util.regex.Matcher chineseCalendarRange = CHINESE_CALENDAR_DATE_RANGE.matcher(question);
-        if (chineseCalendarRange.find()) {
-            LocalDate from = LocalDate.of(
-                    Integer.parseInt(chineseCalendarRange.group(1)),
-                    Integer.parseInt(chineseCalendarRange.group(2)),
-                    Integer.parseInt(chineseCalendarRange.group(3)));
-            LocalDate to = LocalDate.of(
-                    Integer.parseInt(chineseCalendarRange.group(4)),
-                    Integer.parseInt(chineseCalendarRange.group(5)),
-                    Integer.parseInt(chineseCalendarRange.group(6)));
-            if (to.isBefore(from)) {
-                throw new IllegalArgumentException("原始问题的日期范围顺序无效");
-            }
-            return localDateRange(from, to.plusDays(1));
-        }
-        java.util.regex.Matcher days = java.util.regex.Pattern.compile("(?:过去|最近|近)(\\d+)(?:天|日)")
-                .matcher(question);
-        if (days.find()) {
-            long count = Long.parseLong(days.group(1));
-            return new QueryPlan.TimeRange(now.minus(Duration.ofDays(count)), now);
-        }
-        if (question.contains("前天")) {
-            LocalDate today = now.atZone(PARK_ZONE).toLocalDate();
-            return localDateRange(today.minusDays(2), today.minusDays(1));
-        }
-        if (question.contains("昨天") || question.contains("昨日")) {
-            java.time.Instant today = now.atZone(PARK_ZONE).toLocalDate()
-                    .atStartOfDay(PARK_ZONE).toInstant();
-            return new QueryPlan.TimeRange(today.minus(Duration.ofDays(1)), today);
-        }
-        if (question.contains("今天") || question.contains("今日")) {
-            java.time.Instant today = now.atZone(PARK_ZONE).toLocalDate()
-                    .atStartOfDay(PARK_ZONE).toInstant();
-            return new QueryPlan.TimeRange(today, now);
-        }
-        if (question.contains("本周")) {
-            LocalDate currentWeekStart = now.atZone(PARK_ZONE).toLocalDate()
-                    .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
-            return new QueryPlan.TimeRange(currentWeekStart.atStartOfDay(PARK_ZONE).toInstant(), now);
-        }
-        if (question.contains("上月")) {
-            LocalDate currentMonthStart = now.atZone(PARK_ZONE).toLocalDate().withDayOfMonth(1);
-            return localDateRange(currentMonthStart.minusMonths(1), currentMonthStart);
-        }
-        if (question.contains("本月")) {
-            LocalDate currentMonthStart = now.atZone(PARK_ZONE).toLocalDate().withDayOfMonth(1);
-            return new QueryPlan.TimeRange(currentMonthStart.atStartOfDay(PARK_ZONE).toInstant(), now);
-        }
-        java.util.regex.Matcher qualifiedWeek = QUALIFIED_PREVIOUS_WEEK.matcher(question);
-        if (qualifiedWeek.find()) {
-            LocalDate currentWeekStart = now.atZone(PARK_ZONE).toLocalDate()
-                    .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
-            LocalDate previousWeekStart = currentWeekStart.minusWeeks(1);
-            String qualifier = qualifiedWeek.group(1);
-            if ("末".equals(qualifier)) {
-                return localDateRange(previousWeekStart.plusDays(5), currentWeekStart);
-            }
-            int dayOffset = switch (qualifier) {
-                case "一" -> 0;
-                case "二" -> 1;
-                case "三" -> 2;
-                case "四" -> 3;
-                case "五" -> 4;
-                case "六" -> 5;
-                case "日", "天" -> 6;
-                default -> throw new IllegalArgumentException("无法识别上周的日期限定: " + qualifier);
-            };
-            LocalDate day = previousWeekStart.plusDays(dayOffset);
-            return localDateRange(day, day.plusDays(1));
-        }
-        if (question.contains("上周")) {
-            LocalDate currentWeekStart = now.atZone(PARK_ZONE).toLocalDate()
-                    .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
-            return localDateRange(currentWeekStart.minusWeeks(1), currentWeekStart);
-        }
-        if (question.contains("过去一周") || question.contains("最近一周")) {
-            return new QueryPlan.TimeRange(now.minus(Duration.ofDays(7)), now);
-        }
-        return null;
-    }
-
-    private static void rejectMultipleTimeExpressions(String question) {
-        java.util.regex.Matcher matcher = TIME_EXPRESSION.matcher(question);
-        int matches = 0;
-        while (matcher.find()) {
-            matches++;
-            if (matches > 1) {
-                throw new IllegalArgumentException("原始问题包含多个时间范围，当前查询计划不支持范围对比");
-            }
-        }
-    }
-
     private static QueryPlan.TimeRange toTimeRange(AnalyticsModelClient.RequestedTimeRange requested) {
         return new QueryPlan.TimeRange(requested.fromInclusive(), requested.toExclusive());
     }
@@ -761,12 +622,6 @@ public class OperationsAnalysisGraph {
         return new AnalyticsModelClient.QuestionUnderstanding(
                 understanding.normalizedQuestion(), understanding.metricTerms(), understanding.clarificationQuestions(),
                 requested, understanding.requestedDimensions(), understanding.requestedFilters());
-    }
-
-    private static QueryPlan.TimeRange localDateRange(LocalDate fromInclusive, LocalDate toExclusive) {
-        return new QueryPlan.TimeRange(
-                fromInclusive.atStartOfDay(PARK_ZONE).toInstant(),
-                toExclusive.atStartOfDay(PARK_ZONE).toInstant());
     }
 
     Map<String, Object> generateSql(OverAllState state) {

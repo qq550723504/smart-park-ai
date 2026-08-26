@@ -756,31 +756,35 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
-    void rejectsUnsupportedExplicitTimePhraseInsteadOfUsingDefaultLookback() {
+    void supportsQuarterTimePhraseInsteadOfUsingDefaultLookback() {
         modelClient.reset(
                 new AnalyticsModelClient.QuestionUnderstanding("本季度能耗", List.of("能耗"), List.of()),
                 List.of(GOOD_TOTAL_SQL), null, null);
 
         var outcome = graph.run(UUID.randomUUID(), "本季度能耗");
 
-        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.FAILED);
-        assertThat(modelClient.generateSqlInvocations()).isZero();
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.generateSqlInvocations()).isEqualTo(1);
+        assertThat(modelClient.lastPlan().timeRange()).isEqualTo(new QueryPlan.TimeRange(
+                Instant.parse("2026-06-30T16:00:00Z"), Instant.parse("2026-08-24T00:00:00Z")));
     }
 
     @Test
-    void rejectsUnsupportedRelativeTimePhraseInsteadOfUsingDefaultLookback() {
+    void supportsChineseMonthDurationInsteadOfUsingDefaultLookback() {
         modelClient.reset(
                 new AnalyticsModelClient.QuestionUnderstanding("最近一个月能耗", List.of("能耗"), List.of()),
                 List.of(GOOD_TOTAL_SQL), null, null);
 
         var outcome = graph.run(UUID.randomUUID(), "最近一个月能耗");
 
-        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.FAILED);
-        assertThat(modelClient.generateSqlInvocations()).isZero();
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.generateSqlInvocations()).isEqualTo(1);
+        assertThat(modelClient.lastPlan().timeRange()).isEqualTo(new QueryPlan.TimeRange(
+                Instant.parse("2026-07-24T00:00:00Z"), Instant.parse("2026-08-24T00:00:00Z")));
     }
 
     @Test
-    void rejectsUnparsedExplicitMonthYearAndChineseDurationInsteadOfUsingDefaultLookback() {
+    void supportsExplicitMonthYearAndChineseDurationInsteadOfUsingDefaultLookback() {
         for (String question : List.of("8月能耗", "2026年能耗", "过去两周能耗")) {
             modelClient.reset(
                     new AnalyticsModelClient.QuestionUnderstanding(question, List.of("能耗"), List.of()),
@@ -789,8 +793,8 @@ class OperationsAnalysisGraphTest {
             var outcome = graph.run(UUID.randomUUID(), question);
 
             assertThat(outcome.outcome()).as(question)
-                    .isEqualTo(OperationsAnalysisGraph.RunOutcome.FAILED);
-            assertThat(modelClient.generateSqlInvocations()).as(question).isZero();
+                    .isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+            assertThat(modelClient.generateSqlInvocations()).as(question).isEqualTo(1);
         }
     }
 
