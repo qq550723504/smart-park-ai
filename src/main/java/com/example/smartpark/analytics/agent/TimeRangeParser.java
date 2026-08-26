@@ -32,7 +32,7 @@ final class TimeRangeParser {
     private static final Pattern QUALIFIED_MONTH_DAY = Pattern.compile("(本月|上月)(\\d{1,2})日");
     private static final Pattern DURATION = Pattern.compile(
             "(?:过去|最近|近)([0-9]+|[一二两三四五六七八九十百千万]+)"
-                    + "(小时|个?月|个?季度|周|星期|天|日)");
+                    + "(小时|个?月|个?季度|个?年|周|星期|天|日)");
     private static final Pattern YEAR_MONTH = Pattern.compile(
             "(?<![A-Za-z0-9_-])(\\d{4})年(\\d{1,2})月(?![A-Za-z0-9_-])");
     private static final Pattern YEAR_ONLY = Pattern.compile(
@@ -181,6 +181,7 @@ final class TimeRangeParser {
             case "月", "个月" -> new QueryPlan.TimeRange(now.atZone(PARK_ZONE).minusMonths(count).toInstant(), now);
             case "季度", "个季度" -> new QueryPlan.TimeRange(now.atZone(PARK_ZONE)
                     .minusMonths(Math.multiplyExact(count, 3)).toInstant(), now);
+            case "年", "个年" -> new QueryPlan.TimeRange(now.atZone(PARK_ZONE).minusYears(count).toInstant(), now);
             default -> null;
         };
     }

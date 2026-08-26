@@ -41,6 +41,14 @@ class TimeRangeParserTest {
                 new QueryPlan.TimeRange(
                         Instant.parse("2026-07-24T16:00:00Z"), NOW),
                 "最近一个月"));
+        assertThat(parser.parse("过去1年能耗", NOW)).isEqualTo(new TimeRangeParser.ParseResult(
+                TimeRangeParser.Status.PARSED,
+                new QueryPlan.TimeRange(Instant.parse("2025-08-24T16:00:00Z"), NOW),
+                "过去1年"));
+        assertThat(parser.parse("近两年告警", NOW)).isEqualTo(new TimeRangeParser.ParseResult(
+                TimeRangeParser.Status.PARSED,
+                new QueryPlan.TimeRange(Instant.parse("2024-08-24T16:00:00Z"), NOW),
+                "近两年"));
     }
 
     @Test
