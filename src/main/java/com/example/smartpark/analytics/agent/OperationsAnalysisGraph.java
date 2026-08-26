@@ -61,6 +61,8 @@ public class OperationsAnalysisGraph {
     private static final long MODEL_TIME_SKEW_TOLERANCE_SECONDS = 300;
     private static final java.util.regex.Pattern CALENDAR_DATE_RANGE = java.util.regex.Pattern.compile(
             "(\\d{4}-\\d{2}-\\d{2})\\s*(?:到|至|~|～)\\s*(\\d{4}-\\d{2}-\\d{2})");
+    private static final java.util.regex.Pattern QUALIFIED_PREVIOUS_WEEK = java.util.regex.Pattern.compile(
+            "上周([一二三四五六日天末])");
     private final MetricCatalog catalog;
     private final AnalyticsModelClient modelClient;
     private final CostGate costGate;
@@ -649,6 +651,28 @@ public class OperationsAnalysisGraph {
             java.time.Instant today = now.atZone(PARK_ZONE).toLocalDate()
                     .atStartOfDay(PARK_ZONE).toInstant();
             return new QueryPlan.TimeRange(today, now);
+        }
+        java.util.regex.Matcher qualifiedWeek = QUALIFIED_PREVIOUS_WEEK.matcher(question);
+        if (qualifiedWeek.find()) {
+            LocalDate currentWeekStart = now.atZone(PARK_ZONE).toLocalDate()
+                    .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+            LocalDate previousWeekStart = currentWeekStart.minusWeeks(1);
+            String qualifier = qualifiedWeek.group(1);
+            if ("末".equals(qualifier)) {
+                return localDateRange(previousWeekStart.plusDays(5), currentWeekStart);
+            }
+            int dayOffset = switch (qualifier) {
+                case "一" -> 0;
+                case "二" -> 1;
+                case "三" -> 2;
+                case "四" -> 3;
+                case "五" -> 4;
+                case "六" -> 5;
+                case "日", "天" -> 6;
+                default -> throw new IllegalArgumentException("无法识别上周的日期限定: " + qualifier);
+            };
+            LocalDate day = previousWeekStart.plusDays(dayOffset);
+            return localDateRange(day, day.plusDays(1));
         }
         if (question.contains("上周")) {
             LocalDate currentWeekStart = now.atZone(PARK_ZONE).toLocalDate()

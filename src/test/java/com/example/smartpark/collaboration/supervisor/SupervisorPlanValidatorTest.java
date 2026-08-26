@@ -50,6 +50,18 @@ class SupervisorPlanValidatorTest {
     }
 
     @Test
+    void recognizesEnergySubtypeIdentifiersWithoutExtraEnergyKeywords() {
+        assertThat(validator.expectedDomains("DEV-ENERGY-001 当前状态"))
+                .isEqualTo(Set.of(ExpertDomain.ENERGY));
+    }
+
+    @Test
+    void preservesNonEnergyDeviceIdentifiersInMixedQuestions() {
+        assertThat(validator.expectedDomains("compare energy baseline with DEV-HVAC-001 current status"))
+                .isEqualTo(Set.of(ExpertDomain.ENERGY, ExpertDomain.DEVICE));
+    }
+
+    @Test
     void genericDeviceAlertQuestionsDoNotRequireTheSecurityExpert() {
         // 冷机离线告警 is a device alert; requiring SECURITY would dispatch an
         // expert whose only tool looks up security events.

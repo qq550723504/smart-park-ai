@@ -278,6 +278,40 @@ class OperationsAnalysisGraphTest {
         assertThat(modelClient.lastPlan().timeRange())
                 .isEqualTo(new QueryPlan.TimeRange(
                         Instant.parse("2026-08-16T16:00:00Z"),
+                Instant.parse("2026-08-23T16:00:00Z")));
+    }
+
+    @Test
+    void interpretsPreviousWednesdayUsingParkLocalCalendarBoundaries() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("上周三能耗", List.of("能耗"), List.of()),
+                List.of(GOOD_TOTAL_SQL),
+                new ChartSpec.Proposal("TABLE", "上周三能耗", "energy_kwh", List.of(), "", "kWh"),
+                "共 1 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "上周三能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().timeRange())
+                .isEqualTo(new QueryPlan.TimeRange(
+                        Instant.parse("2026-08-18T16:00:00Z"),
+                        Instant.parse("2026-08-19T16:00:00Z")));
+    }
+
+    @Test
+    void interpretsPreviousWeekendUsingParkLocalCalendarBoundaries() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("上周末能耗", List.of("能耗"), List.of()),
+                List.of(GOOD_TOTAL_SQL),
+                new ChartSpec.Proposal("TABLE", "上周末能耗", "energy_kwh", List.of(), "", "kWh"),
+                "共 1 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "上周末能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().timeRange())
+                .isEqualTo(new QueryPlan.TimeRange(
+                        Instant.parse("2026-08-21T16:00:00Z"),
                         Instant.parse("2026-08-23T16:00:00Z")));
     }
 
@@ -352,6 +386,24 @@ class OperationsAnalysisGraphTest {
         assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
         assertThat(modelClient.lastPlan().filters()).containsEntry("status", "OPEN");
         assertThat(lastExecutionParameters).containsEntry("filter_status", "OPEN");
+    }
+
+    @Test
+    void doesNotInferRiskFromBareHighWhenItModifiesAlertCategory() {
+        String alertSql = """
+                SELECT COUNT(*) AS alert_count FROM analytics.v_alert_fact
+                WHERE occurred_at >= :fromTs AND occurred_at < :toTs
+                  AND category = :filter_category LIMIT 200""";
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("high temperature 告警数量", List.of("告警数量"), List.of()),
+                List.of(alertSql),
+                new ChartSpec.Proposal("TABLE", "高温告警", "alert_count", List.of(), "", "条"),
+                "共 1 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "high temperature 告警数量");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().filters()).containsExactlyEntriesOf(Map.of("category", "TEMPERATURE"));
     }
 
     @Test

@@ -9,6 +9,9 @@ import java.util.Map;
 import java.util.Set;
 
 public final class SupervisorPlanValidator {
+    private static final java.util.regex.Pattern DEV_IDENTIFIER = java.util.regex.Pattern.compile(
+            "(?i)(?<![A-Z0-9_-])(DEV-[A-Z0-9]+(?:-[A-Z0-9]+)+)(?![A-Z0-9_-])");
+
     public SupervisorPlan validate(SupervisorPlan plan) {
         Set<ExpertDomain> expected = expectedDomains(plan.normalizedQuestion());
         if (expected.isEmpty()) {
@@ -30,12 +33,12 @@ public final class SupervisorPlanValidator {
         EnumSet<ExpertDomain> domains = EnumSet.noneOf(ExpertDomain.class);
         boolean energyContext = containsAny(text, "energy", "consumption", "kwh", "baseline", "meter", "能耗", "用电", "电量", "电表")
                 || containsEntityIdentifier(text, "MTR-")
-                || containsEntityIdentifier(text, "DEV-ENERGY-");
+                || containsEnergyDeviceIdentifier(text);
         if (energyContext) {
             domains.add(ExpertDomain.ENERGY);
         }
         if (containsAny(text, "device", "offline", "hvac", "equipment", "冷机", "设备", "离线")
-                || (containsEntityIdentifier(text, "DEV-") && !energyContext)) {
+                || containsNonEnergyDeviceIdentifier(text)) {
             domains.add(ExpertDomain.DEVICE);
         }
         // Generic alert words (告警/alarm) must NOT route to SECURITY: ordinary
@@ -82,6 +85,26 @@ public final class SupervisorPlanValidator {
                                 + "[A-Z0-9]+(?:-[A-Z0-9]+)+(?![A-Z0-9_-])")
                 .matcher(text)
                 .find();
+    }
+
+    private static boolean containsNonEnergyDeviceIdentifier(String text) {
+        var matcher = DEV_IDENTIFIER.matcher(text);
+        while (matcher.find()) {
+            if (!matcher.group(1).toUpperCase(Locale.ROOT).startsWith("DEV-ENERGY-")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsEnergyDeviceIdentifier(String text) {
+        var matcher = DEV_IDENTIFIER.matcher(text);
+        while (matcher.find()) {
+            if (matcher.group(1).toUpperCase(Locale.ROOT).startsWith("DEV-ENERGY-")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static final class SupervisorPlanValidationException extends IllegalArgumentException {

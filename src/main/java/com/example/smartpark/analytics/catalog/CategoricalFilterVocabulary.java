@@ -69,11 +69,22 @@ public final class CategoricalFilterVocabulary {
     private static boolean matchesTerm(String question, String term) {
         String normalized = question.toLowerCase(Locale.ROOT);
         if (isAsciiToken(term)) {
+            if (Set.of("high", "medium", "low").contains(term)
+                    && !matchesRiskContext(normalized, term)) {
+                return false;
+            }
             return Pattern.compile("(?<![A-Za-z0-9_])" + Pattern.quote(term)
                             + "(?![A-Za-z0-9_])", Pattern.CASE_INSENSITIVE)
                     .matcher(normalized).find();
         }
         return normalized.contains(term);
+    }
+
+    private static boolean matchesRiskContext(String question, String risk) {
+        return Pattern.compile("(?i)(?<![A-Za-z0-9_])(?:risk(?:[ _-]?level)?\\s*[:=]?\\s*"
+                        + Pattern.quote(risk) + "|" + Pattern.quote(risk)
+                        + "\\s+(?:risk(?:[ _-]?level)?))(?![A-Za-z0-9_])")
+                .matcher(question).find();
     }
 
     private static boolean isNegatedTerm(String question, String term) {

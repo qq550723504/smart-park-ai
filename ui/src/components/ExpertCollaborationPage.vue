@@ -19,7 +19,7 @@ const domains = computed(() => run.value?.plan?.selectedDomains ?? [])
 const handoffs = computed(() => props.trace.events.value.filter((event) => event.eventType === 'EXPERT_HANDOFF'))
 
 watch(
-  () => [props.active, run.value?.runId] as const,
+  [() => props.active, () => run.value?.runId],
   ([active, runId]) => { if (active && runId) props.trace.subscribe(runId) },
   { immediate: true },
 )
