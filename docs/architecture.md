@@ -4,7 +4,7 @@
 
 ## 1. 项目定位与当前能力
 
-项目是一个基于 Spring Boot、Spring AI Alibaba 和 Vue 3 的智慧园区 AI 工作流示例。当前 `main` 已形成四条可以独立运行、又能共享执行轨迹的业务链路：
+项目是一个基于 Spring Boot、Spring AI Alibaba 和 Vue 3 的智慧园区 AI 工作流示例。当前 `main` 已形成四条可以独立运行的业务链路，其中告警处置、运营分析和专家协作接入统一执行轨迹，客服使用独立的会话与工单状态链路：
 
 - 告警处置：告警分诊、园区上下文收集、知识检索、AI 诊断、风险门禁、人工审批和工单创建。
 - 园区客服：基于园区知识回答停车、访客和能耗问题；报修、知识不足或策略限制时转人工。
@@ -76,7 +76,7 @@
 - DashScope ChatModel 及告警 Agent；关闭 `spring.ai.dashscope.enabled` 后，告警工作流及依赖它的工具和 Controller 不注册。
 - 客服回答模式：`mock` 使用确定性回答，`dashscope` 使用结构化模型回答。
 - 知识模式：`mock` 使用内存关键词检索，`rag` 使用 DashScope Embedding 和进程内 `SimpleVectorStore`。
-- 运营分析：只有 `smartpark.analytics.enabled=true` 且分析数据库配置可用时装配。
+- 运营分析：只有 `smartpark.analytics.enabled=true` 时尝试装配；若分析数据库、管理员账号、只读账号或 ChatModel 配置缺失，启动期间会抛出明确错误。
 - 专家协作：只有 ChatModel、三个专家工具集和协作运行时都可用时装配；能力接口据此返回 `collaborationEnabled`。
 - MCP：只有 `smartpark.mcp.enabled=true` 时装配；协议和网络边界仍需由部署环境负责。
 
@@ -221,7 +221,7 @@ safeSummary / typed displayPayload
 
 `DisplayPayload` 是受控的类型化展示负载：文本、工具调用、专家交接、SQL、图表、音频状态和错误分别使用不同结构。SQL 只发送经过校验的安全版本；音频负载当前只表示状态元数据。事件模型为未来语音场景预留了 `VOICE` 和音频事件枚举，但当前 `main` 分支没有语音 Session、WebSocket 或前端语音入口，不应视为当前已交付能力。
 
-Vue 3 控制台按场景切换页面：告警工作流、园区客服、专家协作和运营分析；右侧统一执行轨迹栏通过 `runId` 订阅后端事件。`X-Demo-Role` 用于本地演示查看者、操作员、审批人、客服坐席和管理员的 UI/API 操作边界，不是生产身份系统。
+Vue 3 控制台按场景切换页面：告警工作流、园区客服、专家协作和运营分析；右侧统一执行轨迹栏为告警、专家协作和运营分析通过 `runId` 订阅后端事件。客服当前通过会话消息和工单状态展示进展，不接入统一执行事件流。`X-Demo-Role` 用于本地演示查看者、操作员、审批人、客服坐席和管理员的 UI/API 操作边界，不是生产身份系统。
 
 ## 7. 知识、审计、反馈和 MCP
 
