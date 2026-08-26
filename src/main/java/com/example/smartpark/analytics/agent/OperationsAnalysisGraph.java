@@ -60,7 +60,8 @@ public class OperationsAnalysisGraph {
     private final AnalysisSummaryValidator summaryValidator;
     private final Clock clock;
     private final Duration executionTimeout;
-    private final TimeRangeParser timeRangeParser = new TimeRangeParser();
+    private final TimeIntentProvider timeIntentProvider;
+    private final TimeConstraintResolver timeConstraintResolver = new TimeConstraintResolver();
     private final CompiledGraph compiled;
     private final ConcurrentHashMap<UUID, RunContext> contexts = new ConcurrentHashMap<>();
 
@@ -114,6 +115,7 @@ public class OperationsAnalysisGraph {
         AnalyticsModelClient.QuestionUnderstanding pinnedUnderstanding;
         List<com.example.smartpark.analytics.catalog.MetricDefinition> metrics = List.of();
         String schemaDescription = "";
+        TimeIntentResult timeIntentResult;
         QueryPlan.TimeRange serverTimeRange;
         QueryPlan.TimeRangeSource timeRangeSource;
         QueryPlan plan;
@@ -140,7 +142,7 @@ public class OperationsAnalysisGraph {
                                    AnalysisSummaryValidator summaryValidator,
                                    Clock clock) {
         this(catalog, modelClient, costGate, executionGate, publisher, summaryValidator, clock,
-                Duration.ofSeconds(60));
+                Duration.ofSeconds(60), new FiniteGrammarTimeIntentProvider());
     }
 
     public OperationsAnalysisGraph(MetricCatalog catalog,
@@ -151,6 +153,19 @@ public class OperationsAnalysisGraph {
                                    AnalysisSummaryValidator summaryValidator,
                                    Clock clock,
                                    Duration executionTimeout) {
+        this(catalog, modelClient, costGate, executionGate, publisher, summaryValidator, clock,
+                executionTimeout, new FiniteGrammarTimeIntentProvider());
+    }
+
+    OperationsAnalysisGraph(MetricCatalog catalog,
+                            AnalyticsModelClient modelClient,
+                            CostGate costGate,
+                            ExecutionGate executionGate,
+                            ExecutionEventPublisher publisher,
+                            AnalysisSummaryValidator summaryValidator,
+                            Clock clock,
+                            Duration executionTimeout,
+                            TimeIntentProvider timeIntentProvider) {
         this.catalog = catalog;
         this.modelClient = modelClient;
         this.costGate = costGate;
@@ -158,6 +173,7 @@ public class OperationsAnalysisGraph {
         this.publisher = publisher == null ? new InMemoryExecutionEventPublisher() : publisher;
         this.summaryValidator = summaryValidator;
         this.clock = clock;
+        this.timeIntentProvider = java.util.Objects.requireNonNull(timeIntentProvider, "timeIntentProvider");
         if (executionTimeout == null || executionTimeout.isZero() || executionTimeout.isNegative()) {
             throw new IllegalArgumentException("executionTimeout must be positive");
         }
@@ -311,15 +327,17 @@ public class OperationsAnalysisGraph {
         RunContext ctx = contexts.get(runId);
         nodeStarted(ctx, runId, ExecutionStage.UNDERSTANDING, "理解问题");
         String question = text(state, STATE_QUESTION);
-        TimeRangeParser.ParseResult parsedTime = timeRangeParser.parse(question, Instant.now(clock));
-        if (parsedTime.status() == TimeRangeParser.Status.MULTIPLE) {
+        TimeIntentResult parsedTime = timeIntentProvider.resolve(question, Instant.now(clock));
+        if (parsedTime.status() == TimeIntentResult.Status.MULTIPLE) {
             throw new IllegalArgumentException("原始问题包含多个时间范围，当前查询计划不支持范围对比");
         }
-        if (parsedTime.status() == TimeRangeParser.Status.UNSUPPORTED) {
-            throw new IllegalArgumentException("原始问题包含暂不支持的时间范围表达式: " + parsedTime.expression());
+        if (parsedTime.status() == TimeIntentResult.Status.UNSUPPORTED
+                || parsedTime.status() == TimeIntentResult.Status.AMBIGUOUS) {
+            throw new IllegalArgumentException("原始问题包含暂不支持的时间范围表达式: " + parsedTime.reason());
         }
+        ctx.timeIntentResult = parsedTime;
         QueryPlan.TimeRange parsedServerTimeRange = parsedTime.timeRange();
-        ctx.timeRangeSource = parsedTime.status() == TimeRangeParser.Status.PARSED
+        ctx.timeRangeSource = parsedTime.status() == TimeIntentResult.Status.PARSED
                 ? QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE
                 : QueryPlan.TimeRangeSource.DEFAULT_METRIC_LOOKBACK;
         // Clarified runs carry the operator's structured selection as the understanding;
@@ -442,12 +460,14 @@ public class OperationsAnalysisGraph {
         // may return a range using a different locale or boundary convention,
         // so never let that advisory value reject a valid request or widen the
         // SQL window. Derive every recognized range once from the server clock.
-        QueryPlan.TimeRange timeRange = ctx.serverTimeRange != null
-                ? ctx.serverTimeRange
-                : new QueryPlan.TimeRange(now.minus(Duration.ofDays(lookbackDays)), now);
-        QueryPlan.TimeRangeSource timeRangeSource = ctx.timeRangeSource != null
-                ? ctx.timeRangeSource
-                : QueryPlan.TimeRangeSource.DEFAULT_METRIC_LOOKBACK;
+        TimeConstraintResolver.Resolved resolvedTime = ctx.serverTimeRange != null
+                ? new TimeConstraintResolver.Resolved(ctx.serverTimeRange,
+                        QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE)
+                : timeConstraintResolver.resolve(ctx.timeIntentResult, now, lookbackDays);
+        QueryPlan.TimeRange timeRange = resolvedTime.timeRange();
+        QueryPlan.TimeRangeSource timeRangeSource = resolvedTime.source();
+        ctx.serverTimeRange = timeRange;
+        ctx.timeRangeSource = timeRangeSource;
         ctx.plan = new QueryPlan(
                 originalQuestion,
                 ctx.metrics,

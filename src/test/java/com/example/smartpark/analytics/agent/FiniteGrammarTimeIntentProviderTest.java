@@ -50,6 +50,13 @@ class FiniteGrammarTimeIntentProviderTest {
     }
 
     @Test
+    void keepsTheOriginalMentionAsTheIntentSource() {
+        TimeIntentResult result = provider.resolve("2026年8月1日能耗", NOW);
+
+        assertThat(result.intent().sourceText()).isEqualTo("2026年8月1日");
+    }
+
+    @Test
     void rejectsAResidualDayPartInsteadOfReturningTheBaseDay() {
         assertThat(provider.resolve("今天晚上能耗", NOW).status())
                 .isEqualTo(TimeIntentResult.Status.UNSUPPORTED);

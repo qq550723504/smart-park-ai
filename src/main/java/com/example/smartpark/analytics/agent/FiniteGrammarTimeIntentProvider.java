@@ -178,13 +178,13 @@ final class FiniteGrammarTimeIntentProvider implements TimeIntentProvider {
     private static Parsed parseCalendarDateRange(String expression) {
         Matcher matcher = CALENDAR_DATE_RANGE.matcher(expression);
         matcher.matches();
-        return dateRange(LocalDate.parse(matcher.group(1)), LocalDate.parse(matcher.group(2)));
+        return dateRange(expression, LocalDate.parse(matcher.group(1)), LocalDate.parse(matcher.group(2)));
     }
 
     private static Parsed parseChineseCalendarDateRange(String expression) {
         Matcher matcher = CHINESE_CALENDAR_DATE_RANGE.matcher(expression);
         matcher.matches();
-        return dateRange(LocalDate.of(Integer.parseInt(matcher.group(1)), Integer.parseInt(matcher.group(2)),
+        return dateRange(expression, LocalDate.of(Integer.parseInt(matcher.group(1)), Integer.parseInt(matcher.group(2)),
                         Integer.parseInt(matcher.group(3))),
                 LocalDate.of(Integer.parseInt(matcher.group(4)), Integer.parseInt(matcher.group(5)),
                         Integer.parseInt(matcher.group(6))));
@@ -193,7 +193,7 @@ final class FiniteGrammarTimeIntentProvider implements TimeIntentProvider {
     private static Parsed parseFullDate(String expression) {
         Matcher matcher = FULL_NUMERIC_DATE.matcher(expression);
         matcher.matches();
-        return singleDate(LocalDate.of(Integer.parseInt(matcher.group(1)), Integer.parseInt(matcher.group(2)),
+        return singleDate(expression, LocalDate.of(Integer.parseInt(matcher.group(1)), Integer.parseInt(matcher.group(2)),
                 Integer.parseInt(matcher.group(3))));
     }
 

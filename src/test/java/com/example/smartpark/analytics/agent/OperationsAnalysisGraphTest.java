@@ -285,6 +285,72 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
+    void carriesCompleteDayPartRangeAsExplicitUserRange() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("今天上午能耗", List.of("能耗"), List.of()),
+                List.of(GOOD_TOTAL_SQL),
+                new ChartSpec.Proposal("TABLE", "今天上午能耗", "energy_kwh", List.of(), "", "kWh"),
+                "共 1 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "今天上午能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().timeRange()).isEqualTo(new QueryPlan.TimeRange(
+                Instant.parse("2026-08-23T16:00:00Z"),
+                Instant.parse("2026-08-24T04:00:00Z")));
+        assertThat(modelClient.lastPlan().timeRangeSource())
+                .isEqualTo(QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE);
+    }
+
+    @Test
+    void carriesMonthDayWithHaoSuffixAsExplicitUserRange() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("本月15号能耗", List.of("能耗"), List.of()),
+                List.of(GOOD_TOTAL_SQL),
+                new ChartSpec.Proposal("TABLE", "本月15号能耗", "energy_kwh", List.of(), "", "kWh"),
+                "共 1 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "本月15号能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().timeRange()).isEqualTo(new QueryPlan.TimeRange(
+                Instant.parse("2026-08-14T16:00:00Z"),
+                Instant.parse("2026-08-15T16:00:00Z")));
+        assertThat(modelClient.lastPlan().timeRangeSource())
+                .isEqualTo(QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE);
+    }
+
+    @Test
+    void carriesYearQualifiedHalfYearAsOneExplicitUserRange() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("2026年上半年能耗", List.of("能耗"), List.of()),
+                List.of(GOOD_TOTAL_SQL),
+                new ChartSpec.Proposal("TABLE", "2026年上半年能耗", "energy_kwh", List.of(), "", "kWh"),
+                "共 1 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "2026年上半年能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().timeRange()).isEqualTo(new QueryPlan.TimeRange(
+                Instant.parse("2025-12-31T16:00:00Z"),
+                Instant.parse("2026-06-30T16:00:00Z")));
+        assertThat(modelClient.lastPlan().timeRangeSource())
+                .isEqualTo(QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE);
+    }
+
+    @Test
+    void rejectsResidualTemporalQualifierBeforeGeneratingSql() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("今天晚上能耗", List.of("能耗"), List.of()),
+                List.of(GOOD_TOTAL_SQL), null, "不应执行未完整解析的时间表达式。");
+
+        var outcome = graph.run(UUID.randomUUID(), "今天晚上能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.FAILED);
+        assertThat(modelClient.generateSqlInvocations()).isZero();
+    }
+
+    @Test
     void interpretsPreviousWeekUsingParkLocalCalendarBoundaries() {
         modelClient.reset(
                 new AnalyticsModelClient.QuestionUnderstanding("上周能耗", List.of("能耗"), List.of()),
