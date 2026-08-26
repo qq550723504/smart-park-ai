@@ -180,9 +180,9 @@ git commit -m "feat: add realtime voice assistant console"
 
 ## Task 9：配置、隐私与回归
 
-- [ ] 在 `application.yml` 增加音频规格、10 秒输入、15 秒 agent、5 秒 TTS 首块、allowed origins；密钥仍只来自环境变量。
+- [x] 在 `application.yml` 增加音频规格、10 秒输入、15 秒 agent、5 秒 TTS 首块、allowed origins；密钥仍只来自环境变量。
 
-- [ ] 运行后端全测、前端全测/构建、敏感数据测试；搜索日志与事件 DTO 确认没有 `byte[]`、base64、API key、原 prompt 字段。
+- [x] 运行后端全测、前端全测/构建、敏感数据测试；搜索日志与事件 DTO 确认没有 `byte[]`、base64、API key、原 prompt 字段。
 
 ## 完成闸门
 
