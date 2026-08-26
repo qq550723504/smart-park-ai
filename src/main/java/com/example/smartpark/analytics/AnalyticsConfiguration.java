@@ -9,6 +9,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
+import org.flywaydb.core.Flyway;
 
 import java.time.Duration;
 
@@ -46,7 +47,11 @@ public class AnalyticsConfiguration {
 
     @Bean(destroyMethod = "shutdown")
     @ConditionalOnProperty(name = "smartpark.analytics.demo-data-refresh-enabled", havingValue = "true")
-    DemoDataRefresher demoDataRefresher(AnalyticsProperties properties) {
+    DemoDataRefresher demoDataRefresher(AnalyticsProperties properties,
+                                        ObjectProvider<Flyway> analyticsFlywayProvider) {
+        // Force the explicit migration bean first when production enables it;
+        // isolated wiring tests may intentionally omit Flyway and use a fake DB.
+        analyticsFlywayProvider.getIfAvailable();
         properties.validateUsable();
         var refresher = new DemoDataRefresher(properties.getDatasource().getUrl(),
                 properties.getDatasource().getAdminUsername(),
@@ -54,6 +59,20 @@ public class AnalyticsConfiguration {
                 Duration.ofHours(1));
         refresher.start();
         return refresher;
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "spring.flyway.enabled", havingValue = "true")
+    Flyway analyticsFlyway(AnalyticsProperties properties) {
+        properties.validateUsable();
+        Flyway flyway = Flyway.configure()
+                .dataSource(properties.getDatasource().getUrl(),
+                        properties.getDatasource().getAdminUsername(),
+                        properties.getDatasource().getAdminPassword())
+                .locations("classpath:db/migration")
+                .load();
+        flyway.migrate();
+        return flyway;
     }
 
     @Bean

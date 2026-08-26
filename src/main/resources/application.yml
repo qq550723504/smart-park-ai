@@ -4,7 +4,7 @@ spring:
     # (object-owner) account. The read-only role is created password-less by
     # V1; AnalyticsRoleCredentials binds its runtime credential via JDBC
     # parameter at startup — no password placeholder exists in migration SQL.
-    enabled: ${smartpark.analytics.enabled:false}
+    enabled: ${SMARTPARK_ANALYTICS_ENABLED:false}
     url: ${SMARTPARK_ANALYTICS_DB_URL:}
     user: ${SMARTPARK_ANALYTICS_DB_ADMIN_USER:}
     password: ${SMARTPARK_ANALYTICS_DB_ADMIN_PASSWORD:}
