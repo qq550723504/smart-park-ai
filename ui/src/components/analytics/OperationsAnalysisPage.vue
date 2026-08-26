@@ -8,6 +8,14 @@ void props
 const emit = defineEmits<{ (event: 'run-started', runId: string): void }>()
 
 const question = ref('')
+const recommendedQuestions = [
+  '能耗总量',
+  '各楼宇能耗对比',
+  '告警数量',
+  '高风险告警数量',
+  '停车进场量',
+  '设备离线数',
+]
 const analysis = useOperationsAnalysis({
   ...(props.trace ? { trace: props.trace } : {}),
   ...(props.pollIntervalMs != null ? { pollIntervalMs: props.pollIntervalMs } : {}),
@@ -18,6 +26,10 @@ function launch(): void {
   void analysis.submit(question.value).then(() => {
     if (analysis.runId.value) emit('run-started', analysis.runId.value)
   })
+}
+
+function selectRecommendedQuestion(value: string): void {
+  question.value = value
 }
 
 function resume(): void {
@@ -84,6 +96,18 @@ watch(
       <input v-model="question" type="text" placeholder="例如：上周各楼宇能耗对比、高风险告警有多少…" aria-label="分析问题" />
       <button type="submit" :disabled="analysis.phase.value === 'running'">开始分析</button>
     </form>
+    <div class="analytics-presets" role="group" aria-label="推荐问题">
+      <span>试试这些问题</span>
+      <button
+        v-for="preset in recommendedQuestions"
+        :key="preset"
+        type="button"
+        :disabled="analysis.phase.value === 'running'"
+        @click="selectRecommendedQuestion(preset)"
+      >
+        {{ preset }}
+      </button>
+    </div>
     <p v-if="analysis.error.value" class="analytics-error" data-testid="analytics-error">{{ analysis.error.value }}</p>
 
     <p v-if="analysis.phase.value === 'running'" class="analytics-running" data-testid="analytics-running">
