@@ -10,6 +10,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class TimeRangeParserTest {
 
     private static final Instant NOW = Instant.parse("2026-08-24T16:00:00Z");
+    private static final Instant EDGE_NOW = Instant.parse("2026-08-24T00:00:00Z");
     private final TimeRangeParser parser = new TimeRangeParser();
 
     @Test
@@ -56,5 +57,21 @@ class TimeRangeParserTest {
         assertThat(parser.parse("总能耗", NOW).status()).isEqualTo(TimeRangeParser.Status.NONE);
         assertThat(parser.parse("上上月能耗", NOW).status()).isEqualTo(TimeRangeParser.Status.UNSUPPORTED);
         assertThat(parser.parse("对比本月和去年能耗", NOW).status()).isEqualTo(TimeRangeParser.Status.MULTIPLE);
+    }
+
+    @Test
+    void parsesQualifiedPeriodsAndHourlyDurationsWithoutMatchingEntityDates() {
+        assertThat(parser.parse("本周三能耗", EDGE_NOW).timeRange()).isEqualTo(new QueryPlan.TimeRange(
+                Instant.parse("2026-08-25T16:00:00Z"),
+                Instant.parse("2026-08-26T16:00:00Z")));
+        assertThat(parser.parse("上月15日能耗", EDGE_NOW).timeRange()).isEqualTo(new QueryPlan.TimeRange(
+                Instant.parse("2026-07-14T16:00:00Z"),
+                Instant.parse("2026-07-15T16:00:00Z")));
+        assertThat(parser.parse("过去24小时能耗", EDGE_NOW).timeRange()).isEqualTo(new QueryPlan.TimeRange(
+                Instant.parse("2026-08-23T00:00:00Z"), EDGE_NOW));
+        assertThat(parser.parse("近12小时告警", EDGE_NOW).timeRange()).isEqualTo(new QueryPlan.TimeRange(
+                Instant.parse("2026-08-23T12:00:00Z"), EDGE_NOW));
+        assertThat(parser.parse("MTR-2026-08-01表计的能耗", EDGE_NOW).status())
+                .isEqualTo(TimeRangeParser.Status.NONE);
     }
 }

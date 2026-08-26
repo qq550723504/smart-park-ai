@@ -1,6 +1,7 @@
 package com.example.smartpark.analytics.agent;
 
 import com.example.smartpark.analytics.model.QueryPlan;
+import com.example.smartpark.analytics.model.QuestionTokenScanner;
 
 import java.time.DateTimeException;
 import java.time.Instant;
@@ -18,23 +19,33 @@ final class TimeRangeParser {
 
     private static final ZoneId PARK_ZONE = ZoneId.of("Asia/Shanghai");
     private static final Pattern CALENDAR_DATE_RANGE = Pattern.compile(
-            "(\\d{4}-\\d{2}-\\d{2})\\s*(?:到|至|~|～)\\s*(\\d{4}-\\d{2}-\\d{2})");
+            "(?<![A-Za-z0-9_-])(\\d{4}-\\d{2}-\\d{2})\\s*(?:到|至|~|～)\\s*"
+                    + "(\\d{4}-\\d{2}-\\d{2})(?![A-Za-z0-9_-])");
     private static final Pattern CHINESE_CALENDAR_DATE_RANGE = Pattern.compile(
-            "(\\d{4})年(\\d{1,2})月(\\d{1,2})日\\s*(?:到|至|~|～)\\s*"
-                    + "(\\d{4})年(\\d{1,2})月(\\d{1,2})日");
+            "(?<![A-Za-z0-9_-])(\\d{4})年(\\d{1,2})月(\\d{1,2})日\\s*(?:到|至|~|～)\\s*"
+                    + "(\\d{4})年(\\d{1,2})月(\\d{1,2})日(?![A-Za-z0-9_-])");
     private static final Pattern FULL_NUMERIC_DATE = Pattern.compile(
-            "(\\d{4})[-/.年](\\d{1,2})[-/.月](\\d{1,2})日?");
-    private static final Pattern MONTH_DAY = Pattern.compile("(\\d{1,2})月(\\d{1,2})日");
+            "(?<![A-Za-z0-9_-])(\\d{4})[-/.年](\\d{1,2})[-/.月](\\d{1,2})日?"
+                    + "(?![A-Za-z0-9_-])");
+    private static final Pattern MONTH_DAY = Pattern.compile(
+            "(?<![A-Za-z0-9_-])(\\d{1,2})月(\\d{1,2})日(?![A-Za-z0-9_-])");
+    private static final Pattern QUALIFIED_MONTH_DAY = Pattern.compile("(本月|上月)(\\d{1,2})日");
     private static final Pattern DURATION = Pattern.compile(
-            "(?:过去|最近|近)([0-9]+|[一二两三四五六七八九十百千万]+)(个?月|个?季度|周|星期|天|日)");
-    private static final Pattern YEAR_MONTH = Pattern.compile("(\\d{4})年(\\d{1,2})月");
-    private static final Pattern YEAR_ONLY = Pattern.compile("(\\d{4})年");
-    private static final Pattern MONTH_ONLY = Pattern.compile("(\\d{1,2})月");
-    private static final Pattern QUALIFIED_PREVIOUS_WEEK = Pattern.compile("上周([一二三四五六日天末])");
+            "(?:过去|最近|近)([0-9]+|[一二两三四五六七八九十百千万]+)"
+                    + "(小时|个?月|个?季度|周|星期|天|日)");
+    private static final Pattern YEAR_MONTH = Pattern.compile(
+            "(?<![A-Za-z0-9_-])(\\d{4})年(\\d{1,2})月(?![A-Za-z0-9_-])");
+    private static final Pattern YEAR_ONLY = Pattern.compile(
+            "(?<![A-Za-z0-9_-])(\\d{4})年(?![A-Za-z0-9_-])");
+    private static final Pattern MONTH_ONLY = Pattern.compile(
+            "(?<![A-Za-z0-9_-])(\\d{1,2})月(?![A-Za-z0-9_-])");
+    private static final Pattern QUALIFIED_WEEK = Pattern.compile("(本周|上周)([一二三四五六日天末])");
     private static final Pattern TIME_EXPRESSION = Pattern.compile(
             "(?:" + CHINESE_CALENDAR_DATE_RANGE.pattern() + "|"
                     + CALENDAR_DATE_RANGE.pattern() + "|"
                     + FULL_NUMERIC_DATE.pattern() + "|"
+                    + QUALIFIED_WEEK.pattern() + "|"
+                    + QUALIFIED_MONTH_DAY.pattern() + "|"
                     + MONTH_DAY.pattern() + "|"
                     + DURATION.pattern() + "|"
                     + YEAR_MONTH.pattern() + "|"
@@ -76,9 +87,23 @@ final class TimeRangeParser {
         List<String> expressions = new ArrayList<>();
         Matcher matcher = TIME_EXPRESSION.matcher(question);
         while (matcher.find()) {
+            if (isDateExpression(matcher.group())
+                    && !QuestionTokenScanner.isStandaloneSpan(question, matcher.start(), matcher.end())) {
+                continue;
+            }
             expressions.add(matcher.group());
         }
         return expressions;
+    }
+
+    private static boolean isDateExpression(String expression) {
+        return CALENDAR_DATE_RANGE.matcher(expression).matches()
+                || CHINESE_CALENDAR_DATE_RANGE.matcher(expression).matches()
+                || FULL_NUMERIC_DATE.matcher(expression).matches()
+                || MONTH_DAY.matcher(expression).matches()
+                || YEAR_MONTH.matcher(expression).matches()
+                || YEAR_ONLY.matcher(expression).matches()
+                || MONTH_ONLY.matcher(expression).matches();
     }
 
     private static QueryPlan.TimeRange parseExpression(String expression, Instant now) {
@@ -113,6 +138,13 @@ final class TimeRangeParser {
             return singleDateRange(LocalDate.of(today.getYear(),
                     Integer.parseInt(monthDay.group(1)), Integer.parseInt(monthDay.group(2))));
         }
+        Matcher qualifiedMonthDay = QUALIFIED_MONTH_DAY.matcher(expression);
+        if (qualifiedMonthDay.matches()) {
+            LocalDate currentMonth = now.atZone(PARK_ZONE).toLocalDate().withDayOfMonth(1);
+            LocalDate month = "上月".equals(qualifiedMonthDay.group(1))
+                    ? currentMonth.minusMonths(1) : currentMonth;
+            return singleDateRange(month.withDayOfMonth(Integer.parseInt(qualifiedMonthDay.group(2))));
+        }
         Matcher duration = DURATION.matcher(expression);
         if (duration.matches()) {
             long count = parseNumber(duration.group(1));
@@ -143,6 +175,7 @@ final class TimeRangeParser {
             return null;
         }
         return switch (unit) {
+            case "小时" -> new QueryPlan.TimeRange(now.minusSeconds(Math.multiplyExact(count, 3_600)), now);
             case "天", "日" -> new QueryPlan.TimeRange(now.minusSeconds(Math.multiplyExact(count, 86_400)), now);
             case "周", "星期" -> new QueryPlan.TimeRange(now.minusSeconds(Math.multiplyExact(count, 7 * 86_400)), now);
             case "月", "个月" -> new QueryPlan.TimeRange(now.atZone(PARK_ZONE).minusMonths(count).toInstant(), now);
@@ -180,22 +213,23 @@ final class TimeRangeParser {
                     LocalDate.of(today.getYear(), 7, 1));
             case "下半年" -> localDateRange(LocalDate.of(today.getYear(), 7, 1),
                     LocalDate.of(today.getYear() + 1, 1, 1));
-            default -> qualifiedPreviousWeek(expression, currentWeekStart);
+            default -> qualifiedWeek(expression, currentWeekStart);
         };
     }
 
-    private static QueryPlan.TimeRange qualifiedPreviousWeek(String expression,
-                                                              LocalDate currentWeekStart) {
-        Matcher matcher = QUALIFIED_PREVIOUS_WEEK.matcher(expression);
+    private static QueryPlan.TimeRange qualifiedWeek(String expression, LocalDate currentWeekStart) {
+        Matcher matcher = QUALIFIED_WEEK.matcher(expression);
         if (!matcher.matches()) {
             return null;
         }
-        LocalDate previousWeekStart = currentWeekStart.minusWeeks(1);
+        LocalDate weekStart = "上周".equals(matcher.group(1))
+                ? currentWeekStart.minusWeeks(1) : currentWeekStart;
         String qualifier = matcher.group(1);
-        if ("末".equals(qualifier)) {
-            return localDateRange(previousWeekStart.plusDays(5), currentWeekStart);
+        String dayQualifier = matcher.group(2);
+        if ("末".equals(dayQualifier)) {
+            return localDateRange(weekStart.plusDays(5), weekStart.plusDays(7));
         }
-        int dayOffset = switch (qualifier) {
+        int dayOffset = switch (dayQualifier) {
             case "一" -> 0;
             case "二" -> 1;
             case "三" -> 2;
@@ -205,7 +239,7 @@ final class TimeRangeParser {
             case "日", "天" -> 6;
             default -> throw new IllegalArgumentException("无法识别上周的日期限定: " + qualifier);
         };
-        LocalDate day = previousWeekStart.plusDays(dayOffset);
+        LocalDate day = weekStart.plusDays(dayOffset);
         return localDateRange(day, day.plusDays(1));
     }
 
