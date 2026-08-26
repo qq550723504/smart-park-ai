@@ -520,6 +520,12 @@ public class OperationsAnalysisGraph {
         QueryPlan.TimeRangeSource timeRangeSource = resolvedTime.source();
         ctx.serverTimeRange = timeRange;
         ctx.timeRangeSource = timeRangeSource;
+        if (timeRangeSource == QueryPlan.TimeRangeSource.DEFAULT_METRIC_LOOKBACK) {
+            // 默认回看期同样显式标注来源：NONE 不是“无信息”，而是可审计的决策，
+            // 随最终结果持久化并在 UI 中展示。
+            ctx.timeResolution = TimeResolutionMetadata.defaultLookback(
+                    timeRange.from(), timeRange.to());
+        }
         ctx.plan = new QueryPlan(
                 originalQuestion,
                 ctx.metrics,

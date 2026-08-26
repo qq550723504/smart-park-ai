@@ -47,8 +47,11 @@ public record TimeResolutionMetadata(
             if (!fromInclusive.equals(toExclusive)) {
                 throw new IllegalArgumentException("EMPTY metadata requires equal boundaries");
             }
-        } else if (fromInclusive != null && !fromInclusive.isBefore(toExclusive)) {
-            throw new IllegalArgumentException("non-empty metadata requires ordered boundaries");
+        } else if (fromInclusive != null) {
+            Objects.requireNonNull(toExclusive, "toExclusive is required when fromInclusive is present");
+            if (!fromInclusive.isBefore(toExclusive)) {
+                throw new IllegalArgumentException("non-empty metadata requires ordered boundaries");
+            }
         }
     }
 

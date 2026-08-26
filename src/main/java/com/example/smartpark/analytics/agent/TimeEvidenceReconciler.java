@@ -13,7 +13,7 @@ import java.util.Objects;
  *   <li>parser resolved + model empty or all mentions matched → parser result</li>
  *   <li>both found nothing → NONE</li>
  *   <li>model named time the whitelist cannot resolve → UNSUPPORTED</li>
- *   <li>partial/overlapping-only match → AMBIGUOUS</li>
+ *   <li>mention straddling parser mentions or sticking out of them → AMBIGUOUS</li>
  *   <li>multiple distinct ranges → MULTIPLE</li>
  *   <li>equivalent duplicates → deduplicated PARSED</li>
  * </ul>
@@ -34,38 +34,30 @@ final class TimeEvidenceReconciler {
 
         if (model.isEmpty()) {
             // Parser alone decides; its own fail-closed statuses stand.
-            return switch (parserResult.status()) {
-                case MULTIPLE -> multiple(parserResult);
-                default -> parserResult;
-            };
+            return parserResult;
         }
         if (parserResult.status() == TimeIntentResult.Status.NONE) {
             return unsupported(model.mentions(),
                     "问题包含暂不支持的时间范围表达式，请换个说法（例如具体日期或“过去N天”）");
         }
 
-        // Every located model span must exactly equal one parser mention span.
+        // Every located model span must sit inside one parser mention span.
+        // Exact equality or a nested verbatim fragment (“周一” within a wider
+        // expression the parser consumed as one candidate) counts as agreement;
+        // anything straddling two parser mentions or extending beyond one
+        // escalates to AMBIGUOUS rather than being silently accepted.
         for (TimeIntentResult.TimeMention modelMention : model.mentions()) {
             boolean matched = parserResult.mentions().stream().anyMatch(parsed ->
-                    parsed.start() == modelMention.start()
-                            && parsed.end() == modelMention.end()
-                            && parsed.text().equals(modelMention.text()));
+                    parsed.start() <= modelMention.start()
+                            && parsed.end() >= modelMention.end()
+                            && parsed.text().contains(modelMention.text()));
             if (!matched) {
                 return new TimeIntentResult(TimeIntentResult.Status.AMBIGUOUS,
                         parserResult.mentions(), null, null,
                         "模型识别的时间片段与可解析的时间表达不一致: " + modelMention.text());
             }
         }
-        if (parserResult.status() == TimeIntentResult.Status.MULTIPLE) {
-            return multiple(parserResult);
-        }
         return parserResult;
-    }
-
-    private static TimeIntentResult multiple(TimeIntentResult parserResult) {
-        return new TimeIntentResult(TimeIntentResult.Status.MULTIPLE,
-                parserResult.mentions(), null, null,
-                "原始问题包含多个时间范围");
     }
 
     private static TimeIntentResult unsupported(

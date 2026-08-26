@@ -58,21 +58,33 @@ class TimeEvidenceReconcilerTest {
     }
 
     @Test
-    void partialOverlapBetweenModelAndParserSpansIsAmbiguous() {
-        // 模型只标注了前缀“过去一周”，而解析器提取的是“过去一周”整体——此处构造
-        // 一个解析器识别更长表达的场景：白名单把“最近3天”完整解析。
-        var question = "最近3天能耗";
+    void modelMentionStraddlingParserMentionsIsAmbiguous() {
+        // 模型片段横跨两个解析器 mention（“本月”和“去年”），无法归入任何
+        // 单一可解析表达 → AMBIGUOUS。
+        var question = "对比本月和去年能耗";
         var parser = new WhitelistTimeIntentProvider().resolve(question, NOW);
 
-        // 模型返回的片段必须逐字存在，但与解析器 span 不完全相等 → AMBIGUOUS
-        var result = reconciler.reconcile(
-                new TimeIntentResult(TimeIntentResult.Status.PARSED,
-                        List.of(new TimeIntentResult.TimeMention("最近3天", 0, 4)),
-                        parser.intent(), parser.timeRange(), ""),
-                List.of("最近3"),
-                question);
+        assertThat(parser.status()).isEqualTo(TimeIntentResult.Status.MULTIPLE);
+
+        var result = reconciler.reconcile(parser, List.of("月和去年"), question);
 
         assertThat(result.status()).isEqualTo(TimeIntentResult.Status.AMBIGUOUS);
+    }
+
+    @Test
+    void nestedVerbatimModelFragmentInsideParserMentionIsAccepted() {
+        // 模型在完整表达之外额外返回嵌套片段（“2026年8月25日”中的“8月25日”）
+        // 属于合理的识别结果：只要落在单一解析器 mention 内部就视为一致，
+        // 不应把合法问题误杀为 AMBIGUOUS。
+        var question = "2026年8月25日能耗";
+        var parser = new WhitelistTimeIntentProvider().resolve(question, NOW);
+
+        assertThat(parser.status()).isEqualTo(TimeIntentResult.Status.PARSED);
+
+        var result = reconciler.reconcile(parser,
+                List.of("2026年8月25日", "8月25日"), question);
+
+        assertThat(result.status()).isEqualTo(TimeIntentResult.Status.PARSED);
     }
 
     @Test
