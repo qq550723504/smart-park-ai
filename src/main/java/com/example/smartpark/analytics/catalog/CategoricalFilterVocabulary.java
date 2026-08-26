@@ -32,9 +32,9 @@ public final class CategoricalFilterVocabulary {
     public static String canonicalValue(String dimension, String value) {
         if (value == null) return null;
         Map<String, String> vocabulary = TERMS.get(dimension);
-        return vocabulary == null
-                ? value
-                : vocabulary.getOrDefault(value.toLowerCase(Locale.ROOT), value);
+        if (vocabulary == null) return value;
+        String normalized = value.strip();
+        return vocabulary.getOrDefault(normalized.toLowerCase(Locale.ROOT), normalized);
     }
 
     public static Set<String> matchingCanonicalValues(String dimension, String question) {
