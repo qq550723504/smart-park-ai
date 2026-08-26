@@ -139,7 +139,9 @@ RAG 索引和客服会话都属于当前进程状态。应用重启后，RAG 重
 START
   → classifyAlert
   → collectParkContext
-  → retrieveKnowledge
+       ├─ ENERGY → energyAnalysis → retrieveKnowledge
+       ├─ ACCESS → securityReview → retrieveKnowledge
+       └─ 其他分类 → retrieveKnowledge
   → diagnoseAlert
   → riskGate
        ├─ CREATE_WORK_ORDER → createWorkOrder → summarizeResult → END
@@ -249,9 +251,9 @@ MCP 不提供知识正文、身份数据、工作流变更、工单写入、设�
 
 - **Agent 与副作用：** Agent 只读事实并提出判断；工单写入由风险门禁后的工作流节点负责。
 - **安防数据：** 只允许脱敏摘要进入通用链路，不包含原始视频、图片、人脸特征或身份证等人员原始记录。
-- **对外输出：** Web DTO 和统一事件只暴露流程跟踪所需的 ID、状态、时间、节点和安全摘要；诊断、审批、工单和知识正文不直接返回。
-- **SQL 分析：** 应用运行账号固定为 `smartpark_analytics_ro`，只授予四个白名单分析视图的 `SELECT`；管理员账号仅用于 Flyway 迁移和本地演示数据刷新。
-- **密钥：** DashScope Key 只从当前进程环境变量读取；真实部署应接入密钥管理服务，不写入源码、`.env`、命令行参数或 Git 历史。
+- **告警对外输出：** 告警工作流的 Web DTO 除流程跟踪字段外，还暴露 `WorkflowResponse` 的 `status`、`diagnosis`、`approval`、`workOrder`、`errors`、`eventSequence` 和 `riskReasons` 等受控投影：诊断投影包含诊断/告警/设备 ID、风险级别、置信度和时间；审批投影包含决定和时间；工单投影包含工单/工作流/园区/建筑/设备/告警 ID、风险级别、状态、嵌套审批投影和创建/更新时间。诊断、工单和证据中的自由文本，以及审核人身份和原始审批评论按脱敏契约隐藏或替换。统一事件另行暴露事件/运行 ID、序号、时间、场景、角色、阶段、事件类型、状态和安全摘要。客服、运营分析和专家协作接口按各自产品契约返回必要的回答、分析结果或专家发现。
+- **SQL 分析：** 应用运行账号固定为 `smartpark_analytics_ro`，只授予四个白名单分析视图的 `SELECT`；管理员账号用于 Flyway 迁移、可选的本地演示数据刷新，以及应用启动时为只读角色同步运行时凭据。
+- **密钥：** 本地和容器部署推荐通过当前进程的 `AI_DASHSCOPE_API_KEY` 环境变量注入 DashScope Key；`application.yml` 使用 Spring 配置占位符，并不强制值只能来自操作系统环境变量。真实部署应接入密钥管理服务，不写入源码、`.env`、命令行参数或 Git 历史。
 - **演示授权：** `X-Demo-Role` 仅用于本地演示边界，必须由网关/应用真实认证授权替换。
 
 ## 9. API 与事件接口
