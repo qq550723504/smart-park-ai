@@ -17,6 +17,7 @@ public final class SupervisorPlanner {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Pattern ENERGY_DEVICE_ID = Pattern.compile("DEV-ENERGY-[A-Z0-9-]+", Pattern.CASE_INSENSITIVE);
     private static final Pattern DEVICE_ID = Pattern.compile("DEV-[A-Z0-9-]+", Pattern.CASE_INSENSITIVE);
+    private static final Pattern NON_ENERGY_DEVICE_ID = Pattern.compile("DEV-(?!ENERGY-)[A-Z0-9-]+", Pattern.CASE_INSENSITIVE);
     private static final Pattern SECURITY_EVENT_ID = Pattern.compile("SEC-[A-Z0-9-]+", Pattern.CASE_INSENSITIVE);
     private static final Map<String, ExpertDomain> DOMAIN_ALIASES = Map.ofEntries(
             Map.entry("energy", ExpertDomain.ENERGY),
@@ -109,15 +110,19 @@ public final class SupervisorPlanner {
         if (domain != null) return domain;
         if ("power".equals(normalized)) {
             String questionText = question.toLowerCase(Locale.ROOT);
-            if (questionText.contains("dev-") || questionText.contains("device")
-                    || questionText.contains("equipment") || questionText.contains("设备")) {
-                return ExpertDomain.DEVICE;
-            }
-            if (questionText.contains("energy") || questionText.contains("consumption")
+            boolean explicitEnergyContext = questionText.contains("energy")
                     || questionText.contains("能耗") || questionText.contains("用电")
-                    || questionText.contains("电量")) {
+                    || questionText.contains("电量") || questionText.contains("consumption");
+            boolean explicitDeviceContext = NON_ENERGY_DEVICE_ID.matcher(questionText).find()
+                    || questionText.contains("device") || questionText.contains("equipment")
+                    || questionText.contains("设备");
+            if (explicitEnergyContext && !explicitDeviceContext) {
                 return ExpertDomain.ENERGY;
             }
+            if (explicitDeviceContext) {
+                return ExpertDomain.DEVICE;
+            }
+            if (questionText.contains("dev-energy-")) return ExpertDomain.ENERGY;
             throw new ModelOutputException("ambiguous expert domain: " + original);
         }
         if (ENERGY_DEVICE_ID.matcher(normalized).matches()) return ExpertDomain.ENERGY;
