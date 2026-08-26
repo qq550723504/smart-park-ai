@@ -22,12 +22,18 @@ record TimeIntentResult(
         if (status == Status.PARSED && timeRange == null) {
             throw new IllegalArgumentException("PARSED result requires a timeRange");
         }
-        if (status != Status.PARSED && (intent != null || timeRange != null)) {
+        if (status == Status.EMPTY
+                && (timeRange == null || intent == null
+                    || !timeRange.from().equals(timeRange.to()))) {
+            throw new IllegalArgumentException("EMPTY result requires a zero-width range");
+        }
+        if (status != Status.PARSED && status != Status.EMPTY
+                && (intent != null || timeRange != null)) {
             throw new IllegalArgumentException("non-parsed result must not carry a resolved payload");
         }
     }
 
-    enum Status { NONE, PARSED, UNSUPPORTED, MULTIPLE, AMBIGUOUS }
+    enum Status { NONE, PARSED, UNSUPPORTED, MULTIPLE, AMBIGUOUS, EMPTY }
 
     record TimeMention(String text, int start, int end) {
         TimeMention {

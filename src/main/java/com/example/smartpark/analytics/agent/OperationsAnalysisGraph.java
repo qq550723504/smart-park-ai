@@ -61,6 +61,7 @@ public class OperationsAnalysisGraph {
     private final Clock clock;
     private final Duration executionTimeout;
     private final TimeIntentProvider timeIntentProvider;
+    private final TimeEvidenceReconciler timeEvidenceReconciler = new TimeEvidenceReconciler();
     private final TimeConstraintResolver timeConstraintResolver = new TimeConstraintResolver();
     private final CompiledGraph compiled;
     private final ConcurrentHashMap<UUID, RunContext> contexts = new ConcurrentHashMap<>();
@@ -142,7 +143,7 @@ public class OperationsAnalysisGraph {
                                    AnalysisSummaryValidator summaryValidator,
                                    Clock clock) {
         this(catalog, modelClient, costGate, executionGate, publisher, summaryValidator, clock,
-                Duration.ofSeconds(60), new FiniteGrammarTimeIntentProvider());
+                Duration.ofSeconds(60), new WhitelistTimeIntentProvider());
     }
 
     public OperationsAnalysisGraph(MetricCatalog catalog,
@@ -154,7 +155,7 @@ public class OperationsAnalysisGraph {
                                    Clock clock,
                                    Duration executionTimeout) {
         this(catalog, modelClient, costGate, executionGate, publisher, summaryValidator, clock,
-                executionTimeout, new FiniteGrammarTimeIntentProvider());
+                executionTimeout, new WhitelistTimeIntentProvider());
     }
 
     OperationsAnalysisGraph(MetricCatalog catalog,
@@ -314,6 +315,10 @@ public class OperationsAnalysisGraph {
                 return AnalysisRunResult.failed(runId, ctx.failureStage);
             }
             default -> {
+                if ("EMPTY".equals(ctx.status)) {
+                    return new AnalysisRunResult(runId, RunOutcome.COMPLETED, List.of(), List.of(),
+                            null, null, "当前周期刚开始，暂无数据", null);
+                }
                 return new AnalysisRunResult(runId, RunOutcome.COMPLETED, List.of(), List.of(),
                         ctx.chart, ctx.result, ctx.summary, null);
             }
@@ -327,39 +332,47 @@ public class OperationsAnalysisGraph {
         RunContext ctx = contexts.get(runId);
         nodeStarted(ctx, runId, ExecutionStage.UNDERSTANDING, "理解问题");
         String question = text(state, STATE_QUESTION);
-        TimeIntentResult parsedTime = timeIntentProvider.resolve(question, Instant.now(clock));
-        if (parsedTime.status() == TimeIntentResult.Status.MULTIPLE) {
-            throw new IllegalArgumentException("原始问题包含多个时间范围，当前查询计划不支持范围对比");
-        }
-        if (parsedTime.status() == TimeIntentResult.Status.UNSUPPORTED
-                || parsedTime.status() == TimeIntentResult.Status.AMBIGUOUS) {
-            throw new IllegalArgumentException("原始问题包含暂不支持的时间范围表达式: " + parsedTime.reason());
-        }
-        ctx.timeIntentResult = parsedTime;
-        QueryPlan.TimeRange parsedServerTimeRange = parsedTime.timeRange();
-        ctx.timeRangeSource = parsedTime.status() == TimeIntentResult.Status.PARSED
-                ? QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE
-                : QueryPlan.TimeRangeSource.DEFAULT_METRIC_LOOKBACK;
-        // Clarified runs carry the operator's structured selection as the understanding;
-        // the model is not consulted again for metric resolution.
+        // 澄清恢复携带操作员的结构化选择与服务器解析的时间快照；不再重复解析。
         AnalyticsModelClient.QuestionUnderstanding modelUnderstanding = ctx.pinnedUnderstanding != null
                 ? ctx.pinnedUnderstanding
                 : modelClient.understandQuestion(question);
         if (ctx.pinnedUnderstanding != null && ctx.pinnedUnderstanding.requestedTimeRange() != null) {
             ctx.serverTimeRange = toTimeRange(ctx.pinnedUnderstanding.requestedTimeRange());
             ctx.timeRangeSource = QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE;
-        } else {
-            if (parsedServerTimeRange == null && modelUnderstanding.requestedTimeRange() != null) {
-                throw new IllegalArgumentException("模型返回了原始问题未包含的时间范围");
-            }
-            ctx.serverTimeRange = parsedServerTimeRange;
-            // Preserve the server-owned snapshot for a possible clarification
-            // pause. The model value is advisory and must not be replayed later.
-            ctx.understanding = withServerTimeRange(modelUnderstanding, parsedServerTimeRange);
-        }
-        if (ctx.understanding == null) {
             ctx.understanding = modelUnderstanding;
+            finishUnderstanding(ctx, runId);
+            return Map.of();
         }
+        // 单一参考时刻：识别、换算与快照共用同一时钟读数。
+        Instant reference = Instant.now(clock);
+        TimeIntentResult parserResult = timeIntentProvider.resolve(question, reference);
+        TimeIntentResult finalTime = timeEvidenceReconciler.reconcile(
+                parserResult, modelUnderstanding.requestedTimeMentions(), question);
+        switch (finalTime.status()) {
+            case UNSUPPORTED, AMBIGUOUS -> throw new IllegalArgumentException(
+                    "原始问题包含暂不支持的时间范围表达式: " + finalTime.reason());
+            case MULTIPLE -> throw new IllegalArgumentException("原始问题包含多个时间范围，当前查询计划不支持范围对比");
+            case EMPTY -> {
+                ctx.status = "EMPTY";
+                ctx.understanding = modelUnderstanding;
+                publish(ctx, runId, ExecutionStage.UNDERSTANDING, ExecutionEventType.NODE_COMPLETED,
+                        ExecutionStatus.RUNNING, "当前周期刚开始，暂无数据",
+                        DisplayPayload.text("当前周期刚开始，暂无数据", false));
+                return Map.of();
+            }
+            default -> { /* NONE / PARSED 继续走正常链路 */ }
+        }
+        ctx.timeIntentResult = finalTime;
+        QueryPlan.TimeRange parsedServerTimeRange = finalTime.timeRange();
+        ctx.timeRangeSource = finalTime.status() == TimeIntentResult.Status.PARSED
+                ? QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE
+                : QueryPlan.TimeRangeSource.DEFAULT_METRIC_LOOKBACK;
+        if (parsedServerTimeRange == null && modelUnderstanding.requestedTimeRange() != null) {
+            throw new IllegalArgumentException("模型返回了原始问题未包含的时间范围");
+        }
+        ctx.serverTimeRange = parsedServerTimeRange;
+        // 保存服务器拥有的绝对区间快照，供澄清暂停后复用；模型值仅供参考。
+        ctx.understanding = withServerTimeRange(modelUnderstanding, parsedServerTimeRange);
         if (ctx.understanding.needsClarification()) {
             ctx.clarificationQuestions.addAll(ctx.understanding.clarificationQuestions());
             // No structured candidates from the model: the operator picks from
@@ -370,9 +383,13 @@ public class OperationsAnalysisGraph {
             }
             ctx.status = "NEEDS_CLARIFICATION";
         }
+        finishUnderstanding(ctx, runId);
+        return Map.of();
+    }
+
+    private void finishUnderstanding(RunContext ctx, UUID runId) {
         nodeCompleted(ctx, runId, ExecutionStage.UNDERSTANDING, "问题理解完成",
                 DisplayPayload.text(ctx.understanding.normalizedQuestion(), false));
-        return Map.of();
     }
 
     Map<String, Object> resolveMetricAndDimensions(OverAllState state) {
@@ -811,7 +828,9 @@ public class OperationsAnalysisGraph {
     private boolean needsClarification(OverAllState state) {
         UUID runId = runId(state);
         RunContext ctx = contexts.get(runId);
-        return ctx != null && "NEEDS_CLARIFICATION".equals(ctx.status);
+        // EMPTY 在理解节点即终止：不构造查询计划，不触碰 SQL。
+        return ctx != null && ("NEEDS_CLARIFICATION".equals(ctx.status)
+                || "EMPTY".equals(ctx.status));
     }
 
     private UUID runId(OverAllState state) {

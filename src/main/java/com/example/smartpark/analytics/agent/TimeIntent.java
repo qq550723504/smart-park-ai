@@ -60,5 +60,5 @@ record TimeIntent(
 
     enum Unit { HOUR, DAY, WEEK, MONTH, QUARTER, YEAR, HALF_YEAR }
 
-    enum DayPart { MORNING, AFTERNOON }
+    enum DayPart { MORNING, AFTERNOON, EVENING }
 }

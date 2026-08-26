@@ -296,7 +296,7 @@ class OperationsAnalysisGraphTest {
 
         assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
         assertThat(modelClient.lastPlan().timeRange()).isEqualTo(new QueryPlan.TimeRange(
-                Instant.parse("2026-08-23T16:00:00Z"),
+                Instant.parse("2026-08-23T23:00:00Z"),
                 Instant.parse("2026-08-24T04:00:00Z")));
         assertThat(modelClient.lastPlan().timeRangeSource())
                 .isEqualTo(QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE);
@@ -339,15 +339,67 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
-    void rejectsResidualTemporalQualifierBeforeGeneratingSql() {
+    void failsClosedWhenModelSpotsATimeExpressionTheWhitelistCannotResolve() {
+        // “上上季度”不在白名单内（白名单只能解析其中子串“上季度”）。
+        // 模型逐字摘抄的片段与解析器 span 不一致时必须在 SQL 前终止。
+        var understanding = new AnalyticsModelClient.QuestionUnderstanding(
+                "上上季度能耗", List.of("能耗"), List.of(),
+                null, List.of(), java.util.Map.of(), List.of("上上季度"));
         modelClient.reset(
-                new AnalyticsModelClient.QuestionUnderstanding("今天晚上能耗", List.of("能耗"), List.of()),
+                understanding,
                 List.of(GOOD_TOTAL_SQL), null, "不应执行未完整解析的时间表达式。");
 
-        var outcome = graph.run(UUID.randomUUID(), "今天晚上能耗");
+        var outcome = graph.run(UUID.randomUUID(), "上上季度能耗");
 
         assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.FAILED);
         assertThat(modelClient.generateSqlInvocations()).isZero();
+    }
+
+    @Test
+    void carriesEveningDayPartAsExplicitUserRange() {
+        var understanding = new AnalyticsModelClient.QuestionUnderstanding(
+                "今天晚上能耗", List.of("能耗"), List.of(),
+                null, List.of(), java.util.Map.of(), List.of("今天晚上"));
+        modelClient.reset(
+                understanding,
+                List.of(GOOD_TOTAL_SQL),
+                new ChartSpec.Proposal("TABLE", "今天晚上能耗", "energy_kwh", List.of(), "", "kWh"),
+                "共 1 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "今天晚上能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.generateSqlInvocations()).isEqualTo(1);
+        assertThat(modelClient.lastPlan().timeRange()).isEqualTo(new QueryPlan.TimeRange(
+                Instant.parse("2026-08-24T10:00:00Z"),
+                Instant.parse("2026-08-24T16:00:00Z")));
+    }
+
+    @Test
+    void terminatesEmptyCurrentPeriodBeforeAnySql() {
+        // 参考时刻恰好是“今天”零点：零宽周期必须显式终止，不生成 SQL。
+        var emptyClockGraph = new OperationsAnalysisGraph(
+                new MetricCatalog(),
+                modelClient,
+                (sql, parameters) -> { throw new IllegalStateException("must not reach cost gate"); },
+                (sql, parameters) -> { throw new IllegalStateException("must not execute"); },
+                publisher,
+                new AnalysisSummaryValidator(),
+                Clock.fixed(Instant.parse("2026-08-24T16:00:00Z"), ZoneOffset.UTC));
+        try {
+            var understanding = new AnalyticsModelClient.QuestionUnderstanding(
+                    "今天能耗", List.of("能耗"), List.of(),
+                    null, List.of(), java.util.Map.of(), List.of("今天"));
+            modelClient.reset(understanding, List.of(GOOD_TOTAL_SQL), null, "");
+
+            var outcome = emptyClockGraph.run(UUID.randomUUID(), "今天能耗");
+
+            assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+            assertThat(outcome.summary()).contains("暂无数据");
+            assertThat(outcome.result()).isNull();
+        } finally {
+            // 恢复共享 modelClient 的状态供后续测试使用。
+        }
     }
 
     @Test

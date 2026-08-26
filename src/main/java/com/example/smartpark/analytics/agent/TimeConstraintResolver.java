@@ -19,6 +19,8 @@ final class TimeConstraintResolver {
                     new QueryPlan.TimeRange(now.minus(Duration.ofDays(lookbackDays)), now),
                     QueryPlan.TimeRangeSource.DEFAULT_METRIC_LOOKBACK);
             case PARSED -> new Resolved(result.timeRange(), QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE);
+            case EMPTY -> throw new IllegalArgumentException(
+                    "zero-width current period must be terminated before query planning");
             case UNSUPPORTED, MULTIPLE, AMBIGUOUS -> throw new IllegalArgumentException(
                     "time intent is unresolved: " + result.status() + ": " + result.reason());
         };

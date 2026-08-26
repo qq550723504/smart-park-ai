@@ -15,7 +15,7 @@ final class TimeRangeParser {
     private final TimeIntentProvider provider;
 
     TimeRangeParser() {
-        this(new FiniteGrammarTimeIntentProvider());
+        this(new WhitelistTimeIntentProvider());
     }
 
     TimeRangeParser(TimeIntentProvider provider) {
