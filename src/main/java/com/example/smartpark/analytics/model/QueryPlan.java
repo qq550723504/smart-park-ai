@@ -22,11 +22,14 @@ public record QueryPlan(
         List<String> dimensions,
         Map<String, String> filters,
         TimeRange timeRange,
-        int limit) {
+        int limit,
+        TimeRangeSource timeRangeSource) {
 
-    private static final java.util.regex.Pattern ENTITY_IDENTIFIER = java.util.regex.Pattern.compile(
-            "(?i)(?<![A-Za-z0-9_-])(?:[A-Za-z]\\d+|[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)+)"
-                    + "(?![A-Za-z0-9_-])");
+    public QueryPlan(String question, List<MetricDefinition> metrics, List<String> dimensions,
+                     Map<String, String> filters, TimeRange timeRange, int limit) {
+        this(question, metrics, dimensions, filters, timeRange, limit,
+                TimeRangeSource.DEFAULT_METRIC_LOOKBACK);
+    }
 
     public QueryPlan {
         Objects.requireNonNull(question, "question");
@@ -80,9 +83,8 @@ public record QueryPlan(
         }
         Set<String> filterValues = normalizedFilters.values().stream()
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
-        java.util.regex.Matcher scopedEntity = ENTITY_IDENTIFIER.matcher(question);
-        while (scopedEntity.find()) {
-            String identifier = scopedEntity.group();
+        for (QuestionTokenScanner.Token scopedEntity : QuestionTokenScanner.entityIdentifiers(question)) {
+            String identifier = scopedEntity.text();
             if (!filterValues.contains(identifier)) {
                 throw new IllegalArgumentException(
                         "query plan dropped entity identifier from original question: " + identifier);
@@ -96,6 +98,7 @@ public record QueryPlan(
         if (limit < 1 || limit > 500) {
             throw new IllegalArgumentException("limit must be 1..500");
         }
+        Objects.requireNonNull(timeRangeSource, "timeRangeSource");
     }
 
     /**
@@ -122,6 +125,11 @@ public record QueryPlan(
 
     public static String filterParameterName(String dimension) {
         return "filter_" + dimension.toLowerCase(Locale.ROOT);
+    }
+
+    public enum TimeRangeSource {
+        EXPLICIT_USER_RANGE,
+        DEFAULT_METRIC_LOOKBACK
     }
 
     public record TimeRange(Instant from, Instant to) {

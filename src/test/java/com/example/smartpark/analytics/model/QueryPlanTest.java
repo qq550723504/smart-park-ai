@@ -32,6 +32,17 @@ class QueryPlanTest {
                 new QueryPlan.TimeRange(now.minusSeconds(86400 * 7), now), 200);
         assertThat(plan.limit()).isEqualTo(200);
         assertThat(plan.metrics()).hasSize(1);
+        assertThat(plan.timeRangeSource()).isEqualTo(QueryPlan.TimeRangeSource.DEFAULT_METRIC_LOOKBACK);
+    }
+
+    @Test
+    void preservesExplicitTimeRangeSourceInThePlanContract() {
+        QueryPlan plan = new QueryPlan("B1 上周能耗", List.of(metric("energy_kwh")),
+                List.of("building_id"), Map.of("building_id", "B1"),
+                new QueryPlan.TimeRange(now.minusSeconds(86400 * 7), now), 200,
+                QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE);
+
+        assertThat(plan.timeRangeSource()).isEqualTo(QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE);
     }
 
     @Test

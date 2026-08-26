@@ -25,13 +25,8 @@ import com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy;
 import reactor.core.publisher.Flux;
 
 import java.time.Clock;
-import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.LocalDate;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -42,7 +37,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Nine-node analysis workflow on the native 2.0 StateGraph:
+ * Ten-node analysis workflow on the native 2.0 StateGraph:
  * understandQuestion → resolveMetricAndDimensions → recallAllowedSchema →
  * buildQueryPlan → generateSql → validateSqlAst → explainAndCheckCost →
  * executeReadOnlyQuery → buildChartSpec → summarizeFromResult.
@@ -57,12 +52,6 @@ public class OperationsAnalysisGraph {
     private static final String STATE_QUESTION = "question";
     private static final String STATE_RUN_ID = "runId";
     private static final int MAX_SQL_ATTEMPTS = 2; // one original try, at most one repair
-    private static final ZoneId PARK_ZONE = ZoneId.of("Asia/Shanghai");
-    private static final long MODEL_TIME_SKEW_TOLERANCE_SECONDS = 300;
-    private static final java.util.regex.Pattern CALENDAR_DATE_RANGE = java.util.regex.Pattern.compile(
-            "(\\d{4}-\\d{2}-\\d{2})\\s*(?:到|至|~|～)\\s*(\\d{4}-\\d{2}-\\d{2})");
-    private static final java.util.regex.Pattern QUALIFIED_PREVIOUS_WEEK = java.util.regex.Pattern.compile(
-            "上周([一二三四五六日天末])");
     private final MetricCatalog catalog;
     private final AnalyticsModelClient modelClient;
     private final CostGate costGate;
@@ -71,6 +60,8 @@ public class OperationsAnalysisGraph {
     private final AnalysisSummaryValidator summaryValidator;
     private final Clock clock;
     private final Duration executionTimeout;
+    private final TimeIntentProvider timeIntentProvider;
+    private final TimeConstraintResolver timeConstraintResolver = new TimeConstraintResolver();
     private final CompiledGraph compiled;
     private final ConcurrentHashMap<UUID, RunContext> contexts = new ConcurrentHashMap<>();
 
@@ -124,6 +115,9 @@ public class OperationsAnalysisGraph {
         AnalyticsModelClient.QuestionUnderstanding pinnedUnderstanding;
         List<com.example.smartpark.analytics.catalog.MetricDefinition> metrics = List.of();
         String schemaDescription = "";
+        TimeIntentResult timeIntentResult;
+        QueryPlan.TimeRange serverTimeRange;
+        QueryPlan.TimeRangeSource timeRangeSource;
         QueryPlan plan;
         int sqlAttempts;
         String rejectionReason;
@@ -148,7 +142,7 @@ public class OperationsAnalysisGraph {
                                    AnalysisSummaryValidator summaryValidator,
                                    Clock clock) {
         this(catalog, modelClient, costGate, executionGate, publisher, summaryValidator, clock,
-                Duration.ofSeconds(60));
+                Duration.ofSeconds(60), new FiniteGrammarTimeIntentProvider());
     }
 
     public OperationsAnalysisGraph(MetricCatalog catalog,
@@ -159,6 +153,19 @@ public class OperationsAnalysisGraph {
                                    AnalysisSummaryValidator summaryValidator,
                                    Clock clock,
                                    Duration executionTimeout) {
+        this(catalog, modelClient, costGate, executionGate, publisher, summaryValidator, clock,
+                executionTimeout, new FiniteGrammarTimeIntentProvider());
+    }
+
+    OperationsAnalysisGraph(MetricCatalog catalog,
+                            AnalyticsModelClient modelClient,
+                            CostGate costGate,
+                            ExecutionGate executionGate,
+                            ExecutionEventPublisher publisher,
+                            AnalysisSummaryValidator summaryValidator,
+                            Clock clock,
+                            Duration executionTimeout,
+                            TimeIntentProvider timeIntentProvider) {
         this.catalog = catalog;
         this.modelClient = modelClient;
         this.costGate = costGate;
@@ -166,6 +173,7 @@ public class OperationsAnalysisGraph {
         this.publisher = publisher == null ? new InMemoryExecutionEventPublisher() : publisher;
         this.summaryValidator = summaryValidator;
         this.clock = clock;
+        this.timeIntentProvider = java.util.Objects.requireNonNull(timeIntentProvider, "timeIntentProvider");
         if (executionTimeout == null || executionTimeout.isZero() || executionTimeout.isNegative()) {
             throw new IllegalArgumentException("executionTimeout must be positive");
         }
@@ -319,11 +327,39 @@ public class OperationsAnalysisGraph {
         RunContext ctx = contexts.get(runId);
         nodeStarted(ctx, runId, ExecutionStage.UNDERSTANDING, "理解问题");
         String question = text(state, STATE_QUESTION);
+        TimeIntentResult parsedTime = timeIntentProvider.resolve(question, Instant.now(clock));
+        if (parsedTime.status() == TimeIntentResult.Status.MULTIPLE) {
+            throw new IllegalArgumentException("原始问题包含多个时间范围，当前查询计划不支持范围对比");
+        }
+        if (parsedTime.status() == TimeIntentResult.Status.UNSUPPORTED
+                || parsedTime.status() == TimeIntentResult.Status.AMBIGUOUS) {
+            throw new IllegalArgumentException("原始问题包含暂不支持的时间范围表达式: " + parsedTime.reason());
+        }
+        ctx.timeIntentResult = parsedTime;
+        QueryPlan.TimeRange parsedServerTimeRange = parsedTime.timeRange();
+        ctx.timeRangeSource = parsedTime.status() == TimeIntentResult.Status.PARSED
+                ? QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE
+                : QueryPlan.TimeRangeSource.DEFAULT_METRIC_LOOKBACK;
         // Clarified runs carry the operator's structured selection as the understanding;
         // the model is not consulted again for metric resolution.
-        ctx.understanding = ctx.pinnedUnderstanding != null
+        AnalyticsModelClient.QuestionUnderstanding modelUnderstanding = ctx.pinnedUnderstanding != null
                 ? ctx.pinnedUnderstanding
                 : modelClient.understandQuestion(question);
+        if (ctx.pinnedUnderstanding != null && ctx.pinnedUnderstanding.requestedTimeRange() != null) {
+            ctx.serverTimeRange = toTimeRange(ctx.pinnedUnderstanding.requestedTimeRange());
+            ctx.timeRangeSource = QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE;
+        } else {
+            if (parsedServerTimeRange == null && modelUnderstanding.requestedTimeRange() != null) {
+                throw new IllegalArgumentException("模型返回了原始问题未包含的时间范围");
+            }
+            ctx.serverTimeRange = parsedServerTimeRange;
+            // Preserve the server-owned snapshot for a possible clarification
+            // pause. The model value is advisory and must not be replayed later.
+            ctx.understanding = withServerTimeRange(modelUnderstanding, parsedServerTimeRange);
+        }
+        if (ctx.understanding == null) {
+            ctx.understanding = modelUnderstanding;
+        }
         if (ctx.understanding.needsClarification()) {
             ctx.clarificationQuestions.addAll(ctx.understanding.clarificationQuestions());
             // No structured candidates from the model: the operator picks from
@@ -419,25 +455,27 @@ public class OperationsAnalysisGraph {
         nodeStarted(ctx, runId, ExecutionStage.PLANNING, "构建查询计划");
         Instant now = Instant.now(clock);
         int lookbackDays = ctx.metrics.stream().mapToInt(m -> m.defaultLookbackDays()).max().orElse(7);
-        AnalyticsModelClient.RequestedTimeRange requested = ctx.understanding.requestedTimeRange();
         String originalQuestion = text(state, STATE_QUESTION).strip();
-        validateRequestedTimeRange(originalQuestion, requested, now);
-        // Relative time is a server-owned contract. The model prompt and this
-        // node run at different instants, so never copy its rolling endpoints
-        // into SQL; derive them once from the same reference instant here.
-        QueryPlan.TimeRange recognizedTime = expectedTimeRange(originalQuestion.toLowerCase(java.util.Locale.ROOT), now);
-        QueryPlan.TimeRange timeRange = recognizedTime != null
-                ? recognizedTime
-                : requested == null
-                ? new QueryPlan.TimeRange(now.minus(Duration.ofDays(lookbackDays)), now)
-                : new QueryPlan.TimeRange(requested.fromInclusive(), requested.toExclusive());
+        // The original question is the authority for time semantics. The model
+        // may return a range using a different locale or boundary convention,
+        // so never let that advisory value reject a valid request or widen the
+        // SQL window. Derive every recognized range once from the server clock.
+        TimeConstraintResolver.Resolved resolvedTime = ctx.serverTimeRange != null
+                ? new TimeConstraintResolver.Resolved(ctx.serverTimeRange,
+                        QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE)
+                : timeConstraintResolver.resolve(ctx.timeIntentResult, now, lookbackDays);
+        QueryPlan.TimeRange timeRange = resolvedTime.timeRange();
+        QueryPlan.TimeRangeSource timeRangeSource = resolvedTime.source();
+        ctx.serverTimeRange = timeRange;
+        ctx.timeRangeSource = timeRangeSource;
         ctx.plan = new QueryPlan(
                 originalQuestion,
                 ctx.metrics,
                 validatedRequestedDimensions(ctx, originalQuestion),
                 validatedRequestedFilters(ctx, originalQuestion),
                 timeRange,
-                200);
+                200,
+                timeRangeSource);
         // One shared binding set travels through both gates and execution.
         // Entity values are never copied into SQL literals.
         java.util.LinkedHashMap<String, Object> parameters = new java.util.LinkedHashMap<>();
@@ -602,99 +640,17 @@ public class OperationsAnalysisGraph {
         return false;
     }
 
-    private static void validateRequestedTimeRange(String question,
-                                                    AnalyticsModelClient.RequestedTimeRange requested,
-                                                    Instant now) {
-        if (requested == null) return;
-        String normalized = question.toLowerCase(java.util.Locale.ROOT);
-        QueryPlan.TimeRange expected = expectedTimeRange(normalized, now);
-        if (expected == null || !temporallyConsistent(expected, requested, normalized)) {
-            throw new IllegalArgumentException("模型时间范围未被原始问题支持");
-        }
+    private static QueryPlan.TimeRange toTimeRange(AnalyticsModelClient.RequestedTimeRange requested) {
+        return new QueryPlan.TimeRange(requested.fromInclusive(), requested.toExclusive());
     }
 
-    private static boolean temporallyConsistent(QueryPlan.TimeRange expected,
-                                                AnalyticsModelClient.RequestedTimeRange requested,
-                                                String question) {
-        long endSkew = Math.abs(Duration.between(requested.toExclusive(), expected.to()).toSeconds());
-        if (endSkew > MODEL_TIME_SKEW_TOLERANCE_SECONDS) return false;
-        if (question.contains("今天") || question.contains("今日")) {
-            return requested.fromInclusive().equals(expected.from());
-        }
-        Duration expectedWidth = Duration.between(expected.from(), expected.to());
-        Duration requestedWidth = Duration.between(requested.fromInclusive(), requested.toExclusive());
-        return expectedWidth.equals(requestedWidth);
-    }
-
-    private static QueryPlan.TimeRange expectedTimeRange(String question, Instant now) {
-        java.util.regex.Matcher calendarRange = CALENDAR_DATE_RANGE.matcher(question);
-        if (calendarRange.find()) {
-            int firstRangeEnd = calendarRange.end();
-            java.util.regex.Matcher additionalRange = CALENDAR_DATE_RANGE.matcher(question);
-            additionalRange.region(firstRangeEnd, question.length());
-            if (additionalRange.find()) {
-                throw new IllegalArgumentException("原始问题包含多个日期范围，当前查询计划不支持范围对比");
-            }
-            LocalDate from = LocalDate.parse(calendarRange.group(1), DateTimeFormatter.ISO_LOCAL_DATE);
-            LocalDate to = LocalDate.parse(calendarRange.group(2), DateTimeFormatter.ISO_LOCAL_DATE);
-            if (to.isBefore(from)) {
-                throw new IllegalArgumentException("原始问题的日期范围顺序无效");
-            }
-            return localDateRange(from, to.plusDays(1));
-        }
-        java.util.regex.Matcher days = java.util.regex.Pattern.compile("(?:过去|最近|近)(\\d+)(?:天|日)")
-                .matcher(question);
-        if (days.find()) {
-            long count = Long.parseLong(days.group(1));
-            return new QueryPlan.TimeRange(now.minus(Duration.ofDays(count)), now);
-        }
-        if (question.contains("昨天") || question.contains("昨日")) {
-            java.time.Instant today = now.atZone(PARK_ZONE).toLocalDate()
-                    .atStartOfDay(PARK_ZONE).toInstant();
-            return new QueryPlan.TimeRange(today.minus(Duration.ofDays(1)), today);
-        }
-        if (question.contains("今天") || question.contains("今日")) {
-            java.time.Instant today = now.atZone(PARK_ZONE).toLocalDate()
-                    .atStartOfDay(PARK_ZONE).toInstant();
-            return new QueryPlan.TimeRange(today, now);
-        }
-        java.util.regex.Matcher qualifiedWeek = QUALIFIED_PREVIOUS_WEEK.matcher(question);
-        if (qualifiedWeek.find()) {
-            LocalDate currentWeekStart = now.atZone(PARK_ZONE).toLocalDate()
-                    .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
-            LocalDate previousWeekStart = currentWeekStart.minusWeeks(1);
-            String qualifier = qualifiedWeek.group(1);
-            if ("末".equals(qualifier)) {
-                return localDateRange(previousWeekStart.plusDays(5), currentWeekStart);
-            }
-            int dayOffset = switch (qualifier) {
-                case "一" -> 0;
-                case "二" -> 1;
-                case "三" -> 2;
-                case "四" -> 3;
-                case "五" -> 4;
-                case "六" -> 5;
-                case "日", "天" -> 6;
-                default -> throw new IllegalArgumentException("无法识别上周的日期限定: " + qualifier);
-            };
-            LocalDate day = previousWeekStart.plusDays(dayOffset);
-            return localDateRange(day, day.plusDays(1));
-        }
-        if (question.contains("上周")) {
-            LocalDate currentWeekStart = now.atZone(PARK_ZONE).toLocalDate()
-                    .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
-            return localDateRange(currentWeekStart.minusWeeks(1), currentWeekStart);
-        }
-        if (question.contains("过去一周") || question.contains("最近一周")) {
-            return new QueryPlan.TimeRange(now.minus(Duration.ofDays(7)), now);
-        }
-        return null;
-    }
-
-    private static QueryPlan.TimeRange localDateRange(LocalDate fromInclusive, LocalDate toExclusive) {
-        return new QueryPlan.TimeRange(
-                fromInclusive.atStartOfDay(PARK_ZONE).toInstant(),
-                toExclusive.atStartOfDay(PARK_ZONE).toInstant());
+    private static AnalyticsModelClient.QuestionUnderstanding withServerTimeRange(
+            AnalyticsModelClient.QuestionUnderstanding understanding, QueryPlan.TimeRange timeRange) {
+        AnalyticsModelClient.RequestedTimeRange requested = timeRange == null ? null
+                : new AnalyticsModelClient.RequestedTimeRange(timeRange.from(), timeRange.to());
+        return new AnalyticsModelClient.QuestionUnderstanding(
+                understanding.normalizedQuestion(), understanding.metricTerms(), understanding.clarificationQuestions(),
+                requested, understanding.requestedDimensions(), understanding.requestedFilters());
     }
 
     Map<String, Object> generateSql(OverAllState state) {
