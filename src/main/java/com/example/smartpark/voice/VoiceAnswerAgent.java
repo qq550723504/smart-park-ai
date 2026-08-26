@@ -63,7 +63,7 @@ public class VoiceAnswerAgent {
     private final ParkKnowledgeTool knowledgeTool;
     private final VoiceAnswerValidator validator;
 
-    VoiceAnswerAgent(
+    public VoiceAnswerAgent(
             ChatModel chatModel,
             AlertQueryTool alertQueryTool,
             EnergyQueryTool energyQueryTool,
