@@ -17,8 +17,9 @@ out/
 .env.*
 !.env.example
 
-# Python sidecar local environment
-time-parser/.venv/
+# Python offline evaluation sidecar (GPLv3-contaminated, isolated under tools/)
+# See tools/jionlp-eval/LICENSE-GPLv3-EXCEPTION.md — NOT part of the production image.
+tools/jionlp-eval/.venv/
 __pycache__/
 *.pyc
 .pytest_cache/

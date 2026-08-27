@@ -1,6 +1,7 @@
 package com.example.smartpark.analytics.agent;
 
 import com.example.smartpark.analytics.catalog.MetricCatalog;
+import com.example.smartpark.analytics.agent.TimeResolutionMetadata;
 import com.example.smartpark.execution.InMemoryExecutionEventPublisher;
 import com.example.smartpark.execution.model.ExecutionEvent;
 import com.example.smartpark.execution.model.ExecutionEventType;
@@ -397,6 +398,16 @@ class OperationsAnalysisGraphTest {
             assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
             assertThat(outcome.summary()).contains("暂无数据");
             assertThat(outcome.result()).isNull();
+            // EMPTY 必须随结果携带可审计的时间来源元数据，且不得卡在澄清状态。
+            TimeResolutionMetadata meta = outcome.timeResolution();
+            assertThat(meta).isNotNull();
+            assertThat(meta.status()).isEqualTo("EMPTY");
+            assertThat(meta.empty()).isTrue();
+            assertThat(meta.fromInclusive()).isEqualTo(meta.toExclusive());
+            // rerun 必须可重现同样的终态，证明借用 NEEDS_CLARIFICATION 路径不会残留状态。
+            var second = emptyClockGraph.run(UUID.randomUUID(), "今天能耗");
+            assertThat(second.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+            assertThat(second.timeResolution().status()).isEqualTo("EMPTY");
         } finally {
             // 恢复共享 modelClient 的状态供后续测试使用。
         }

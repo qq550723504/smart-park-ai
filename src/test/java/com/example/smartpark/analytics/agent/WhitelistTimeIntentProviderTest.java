@@ -59,6 +59,42 @@ class WhitelistTimeIntentProviderTest {
     }
 
     @Test
+    void parsesComposedWeekRangeFromLastWeekMondayToWednesday() {
+        TimeIntentResult result = provider.resolve("上周一到周三能耗", NOW);
+
+        assertThat(result.status()).isEqualTo(TimeIntentResult.Status.PARSED);
+        assertThat(result.mentions()).extracting(TimeIntentResult.TimeMention::text)
+                .containsExactly("上周一到周三");
+        assertThat(result.timeRange()).isEqualTo(new QueryPlan.TimeRange(
+                Instant.parse("2026-08-16T16:00:00Z"), Instant.parse("2026-08-19T16:00:00Z")));
+    }
+
+    @Test
+    void parsesComposedWeekRangeWithinCurrentWeek() {
+        TimeIntentResult result = provider.resolve("周一到周三能耗", NOW);
+
+        assertThat(result.status()).isEqualTo(TimeIntentResult.Status.PARSED);
+        assertThat(result.timeRange()).isEqualTo(new QueryPlan.TimeRange(
+                Instant.parse("2026-08-23T16:00:00Z"), Instant.parse("2026-08-26T16:00:00Z")));
+    }
+
+    @Test
+    void parsesComposedWeekRangeSpanningWeeksWithExplicitQualifiers() {
+        TimeIntentResult result = provider.resolve("上周五到本周一能耗", NOW);
+
+        assertThat(result.status()).isEqualTo(TimeIntentResult.Status.PARSED);
+        assertThat(result.timeRange()).isEqualTo(new QueryPlan.TimeRange(
+                Instant.parse("2026-08-20T16:00:00Z"), Instant.parse("2026-08-24T16:00:00Z")));
+    }
+
+    @Test
+    void rejectsReversedComposedWeekRange() {
+        TimeIntentResult result = provider.resolve("本周三到本周一能耗", NOW);
+
+        assertThat(result.status()).isEqualTo(TimeIntentResult.Status.UNSUPPORTED);
+    }
+
+    @Test
     void keepsEntityDatesOutOfTemporalMentions() {
         assertThat(provider.resolve("MTR-2026-08-01表计的能耗", NOW).status())
                 .isEqualTo(TimeIntentResult.Status.NONE);

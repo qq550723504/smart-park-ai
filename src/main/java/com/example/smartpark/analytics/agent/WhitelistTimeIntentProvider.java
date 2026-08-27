@@ -55,6 +55,9 @@ final class WhitelistTimeIntentProvider implements TimeIntentProvider {
                     + "(\\d{1,2})[点时](\\d{1,2}分)?(?![A-Za-z0-9_-])");
     private static final Pattern QUALIFIED_WEEK = Pattern.compile(
             "(?<![A-Za-z0-9_-])(本周|上周)([一二三四五六日天末])(?![A-Za-z0-9_-])");
+    private static final Pattern WEEK_RANGE = Pattern.compile(
+            "(?<![A-Za-z0-9_-])(本周|上周|下周)?(?:周|星期)?([一二三四五六日天末])\\s*(?:到|至|~|～)\\s*"
+                    + "(本周|上周|下周)?(?:周|星期)?([一二三四五六日天末])(?![A-Za-z0-9_-])");
     private static final Pattern DURATION = Pattern.compile(
             "(?<![A-Za-z0-9_-])(?:过去|最近|近)([0-9]+|[一二两三四五六七八九十百千万]+)"
                     + "(个?小时|个?月|个?季度|个?年|周|星期|天|日)(?![A-Za-z0-9_-])");
@@ -99,8 +102,18 @@ final class WhitelistTimeIntentProvider implements TimeIntentProvider {
                     .map(candidate -> parse(candidate, now))
                     .toList();
             if (parsedCandidates.stream().anyMatch(parsed -> parsed == null)) {
+                boolean crossYearMonthDay = false;
+                for (int i = 0; i < candidates.size(); i++) {
+                    if (parsedCandidates.get(i) == null
+                            && candidates.get(i).kind() == ExpressionKind.MONTH_DAY_RANGE) {
+                        crossYearMonthDay = true;
+                    }
+                }
+                String reason = crossYearMonthDay
+                        ? "暂不支持跨年的日期区间（例如12月30日到1月2日），请改用带年份的具体日期"
+                        : "时间表达式暂不支持";
                 return new TimeIntentResult(TimeIntentResult.Status.UNSUPPORTED,
-                        selectedMentions, null, null, "时间表达式暂不支持");
+                        selectedMentions, null, null, reason);
             }
             Parsed parsed = parsedCandidates.get(0);
             boolean oneSharedRange = parsedCandidates.stream()
@@ -131,6 +144,7 @@ final class WhitelistTimeIntentProvider implements TimeIntentProvider {
         addMatches(question, DAY_PART, ExpressionKind.DAY_PART, all);
         addMatches(question, QUALIFIED_MONTH_DAY, ExpressionKind.QUALIFIED_MONTH_DAY, all);
         addMatches(question, QUALIFIED_WEEK, ExpressionKind.QUALIFIED_WEEK, all);
+        addMatches(question, WEEK_RANGE, ExpressionKind.WEEK_RANGE, all);
         addMatches(question, DURATION, ExpressionKind.DURATION, all);
         addMatches(question, YEAR_MONTH, ExpressionKind.YEAR_MONTH, all);
         addMatches(question, YEAR_ONLY, ExpressionKind.YEAR_ONLY, all);
@@ -174,6 +188,7 @@ final class WhitelistTimeIntentProvider implements TimeIntentProvider {
             case DAY_PART -> parseDayPart(expression, now);
             case QUALIFIED_MONTH_DAY -> parseQualifiedMonthDay(expression, now);
             case QUALIFIED_WEEK -> parseQualifiedWeek(expression, now);
+            case WEEK_RANGE -> parseWeekRange(expression, now);
             case DURATION -> parseDuration(expression, now);
             case YEAR_MONTH -> parseYearMonth(expression);
             case YEAR_ONLY -> parseYearOnly(expression);
@@ -316,6 +331,48 @@ final class WhitelistTimeIntentProvider implements TimeIntentProvider {
         };
         LocalDate day = weekStart.plusDays(offset);
         return singleDate(expression, day);
+    }
+
+    /**
+     * “上周一到周三”式组合周区间：两端均为星期词，可各自带本周/上周/下周限定词；
+     * 后一端缺限定词时继承前一端（与 Python sidecar 的组合逻辑一致）。换算全部由
+     * 确定性日历完成，不依赖模型算术。起点晚于终点（如“本周三到本周一”）视为非法表达式。
+     */
+    private static Parsed parseWeekRange(String expression, Instant now) {
+        Matcher matcher = WEEK_RANGE.matcher(expression);
+        matcher.matches();
+        LocalDate today = now.atZone(PARK_ZONE).toLocalDate();
+        LocalDate currentWeekStart = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        int q1 = weekQualifierWeeks(matcher.group(1));
+        int q2 = matcher.group(3) != null ? weekQualifierWeeks(matcher.group(3)) : q1;
+        LocalDate from = currentWeekStart.plusWeeks(q1).plusDays(weekdayOffset(matcher.group(2)));
+        LocalDate to = currentWeekStart.plusWeeks(q2).plusDays(weekdayOffset(matcher.group(4)));
+        return dateRange(expression, from, to);
+    }
+
+    private static int weekQualifierWeeks(String qualifier) {
+        if (qualifier == null) {
+            return 0;
+        }
+        return switch (qualifier) {
+            case "上周" -> -1;
+            case "本周" -> 0;
+            case "下周" -> 1;
+            default -> 0;
+        };
+    }
+
+    private static int weekdayOffset(String weekday) {
+        return switch (weekday) {
+            case "一" -> 0;
+            case "二" -> 1;
+            case "三" -> 2;
+            case "四" -> 3;
+            case "五" -> 4;
+            case "六" -> 5;
+            case "日", "天", "末" -> 6;
+            default -> throw new IllegalArgumentException("invalid weekday: " + weekday);
+        };
     }
 
     private static Parsed parseDuration(String expression, Instant now) {
@@ -565,6 +622,6 @@ final class WhitelistTimeIntentProvider implements TimeIntentProvider {
     private enum ExpressionKind {
         CALENDAR_DATE_RANGE, CHINESE_CALENDAR_DATE_RANGE, MONTH_DAY_RANGE, HOUR_RANGE,
         FULL_NUMERIC_DATE, YEAR_HALF, DAY_PART, QUALIFIED_MONTH_DAY, QUALIFIED_WEEK,
-        DURATION, YEAR_MONTH, YEAR_ONLY, MONTH_DAY, MONTH_ONLY, BASE_PERIOD
+        WEEK_RANGE, DURATION, YEAR_MONTH, YEAR_ONLY, MONTH_DAY, MONTH_ONLY, BASE_PERIOD
     }
 }

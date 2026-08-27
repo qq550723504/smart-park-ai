@@ -11,6 +11,9 @@ import java.util.Objects;
  */
 record ModelTimeEvidence(List<TimeIntentResult.TimeMention> mentions) {
 
+    /** Hard ceiling mirroring the Python sidecar's MAX_EXCLUDED_SPANS guard. */
+    private static final int MAX_MENTIONS = 32;
+
     ModelTimeEvidence {
         mentions = List.copyOf(Objects.requireNonNull(mentions, "mentions"));
     }
@@ -24,7 +27,12 @@ record ModelTimeEvidence(List<TimeIntentResult.TimeMention> mentions) {
                                           String question) {
         List<TimeIntentResult.TimeMention> located = new ArrayList<>();
         String normalized = question == null ? "" : question;
-        for (String mention : Objects.requireNonNullElse(requestedMentions, List.<String>of())) {
+        List<String> safeMentions = Objects.requireNonNullElse(requestedMentions, List.<String>of());
+        if (safeMentions.size() > MAX_MENTIONS) {
+            throw new IllegalArgumentException(
+                    "too many time mentions supplied by the model: " + safeMentions.size());
+        }
+        for (String mention : safeMentions) {
             if (mention == null || mention.isBlank()) {
                 throw new IllegalArgumentException("time mention must not be blank");
             }
