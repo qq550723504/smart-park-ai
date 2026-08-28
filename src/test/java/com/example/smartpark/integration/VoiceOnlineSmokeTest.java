@@ -19,6 +19,7 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.junit.jupiter.EnabledIf;
 
 import java.nio.ByteBuffer;
 import java.time.Duration;
@@ -39,6 +40,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         "spring.ai.dashscope.enabled=true",
         "spring.ai.dashscope.chat.options.model=qwen-plus"
 })
+@EnabledIf(expression = "#{systemProperties['run.dashscope.smoke'] == 'true'}", loadContext = false)
 @EnabledIfEnvironmentVariable(named = "AI_DASHSCOPE_API_KEY", matches = ".+")
 class VoiceOnlineSmokeTest {
 
