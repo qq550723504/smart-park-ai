@@ -63,6 +63,15 @@ export type DisplayPayload =
       coordinateXField?: string
       coordinateYField?: string
     }
+  | {
+      payloadType: 'TIME_RANGE'
+      status: 'NONE' | 'PARSED' | 'EMPTY'
+      fromInclusive: string | null
+      toExclusive: string | null
+      source: 'EXPLICIT_USER_RANGE' | 'DEFAULT_METRIC_LOOKBACK'
+      explanation: string
+      empty: boolean
+    }
   | { payloadType: 'AUDIO'; state: string; durationMs: number | null }
   | {
       payloadType: 'ERROR'

@@ -52,6 +52,20 @@ class OperationsAnalysisServiceTest {
     }
 
     @Test
+    void persistsTimeResolutionMetadataOnTerminalOutcome() {
+        var metadata = com.example.smartpark.analytics.agent.TimeResolutionMetadata.explicit(
+                Instant.parse("2026-08-23T00:00:00Z"), Instant.parse("2026-08-24T00:00:00Z"), "昨天");
+        OperationsAnalysisService service = service((runId, question, pinned) ->
+                new OperationsAnalysisGraph.AnalysisRunResult(runId,
+                        OperationsAnalysisGraph.RunOutcome.COMPLETED, List.of(), List.of(), null, null,
+                        "完成", null, null, metadata), directExecutor());
+
+        var run = service.start("昨天能耗");
+
+        assertThat(run.timeResolution()).isEqualTo(metadata);
+    }
+
+    @Test
     void activeRunBlocksStartingAnotherOneUntilItReachesTerminalState() {
         OperationsAnalysisService serializingService = service((runId, question, pinned) -> {
             var paused = clarifying(runId);

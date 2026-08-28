@@ -34,6 +34,16 @@ final class OperationsAnalysisDtos {
         if (record.failureStage() != null) {
             dto.put("failureStage", record.failureStage());
         }
+        if (record.timeResolution() != null) {
+            var t = record.timeResolution();
+            dto.put("timeResolution", Map.of(
+                    "status", t.status(),
+                    "fromInclusive", t.fromInclusive() == null ? "" : t.fromInclusive().toString(),
+                    "toExclusive", t.toExclusive() == null ? "" : t.toExclusive().toString(),
+                    "source", t.source(),
+                    "explanation", t.explanation(),
+                    "empty", t.empty()));
+        }
         dto.put("createdAt", record.createdAt().toString());
         return dto;
     }

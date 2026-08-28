@@ -86,7 +86,10 @@ public final class AnalyticsQuestionNormalizer {
                 understanding.clarificationQuestions(),
                 understanding.requestedTimeRange(),
                 List.copyOf(dimensions),
-                Map.copyOf(filters));
+                Map.copyOf(filters),
+                understanding.requestedTimeMentions(),
+                understanding.serverResolvedTimeRange(),
+                understanding.serverReferenceInstant());
     }
 
     private static String canonicalDimension(String requested) {

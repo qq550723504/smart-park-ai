@@ -24,12 +24,21 @@ public class ParkKnowledgeTool {
 
     @Tool(name = "searchParkKnowledge", description = "Search park knowledge documents by keyword query. Returns matching documents and never fabricates missing knowledge.")
     public KnowledgeSearchResult searchParkKnowledge(String query) {
+        return search(KnowledgeDomain.ALERT_OPERATIONS, query);
+    }
+
+    @Tool(name = "searchVisitorGuide", description = "Search visitor-facing park guides, such as parking policy, by keyword query. Returns matching documents and never fabricates missing guidance.")
+    public KnowledgeSearchResult searchVisitorGuide(String query) {
+        return search(KnowledgeDomain.CUSTOMER_SERVICE, query);
+    }
+
+    private KnowledgeSearchResult search(KnowledgeDomain domain, String query) {
         String normalizedQuery = normalize(query);
         if (normalizedQuery.isEmpty()) {
             return new KnowledgeSearchResult(normalizedQuery, List.of(), "query must not be blank", MOCK_NOTICE);
         }
         return new KnowledgeSearchResult(normalizedQuery,
-                knowledgePort.search(KnowledgeDomain.ALERT_OPERATIONS, normalizedQuery), null, MOCK_NOTICE);
+                knowledgePort.search(domain, normalizedQuery), null, MOCK_NOTICE);
     }
 
     private static String requireText(String value, String fieldName) {

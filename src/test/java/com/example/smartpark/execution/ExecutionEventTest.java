@@ -85,7 +85,8 @@ class ExecutionEventTest {
         assertThat(DisplayPayload.class.getPermittedSubclasses())
                 .extracting(clazz -> clazz.getSimpleName())
                 .containsExactlyInAnyOrder("TextPayload", "ToolCallPayload", "ExpertHandoffPayload",
-                        "SqlPayload", "ChartPayload", "AudioPayload", "ErrorPayload");
+                        "SqlPayload",
+                    "TimeRangePayload", "ChartPayload", "AudioPayload", "ErrorPayload");
     }
 
     @Test

@@ -50,7 +50,7 @@ final class ExecutionDtos {
 
     /** Mirrors the sealed DisplayPayload union with a stable JSON discriminator. */
     sealed interface PayloadDto permits PayloadDto.TextDto, PayloadDto.ToolCallDto, PayloadDto.ExpertHandoffDto,
-            PayloadDto.SqlDto, PayloadDto.ChartDto, PayloadDto.AudioDto, PayloadDto.ErrorDto {
+            PayloadDto.SqlDto, PayloadDto.ChartDto, PayloadDto.TimeRangeDto, PayloadDto.AudioDto, PayloadDto.ErrorDto {
         String payloadType();
 
         static PayloadDto from(DisplayPayload payload) {
@@ -76,6 +76,10 @@ final class ExecutionDtos {
             }
             if (payload instanceof DisplayPayload.AudioPayload audio) {
                 return new PayloadDto.AudioDto(audio.state(), audio.durationMs());
+            }
+            if (payload instanceof DisplayPayload.TimeRangePayload timeRange) {
+                return new PayloadDto.TimeRangeDto(timeRange.status(), timeRange.fromInclusive(),
+                        timeRange.toExclusive(), timeRange.source(), timeRange.explanation(), timeRange.empty());
             }
             if (payload instanceof DisplayPayload.ErrorPayload error) {
                 return new PayloadDto.ErrorDto(error.stage().name(), error.errorCode(), error.retryable(), error.safeMessage());
@@ -137,6 +141,18 @@ final class ExecutionDtos {
                      String seriesField, String unit) {
                 this("CHART", type, title, xField, yFields, seriesField, unit,
                         "VERTICAL", false, null, "", "");
+            }
+        }
+
+        record TimeRangeDto(String payloadType, String status, String fromInclusive, String toExclusive,
+                            String source, String explanation, boolean empty) implements PayloadDto {
+            public TimeRangeDto {
+                payloadType = "TIME_RANGE";
+            }
+
+            public TimeRangeDto(String status, String fromInclusive, String toExclusive,
+                                String source, String explanation, boolean empty) {
+                this("TIME_RANGE", status, fromInclusive, toExclusive, source, explanation, empty);
             }
         }
 

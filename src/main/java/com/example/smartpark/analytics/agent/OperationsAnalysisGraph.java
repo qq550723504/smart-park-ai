@@ -66,6 +66,7 @@ public class OperationsAnalysisGraph {
     private final Duration executionTimeout;
     private final TimeIntentProvider timeIntentProvider;
     private final AnalyticsQuestionNormalizer questionNormalizer = new AnalyticsQuestionNormalizer();
+    private final TimeEvidenceReconciler timeEvidenceReconciler = new TimeEvidenceReconciler();
     private final TimeConstraintResolver timeConstraintResolver = new TimeConstraintResolver();
     private final CompiledGraph compiled;
     private final ConcurrentHashMap<UUID, RunContext> contexts = new ConcurrentHashMap<>();
@@ -92,26 +93,42 @@ public class OperationsAnalysisGraph {
             TabularResult result,
             String summary,
             AnalyticsModelClient.QuestionUnderstanding understanding,
-            String failureStage) {
+            String failureStage,
+            TimeResolutionMetadata timeResolution) {
 
+        /** @deprecated 兼容旧签名；新代码应携带时间解析元数据。 */
+        @Deprecated
         public AnalysisRunResult(UUID runId, RunOutcome outcome,
                                  List<String> clarificationQuestions,
                                  List<List<String>> clarificationOptions,
                                  ChartSpec chart, TabularResult result,
                                  String summary, String failureStage) {
             this(runId, outcome, clarificationQuestions, clarificationOptions,
-                    chart, result, summary, null, failureStage);
+                    chart, result, summary, null, failureStage, null);
+        }
+
+        /** @deprecated 兼容旧签名（含模型理解）；图谱不再读取其中的模型时间戳。 */
+        @Deprecated
+        public AnalysisRunResult(UUID runId, RunOutcome outcome,
+                                 List<String> clarificationQuestions,
+                                 List<List<String>> clarificationOptions,
+                                 ChartSpec chart, TabularResult result,
+                                 String summary,
+                                 AnalyticsModelClient.QuestionUnderstanding understanding,
+                                 String failureStage) {
+            this(runId, outcome, clarificationQuestions, clarificationOptions,
+                    chart, result, summary, understanding, failureStage, null);
         }
 
         static AnalysisRunResult failed(UUID runId, String stage) {
-            return new AnalysisRunResult(runId, RunOutcome.FAILED, List.of(), List.of(), null, null, null, null, stage);
+            return new AnalysisRunResult(runId, RunOutcome.FAILED, List.of(), List.of(), null, null, null, null, stage, null);
         }
 
         static AnalysisRunResult needsClarification(UUID runId, List<String> questions,
                                                     List<List<String>> options,
                                                     AnalyticsModelClient.QuestionUnderstanding understanding) {
             return new AnalysisRunResult(runId, RunOutcome.NEEDS_CLARIFICATION, questions, options,
-                    null, null, null, understanding, null);
+                    null, null, null, understanding, null, null);
         }
     }
 
@@ -121,6 +138,8 @@ public class OperationsAnalysisGraph {
         List<com.example.smartpark.analytics.catalog.MetricDefinition> metrics = List.of();
         String schemaDescription = "";
         TimeIntentResult timeIntentResult;
+        TimeResolutionMetadata timeResolution;
+        Instant referenceInstant;
         QueryPlan.TimeRange serverTimeRange;
         QueryPlan.TimeRangeSource timeRangeSource;
         QueryPlan plan;
@@ -148,7 +167,7 @@ public class OperationsAnalysisGraph {
                                    AnalysisSummaryValidator summaryValidator,
                                    Clock clock) {
         this(catalog, modelClient, costGate, executionGate, publisher, summaryValidator, clock,
-                Duration.ofSeconds(60), new FiniteGrammarTimeIntentProvider());
+                Duration.ofSeconds(60), failClosedProvider());
     }
 
     public OperationsAnalysisGraph(MetricCatalog catalog,
@@ -160,10 +179,10 @@ public class OperationsAnalysisGraph {
                                    Clock clock,
                                    Duration executionTimeout) {
         this(catalog, modelClient, costGate, executionGate, publisher, summaryValidator, clock,
-                executionTimeout, new FiniteGrammarTimeIntentProvider());
+                executionTimeout, failClosedProvider());
     }
 
-    OperationsAnalysisGraph(MetricCatalog catalog,
+    public OperationsAnalysisGraph(MetricCatalog catalog,
                             AnalyticsModelClient modelClient,
                             CostGate costGate,
                             ExecutionGate executionGate,
@@ -189,6 +208,12 @@ public class OperationsAnalysisGraph {
         } catch (Exception exception) {
             throw new IllegalStateException("unable to compile operations analysis graph", exception);
         }
+    }
+
+    private static TimeIntentProvider failClosedProvider() {
+        return (question, now) -> {
+            throw new IllegalStateException("analytics time intent provider must be configured");
+        };
     }
 
     @SuppressWarnings("unchecked")
@@ -308,6 +333,7 @@ public class OperationsAnalysisGraph {
     }
 
     private AnalysisRunResult buildOutcome(UUID runId, RunContext ctx) {
+        TimeResolutionMetadata timeResolution = ctx.timeResolution;
         switch (ctx.status) {
             case "NEEDS_CLARIFICATION" -> {
                 // A clarification pause is not terminal: the run resumes on the
@@ -315,8 +341,9 @@ public class OperationsAnalysisGraph {
                 // close the publisher and break every later resumption).
                 publish(ctx, runId, ExecutionStage.UNDERSTANDING, ExecutionEventType.PAUSED,
                         ExecutionStatus.NEEDS_CLARIFICATION, "需要澄清后再继续", null);
-                return AnalysisRunResult.needsClarification(runId, ctx.clarificationQuestions,
-                        List.copyOf(ctx.clarificationOptions), ctx.understanding);
+                return new AnalysisRunResult(runId, RunOutcome.NEEDS_CLARIFICATION,
+                        ctx.clarificationQuestions, List.copyOf(ctx.clarificationOptions),
+                        null, null, null, ctx.understanding, null, timeResolution);
             }
             case "FAILED" -> {
                 // Terminal publication is owned by the service after the
@@ -324,8 +351,14 @@ public class OperationsAnalysisGraph {
                 return AnalysisRunResult.failed(runId, ctx.failureStage);
             }
             default -> {
-                return new AnalysisRunResult(runId, RunOutcome.COMPLETED, List.of(), List.of(),
-                        ctx.chart, ctx.result, ctx.summary, null);
+                if ("EMPTY".equals(ctx.status)) {
+                    return new AnalysisRunResult(runId, RunOutcome.COMPLETED,
+                            List.<String>of(), List.<List<String>>of(),
+                            null, null, "当前周期刚开始，暂无数据", null, null, ctx.timeResolution);
+                }
+                return new AnalysisRunResult(runId, RunOutcome.COMPLETED,
+                        List.of(), List.of(),
+                        ctx.chart, ctx.result, ctx.summary, null, null, ctx.timeResolution);
             }
         }
     }
@@ -337,40 +370,56 @@ public class OperationsAnalysisGraph {
         RunContext ctx = contexts.get(runId);
         nodeStarted(ctx, runId, ExecutionStage.UNDERSTANDING, "理解问题");
         String question = text(state, STATE_QUESTION);
-        TimeIntentResult parsedTime = timeIntentProvider.resolve(question, Instant.now(clock));
-        if (parsedTime.status() == TimeIntentResult.Status.MULTIPLE) {
-            throw new IllegalArgumentException("原始问题包含多个时间范围，当前查询计划不支持范围对比");
-        }
-        if (parsedTime.status() == TimeIntentResult.Status.UNSUPPORTED
-                || parsedTime.status() == TimeIntentResult.Status.AMBIGUOUS) {
-            throw new IllegalArgumentException("原始问题包含暂不支持的时间范围表达式: " + parsedTime.reason());
-        }
-        ctx.timeIntentResult = parsedTime;
-        QueryPlan.TimeRange parsedServerTimeRange = parsedTime.timeRange();
-        ctx.timeRangeSource = parsedTime.status() == TimeIntentResult.Status.PARSED
-                ? QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE
-                : QueryPlan.TimeRangeSource.DEFAULT_METRIC_LOOKBACK;
-        // Clarified runs carry the operator's structured selection as the understanding;
-        // the model is not consulted again for metric resolution.
+        // 澄清恢复携带操作员的结构化选择与服务器解析的时间快照；不再重复解析。
         AnalyticsModelClient.QuestionUnderstanding modelUnderstanding = ctx.pinnedUnderstanding != null
                 ? ctx.pinnedUnderstanding
                 : modelClient.understandQuestion(question);
         modelUnderstanding = questionNormalizer.normalize(question, modelUnderstanding);
-        if (ctx.pinnedUnderstanding != null && ctx.pinnedUnderstanding.requestedTimeRange() != null) {
-            ctx.serverTimeRange = toTimeRange(ctx.pinnedUnderstanding.requestedTimeRange());
+        if (ctx.pinnedUnderstanding != null && ctx.pinnedUnderstanding.serverResolvedTimeRange() != null) {
+            ctx.serverTimeRange = toTimeRange(ctx.pinnedUnderstanding.serverResolvedTimeRange());
             ctx.timeRangeSource = QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE;
-        } else {
-            if (parsedServerTimeRange == null && modelUnderstanding.requestedTimeRange() != null) {
-                throw new IllegalArgumentException("模型返回了原始问题未包含的时间范围");
-            }
-            ctx.serverTimeRange = parsedServerTimeRange;
-            // Preserve the server-owned snapshot for a possible clarification
-            // pause. The model value is advisory and must not be replayed later.
-            ctx.understanding = withServerTimeRange(modelUnderstanding, parsedServerTimeRange);
-        }
-        if (ctx.understanding == null) {
+            ctx.timeResolution = TimeResolutionMetadata.explicit(ctx.serverTimeRange.from(),
+                    ctx.serverTimeRange.to(), "澄清确认的时间范围");
             ctx.understanding = modelUnderstanding;
+            finishUnderstanding(ctx, runId);
+            return Map.of();
         }
+        // 单一参考时刻：识别、换算与快照共用同一时钟读数。
+        Instant reference = ctx.pinnedUnderstanding != null && ctx.pinnedUnderstanding.serverReferenceInstant() != null
+                ? ctx.pinnedUnderstanding.serverReferenceInstant() : Instant.now(clock);
+        ctx.referenceInstant = reference;
+        TimeIntentResult parserResult = timeIntentProvider.resolve(question, reference);
+        TimeIntentResult finalTime = timeEvidenceReconciler.reconcile(
+                parserResult, modelUnderstanding.requestedTimeMentions(), question);
+        switch (finalTime.status()) {
+            case UNSUPPORTED, AMBIGUOUS -> throw new IllegalArgumentException(
+                    "原始问题包含暂不支持的时间范围表达式: " + finalTime.reason());
+            case MULTIPLE -> throw new IllegalArgumentException("原始问题包含多个时间范围，当前查询计划不支持范围对比");
+            case EMPTY -> {
+                ctx.status = "EMPTY";
+                ctx.timeResolution = TimeResolutionMetadata.emptyPeriod(reference);
+                ctx.understanding = modelUnderstanding;
+                publish(ctx, runId, ExecutionStage.UNDERSTANDING, ExecutionEventType.NODE_COMPLETED,
+                        ExecutionStatus.RUNNING, "当前周期刚开始，暂无数据",
+                        DisplayPayload.text("当前周期刚开始，暂无数据", false));
+                return Map.of();
+            }
+            default -> { /* NONE / PARSED 继续走正常链路 */ }
+        }
+        ctx.timeResolution = finalTime.status() == TimeIntentResult.Status.PARSED
+                ? TimeResolutionMetadata.explicit(finalTime.timeRange().from(), finalTime.timeRange().to(),
+                        finalTime.mentions().stream()
+                                .map(TimeIntentResult.TimeMention::text)
+                                .reduce((a, b) -> a + "、" + b).orElse(""))
+                : null;
+        ctx.timeIntentResult = finalTime;
+        QueryPlan.TimeRange parsedServerTimeRange = finalTime.timeRange();
+        ctx.timeRangeSource = finalTime.status() == TimeIntentResult.Status.PARSED
+                ? QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE
+                : QueryPlan.TimeRangeSource.DEFAULT_METRIC_LOOKBACK;
+        ctx.serverTimeRange = parsedServerTimeRange;
+        // 保存服务器拥有的绝对区间快照，供澄清暂停后复用；模型值仅供参考。
+        ctx.understanding = withServerTimeRange(modelUnderstanding, parsedServerTimeRange, reference);
         if (ctx.understanding.needsClarification()) {
             ctx.clarificationQuestions.addAll(ctx.understanding.clarificationQuestions());
             // No structured candidates from the model: the operator picks from
@@ -381,9 +430,18 @@ public class OperationsAnalysisGraph {
             }
             ctx.status = "NEEDS_CLARIFICATION";
         }
+        finishUnderstanding(ctx, runId);
+        return Map.of();
+    }
+
+    private void finishUnderstanding(RunContext ctx, UUID runId) {
         nodeCompleted(ctx, runId, ExecutionStage.UNDERSTANDING, "问题理解完成",
                 DisplayPayload.text(ctx.understanding.normalizedQuestion(), false));
-        return Map.of();
+        // 用户可见的时间来源卡片：只含安全字段，随理解完成事件下发。
+        if (ctx.timeResolution != null) {
+            publish(ctx, runId, ExecutionStage.UNDERSTANDING, ExecutionEventType.NODE_COMPLETED,
+                    ExecutionStatus.RUNNING, "时间范围已确定", ctx.timeResolution.toDisplayPayload());
+        }
     }
 
     Map<String, Object> resolveMetricAndDimensions(OverAllState state) {
@@ -464,7 +522,7 @@ public class OperationsAnalysisGraph {
         UUID runId = runId(state);
         RunContext ctx = contexts.get(runId);
         nodeStarted(ctx, runId, ExecutionStage.PLANNING, "构建查询计划");
-        Instant now = Instant.now(clock);
+        Instant now = ctx.referenceInstant != null ? ctx.referenceInstant : Instant.now(clock);
         int lookbackDays = ctx.metrics.stream().mapToInt(m -> m.defaultLookbackDays()).max().orElse(7);
         String originalQuestion = text(state, STATE_QUESTION).strip();
         // The original question is the authority for time semantics. The model
@@ -479,6 +537,12 @@ public class OperationsAnalysisGraph {
         QueryPlan.TimeRangeSource timeRangeSource = resolvedTime.source();
         ctx.serverTimeRange = timeRange;
         ctx.timeRangeSource = timeRangeSource;
+        if (timeRangeSource == QueryPlan.TimeRangeSource.DEFAULT_METRIC_LOOKBACK) {
+            // 默认回看期同样显式标注来源：NONE 不是“无信息”，而是可审计的决策，
+            // 随最终结果持久化并在 UI 中展示。
+            ctx.timeResolution = TimeResolutionMetadata.defaultLookback(
+                    timeRange.from(), timeRange.to());
+        }
         ctx.plan = new QueryPlan(
                 originalQuestion,
                 ctx.metrics,
@@ -677,12 +741,14 @@ public class OperationsAnalysisGraph {
     }
 
     private static AnalyticsModelClient.QuestionUnderstanding withServerTimeRange(
-            AnalyticsModelClient.QuestionUnderstanding understanding, QueryPlan.TimeRange timeRange) {
+            AnalyticsModelClient.QuestionUnderstanding understanding, QueryPlan.TimeRange timeRange,
+            Instant referenceInstant) {
         AnalyticsModelClient.RequestedTimeRange requested = timeRange == null ? null
                 : new AnalyticsModelClient.RequestedTimeRange(timeRange.from(), timeRange.to());
         return new AnalyticsModelClient.QuestionUnderstanding(
                 understanding.normalizedQuestion(), understanding.metricTerms(), understanding.clarificationQuestions(),
-                requested, understanding.requestedDimensions(), understanding.requestedFilters());
+                requested, understanding.requestedDimensions(), understanding.requestedFilters(),
+                understanding.requestedTimeMentions(), requested, referenceInstant);
     }
 
     Map<String, Object> generateSql(OverAllState state) {
@@ -856,7 +922,9 @@ public class OperationsAnalysisGraph {
     private boolean needsClarification(OverAllState state) {
         UUID runId = runId(state);
         RunContext ctx = contexts.get(runId);
-        return ctx != null && "NEEDS_CLARIFICATION".equals(ctx.status);
+        // EMPTY 在理解节点即终止：不构造查询计划，不触碰 SQL。
+        return ctx != null && ("NEEDS_CLARIFICATION".equals(ctx.status)
+                || "EMPTY".equals(ctx.status));
     }
 
     private UUID runId(OverAllState state) {

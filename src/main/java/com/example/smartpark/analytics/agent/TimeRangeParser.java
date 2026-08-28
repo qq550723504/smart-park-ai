@@ -8,14 +8,16 @@ import java.util.Objects;
 
 /**
  * Compatibility facade for callers that still consume the original parser
- * result. The finite provider owns recognition and range calculation.
+ * result. A provider must be injected; production wiring uses the sidecar.
  */
 final class TimeRangeParser {
 
     private final TimeIntentProvider provider;
 
     TimeRangeParser() {
-        this(new FiniteGrammarTimeIntentProvider());
+        this((question, now) -> {
+            throw new IllegalStateException("analytics time intent provider must be configured");
+        });
     }
 
     TimeRangeParser(TimeIntentProvider provider) {

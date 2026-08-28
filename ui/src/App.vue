@@ -9,6 +9,7 @@ import CustomerServiceConsole from './components/CustomerServiceConsole.vue'
 import ExecutionTraceRail from './components/execution/ExecutionTraceRail.vue'
 import OperationsAnalysisPage from './components/analytics/OperationsAnalysisPage.vue'
 import ExpertCollaborationPage from './components/ExpertCollaborationPage.vue'
+import VoiceAssistantPage from './components/voice/VoiceAssistantPage.vue'
 import { demoAlerts, type DemoRole } from './types/workflow'
 import { useWorkflow } from './composables/useWorkflow'
 import { useExecutionTrace } from './composables/useExecutionTrace'
@@ -17,7 +18,7 @@ import { customerIntentLabel, workflowNodeLabel } from './utils/labels'
 import { alertWorkflowRunId } from './utils/runId'
 import './styles.css'
 
-const capabilities = ref<{ knowledgeMode: string; customerAnswerMode: string; vectorStore: string; analyticsEnabled: boolean; collaborationEnabled: boolean } | null>(null)
+const capabilities = ref<{ knowledgeMode: string; customerAnswerMode: string; vectorStore: string; analyticsEnabled: boolean; collaborationEnabled: boolean; voiceEnabled: boolean } | null>(null)
 const capabilityLabels = computed(() => capabilities.value ? {
   knowledge: capabilities.value.knowledgeMode === 'mock' ? 'Mock' : 'RAG',
   customer: capabilities.value.customerAnswerMode === 'mock' ? 'Mock' : 'DashScope',
@@ -29,7 +30,7 @@ onMounted(() => {
     .catch(() => { capabilities.value = null })
 })
 const selectedAlertId = ref(demoAlerts[0].id)
-const activeView = ref<'workflow' | 'customer' | 'collaboration' | 'analytics'>('workflow')
+const activeView = ref<'workflow' | 'customer' | 'voice' | 'collaboration' | 'analytics'>('workflow')
 const role = ref<DemoRole>('ADMIN')
 const reviewer = ref('')
 const comment = ref('')
@@ -148,7 +149,7 @@ function confidence(value?: number) {
         <nav class="view-switch" aria-label="场景导航">
           <button :class="{ active: activeView === 'workflow' }" @click="activeView = 'workflow'">告警工作流</button>
           <button :class="{ active: activeView === 'customer' }" @click="activeView = 'customer'">园区客服</button>
-          <button type="button" disabled title="实时语音助手将在 P1 后续切片开放">实时语音</button>
+          <button v-if="capabilities?.voiceEnabled" :class="{ active: activeView === 'voice' }" @click="activeView = 'voice'">实时语音</button>
           <button v-if="capabilities?.collaborationEnabled" :class="{ active: activeView === 'collaboration' }" @click="activeView = 'collaboration'">专家协作</button>
           <button v-if="capabilities?.analyticsEnabled" :class="{ active: activeView === 'analytics' }" @click="activeView = 'analytics'">运营分析</button>
         </nav>
@@ -165,6 +166,10 @@ function confidence(value?: number) {
     <main v-show="activeView === 'customer'" class="main-content customer-main">
       <section class="hero-row customer-hero"><div><span class="eyebrow">园区服务 · 02</span><h2>园区服务问题<br /><em>快速响应与有序转人工</em></h2><p class="hero-copy">基于模拟园区知识回答常见咨询，报修或知识不足时自动生成客服工单。</p></div></section>
       <CustomerServiceConsole :role="role" />
+    </main>
+
+    <main v-show="activeView === 'voice'" class="main-content">
+      <VoiceAssistantPage :trace="trace" :active="activeView === 'voice'" />
     </main>
 
     <main v-show="activeView === 'collaboration'" class="main-content">

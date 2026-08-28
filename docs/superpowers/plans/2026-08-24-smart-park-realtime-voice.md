@@ -28,18 +28,18 @@
 
 ## Task 1：定义可验证的协议与状态机
 
-- [ ] 先写 `VoiceSessionStateMachineTest.java`，覆盖：
+- [x] 先写 `VoiceSessionStateMachineTest.java`，覆盖：
 
   - `IDLE -> LISTENING -> ASR_FINALIZED -> REASONING/TOOL_CALLING -> ANSWER_STREAMING -> SPEAKING -> IDLE`；
   - `START_INPUT` 在 SPEAKING 时先中断再 LISTENING；
   - 非法二进制帧/控制帧顺序拒绝；
   - ERROR 可回到 IDLE；CLOSED 不可恢复。
 
-- [ ] 定义 client controls `START_INPUT|COMMIT_INPUT|INTERRUPT_OUTPUT|CLOSE_SESSION`；server frames `SESSION_STATE|ASR_PARTIAL|ASR_FINAL|TOOL_EVENT|ANSWER_DELTA|AUDIO_CHUNK|ERROR`。所有 JSON 帧含 `sessionId`、`messageId`、`sequence`。
+- [x] 定义 client controls `START_INPUT|COMMIT_INPUT|INTERRUPT_OUTPUT|CLOSE_SESSION`；server frames `SESSION_STATE|ASR_PARTIAL|ASR_FINAL|TOOL_EVENT|ANSWER_DELTA|AUDIO_CHUNK|ERROR`。所有 JSON 帧含 `sessionId`、`messageId`、`sequence`。
 
-- [ ] 实现纯 Java `VoiceSessionStateMachine`，不含网络和厂商 SDK。
+- [x] 实现纯 Java `VoiceSessionStateMachine`，不含网络和厂商 SDK。
 
-- [ ] 验证并提交：
+- [x] 验证并提交：
 
 ```powershell
 .\mvnw.cmd -B -Dtest=VoiceSessionStateMachineTest,VoiceProtocolTest test
@@ -49,13 +49,13 @@ git commit -m "feat: define realtime voice session protocol"
 
 ## Task 2：建立音频格式与内存边界
 
-- [ ] 写 `AudioFrameValidatorTest.java`，覆盖唯一接受的 PCM 规格、单帧字节上限、累计 10 秒上限、空音频、过快发送、状态不匹配；断言对象不保留完成 turn 的原始 byte[]。
+- [x] 写 `AudioFrameValidatorTest.java`，覆盖唯一接受的 PCM 规格、单帧字节上限、累计 10 秒上限、空音频、过快发送、状态不匹配；断言对象不保留完成 turn 的原始 byte[]。
 
-- [ ] 实现 `AudioFormatSpec(sampleRate=16000, channels=1, sampleSizeBits=16)`、frame validator 和仅内存 ring buffer；COMMIT 后把 buffer 所有权交给 ASR 并清零引用。
+- [x] 实现 `AudioFormatSpec(sampleRate=16000, channels=1, sampleSizeBits=16)`、frame validator 和仅内存 ring buffer；COMMIT 后把 buffer 所有权交给 ASR 并清零引用。
 
-- [ ] 在日志捕获测试中断言音频 base64/byte 内容不出现。
+- [x] 在日志捕获测试中断言音频 base64/byte 内容不出现。
 
-- [ ] 验证并提交：
+- [x] 验证并提交：
 
 ```powershell
 .\mvnw.cmd -B -Dtest=AudioFrameValidatorTest,VoiceAudioPrivacyTest test
@@ -65,15 +65,15 @@ git commit -m "feat: bound ephemeral voice audio buffers"
 
 ## Task 3：实现真实 DashScope streaming ASR 适配器
 
-- [ ] 定义 `StreamingAsrPort`，测试 fake port 的 partial/final/close/error 语义；应用代码不得依赖 mock 实现。
+- [x] 定义 `StreamingAsrPort`，测试 fake port 的 partial/final/close/error 语义；应用代码不得依赖 mock 实现。
 
-- [ ] 创建 `DashScopeStreamingAsrAdapter`，包装 2.0 的 `StreamingTranscriptionModel`/`DashScopeWebSocketAsrApi`。将 SDK callback 串行化为 session frame，供应商错误映射为安全错误码。
+- [x] 创建 `DashScopeStreamingAsrAdapter`，包装 2.0 的 `StreamingTranscriptionModel`/`DashScopeWebSocketAsrApi`。将 SDK callback 串行化为 session frame，供应商错误映射为安全错误码。
 
-- [ ] 写 adapter 合同测试，使用本地假的 SDK facade 验证音频传递、partial 顺序、commit、cancel、close；真正联网 smoke 放在加固计划，不进入默认单测。
+- [x] 写 adapter 合同测试，使用本地假的 SDK facade 验证音频传递、partial 顺序、commit、cancel、close；真正联网 smoke 放在加固计划，不进入默认单测。
 
-- [ ] 配置 bean 条件必须是“凭据存在则创建，否则应用启动失败”，不得注册 mock 替代品。
+- [x] 配置 bean 条件必须是“凭据存在则创建，否则应用启动失败”，不得注册 mock 替代品。
 
-- [ ] 验证并提交：
+- [x] 验证并提交：
 
 ```powershell
 .\mvnw.cmd -B -Dtest=StreamingAsrPortTest,DashScopeStreamingAsrAdapterTest,VoiceProviderConfigurationTest test
@@ -83,15 +83,15 @@ git commit -m "feat: stream voice input to dashscope asr"
 
 ## Task 4：实现证据约束的语音回答 Agent
 
-- [ ] 写 `VoiceAnswerAgentTest.java`，覆盖告警、能耗、停车政策三个问题。固定模型必须调用对应只读工具/知识；未调用工具却给出数据、引用不存在政策、尝试写操作均被拒绝。
+- [x] 写 `VoiceAnswerAgentTest.java`，覆盖告警、能耗、停车政策三个问题。固定模型必须调用对应只读工具/知识；未调用工具却给出数据、引用不存在政策、尝试写操作均被拒绝。
 
-- [ ] 构建 `VoiceAnswerAgent`：工具集合仅含 Alert/Device/Energy/Security/ParkKnowledge 的只读接口；停车政策必须有知识引用；实时值必须有本 turn 的 tool evidence。
+- [x] 构建 `VoiceAnswerAgent`：工具集合仅含 Alert/Device/Energy/Security/ParkKnowledge 的只读接口；停车政策必须有知识引用；实时值必须有本 turn 的 tool evidence。
 
-- [ ] 定义 `VoiceAnswer(text, evidenceRefs, toolCalls)`；`VoiceAnswerValidator` 在 TTS 前检查数字、告警/设备 ID 与引用均可追溯。校验失败显式结束，不生成“合理猜测”。
+- [x] 定义 `VoiceAnswer(text, evidenceRefs, toolCalls)`；`VoiceAnswerValidator` 在 TTS 前检查数字、告警/设备 ID 与引用均可追溯。校验失败显式结束，不生成“合理猜测”。
 
-- [ ] 真实工具开始/完成和文本 delta 发布到 WS 与统一事件；UI 工具事件由后端事实产生。
+- [x] 真实工具开始/完成和文本 delta 发布到 WS 与统一事件；UI 工具事件由后端事实产生。
 
-- [ ] 验证并提交：
+- [x] 验证并提交：
 
 ```powershell
 .\mvnw.cmd -B -Dtest=VoiceAnswerAgentTest,VoiceAnswerValidatorTest,ParkToolsTest test
@@ -101,13 +101,13 @@ git commit -m "feat: answer park voice queries with evidence"
 
 ## Task 5：实现 streaming TTS 和可取消播放流
 
-- [ ] 定义 `StreamingTtsPort`，写测试覆盖 text delta 合并、首块、后续块、完成、供应商错误、cancel 后不再发块。
+- [x] 定义 `StreamingTtsPort`，写测试覆盖 text delta 合并、首块、后续块、完成、供应商错误、cancel 后不再发块。
 
-- [ ] 实现 `DashScopeStreamingTtsAdapter`，包装 `StreamingInputTextToSpeechModel`；只接收已校验 VoiceAnswer 的文本流。
+- [x] 实现 `DashScopeStreamingTtsAdapter`，包装 `StreamingInputTextToSpeechModel`；只接收已校验 VoiceAnswer 的文本流。
 
-- [ ] 中断使用 per-turn cancellation token；取消同时停止供应商订阅、清空待发送块并发布 `OUTPUT_INTERRUPTED`。晚到 callback 必须按 turnId 丢弃。
+- [x] 中断使用 per-turn cancellation token；取消同时停止供应商订阅、清空待发送块并发布 `OUTPUT_INTERRUPTED`。晚到 callback 必须按 turnId 丢弃。
 
-- [ ] 验证并提交：
+- [x] 验证并提交：
 
 ```powershell
 .\mvnw.cmd -B -Dtest=StreamingTtsPortTest,DashScopeStreamingTtsAdapterTest,VoiceOutputCancellationTest test
@@ -117,20 +117,20 @@ git commit -m "feat: stream interruptible dashscope speech output"
 
 ## Task 6：编排 session 生命周期、HTTP 与 WebSocket
 
-- [ ] 写 `VoiceSessionServiceTest.java`，覆盖完整 turn、ASR 空文本、输入/Agent/TTS 超时、中断、重复 commit、连接关闭、两个 session 隔离、清理后无音频引用。
+- [x] 写 `VoiceSessionServiceTest.java`，覆盖完整 turn、ASR 空文本、输入/Agent/TTS 超时、中断、重复 commit、连接关闭、两个 session 隔离、清理后无音频引用。
 
-- [ ] 写 `VoiceSessionControllerTest` 与 `VoiceWebSocketHandlerTest`，覆盖：
+- [x] 写 `VoiceSessionControllerTest` 与 `VoiceWebSocketHandlerTest`，覆盖：
 
   - `POST /api/voice/sessions`；
   - `GET /api/voice/sessions/{sessionId}`；
   - `/ws/voice/sessions/{sessionId}` 二进制和 JSON 帧；
   - 未知 session、超大 frame、非法 control、鉴权/Origin 策略。
 
-- [ ] 实现 service、store、controller、handler；同 session 通过 serial executor 处理；每个 turn 拥有独立 ID/cancellation；CLOSE/网络断开关闭 ASR/TTS 并移除 buffer。
+- [x] 实现 service、store、controller、handler；同 session 通过 serial executor 处理；每个 turn 拥有独立 ID/cancellation；CLOSE/网络断开关闭 ASR/TTS 并移除 buffer。
 
-- [ ] 所有状态转换同步发布统一事件，terminal session 完成事件流。
+- [x] 所有状态转换同步发布统一事件，terminal session 完成事件流。
 
-- [ ] 验证并提交：
+- [x] 验证并提交：
 
 ```powershell
 .\mvnw.cmd -B -Dtest=VoiceSessionServiceTest,VoiceSessionControllerTest,VoiceWebSocketHandlerTest test
@@ -140,15 +140,15 @@ git commit -m "feat: expose realtime voice sessions"
 
 ## Task 7：浏览器采集、播放与中断
 
-- [ ] 先写 `pcm-player.spec.ts` 和 `useVoiceSession.spec.ts`，mock AudioContext/WebSocket，覆盖采集帧、commit、partial/final、音频顺序播放、麦克风点击中断、晚到块丢弃、连接错误。
+- [x] 先写 `pcm-player.spec.ts` 和 `useVoiceSession.spec.ts`，mock AudioContext/WebSocket，覆盖采集帧、commit、partial/final、音频顺序播放、麦克风点击中断、晚到块丢弃、连接错误。
 
-- [ ] 创建 AudioWorklet：麦克风 float32 重采样为 16k mono int16，每 20ms 发送；主线程不得用已弃用 ScriptProcessorNode。
+- [x] 创建 AudioWorklet：麦克风 float32 重采样为 16k mono int16，每 20ms 发送；主线程不得用已弃用 ScriptProcessorNode。
 
-- [ ] 创建 player：解码服务器约定格式、按 sequence 排队、cancel 立即 stop 当前 source 且清空队列。
+- [x] 创建 player：解码服务器约定格式、按 sequence 排队、cancel 立即 stop 当前 source 且清空队列。
 
-- [ ] `useVoiceSession` 只根据服务器状态驱动 UI；本地点击只发 control，不直接把状态伪设为成功。
+- [x] `useVoiceSession` 只根据服务器状态驱动 UI；本地点击只发 control，不直接把状态伪设为成功。
 
-- [ ] 验证并提交：
+- [x] 验证并提交：
 
 ```powershell
 Push-Location ui
@@ -161,13 +161,13 @@ git commit -m "feat: capture and play realtime park voice audio"
 
 ## Task 8：语音展台页面
 
-- [ ] 写 `VoiceAssistantPage.spec.ts`，覆盖麦克风权限、状态文案、实时识别文本、工具卡、流式回答、TTS 状态、中断、明确错误与重试。
+- [x] 写 `VoiceAssistantPage.spec.ts`，覆盖麦克风权限、状态文案、实时识别文本、工具卡、流式回答、TTS 状态、中断、明确错误与重试。
 
-- [ ] 实现页面：中央麦克风主控、实时转写、回答字幕与证据；右侧共享轨迹；不得展示 raw audio、prompt 或隐含工具参数。
+- [x] 实现页面：中央麦克风主控、实时转写、回答字幕与证据；右侧共享轨迹；不得展示 raw audio、prompt 或隐含工具参数。
 
-- [ ] `App.vue` 加“实时语音”入口和共享 runId；离开页面发送 CLOSE 并释放 MediaStream tracks。
+- [x] `App.vue` 加“实时语音”入口和共享 runId；离开页面发送 CLOSE 并释放 MediaStream tracks。
 
-- [ ] 验证并提交：
+- [x] 验证并提交：
 
 ```powershell
 Push-Location ui
@@ -180,9 +180,9 @@ git commit -m "feat: add realtime voice assistant console"
 
 ## Task 9：配置、隐私与回归
 
-- [ ] 在 `application.yml` 增加音频规格、10 秒输入、15 秒 agent、5 秒 TTS 首块、allowed origins；密钥仍只来自环境变量。
+- [x] 在 `application.yml` 增加音频规格、10 秒输入、15 秒 agent、5 秒 TTS 首块、allowed origins；密钥仍只来自环境变量。
 
-- [ ] 运行后端全测、前端全测/构建、敏感数据测试；搜索日志与事件 DTO 确认没有 `byte[]`、base64、API key、原 prompt 字段。
+- [x] 运行后端全测、前端全测/构建、敏感数据测试；搜索日志与事件 DTO 确认没有 `byte[]`、base64、API key、原 prompt 字段。
 
 ## 完成闸门
 

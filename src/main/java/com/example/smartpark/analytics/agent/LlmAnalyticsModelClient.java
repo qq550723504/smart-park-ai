@@ -59,8 +59,8 @@ public class LlmAnalyticsModelClient implements AnalyticsModelClient {
                 normalizedQuestion (字符串), metricTerms (name 数组), clarificationQuestions (字符串数组),
                 requestedDimensions (用户明确要求的目录维度 name 数组；总计查询为空数组),
                 requestedFilters (用户明确指定的实体过滤对象，键为目录维度 name、值为问题中原样出现的实体；没有则为空对象),
-                requestedTimeRange (没有时间要求时为 null；否则为对象，包含 ISO-8601 UTC 字段
-                fromInclusive 与 toExclusive)。所有相对时间都以当前时刻和园区时区解释。
+                requestedTimeMentions (字符串数组): 问题中出现的所有时间表达，每个元素必须是原问题中逐字存在的片段
+                （如 "上周一到周三"、"过去30天"）；只负责找出这些词，禁止换算成日期或时间戳；没有则为空数组。
                 当前时刻: %s；园区时区: Asia/Shanghai；园区当地时间: %s。
                 """.formatted(now, now.atZone(ZoneId.of("Asia/Shanghai"))) + catalogHint;
         JsonNode json = parseJson(call(system, question));
@@ -71,9 +71,10 @@ public class LlmAnalyticsModelClient implements AnalyticsModelClient {
                 requireQuestion(question),
                 stringList(json, "metricTerms"),
                 stringList(json, "clarificationQuestions"),
-                requestedTimeRange(json),
+                null,
                 stringList(json, "requestedDimensions"),
-                stringMap(json, "requestedFilters"));
+                stringMap(json, "requestedFilters"),
+                stringList(json, "requestedTimeMentions"));
     }
 
     private static String requireQuestion(String question) {
@@ -215,26 +216,6 @@ public class LlmAnalyticsModelClient implements AnalyticsModelClient {
             values.put(entry.getKey(), entry.getValue().asText().strip());
         });
         return java.util.Collections.unmodifiableMap(values);
-    }
-
-    private static RequestedTimeRange requestedTimeRange(JsonNode json) {
-        JsonNode node = json.get("requestedTimeRange");
-        if (node == null || node.isNull()) {
-            return null;
-        }
-        if (!node.isObject()) {
-            throw new IllegalStateException("requestedTimeRange must be an object or null");
-        }
-        String from = text(node, "fromInclusive");
-        String to = text(node, "toExclusive");
-        if (from.isBlank() || to.isBlank()) {
-            throw new IllegalStateException("requestedTimeRange requires fromInclusive and toExclusive");
-        }
-        try {
-            return new RequestedTimeRange(Instant.parse(from), Instant.parse(to));
-        } catch (RuntimeException invalidRange) {
-            throw new IllegalStateException("requestedTimeRange is invalid", invalidRange);
-        }
     }
 
     private static String sampleRows(TabularResult result) {

@@ -11,13 +11,13 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 import javax.sql.DataSource;
 import java.sql.Timestamp;
-import java.sql.DriverManager;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -39,6 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class OperationsAnalysisGraphTest {
 
+    private static final Instant TEST_NOW = Instant.parse("2026-08-24T00:00:00Z");
     private static final String GOOD_SQL = """
             SELECT building_id, SUM(kwh) AS energy_kwh FROM analytics.v_energy_hourly
             WHERE hour_ts >= :fromTs AND hour_ts < :toTs
@@ -51,6 +52,7 @@ class OperationsAnalysisGraphTest {
     private PostgreSQLContainer<?> postgres;
     private ScriptedModelClient modelClient;
     private OperationsAnalysisGraph graph;
+    private OperationsAnalysisGraph graphWithSeedRows;
     private InMemoryExecutionEventPublisher publisher;
     private Map<String, Object> lastExecutionParameters;
 
@@ -63,7 +65,12 @@ class OperationsAnalysisGraphTest {
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
-        insertFixedClockEnergyFixtures();
+        var adminDataSource = new SimpleDriverDataSource();
+        adminDataSource.setDriverClass(org.postgresql.Driver.class);
+        adminDataSource.setUrl(postgres.getJdbcUrl());
+        adminDataSource.setUsername(postgres.getUsername());
+        adminDataSource.setPassword(postgres.getPassword());
+        seedFixedClockEnergyFacts(adminDataSource);
         com.example.smartpark.analytics.AnalyticsRoleCredentials.sync(
                 postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword(), "test-ro-pass");
 
@@ -75,7 +82,12 @@ class OperationsAnalysisGraphTest {
 
         modelClient = new ScriptedModelClient();
         publisher = new InMemoryExecutionEventPublisher();
-        graph = new OperationsAnalysisGraph(
+        graph = newGraph(dataSource, Clock.fixed(Instant.parse("2026-08-24T00:00:00Z"), ZoneOffset.UTC));
+        graphWithSeedRows = newGraph(dataSource, Clock.fixed(Instant.parse("2026-08-24T12:00:00Z"), ZoneOffset.UTC));
+    }
+
+    private OperationsAnalysisGraph newGraph(DataSource dataSource, Clock clock) {
+        return new OperationsAnalysisGraph(
                 new MetricCatalog(),
                 modelClient,
                 (sql, parameters) -> new com.example.smartpark.analytics.sql.QueryCostGuard(
@@ -89,32 +101,25 @@ class OperationsAnalysisGraphTest {
                 },
                 publisher,
                 new AnalysisSummaryValidator(),
-                Clock.fixed(Instant.parse("2026-08-24T00:00:00Z"), ZoneOffset.UTC));
+                clock,
+                Duration.ofSeconds(60), new WhitelistTimeIntentProvider());
     }
 
-    private void insertFixedClockEnergyFixtures() {
-        String sql = """
+    /**
+     * V1 seeds runtime-relative demo data using the database clock. This graph
+     * test intentionally uses a fixed application clock, so add a tiny fixture
+     * on that same clock rather than coupling the test to today's database date.
+     */
+    private void seedFixedClockEnergyFacts(DataSource dataSource) {
+        new JdbcTemplate(dataSource).batchUpdate("""
                 INSERT INTO analytics.energy_hourly_raw
                     (building_id, meter_id, reading_at, kwh, baseline_kwh, peak_kw)
                 VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT DO NOTHING""";
-        try (var connection = DriverManager.getConnection(
-                postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
-             var statement = connection.prepareStatement(sql)) {
-            Instant readingAt = Instant.parse("2026-08-20T12:00:00Z");
-            for (int building = 1; building <= 3; building++) {
-                statement.setString(1, "B" + building);
-                statement.setString(2, "MTR-FIXED-" + building);
-                statement.setTimestamp(3, Timestamp.from(readingAt));
-                statement.setBigDecimal(4, java.math.BigDecimal.valueOf(20 + building));
-                statement.setBigDecimal(5, java.math.BigDecimal.valueOf(15));
-                statement.setBigDecimal(6, java.math.BigDecimal.valueOf(40));
-                statement.addBatch();
-            }
-            statement.executeBatch();
-        } catch (java.sql.SQLException failure) {
-            throw new IllegalStateException("unable to insert fixed-clock analytics fixtures", failure);
-        }
+                ON CONFLICT DO NOTHING
+                """, List.of(
+                new Object[] {"B1", "GRAPH-TEST-B1", Timestamp.from(TEST_NOW.minus(Duration.ofDays(4))), 10.0, 8.0, 20.0},
+                new Object[] {"B2", "GRAPH-TEST-B2", Timestamp.from(TEST_NOW.minus(Duration.ofDays(4))), 11.0, 8.0, 21.0},
+                new Object[] {"B3", "GRAPH-TEST-B3", Timestamp.from(TEST_NOW.minus(Duration.ofDays(4))), 12.0, 8.0, 22.0}));
     }
 
     @AfterAll
@@ -127,14 +132,14 @@ class OperationsAnalysisGraphTest {
     @Test
     void runsEveryNodeInOrderAndCompletesWithRealResults() {
         modelClient.reset(
-                new AnalyticsModelClient.QuestionUnderstanding("上周各楼宇能耗对比", List.of("能耗"), List.of(),
+                new AnalyticsModelClient.QuestionUnderstanding("过去7天各楼宇能耗对比", List.of("能耗"), List.of(),
                         null, List.of("building_id")),
                 List.of(GOOD_SQL),
                 new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("energy_kwh"), "", "kWh"),
                 "共 3 行结果。");
         UUID runId = UUID.randomUUID();
 
-        var outcome = graph.run(runId, "上周各楼宇能耗对比");
+        var outcome = graphWithSeedRows.run(runId, "过去7天各楼宇能耗对比");
 
         assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
         assertThat(outcome.result().rowCount()).isEqualTo(3);
@@ -343,7 +348,7 @@ class OperationsAnalysisGraphTest {
 
         assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
         assertThat(modelClient.lastPlan().timeRange()).isEqualTo(new QueryPlan.TimeRange(
-                Instant.parse("2026-08-23T16:00:00Z"),
+                Instant.parse("2026-08-23T23:00:00Z"),
                 Instant.parse("2026-08-24T04:00:00Z")));
         assertThat(modelClient.lastPlan().timeRangeSource())
                 .isEqualTo(QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE);
@@ -386,15 +391,68 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
-    void rejectsResidualTemporalQualifierBeforeGeneratingSql() {
+    void failsClosedWhenModelSpotsATimeExpressionTheWhitelistCannotResolve() {
+        // “上上季度”不在白名单内（白名单只能解析其中子串“上季度”）。
+        // 模型逐字摘抄的片段与解析器 span 不一致时必须在 SQL 前终止。
+        var understanding = new AnalyticsModelClient.QuestionUnderstanding(
+                "上上季度能耗", List.of("能耗"), List.of(),
+                null, List.of(), java.util.Map.of(), List.of("上上季度"));
         modelClient.reset(
-                new AnalyticsModelClient.QuestionUnderstanding("今天晚上能耗", List.of("能耗"), List.of()),
+                understanding,
                 List.of(GOOD_TOTAL_SQL), null, "不应执行未完整解析的时间表达式。");
 
-        var outcome = graph.run(UUID.randomUUID(), "今天晚上能耗");
+        var outcome = graph.run(UUID.randomUUID(), "上上季度能耗");
 
         assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.FAILED);
         assertThat(modelClient.generateSqlInvocations()).isZero();
+    }
+
+    @Test
+    void carriesEveningDayPartAsExplicitUserRange() {
+        var understanding = new AnalyticsModelClient.QuestionUnderstanding(
+                "今天晚上能耗", List.of("能耗"), List.of(),
+                null, List.of(), java.util.Map.of(), List.of("今天晚上"));
+        modelClient.reset(
+                understanding,
+                List.of(GOOD_TOTAL_SQL),
+                new ChartSpec.Proposal("TABLE", "今天晚上能耗", "energy_kwh", List.of(), "", "kWh"),
+                "共 1 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "今天晚上能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.generateSqlInvocations()).isEqualTo(1);
+        assertThat(modelClient.lastPlan().timeRange()).isEqualTo(new QueryPlan.TimeRange(
+                Instant.parse("2026-08-24T10:00:00Z"),
+                Instant.parse("2026-08-24T16:00:00Z")));
+    }
+
+    @Test
+    void terminatesEmptyCurrentPeriodBeforeAnySql() {
+        // 参考时刻恰好是“今天”零点：零宽周期必须显式终止，不生成 SQL。
+        var emptyClockGraph = new OperationsAnalysisGraph(
+                new MetricCatalog(),
+                modelClient,
+                (sql, parameters) -> { throw new IllegalStateException("must not reach cost gate"); },
+                (sql, parameters) -> { throw new IllegalStateException("must not execute"); },
+                publisher,
+                new AnalysisSummaryValidator(),
+                Clock.fixed(Instant.parse("2026-08-24T16:00:00Z"), ZoneOffset.UTC),
+                Duration.ofSeconds(60), new WhitelistTimeIntentProvider());
+        try {
+            var understanding = new AnalyticsModelClient.QuestionUnderstanding(
+                    "今天能耗", List.of("能耗"), List.of(),
+                    null, List.of(), java.util.Map.of(), List.of("今天"));
+            modelClient.reset(understanding, List.of(GOOD_TOTAL_SQL), null, "");
+
+            var outcome = emptyClockGraph.run(UUID.randomUUID(), "今天能耗");
+
+            assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+            assertThat(outcome.summary()).contains("暂无数据");
+            assertThat(outcome.result()).isNull();
+        } finally {
+            // 恢复共享 modelClient 的状态供后续测试使用。
+        }
     }
 
     @Test

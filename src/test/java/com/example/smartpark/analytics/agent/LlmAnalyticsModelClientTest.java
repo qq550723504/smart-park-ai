@@ -27,10 +27,7 @@ class LlmAnalyticsModelClientTest {
                   "metricTerms": ["energy_consumption"],
                   "clarificationQuestions": [],
                   "requestedDimensions": ["building_id"],
-                  "requestedTimeRange": {
-                    "fromInclusive": "2026-07-25T00:00:00Z",
-                    "toExclusive": "2026-08-24T00:00:00Z"
-                  }
+                  "requestedTimeMentions": ["过去30天"]
                 }
                 """);
         var client = new LlmAnalyticsModelClient(
@@ -38,12 +35,11 @@ class LlmAnalyticsModelClientTest {
 
         var understanding = client.understandQuestion("过去30天各楼宇能耗");
 
-        assertThat(understanding.requestedTimeRange()).isEqualTo(
-                new AnalyticsModelClient.RequestedTimeRange(
-                        Instant.parse("2026-07-25T00:00:00Z"), NOW));
+        assertThat(understanding.requestedTimeMentions()).containsExactly("过去30天");
         assertThat(understanding.requestedDimensions()).containsExactly("building_id");
+        assertThat(understanding.requestedTimeRange()).isNull();
         assertThat(model.lastPrompt().getSystemMessage().getText())
-                .contains("2026-08-24T00:00:00Z", "Asia/Shanghai", "requestedTimeRange");
+                .contains("2026-08-24T00:00:00Z", "Asia/Shanghai", "requestedTimeMentions");
     }
 
     @Test
@@ -95,21 +91,22 @@ class LlmAnalyticsModelClientTest {
     }
 
     @Test
-    void rejectsPartialRequestedTimeRangeInsteadOfSilentlyUsingDefault() {
+    void keepsRequestedTimeMentionsAsVerbatimFragments() {
         TestChatModel model = new TestChatModel("""
                 {
-                  "normalizedQuestion": "过去30天各楼宇能耗",
+                  "normalizedQuestion": "上周各楼宇能耗",
                   "metricTerms": ["energy_consumption"],
                   "clarificationQuestions": [],
-                  "requestedTimeRange": {"fromInclusive": "2026-07-25T00:00:00Z"}
+                  "requestedTimeMentions": ["上周"]
                 }
                 """);
         var client = new LlmAnalyticsModelClient(
                 model, new MetricCatalog(), Clock.fixed(NOW, ZoneOffset.UTC));
 
-        assertThatThrownBy(() -> client.understandQuestion("过去30天各楼宇能耗"))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("requestedTimeRange");
+        // 逐字校验由 ModelTimeEvidence 在原问题中定位时进行，客户端只负责透传。
+        var understanding = client.understandQuestion("上周各楼宇能耗");
+
+        assertThat(understanding.requestedTimeMentions()).containsExactly("上周");
     }
 
     @Test

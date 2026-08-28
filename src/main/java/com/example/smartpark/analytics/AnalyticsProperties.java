@@ -21,6 +21,7 @@ public class AnalyticsProperties {
     private long maxResultBytes = 1024L * 1024L;
     private double maxPlanCost = 1_000_000.0;
     private final Datasource datasource = new Datasource();
+    private final TimeIntent timeIntent = new TimeIntent();
 
     /** Fails startup when enabled=true but the real database contract is incomplete. */
     public void validateUsable() {
@@ -80,6 +81,35 @@ public class AnalyticsProperties {
         this.maxPlanCost = maxPlanCost;
     }
     public Datasource getDatasource() { return datasource; }
+    public TimeIntent getTimeIntent() { return timeIntent; }
+
+    public static class TimeIntent {
+        private boolean enabled = true;
+        private String url = "http://analytics-time-parser:8081";
+        private Duration connectTimeout = Duration.ofSeconds(1);
+        private Duration readTimeout = Duration.ofSeconds(3);
+        private int maxResponseBytes = 32 * 1024;
+        private String expectedProvider = "jionlp";
+        private String expectedVersion = "1.5.29";
+        private String timezone = "Asia/Shanghai";
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public String getUrl() { return url; }
+        public void setUrl(String url) { this.url = url; }
+        public Duration getConnectTimeout() { return connectTimeout; }
+        public void setConnectTimeout(Duration connectTimeout) { this.connectTimeout = connectTimeout; }
+        public Duration getReadTimeout() { return readTimeout; }
+        public void setReadTimeout(Duration readTimeout) { this.readTimeout = readTimeout; }
+        public int getMaxResponseBytes() { return maxResponseBytes; }
+        public void setMaxResponseBytes(int maxResponseBytes) { this.maxResponseBytes = maxResponseBytes; }
+        public String getExpectedProvider() { return expectedProvider; }
+        public void setExpectedProvider(String expectedProvider) { this.expectedProvider = expectedProvider; }
+        public String getExpectedVersion() { return expectedVersion; }
+        public void setExpectedVersion(String expectedVersion) { this.expectedVersion = expectedVersion; }
+        public String getTimezone() { return timezone; }
+        public void setTimezone(String timezone) { this.timezone = timezone; }
+    }
 
     public static class Datasource {
         private String url;

@@ -38,7 +38,22 @@ public class AnalysisRunStore {
             /** Last lifecycle-transition time; terminal retention is measured from this. */
             Instant updatedAt,
             List<String> columns,
-            List<List<Object>> rows) {}
+            List<List<Object>> rows,
+            /** 用户可见的时间范围来源；仅安全字段，可为 null（旧记录）。 */
+            com.example.smartpark.analytics.agent.TimeResolutionMetadata timeResolution) {
+
+        /** @deprecated 兼容旧签名。 */
+        @Deprecated
+        public RunRecord(UUID runId, String question, String status,
+                List<String> clarificationQuestions, List<List<String>> clarificationOptions,
+                String summary, int rowCount, boolean truncated, long durationMs,
+                String failureStage, Instant createdAt, Instant updatedAt,
+                List<String> columns, List<List<Object>> rows) {
+            this(runId, question, status, clarificationQuestions, clarificationOptions,
+                    summary, rowCount, truncated, durationMs, failureStage,
+                    createdAt, updatedAt, columns, rows, null);
+        }
+    }
 
     private final Map<UUID, RunRecord> runs = new ConcurrentHashMap<>();
     private final Clock clock;

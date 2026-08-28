@@ -17,6 +17,9 @@ import com.example.smartpark.analytics.agent.AnalyticsModelClient;
 import com.example.smartpark.analytics.agent.AnalysisSummaryValidator;
 import com.example.smartpark.analytics.agent.LlmAnalyticsModelClient;
 import com.example.smartpark.analytics.agent.OperationsAnalysisGraph;
+import com.example.smartpark.analytics.agent.TimeIntentProvider;
+import com.example.smartpark.analytics.agent.time.JioNlpClient;
+import com.example.smartpark.analytics.agent.time.JioNlpTimeIntentProvider;
 import com.example.smartpark.analytics.catalog.MetricCatalog;
 import com.example.smartpark.analytics.sql.QueryCostGuard;
 import com.example.smartpark.analytics.sql.ReadOnlyQueryExecutor;
@@ -164,18 +167,34 @@ public class AnalyticsConfiguration {
     }
 
     @Bean
+    JioNlpClient jioNlpClient(AnalyticsProperties properties) {
+        AnalyticsProperties.TimeIntent config = properties.getTimeIntent();
+        if (!config.isEnabled()) {
+            throw new IllegalStateException("smartpark.analytics.time-intent.enabled must remain true");
+        }
+        return new JioNlpClient(config.getUrl(), config.getConnectTimeout(), config.getReadTimeout(),
+                config.getMaxResponseBytes(), config.getExpectedProvider(), config.getExpectedVersion());
+    }
+
+    @Bean
+    TimeIntentProvider timeIntentProvider(JioNlpClient client, AnalyticsProperties properties) {
+        return new JioNlpTimeIntentProvider(client, properties.getTimeIntent().getTimezone());
+    }
+
+    @Bean
     OperationsAnalysisGraph operationsAnalysisGraph(MetricCatalog metricCatalog,
                                                     AnalyticsModelClient analyticsModelClient,
                                                     QueryCostGuard queryCostGuard,
                                                     ReadOnlyQueryExecutor readOnlyQueryExecutor,
                                                     com.example.smartpark.execution.ExecutionEventPublisher publisher,
                                                     Clock analyticsClock,
-                                                    AnalyticsProperties properties) {
+                                                    AnalyticsProperties properties,
+                                                    TimeIntentProvider timeIntentProvider) {
         OperationsAnalysisGraph.CostGate costGate =
                 (sql, parameters) -> queryCostGuard.estimatedCost(sql.sql(), parameters);
         return new OperationsAnalysisGraph(metricCatalog, analyticsModelClient, costGate,
                 readOnlyQueryExecutor::execute, publisher, new AnalysisSummaryValidator(), analyticsClock,
-                properties.getAnalysisTimeout());
+                properties.getAnalysisTimeout(), timeIntentProvider);
     }
 
     @Bean
