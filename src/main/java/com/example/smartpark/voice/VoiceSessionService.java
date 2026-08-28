@@ -156,6 +156,7 @@ public class VoiceSessionService {
         session.close();
         store.remove(session.sessionId());
         VoiceFramePublisher publisher = publishers.remove(session.sessionId());
+        messageCounters.remove(session.sessionId());
         if (publisher != null) {
             publisher.close();
         }
@@ -230,7 +231,13 @@ public class VoiceSessionService {
         publishState(session, VoiceSessionEvent.START_INPUT);
 
         String turnId = session.beginTurn();
-        asrPort.start(session.sessionId(), turnId, asrListener(session));
+        try {
+            asrPort.start(session.sessionId(), turnId, asrListener(session));
+        } catch (RuntimeException ex) {
+            log.warn("asr startup failed in {}: {}", session.sessionId(), ex.getClass().getSimpleName());
+            failTurn(session, VoiceErrorCode.PROVIDER_FAILURE, "语音识别暂时不可用，请重试");
+            return;
+        }
         trackDeadline(session, deadlines.maxInputDuration(),
                 () -> timeoutInput(session));
     }
@@ -244,6 +251,10 @@ public class VoiceSessionService {
         publishState(session, VoiceSessionEvent.INPUT_COMMITTED);
         asrPort.commit(session.sessionId(), turnId);
         trackDeadline(session, deadlines.maxAgentDuration(), () -> timeoutAgent(session));
+        String pendingFinalText = session.takePendingFinalText();
+        if (pendingFinalText != null) {
+            startAnswerPhase(session, turnId, pendingFinalText);
+        }
     }
 
     private void onInterruptOutput(VoiceSession session) {
@@ -357,7 +368,14 @@ public class VoiceSessionService {
                     }
                     publish(new com.example.smartpark.voice.model.AsrFinalFrame(
                             sessionId, messageId(sid), session.nextFrameSequence(), text));
-                    startAnswerPhase(session, turnId, text);
+                    if (current == VoiceSessionState.LISTENING) {
+                        // Providers may emit sentence-end before the client
+                        // commits the input stream. Keep the final transcript,
+                        // but do not start reasoning from LISTENING.
+                        session.setPendingFinalText(text);
+                    } else {
+                        startAnswerPhase(session, turnId, text);
+                    }
                 });
             }
 
@@ -461,7 +479,9 @@ public class VoiceSessionService {
                 || session.isTurnInterrupted()) {
             return;
         }
-        safeApply(session, VoiceSessionEvent.ANSWER_COMPLETED);
+        if (!safeApply(session, VoiceSessionEvent.ANSWER_COMPLETED)) {
+            return;
+        }
         publishState(session, VoiceSessionEvent.ANSWER_COMPLETED);
         trackDeadline(session, deadlines.ttsFirstChunkTimeout(), () -> timeoutTtsFirstChunk(session));
         final String sid = session.sessionId();
@@ -646,6 +666,10 @@ public class VoiceSessionService {
                 .computeIfAbsent(sessionId, k -> new java.util.concurrent.atomic.AtomicLong())
                 .incrementAndGet();
         return sessionId + "-m" + n;
+    }
+
+    int messageCounterCount() {
+        return messageCounters.size();
     }
 
     private static String userMessageFor(VoiceErrorCode code) {

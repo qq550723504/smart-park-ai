@@ -78,6 +78,7 @@ function makeHarness(frameScript: VoiceServerFrame[] = []) {
   const fakeWs = new FakeWebSocket('')
   const fakePlayer = new FakePlayer()
   const fakeCapture = new FakeCapture()
+  const fakeTrack = { stopped: 0, stop() { this.stopped++ } }
 
   const deps: UseVoiceSessionDeps = {
     api: {
@@ -93,7 +94,7 @@ function makeHarness(frameScript: VoiceServerFrame[] = []) {
       queueMicrotask(() => fakeWs.open())
       return fakeWs as WebSocketLike
     },
-    requestMicrophone: async () => ({}) as MediaStream,
+    requestMicrophone: async () => ({ getTracks: () => [fakeTrack] }) as unknown as MediaStream,
     createPlayer: () => fakePlayer,
     createCapture: () => fakeCapture,
   }
@@ -122,7 +123,7 @@ function makeHarness(frameScript: VoiceServerFrame[] = []) {
     return undefined
   }
 
-  return { binding, fakeWs, fakePlayer, fakeCapture, serverSendsState, lastSentControl }
+  return { binding, fakeWs, fakePlayer, fakeCapture, fakeTrack, serverSendsState, lastSentControl }
 }
 
 describe('useVoiceSession', () => {
@@ -168,6 +169,7 @@ describe('useVoiceSession', () => {
     await h.binding.toggleMicrophone() // 第二次点击：提交输入
     expect(h.lastSentControl('COMMIT_INPUT')).toBeDefined()
     expect(h.fakeCapture.stoppedCount).toBe(1)
+    expect(h.fakeTrack.stopped).toBe(1)
   })
 
   it('answer deltas append in order and tool events come from backend facts', async () => {
@@ -250,5 +252,6 @@ describe('useVoiceSession', () => {
     expect(h.lastSentControl('CLOSE_SESSION')).toBeDefined()
     expect(h.fakeWs.closed).toBe(true)
     expect(h.fakeCapture.stoppedCount).toBe(1)
+    expect(h.fakeTrack.stopped).toBe(1)
   })
 })

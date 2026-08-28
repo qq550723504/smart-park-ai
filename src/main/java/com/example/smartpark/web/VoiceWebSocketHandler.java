@@ -50,10 +50,11 @@ public class VoiceWebSocketHandler extends AbstractWebSocketHandler {
             closeQuietly(wsSession, "unknown session");
             return;
         }
-        wsSession.getAttributes().put(SESSION_ATTR, sessionId);
         if (!service.attach(sessionId, publisherFor(wsSession))) {
             closeQuietly(wsSession, "session already attached");
+            return;
         }
+        wsSession.getAttributes().put(SESSION_ATTR, sessionId);
     }
 
     @Override

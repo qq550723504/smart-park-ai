@@ -104,9 +104,12 @@ public final class DashScopeStreamingAsrAdapter implements StreamingAsrPort, Dis
 
     @Override
     public void cancel(String sessionId, String turnId) {
-        TurnState state = activeTurnsBySession.remove(sessionId);
+        TurnState state = activeTurnsBySession.get(sessionId);
         if (state == null || !state.turnId.equals(turnId)) {
             return; // unknown/superseded turn: cancellation is a no-op
+        }
+        if (!activeTurnsBySession.remove(sessionId, state)) {
+            return;
         }
         state.finished.set(true);
         state.input.tryEmitComplete();
@@ -153,7 +156,6 @@ public final class DashScopeStreamingAsrAdapter implements StreamingAsrPort, Dis
                 // Exactly one final per turn: later finals are duplicates and
                 // must not reach the listener twice.
                 state.finalSent = true;
-                state.input.tryEmitComplete();
             } else if (state != null && state.finalSent) {
                 return;
             }

@@ -46,6 +46,20 @@ class VoiceAnswerValidatorTest {
     }
 
     @Test
+    void matchesNumbersAsCompleteTokensRatherThanEvidenceSubstrings() {
+        assertThatThrownBy(() -> validator.validate(VoiceIntent.ENERGY, new VoiceAnswer(
+                "当前用电 5 千瓦时。", List.of("DEV-ENERGY-001"), List.of(ENERGY_TOOL))))
+                .hasFieldOrPropertyWithValue("reason", AnswerRejectReason.UNSUPPORTED_CLAIM_NUMBER);
+    }
+
+    @Test
+    void deterministicNoMatchParkingAnswerIsAllowedWithoutCitation() {
+        assertThatCode(() -> validator.validate(VoiceIntent.PARKING_POLICY,
+                new VoiceAnswer(VoiceAnswerAgent.NO_PARKING_MATCH, List.of(), List.of())))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
     void rejectsIdentifiersNotPresentInEvidence() {
         assertThatThrownBy(() -> validator.validate(VoiceIntent.ALERT, new VoiceAnswer(
                 "告警 ALT-TEMP-999 已确认：DEV-HVAC-001 温度上升。",

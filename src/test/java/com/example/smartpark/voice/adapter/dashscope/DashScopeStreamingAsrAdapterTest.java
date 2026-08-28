@@ -123,6 +123,19 @@ class DashScopeStreamingAsrAdapterTest {
                 .isInstanceOf(IllegalStateException.class);
     }
 
+    @Test
+    void staleCancellationCannotRemoveAReplacementTurn() {
+        newAdapter();
+        adapter.start("s-1", "t-1", new RecordingListener());
+        adapter.cancel("s-1", "t-1");
+        adapter.start("s-1", "t-2", new RecordingListener());
+
+        adapter.cancel("s-1", "t-1");
+        adapter.send("s-1", "t-2", new byte[]{7});
+
+        adapter.cancel("s-1", "t-2");
+    }
+
     private static List<String> decode(List<ByteBuffer> buffers) {
         return buffers.stream()
                 .map(buffer -> {

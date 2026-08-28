@@ -18,7 +18,7 @@ import { customerIntentLabel, workflowNodeLabel } from './utils/labels'
 import { alertWorkflowRunId } from './utils/runId'
 import './styles.css'
 
-const capabilities = ref<{ knowledgeMode: string; customerAnswerMode: string; vectorStore: string; analyticsEnabled: boolean; collaborationEnabled: boolean } | null>(null)
+const capabilities = ref<{ knowledgeMode: string; customerAnswerMode: string; vectorStore: string; analyticsEnabled: boolean; collaborationEnabled: boolean; voiceEnabled: boolean } | null>(null)
 const capabilityLabels = computed(() => capabilities.value ? {
   knowledge: capabilities.value.knowledgeMode === 'mock' ? 'Mock' : 'RAG',
   customer: capabilities.value.customerAnswerMode === 'mock' ? 'Mock' : 'DashScope',
@@ -149,7 +149,7 @@ function confidence(value?: number) {
         <nav class="view-switch" aria-label="场景导航">
           <button :class="{ active: activeView === 'workflow' }" @click="activeView = 'workflow'">告警工作流</button>
           <button :class="{ active: activeView === 'customer' }" @click="activeView = 'customer'">园区客服</button>
-          <button :class="{ active: activeView === 'voice' }" @click="activeView = 'voice'">实时语音</button>
+          <button v-if="capabilities?.voiceEnabled" :class="{ active: activeView === 'voice' }" @click="activeView = 'voice'">实时语音</button>
           <button v-if="capabilities?.collaborationEnabled" :class="{ active: activeView === 'collaboration' }" @click="activeView = 'collaboration'">专家协作</button>
           <button v-if="capabilities?.analyticsEnabled" :class="{ active: activeView === 'analytics' }" @click="activeView = 'analytics'">运营分析</button>
         </nav>

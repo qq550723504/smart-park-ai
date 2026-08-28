@@ -74,6 +74,7 @@ export interface OperationsCapabilities {
   vectorStore: 'none' | 'simple-vector-store'
   analyticsEnabled: boolean
   collaborationEnabled: boolean
+  voiceEnabled: boolean
 }
 
 export function getOperationsCapabilities() {

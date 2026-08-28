@@ -60,6 +60,7 @@ public class VoiceAnswerAgent {
     static final String WRITE_REFUSAL = "语音助手只能查询园区只读信息，无法执行写入或控制操作。";
     static final String ASK_ALERT_ID = "请告诉我具体的告警编号，我再为您查询。";
     static final String ASK_METER_ID = "请提供表计编号，我再为您查询用电情况。";
+    static final String NO_PARKING_MATCH = "暂时没有查到相关停车政策信息，无法提供确定答案。";
 
     private final ChatClient chatClient;
     private final AlertQueryTool alertQueryTool;
@@ -102,7 +103,7 @@ public class VoiceAnswerAgent {
         VoiceIntent intent = toIntent(plan.path("intent").asText(""));
 
         return switch (intent) {
-            case WRITE_REQUEST -> templateAnswer(intent, WRITE_REFUSAL);
+            case WRITE_REQUEST -> templateAnswer(intent, WRITE_REFUSAL, listener);
             case ALERT -> handleAlert(plan, question, listener, cancelled);
             case ENERGY -> handleEnergy(plan, question, listener, cancelled);
             case PARKING_POLICY -> handleParkingPolicy(plan, question, listener, cancelled);
@@ -115,7 +116,7 @@ public class VoiceAnswerAgent {
                                     java.util.function.BooleanSupplier cancelled) {
         String alertId = plan.path("alertId").asText("").trim();
         if (alertId.isEmpty()) {
-            return templateAnswer(VoiceIntent.ALERT, ASK_ALERT_ID);
+            return templateAnswer(VoiceIntent.ALERT, ASK_ALERT_ID, listener);
         }
         listener.onToolStarted("lookupAlert", "alertId=" + alertId);
         AlertQueryTool.AlertLookupResult result = alertQueryTool.lookupAlert(alertId);
@@ -147,7 +148,7 @@ public class VoiceAnswerAgent {
                                      java.util.function.BooleanSupplier cancelled) {
         String meterId = plan.path("meterId").asText("").trim();
         if (meterId.isEmpty()) {
-            return templateAnswer(VoiceIntent.ENERGY, ASK_METER_ID);
+            return templateAnswer(VoiceIntent.ENERGY, ASK_METER_ID, listener);
         }
         listener.onToolStarted("lookupEnergyConsumption", "meterId=" + meterId);
         EnergyQueryTool.EnergyLookupResult result = energyQueryTool.lookupEnergyConsumption(meterId);
@@ -195,6 +196,9 @@ public class VoiceAnswerAgent {
         }
         ToolCallRecord call = new ToolCallRecord("searchVisitorGuide", "query=" + keyword,
                 digestJoiner.length() == 0 ? "error=no matching documents" : digestJoiner.toString());
+        if (result.documents().isEmpty()) {
+            return templateAnswer(VoiceIntent.PARKING_POLICY, NO_PARKING_MATCH, listener);
+        }
         return streamGrounded(VoiceIntent.PARKING_POLICY, question, refs,
                 List.of(call), List.of(evidenceLine(call)), listener, cancelled);
     }
@@ -235,7 +239,8 @@ public class VoiceAnswerAgent {
         return call.toolName() + ": " + call.argumentSummary() + "; " + call.resultDigest();
     }
 
-    private VoiceAnswer templateAnswer(VoiceIntent intent, String text) {
+    private VoiceAnswer templateAnswer(VoiceIntent intent, String text, Listener listener) {
+        listener.onTextDelta(text);
         VoiceAnswer answer = new VoiceAnswer(text, List.of(), List.of());
         validator.validate(intent, answer);
         return answer;

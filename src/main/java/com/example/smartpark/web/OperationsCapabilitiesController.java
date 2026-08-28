@@ -14,16 +14,19 @@ public class OperationsCapabilitiesController {
     private final String knowledgeMode;
     private final String customerAnswerMode;
     private final boolean analyticsEnabled;
+    private final boolean voiceEnabled;
     private final ObjectProvider<ExpertCollaborationService> collaborationService;
 
     public OperationsCapabilitiesController(
             @Value("${smartpark.knowledge.mode:mock}") String knowledgeMode,
             @Value("${smartpark.customer-service.answer-mode:mock}") String customerAnswerMode,
             @Value("${smartpark.analytics.enabled:false}") boolean analyticsEnabled,
+            @Value("${smartpark.voice.enabled:false}") boolean voiceEnabled,
             ObjectProvider<ExpertCollaborationService> collaborationService) {
         this.knowledgeMode = safeMode(knowledgeMode, "mock", "rag");
         this.customerAnswerMode = safeMode(customerAnswerMode, "mock", "dashscope");
         this.analyticsEnabled = analyticsEnabled;
+        this.voiceEnabled = voiceEnabled;
         this.collaborationService = collaborationService;
     }
 
@@ -31,7 +34,7 @@ public class OperationsCapabilitiesController {
     public Capabilities capabilities() {
         return new Capabilities(knowledgeMode, customerAnswerMode,
                 "rag".equals(knowledgeMode) ? "simple-vector-store" : "none", analyticsEnabled,
-                collaborationService.getIfAvailable() != null);
+                collaborationService.getIfAvailable() != null, voiceEnabled);
     }
 
     private static String safeMode(String value, String... allowed) {
@@ -46,5 +49,6 @@ public class OperationsCapabilitiesController {
             String customerAnswerMode,
             String vectorStore,
             boolean analyticsEnabled,
-            boolean collaborationEnabled) { }
+            boolean collaborationEnabled,
+            boolean voiceEnabled) { }
 }

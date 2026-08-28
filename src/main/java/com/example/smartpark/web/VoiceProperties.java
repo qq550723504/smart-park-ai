@@ -3,6 +3,8 @@ package com.example.smartpark.web;
 import com.example.smartpark.voice.VoiceDeadlines;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.time.Duration;
+
 /** Voice session transport policy and budgets; secrets stay in environment variables. */
 @ConfigurationProperties(prefix = "smartpark.voice")
 public class VoiceProperties {
@@ -22,40 +24,38 @@ public class VoiceProperties {
 
     public static class Budgets {
         /** Max cumulative input per turn (plan: 10s). */
-        private String maxInputDuration = "PT10S";
+        private Duration maxInputDuration = Duration.ofSeconds(10);
         /** Max agent reasoning+tools+streaming time (plan: 15s). */
-        private String maxAgentDuration = "PT15S";
+        private Duration maxAgentDuration = Duration.ofSeconds(15);
         /** Max wait for the first TTS chunk (plan: 5s). */
-        private String ttsFirstChunkTimeout = "PT5S";
+        private Duration ttsFirstChunkTimeout = Duration.ofSeconds(5);
 
         public VoiceDeadlines toDeadlines() {
             return new VoiceDeadlines(
-                    java.time.Duration.parse(maxInputDuration),
-                    java.time.Duration.parse(maxAgentDuration),
-                    java.time.Duration.parse(ttsFirstChunkTimeout));
+                    maxInputDuration, maxAgentDuration, ttsFirstChunkTimeout);
         }
 
-        public String getMaxInputDuration() {
+        public Duration getMaxInputDuration() {
             return maxInputDuration;
         }
 
-        public void setMaxInputDuration(String value) {
+        public void setMaxInputDuration(Duration value) {
             this.maxInputDuration = value;
         }
 
-        public String getMaxAgentDuration() {
+        public Duration getMaxAgentDuration() {
             return maxAgentDuration;
         }
 
-        public void setMaxAgentDuration(String value) {
+        public void setMaxAgentDuration(Duration value) {
             this.maxAgentDuration = value;
         }
 
-        public String getTtsFirstChunkTimeout() {
+        public Duration getTtsFirstChunkTimeout() {
             return ttsFirstChunkTimeout;
         }
 
-        public void setTtsFirstChunkTimeout(String value) {
+        public void setTtsFirstChunkTimeout(Duration value) {
             this.ttsFirstChunkTimeout = value;
         }
     }

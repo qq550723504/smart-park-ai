@@ -256,6 +256,12 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
     })
   }
 
+  async function stopInput(): Promise<void> {
+    await capture?.stop().catch(() => undefined)
+    stream?.getTracks?.().forEach((track) => track.stop())
+    stream = null
+  }
+
   /**
    * Mic click semantics per backend contract:
    * IDLE/ERROR → begin listening; LISTENING → commit;
@@ -267,7 +273,7 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
       const phase = voicePhase.value as string | null
       switch (phase as VoiceSessionState | null) {
         case 'LISTENING':
-          ensureCapture().stop().catch(() => undefined)
+          await stopInput()
           sendControl('COMMIT_INPUT')
           break
         case 'SPEAKING':
@@ -309,6 +315,7 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
     }
     capture?.stop().catch(() => undefined)
     stream?.getTracks?.().forEach((track) => track.stop())
+    stream = null
     socket?.close()
     socket = null
     suppressAudio = false

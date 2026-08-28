@@ -19,9 +19,13 @@ public final class FakeStreamingAsrPort implements StreamingAsrPort {
     private final List<String> started = new CopyOnWriteArrayList<>();
     private final List<String> committed = new CopyOnWriteArrayList<>();
     private final List<String> cancelled = new CopyOnWriteArrayList<>();
+    private volatile RuntimeException startFailure;
 
     @Override
     public void start(String sessionId, String turnId, Listener listener) {
+        if (startFailure != null) {
+            throw startFailure;
+        }
         started.add(sessionId + "/" + turnId);
         listenersByTurn.put(turnKey(sessionId, turnId), listener);
     }
@@ -56,6 +60,14 @@ public final class FakeStreamingAsrPort implements StreamingAsrPort {
             l.onClosed(sessionId, turnId);
         });
         finishTurn(sessionId, turnId);
+    }
+
+    public void emitFinalBeforeCommit(String sessionId, String turnId, String text) {
+        withActiveListener(sessionId, turnId, l -> l.onFinal(sessionId, turnId, text));
+    }
+
+    public void failOnStart(RuntimeException failure) {
+        startFailure = failure;
     }
 
     public void failTurn(String sessionId, String turnId, VoiceErrorCode code) {

@@ -119,6 +119,8 @@ class VoiceWebSocketHandlerTest {
 
         // 第二条连接不能劫持正在进行的音频流。
         verify(second).close(CloseStatus.NOT_ACCEPTABLE.withReason("session already attached"));
+        handler.afterConnectionClosed(second, CloseStatus.NORMAL);
+        assertThat(support.store.find(created.sessionId())).isPresent();
     }
 
     @Test

@@ -48,7 +48,7 @@ class ${CAPTURE_WORKLET_NAME}Processor extends AudioWorkletProcessor {
   constructor() {
     super();
     this.ratio = sampleRate / TARGET_SAMPLE_RATE;
-    this.cursor = 0;
+    this.position = 0;
     this.pending = new Float32Array(CHUNK_SAMPLES);
     this.pendingFilled = 0;
   }
@@ -59,9 +59,10 @@ class ${CAPTURE_WORKLET_NAME}Processor extends AudioWorkletProcessor {
     const channel = input[0];
     if (!channel) return true;
 
-    for (let i = 0; i < channel.length; i++) {
-      const position = this.cursor + i;
-      // linear interpolation between neighbouring source samples
+    let position = this.position;
+    while (position < channel.length) {
+      // position is relative to this input block; only the fractional carry
+      // crosses process() boundaries.
       const leftIndex = Math.floor(position);
       const rightIndex = Math.min(leftIndex + 1, channel.length - 1);
       const fraction = position - leftIndex;
@@ -78,9 +79,10 @@ class ${CAPTURE_WORKLET_NAME}Processor extends AudioWorkletProcessor {
         this.port.postMessage(pcm.buffer, [pcm.buffer]);
         this.pendingFilled = 0;
       }
+      position += this.ratio;
     }
 
-    this.cursor += channel.length;
+    this.position = position - channel.length;
     return true;
   }
 }
@@ -159,14 +161,15 @@ export class VoicePcmCapture {
       throw new Error('capture already started')
     }
     const context = this.deps.createContext(16000)
-    const source = buildCaptureWorkletSource()
-    this.moduleUrl = this.deps.createModuleUrl(source)
+    const workletSource = buildCaptureWorkletSource()
+    this.moduleUrl = this.deps.createModuleUrl(workletSource)
     await context.audioWorklet.addModule(this.moduleUrl)
 
     const node = await this.deps.createWorkletNode(context, CAPTURE_WORKLET_NAME, this.moduleUrl)
     node.port.onmessage = (event) => onChunk(event.data as ArrayBuffer)
 
-    context.createMediaStreamSource(stream).connect(node)
+    const mediaSource = context.createMediaStreamSource(stream)
+    mediaSource.connect(node)
     // Pull sink with zero gain: keeps the worklet processing without ever
     // playing the user's own microphone back through the speakers.
     const mute = this.deps.createMuteSink(context)
@@ -177,7 +180,7 @@ export class VoicePcmCapture {
     this.context = context
     this.node = node
     this.mute = mute
-    this.source = context.createMediaStreamSource(stream)
+    this.source = mediaSource
   }
 
   async stop(): Promise<void> {

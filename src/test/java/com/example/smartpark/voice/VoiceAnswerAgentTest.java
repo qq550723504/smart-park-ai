@@ -1,6 +1,8 @@
 package com.example.smartpark.voice;
 
 import com.example.smartpark.adapter.mock.MockParkFixture;
+import com.example.smartpark.model.common.KnowledgeDocument;
+import com.example.smartpark.port.knowledge.KnowledgePort;
 import com.example.smartpark.voice.model.AnswerValidationException;
 import com.example.smartpark.voice.model.VoiceAnswer;
 import com.example.smartpark.tool.alert.AlertQueryTool;
@@ -141,6 +143,33 @@ class VoiceAnswerAgentTest {
         assertThat(answer.text()).contains("告警编号");
         assertThat(answer.toolCalls()).isEmpty();
         assertThat(listener.startedTools).isEmpty();
+    }
+
+    @Test
+    void templateAnswerPublishesTextDeltaForSessionStateProgression() {
+        RecordingListener listener = new RecordingListener();
+        VoiceAnswerAgent agent = newAgent("{\"intent\":\"WRITE_REQUEST\"}", List.of());
+
+        VoiceAnswer answer = agent.answer("s-1", "t-1", "打开大门", listener);
+
+        assertThat(listener.deltas).containsExactly(answer.text());
+    }
+
+    @Test
+    void parkingSearchWithoutMatchesReturnsDeterministicNoEvidenceAnswer() {
+        RecordingListener listener = new RecordingListener();
+        VoiceAnswerAgent agent = new VoiceAnswerAgent(
+                new ScriptedChatModel("{\"intent\":\"PARKING_POLICY\",\"keyword\":\"停车\"}", List.of()),
+                new AlertQueryTool(fixture.alerts()),
+                new EnergyQueryTool(fixture.energy()),
+                new ParkKnowledgeTool((KnowledgePort) (domain, query) -> List.<KnowledgeDocument>of()),
+                new VoiceAnswerValidator());
+
+        VoiceAnswer answer = agent.answer("s-1", "t-1", "访客怎么停车？", listener);
+
+        assertThat(answer.text()).isEqualTo(VoiceAnswerAgent.NO_PARKING_MATCH);
+        assertThat(answer.toolCalls()).isEmpty();
+        assertThat(listener.deltas).containsExactly(VoiceAnswerAgent.NO_PARKING_MATCH);
     }
 
 

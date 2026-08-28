@@ -12,6 +12,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.lang.NonNull;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
@@ -32,8 +33,8 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistra
 public class VoiceSessionConfiguration {
 
     @Bean
-    VoiceSessionStore voiceSessionStore() {
-        return new VoiceSessionStore();
+    VoiceSessionStore voiceSessionStore(VoiceDeadlines deadlines) {
+        return new VoiceSessionStore(deadlines);
     }
 
     @Bean
@@ -50,7 +51,8 @@ public class VoiceSessionConfiguration {
     }
 
     @Bean
-    DeadlineScheduler deadlineScheduler(ThreadPoolTaskScheduler taskScheduler) {
+    DeadlineScheduler deadlineScheduler(
+            @Qualifier("voiceDeadlineTaskScheduler") ThreadPoolTaskScheduler taskScheduler) {
         return (task, delay) -> {
             var scheduled = taskScheduler.schedule(task, java.time.Instant.now().plus(delay));
             return () -> scheduled.cancel(false);
@@ -75,6 +77,7 @@ public class VoiceSessionConfiguration {
     @Bean(name = "voiceAgentExecutor", destroyMethod = "shutdown")
     ThreadPoolTaskScheduler voiceAgentPool() {
         ThreadPoolTaskScheduler pool = new ThreadPoolTaskScheduler();
+        pool.setPoolSize(4);
         pool.setThreadNamePrefix("voice-agent-");
         pool.setDaemon(true);
         return pool;

@@ -40,11 +40,16 @@ public final class VoiceSession implements AutoCloseable {
 
     /** Per-turn bookkeeping; guarded by the serial executor except volatile reads. */
     private volatile String currentTurnId;
+    private volatile String pendingFinalText;
     private final AtomicLong turnCounter = new AtomicLong();
     private final AtomicBoolean turnInterrupted = new AtomicBoolean(false);
     private volatile long receivedChunkCount;
 
     public VoiceSession(String sessionId) {
+        this(sessionId, Duration.ofSeconds(10));
+    }
+
+    public VoiceSession(String sessionId, Duration maxInputDuration) {
         this.sessionId = sessionId;
         this.serialExecutor = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "voice-session-" + sessionId);
@@ -53,10 +58,10 @@ public final class VoiceSession implements AutoCloseable {
         });
         this.audioValidator = new AudioFrameValidator(
                 new com.example.smartpark.voice.audio.AudioFormatSpec(),
-                Duration.ofSeconds(10), 8192, 1000);
+                maxInputDuration, 8192, 1000);
         this.ringBuffer = new VoiceAudioRingBuffer(
                 new com.example.smartpark.voice.audio.AudioFormatSpec(),
-                Duration.ofSeconds(10));
+                maxInputDuration);
     }
 
     public void execute(Runnable action) {
@@ -112,12 +117,23 @@ public final class VoiceSession implements AutoCloseable {
         receivedChunkCount = 0;
         audioValidator.reset();
         ringBuffer.release();
+        pendingFinalText = null;
         currentTurnId = "turn-" + turnCounter.incrementAndGet();
         return currentTurnId;
     }
 
     public String currentTurnId() {
         return currentTurnId;
+    }
+
+    public void setPendingFinalText(String text) {
+        pendingFinalText = text;
+    }
+
+    public String takePendingFinalText() {
+        String text = pendingFinalText;
+        pendingFinalText = null;
+        return text;
     }
 
     /** Marks the active turn interrupted; later agent/TTS work for it is dropped. */

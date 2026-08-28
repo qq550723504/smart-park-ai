@@ -7,7 +7,10 @@ import com.example.smartpark.voice.model.VoiceAnswer;
 import com.example.smartpark.voice.model.VoiceIntent;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -23,7 +26,8 @@ public class VoiceAnswerValidator {
     /** Fixture-style identifiers: ALT-TEMP-001, DEV-HVAC-001, KD-PARKING-001, SEC-ACCESS-001. */
     private static final Pattern IDENTIFIER =
             Pattern.compile("[A-Z]{2,10}-[A-Z0-9]+(?:-[A-Z0-9]+)*");
-    private static final Pattern NUMBER = Pattern.compile("\\d+(?:\\.\\d+)?");
+    private static final Pattern NUMBER = Pattern.compile(
+            "(?<![A-Za-z0-9-])\\d+(?:\\.\\d+)?(?![A-Za-z0-9-])");
     private static final Pattern POLICY_CITATION = Pattern.compile("\\[doc:([A-Za-z0-9\\-]+)]");
 
     public void validate(VoiceIntent intent, VoiceAnswer answer) {
@@ -34,6 +38,10 @@ public class VoiceAnswerValidator {
         String corpus = corpus(answer);
 
         if (intent == VoiceIntent.PARKING_POLICY) {
+            if (answer.text().equals(VoiceAnswerAgent.NO_PARKING_MATCH)
+                    && answer.evidenceRefs().isEmpty() && answer.toolCalls().isEmpty()) {
+                return;
+            }
             // 政策类回答先做引用校验，避免引用编号被当作普通标识符误报。
             Matcher citations = POLICY_CITATION.matcher(answer.text());
             boolean anyCitation = false;
@@ -60,8 +68,9 @@ public class VoiceAnswerValidator {
                 throw fail(AnswerRejectReason.UNSUPPORTED_CLAIM_NUMBER);
             }
         } else {
+            Set<BigDecimal> evidenceNumbers = numericTokens(corpus);
             for (Matcher numbers = NUMBER.matcher(answer.text()); numbers.find(); ) {
-                if (!corpus.contains(numbers.group())) {
+                if (!evidenceNumbers.contains(normalizeNumber(numbers.group()))) {
                     throw fail(AnswerRejectReason.UNSUPPORTED_CLAIM_NUMBER);
                 }
             }
@@ -75,6 +84,18 @@ public class VoiceAnswerValidator {
         }
         List.copyOf(answer.evidenceRefs()).forEach(ref -> builder.append(ref).append(' '));
         return builder.toString();
+    }
+
+    private static Set<BigDecimal> numericTokens(String corpus) {
+        Set<BigDecimal> values = new HashSet<>();
+        for (Matcher matcher = NUMBER.matcher(corpus); matcher.find(); ) {
+            values.add(normalizeNumber(matcher.group()));
+        }
+        return values;
+    }
+
+    private static BigDecimal normalizeNumber(String value) {
+        return new BigDecimal(value).stripTrailingZeros();
     }
 
     private static AnswerValidationException fail(AnswerRejectReason reason) {

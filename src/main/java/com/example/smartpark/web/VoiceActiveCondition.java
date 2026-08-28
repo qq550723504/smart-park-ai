@@ -19,7 +19,7 @@ public class VoiceActiveCondition implements Condition {
 
     @Override
     public boolean matches(@NonNull ConditionContext context, @NonNull AnnotatedTypeMetadata metadata) {
-        if (!"true".equals(context.getEnvironment().getProperty(ENABLED_KEY))) {
+        if (!Boolean.parseBoolean(context.getEnvironment().getProperty(ENABLED_KEY))) {
             return false;
         }
         String envValue = context.getEnvironment().getProperty(ENV_KEY);

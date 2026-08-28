@@ -43,7 +43,38 @@ describe('voice capture worklet', () => {
     expect(source).toContain('320')
     expect(source).toContain('postMessage')
     expect(source).toContain('Int16Array')
+    expect(source).toContain('this.position = position - channel.length')
+    expect(source).toContain('position += this.ratio')
+    expect(source).not.toContain('this.cursor')
     // 主线程绝不使用已弃用的 ScriptProcessorNode。
     expect(source.toLowerCase()).not.toContain('scriptprocessor')
+  })
+
+  it('keeps the connected media source so stop can disconnect it', async () => {
+    let disconnected = 0
+    const source = { connect: () => undefined, disconnect: () => { disconnected++ } }
+    const context = {
+      sampleRate: 48000,
+      createMediaStreamSource: () => source,
+      createGain: () => ({ gain: { value: 0 }, connect: () => undefined }),
+      audioWorklet: { addModule: async () => undefined },
+      destination: {},
+      close: async () => undefined,
+    }
+    const node = {
+      port: { onmessage: null, postMessage: () => undefined },
+      connect: () => undefined,
+      disconnect: () => undefined,
+    }
+    const capture = new (await import('./pcm-capture')).VoicePcmCapture({
+      createContext: () => context,
+      createWorkletNode: async () => node as unknown as import('./pcm-capture').WorkletNodeLike,
+      createMuteSink: () => ({ gain: { value: 0 }, connect: () => undefined, disconnect: () => undefined }),
+      createModuleUrl: () => 'blob:test',
+      revokeModuleUrl: () => undefined,
+    })
+    await capture.start({} as MediaStream, () => undefined)
+    await capture.stop()
+    expect(disconnected).toBe(1)
   })
 })

@@ -210,6 +210,49 @@ class VoiceSessionServiceTest {
     }
 
     @Test
+    void providerStartFailureBecomesAnExplicitRetryableError() {
+        VoiceTestSupport h = harness("{\"intent\":\"CHITCHAT\"}", List.of());
+        var session = h.createSession();
+        h.asrPort.failOnStart(new IllegalStateException("provider unavailable"));
+
+        startTurn(h, session);
+
+        assertThat(session.session().state()).isEqualTo(VoiceSessionState.ERROR);
+        assertThat(h.frames.lastErrorCode()).isEqualTo(VoiceErrorCode.PROVIDER_FAILURE);
+    }
+
+    @Test
+    void providerFinalBeforeCommitIsPublishedButDoesNotStartReasoning() {
+        VoiceTestSupport h = harness("{\"intent\":\"CHITCHAT\"}", List.of("你好"));
+        var session = h.createSession();
+        startTurn(h, session);
+        String turnId = session.session().currentTurnId();
+
+        h.asrPort.emitFinalBeforeCommit(session.info().sessionId(), turnId, "你好");
+        h.flush(session.session());
+
+        assertThat(session.session().state()).isEqualTo(VoiceSessionState.LISTENING);
+        assertThat(h.frames.sawState(VoiceSessionState.REASONING)).isFalse();
+
+        commitTurn(h, session);
+        h.flush(session.session());
+        assertThat(session.session().state()).isEqualTo(VoiceSessionState.SPEAKING);
+    }
+
+    @Test
+    void closingSessionRemovesItsMessageCounter() {
+        VoiceTestSupport h = harness("{\"intent\":\"CHITCHAT\"}", List.of());
+        var session = h.createSession();
+        startTurn(h, session);
+        assertThat(h.service.messageCounterCount()).isGreaterThan(0);
+
+        h.service.closeSession(session.info().sessionId());
+        h.flush(session.session());
+
+        assertThat(h.service.messageCounterCount()).isZero();
+    }
+
+    @Test
     void closeReleasesAudioAndTwoSessionsStayIsolated() {
         VoiceTestSupport h = harness(
                 "{\"intent\":\"ENERGY\",\"meterId\":\"DEV-ENERGY-001\"}",
