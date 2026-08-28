@@ -11,7 +11,7 @@ class OperationsCapabilitiesControllerTest {
     @Test
     void reportsConfiguredRagAndDashScopeModesBackedByCurrentRuntime() {
         OperationsCapabilitiesController.Capabilities capabilities =
-                new OperationsCapabilitiesController("rag", "dashscope", true, provider(null)).capabilities();
+                new OperationsCapabilitiesController("rag", "dashscope", true, true, provider(null)).capabilities();
 
         assertThat(capabilities.knowledgeMode()).isEqualTo("rag");
         assertThat(capabilities.customerAnswerMode()).isEqualTo("dashscope");
@@ -22,7 +22,7 @@ class OperationsCapabilitiesControllerTest {
     @Test
     void reportsCollaborationOnlyWhenItsRuntimeBeanIsAvailable() {
         OperationsCapabilitiesController.Capabilities capabilities =
-                new OperationsCapabilitiesController("mock", "mock", false, provider(new ExpertCollaborationService(
+                new OperationsCapabilitiesController("mock", "mock", false, false, provider(new ExpertCollaborationService(
                         null, null, null, null, null, null, null, null))).capabilities();
 
         assertThat(capabilities.collaborationEnabled()).isTrue();

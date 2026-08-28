@@ -77,3 +77,14 @@ smartpark:
     minimum-knowledge-score: ${SMARTPARK_CUSTOMER_MINIMUM_KNOWLEDGE_SCORE:0.70}
   mcp:
     enabled: ${SMARTPARK_MCP_ENABLED:false}
+  voice:
+    # Opt-in: real DashScope ASR/TTS credentials are mandatory when enabled;
+    # enabling without AI_DASHSCOPE_API_KEY fails application startup loudly.
+    enabled: ${SMARTPARK_VOICE_ENABLED:false}
+    allowed-origins: ${SMARTPARK_VOICE_ALLOWED_ORIGINS:http://localhost:5173}
+    max-binary-frame-bytes: ${SMARTPARK_VOICE_MAX_BINARY_FRAME_BYTES:65536}
+    budgets:
+      # 唯一接受的采集规格为 16 kHz / mono / int16（32 字节每毫秒）。
+      max-input-duration: ${SMARTPARK_VOICE_MAX_INPUT_DURATION:10s}
+      max-agent-duration: ${SMARTPARK_VOICE_MAX_AGENT_DURATION:15s}
+      tts-first-chunk-timeout: ${SMARTPARK_VOICE_TTS_FIRST_CHUNK_TIMEOUT:5s}

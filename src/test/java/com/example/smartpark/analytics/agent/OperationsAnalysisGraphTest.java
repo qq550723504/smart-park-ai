@@ -11,6 +11,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -38,6 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class OperationsAnalysisGraphTest {
 
+    private static final Instant TEST_NOW = Instant.parse("2026-08-24T00:00:00Z");
     private static final String GOOD_SQL = """
             SELECT building_id, SUM(kwh) AS energy_kwh FROM analytics.v_energy_hourly
             WHERE hour_ts >= :fromTs AND hour_ts < :toTs
@@ -63,6 +65,12 @@ class OperationsAnalysisGraphTest {
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
+        var adminDataSource = new SimpleDriverDataSource();
+        adminDataSource.setDriverClass(org.postgresql.Driver.class);
+        adminDataSource.setUrl(postgres.getJdbcUrl());
+        adminDataSource.setUsername(postgres.getUsername());
+        adminDataSource.setPassword(postgres.getPassword());
+        seedFixedClockEnergyFacts(adminDataSource);
         com.example.smartpark.analytics.AnalyticsRoleCredentials.sync(
                 postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword(), "test-ro-pass");
 
@@ -95,6 +103,23 @@ class OperationsAnalysisGraphTest {
                 new AnalysisSummaryValidator(),
                 clock,
                 Duration.ofSeconds(60), new WhitelistTimeIntentProvider());
+    }
+
+    /**
+     * V1 seeds runtime-relative demo data using the database clock. This graph
+     * test intentionally uses a fixed application clock, so add a tiny fixture
+     * on that same clock rather than coupling the test to today's database date.
+     */
+    private void seedFixedClockEnergyFacts(DataSource dataSource) {
+        new JdbcTemplate(dataSource).batchUpdate("""
+                INSERT INTO analytics.energy_hourly_raw
+                    (building_id, meter_id, reading_at, kwh, baseline_kwh, peak_kw)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT DO NOTHING
+                """, List.of(
+                new Object[] {"B1", "GRAPH-TEST-B1", Timestamp.from(TEST_NOW.minus(Duration.ofDays(4))), 10.0, 8.0, 20.0},
+                new Object[] {"B2", "GRAPH-TEST-B2", Timestamp.from(TEST_NOW.minus(Duration.ofDays(4))), 11.0, 8.0, 21.0},
+                new Object[] {"B3", "GRAPH-TEST-B3", Timestamp.from(TEST_NOW.minus(Duration.ofDays(4))), 12.0, 8.0, 22.0}));
     }
 
     @AfterAll
