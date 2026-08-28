@@ -1,5 +1,8 @@
 package com.example.smartpark.analytics.agent;
 
+// Test-only compatibility fixture. The production graph is wired to the
+// JioNLP sidecar and deliberately has no finite-regex time provider.
+
 import com.example.smartpark.analytics.model.QueryPlan;
 import com.example.smartpark.analytics.model.QuestionTokenScanner;
 

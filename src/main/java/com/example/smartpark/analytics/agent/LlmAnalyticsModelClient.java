@@ -206,26 +206,6 @@ public class LlmAnalyticsModelClient implements AnalyticsModelClient {
         return java.util.Collections.unmodifiableMap(values);
     }
 
-    private static RequestedTimeRange requestedTimeRange(JsonNode json) {
-        JsonNode node = json.get("requestedTimeRange");
-        if (node == null || node.isNull()) {
-            return null;
-        }
-        if (!node.isObject()) {
-            throw new IllegalStateException("requestedTimeRange must be an object or null");
-        }
-        String from = text(node, "fromInclusive");
-        String to = text(node, "toExclusive");
-        if (from.isBlank() || to.isBlank()) {
-            throw new IllegalStateException("requestedTimeRange requires fromInclusive and toExclusive");
-        }
-        try {
-            return new RequestedTimeRange(Instant.parse(from), Instant.parse(to));
-        } catch (RuntimeException invalidRange) {
-            throw new IllegalStateException("requestedTimeRange is invalid", invalidRange);
-        }
-    }
-
     private static String sampleRows(TabularResult result) {
         StringBuilder builder = new StringBuilder("列: ").append(String.join(", ", result.columnNames())).append('\n');
         result.rows().stream().limit(10).forEach(row ->

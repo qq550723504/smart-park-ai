@@ -160,7 +160,7 @@ public class OperationsAnalysisGraph {
                                    AnalysisSummaryValidator summaryValidator,
                                    Clock clock) {
         this(catalog, modelClient, costGate, executionGate, publisher, summaryValidator, clock,
-                Duration.ofSeconds(60), new WhitelistTimeIntentProvider());
+                Duration.ofSeconds(60), failClosedProvider());
     }
 
     public OperationsAnalysisGraph(MetricCatalog catalog,
@@ -172,10 +172,10 @@ public class OperationsAnalysisGraph {
                                    Clock clock,
                                    Duration executionTimeout) {
         this(catalog, modelClient, costGate, executionGate, publisher, summaryValidator, clock,
-                executionTimeout, new WhitelistTimeIntentProvider());
+                executionTimeout, failClosedProvider());
     }
 
-    OperationsAnalysisGraph(MetricCatalog catalog,
+    public OperationsAnalysisGraph(MetricCatalog catalog,
                             AnalyticsModelClient modelClient,
                             CostGate costGate,
                             ExecutionGate executionGate,
@@ -201,6 +201,12 @@ public class OperationsAnalysisGraph {
         } catch (Exception exception) {
             throw new IllegalStateException("unable to compile operations analysis graph", exception);
         }
+    }
+
+    private static TimeIntentProvider failClosedProvider() {
+        return (question, now) -> {
+            throw new IllegalStateException("analytics time intent provider must be configured");
+        };
     }
 
     @SuppressWarnings("unchecked")
@@ -357,8 +363,8 @@ public class OperationsAnalysisGraph {
         AnalyticsModelClient.QuestionUnderstanding modelUnderstanding = ctx.pinnedUnderstanding != null
                 ? ctx.pinnedUnderstanding
                 : modelClient.understandQuestion(question);
-        if (ctx.pinnedUnderstanding != null && ctx.pinnedUnderstanding.requestedTimeRange() != null) {
-            ctx.serverTimeRange = toTimeRange(ctx.pinnedUnderstanding.requestedTimeRange());
+        if (ctx.pinnedUnderstanding != null && ctx.pinnedUnderstanding.serverResolvedTimeRange() != null) {
+            ctx.serverTimeRange = toTimeRange(ctx.pinnedUnderstanding.serverResolvedTimeRange());
             ctx.timeRangeSource = QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE;
             ctx.timeResolution = TimeResolutionMetadata.explicit(ctx.serverTimeRange.from(),
                     ctx.serverTimeRange.to(), "澄清确认的时间范围");
@@ -397,9 +403,6 @@ public class OperationsAnalysisGraph {
         ctx.timeRangeSource = finalTime.status() == TimeIntentResult.Status.PARSED
                 ? QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE
                 : QueryPlan.TimeRangeSource.DEFAULT_METRIC_LOOKBACK;
-        if (parsedServerTimeRange == null && modelUnderstanding.requestedTimeRange() != null) {
-            throw new IllegalArgumentException("模型返回了原始问题未包含的时间范围");
-        }
         ctx.serverTimeRange = parsedServerTimeRange;
         // 保存服务器拥有的绝对区间快照，供澄清暂停后复用；模型值仅供参考。
         ctx.understanding = withServerTimeRange(modelUnderstanding, parsedServerTimeRange);
@@ -708,7 +711,8 @@ public class OperationsAnalysisGraph {
                 : new AnalyticsModelClient.RequestedTimeRange(timeRange.from(), timeRange.to());
         return new AnalyticsModelClient.QuestionUnderstanding(
                 understanding.normalizedQuestion(), understanding.metricTerms(), understanding.clarificationQuestions(),
-                requested, understanding.requestedDimensions(), understanding.requestedFilters());
+                requested, understanding.requestedDimensions(), understanding.requestedFilters(),
+                understanding.requestedTimeMentions(), requested);
     }
 
     Map<String, Object> generateSql(OverAllState state) {

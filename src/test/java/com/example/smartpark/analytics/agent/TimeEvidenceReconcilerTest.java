@@ -72,10 +72,9 @@ class TimeEvidenceReconcilerTest {
     }
 
     @Test
-    void nestedVerbatimModelFragmentInsideParserMentionIsAccepted() {
-        // 模型在完整表达之外额外返回嵌套片段（“2026年8月25日”中的“8月25日”）
-        // 属于合理的识别结果：只要落在单一解析器 mention 内部就视为一致，
-        // 不应把合法问题误杀为 AMBIGUOUS。
+    void nestedVerbatimModelFragmentInsideParserMentionIsAmbiguous() {
+        // 模型只返回完整表达的子串时，不与 parser 的原文 span 严格相等，
+        // 必须 fail closed，避免把截断证据误当成已解析。
         var question = "2026年8月25日能耗";
         var parser = new WhitelistTimeIntentProvider().resolve(question, NOW);
 
@@ -84,7 +83,7 @@ class TimeEvidenceReconcilerTest {
         var result = reconciler.reconcile(parser,
                 List.of("2026年8月25日", "8月25日"), question);
 
-        assertThat(result.status()).isEqualTo(TimeIntentResult.Status.PARSED);
+        assertThat(result.status()).isEqualTo(TimeIntentResult.Status.AMBIGUOUS);
     }
 
     @Test

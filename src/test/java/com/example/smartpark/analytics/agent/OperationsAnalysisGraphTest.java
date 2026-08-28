@@ -50,6 +50,7 @@ class OperationsAnalysisGraphTest {
     private PostgreSQLContainer<?> postgres;
     private ScriptedModelClient modelClient;
     private OperationsAnalysisGraph graph;
+    private OperationsAnalysisGraph graphWithSeedRows;
     private InMemoryExecutionEventPublisher publisher;
     private Map<String, Object> lastExecutionParameters;
 
@@ -73,7 +74,12 @@ class OperationsAnalysisGraphTest {
 
         modelClient = new ScriptedModelClient();
         publisher = new InMemoryExecutionEventPublisher();
-        graph = new OperationsAnalysisGraph(
+        graph = newGraph(dataSource, Clock.fixed(Instant.parse("2026-08-24T00:00:00Z"), ZoneOffset.UTC));
+        graphWithSeedRows = newGraph(dataSource, Clock.fixed(Instant.parse("2026-08-24T12:00:00Z"), ZoneOffset.UTC));
+    }
+
+    private OperationsAnalysisGraph newGraph(DataSource dataSource, Clock clock) {
+        return new OperationsAnalysisGraph(
                 new MetricCatalog(),
                 modelClient,
                 (sql, parameters) -> new com.example.smartpark.analytics.sql.QueryCostGuard(
@@ -87,7 +93,8 @@ class OperationsAnalysisGraphTest {
                 },
                 publisher,
                 new AnalysisSummaryValidator(),
-                Clock.fixed(Instant.parse("2026-08-24T00:00:00Z"), ZoneOffset.UTC));
+                clock,
+                Duration.ofSeconds(60), new WhitelistTimeIntentProvider());
     }
 
     @AfterAll
@@ -100,14 +107,14 @@ class OperationsAnalysisGraphTest {
     @Test
     void runsEveryNodeInOrderAndCompletesWithRealResults() {
         modelClient.reset(
-                new AnalyticsModelClient.QuestionUnderstanding("上周各楼宇能耗对比", List.of("能耗"), List.of(),
+                new AnalyticsModelClient.QuestionUnderstanding("过去7天各楼宇能耗对比", List.of("能耗"), List.of(),
                         null, List.of("building_id")),
                 List.of(GOOD_SQL),
                 new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("energy_kwh"), "", "kWh"),
                 "共 3 行结果。");
         UUID runId = UUID.randomUUID();
 
-        var outcome = graph.run(runId, "上周各楼宇能耗对比");
+        var outcome = graphWithSeedRows.run(runId, "过去7天各楼宇能耗对比");
 
         assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
         assertThat(outcome.result().rowCount()).isEqualTo(3);
@@ -385,7 +392,8 @@ class OperationsAnalysisGraphTest {
                 (sql, parameters) -> { throw new IllegalStateException("must not execute"); },
                 publisher,
                 new AnalysisSummaryValidator(),
-                Clock.fixed(Instant.parse("2026-08-24T16:00:00Z"), ZoneOffset.UTC));
+                Clock.fixed(Instant.parse("2026-08-24T16:00:00Z"), ZoneOffset.UTC),
+                Duration.ofSeconds(60), new WhitelistTimeIntentProvider());
         try {
             var understanding = new AnalyticsModelClient.QuestionUnderstanding(
                     "今天能耗", List.of("能耗"), List.of(),

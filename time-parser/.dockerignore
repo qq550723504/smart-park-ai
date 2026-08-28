@@ -1,0 +1,9 @@
+.venv
+.pytest_cache
+__pycache__
+*.pyc
+tests
+corpus
+scripts
+requirements.in
+pyproject.toml

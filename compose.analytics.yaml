@@ -1,4 +1,25 @@
 services:
+  analytics-time-parser:
+    build:
+      context: ./time-parser
+      dockerfile: Dockerfile
+    profiles: [analytics]
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    expose:
+      - "8081"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/healthz', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
   analytics-postgres:
     environment:
       # Override the local demo-only trust value explicitly. Do not rely on a
@@ -22,6 +43,11 @@ services:
       SMARTPARK_ANALYTICS_DB_ADMIN_PASSWORD: ${SMARTPARK_ANALYTICS_DB_ADMIN_PASSWORD:?set SMARTPARK_ANALYTICS_DB_ADMIN_PASSWORD in .env before enabling analytics}
       SMARTPARK_ANALYTICS_DB_RO_PASSWORD: ${SMARTPARK_ANALYTICS_DB_RO_PASSWORD:?set SMARTPARK_ANALYTICS_DB_RO_PASSWORD in .env before enabling analytics}
       SMARTPARK_ANALYTICS_DB_USER: smartpark_analytics_ro
+      SMARTPARK_ANALYTICS_TIME_INTENT_ENABLED: "true"
+      SMARTPARK_ANALYTICS_TIME_INTENT_URL: http://analytics-time-parser:8081
+    depends_on:
+      analytics-time-parser:
+        condition: service_healthy
 
 volumes:
   analytics-postgres-analytics-data:

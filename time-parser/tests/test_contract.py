@@ -56,7 +56,7 @@ def test_excluded_entity_span_yields_none_without_mentions():
         "question": "MTR-2026-08-01表计的能耗",
         "referenceInstant": REFERENCE,
         "timezone": "Asia/Shanghai",
-        "excludedSpans": [{"start": 0, "end": 12}],
+        "excludedSpans": [{"start": 0, "end": 14}],
     })
 
     assert response.status_code == 200

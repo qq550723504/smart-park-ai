@@ -175,10 +175,14 @@ public class OperationsAnalysisService {
                         .orElse("");
                 AnalyticsModelClient.RequestedTimeRange requestedTimeRange = pending.understanding() == null
                         ? null : pending.understanding().requestedTimeRange();
+                AnalyticsModelClient.RequestedTimeRange serverResolvedTimeRange = pending.understanding() == null
+                        ? null : pending.understanding().serverResolvedTimeRange();
                 List<String> requestedDimensions = pending.understanding() == null
                         ? List.of() : pending.understanding().requestedDimensions();
                 Map<String, String> requestedFilters = pending.understanding() == null
                         ? Map.of() : pending.understanding().requestedFilters();
+                List<String> requestedTimeMentions = pending.understanding() == null
+                        ? List.of() : pending.understanding().requestedTimeMentions();
                 LinkedHashSet<String> metricTerms = new LinkedHashSet<>();
                 if (pending.understanding() != null) {
                     for (String term : pending.understanding().metricTerms()) {
@@ -193,7 +197,8 @@ public class OperationsAnalysisService {
                         ? current.question() : pending.understanding().normalizedQuestion();
                 pinned = new AnalyticsModelClient.QuestionUnderstanding(
                         normalizedQuestion, List.copyOf(metricTerms),
-                        List.of(), requestedTimeRange, requestedDimensions, requestedFilters);
+                        List.of(), requestedTimeRange, requestedDimensions, requestedFilters,
+                        requestedTimeMentions, serverResolvedTimeRange);
                 // Use the snapshot already checked above. Calling the public
                 // getter here would perform lazy clarification expiry again;
                 // a clock crossing the deadline during resume could therefore

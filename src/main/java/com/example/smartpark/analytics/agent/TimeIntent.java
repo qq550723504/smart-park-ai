@@ -3,7 +3,7 @@ package com.example.smartpark.analytics.agent;
 import java.time.LocalDate;
 import java.util.Objects;
 
-record TimeIntent(
+public record TimeIntent(
         String sourceText,
         Kind kind,
         long amount,
@@ -12,7 +12,7 @@ record TimeIntent(
         LocalDate toDate,
         DayPart dayPart) {
 
-    TimeIntent {
+    public TimeIntent {
         if (sourceText == null || sourceText.isBlank()) {
             throw new IllegalArgumentException("sourceText must not be blank");
         }
@@ -56,9 +56,9 @@ record TimeIntent(
         }
     }
 
-    enum Kind { ROLLING, SINGLE_DATE, DATE_RANGE, CALENDAR_PERIOD, QUALIFIED_DAY, DAY_PART }
+    public enum Kind { ROLLING, SINGLE_DATE, DATE_RANGE, CALENDAR_PERIOD, QUALIFIED_DAY, DAY_PART }
 
-    enum Unit { HOUR, DAY, WEEK, MONTH, QUARTER, YEAR, HALF_YEAR }
+    public enum Unit { HOUR, DAY, WEEK, MONTH, QUARTER, YEAR, HALF_YEAR }
 
-    enum DayPart { MORNING, AFTERNOON, EVENING }
+    public enum DayPart { MORNING, AFTERNOON, EVENING }
 }

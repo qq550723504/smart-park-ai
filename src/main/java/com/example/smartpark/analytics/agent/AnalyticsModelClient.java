@@ -38,19 +38,21 @@ public interface AnalyticsModelClient {
              * 证据：由 {@code ModelTimeEvidence} 在原问题中定位，最终区间永远
              * 来自服务端确定性解析。
              */
-            List<String> requestedTimeMentions) {
+            List<String> requestedTimeMentions,
+            /** Server-owned snapshot used only when resuming clarification. */
+            RequestedTimeRange serverResolvedTimeRange) {
 
         public QuestionUnderstanding(String normalizedQuestion,
                                      List<String> metricTerms,
                                      List<String> clarificationQuestions) {
-            this(normalizedQuestion, metricTerms, clarificationQuestions, null, List.of(), Map.of(), List.of());
+            this(normalizedQuestion, metricTerms, clarificationQuestions, null, List.of(), Map.of(), List.of(), null);
         }
 
         public QuestionUnderstanding(String normalizedQuestion,
                                      List<String> metricTerms,
                                      List<String> clarificationQuestions,
                                      RequestedTimeRange requestedTimeRange) {
-            this(normalizedQuestion, metricTerms, clarificationQuestions, requestedTimeRange, List.of(), Map.of(), List.of());
+            this(normalizedQuestion, metricTerms, clarificationQuestions, requestedTimeRange, List.of(), Map.of(), List.of(), null);
         }
 
         public QuestionUnderstanding(String normalizedQuestion,
@@ -59,7 +61,7 @@ public interface AnalyticsModelClient {
                                      RequestedTimeRange requestedTimeRange,
                                      List<String> requestedDimensions) {
             this(normalizedQuestion, metricTerms, clarificationQuestions,
-                    requestedTimeRange, requestedDimensions, Map.of(), List.of());
+                    requestedTimeRange, requestedDimensions, Map.of(), List.of(), null);
         }
 
         public QuestionUnderstanding(String normalizedQuestion,
@@ -69,7 +71,18 @@ public interface AnalyticsModelClient {
                                      List<String> requestedDimensions,
                                      Map<String, String> requestedFilters) {
             this(normalizedQuestion, metricTerms, clarificationQuestions,
-                    requestedTimeRange, requestedDimensions, requestedFilters, List.of());
+                    requestedTimeRange, requestedDimensions, requestedFilters, List.of(), null);
+        }
+
+        public QuestionUnderstanding(String normalizedQuestion,
+                                     List<String> metricTerms,
+                                     List<String> clarificationQuestions,
+                                     RequestedTimeRange requestedTimeRange,
+                                     List<String> requestedDimensions,
+                                     Map<String, String> requestedFilters,
+                                     List<String> requestedTimeMentions) {
+            this(normalizedQuestion, metricTerms, clarificationQuestions,
+                    requestedTimeRange, requestedDimensions, requestedFilters, requestedTimeMentions, null);
         }
 
         public QuestionUnderstanding {
