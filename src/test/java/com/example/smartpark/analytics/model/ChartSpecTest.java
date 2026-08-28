@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Arrays;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -149,5 +150,89 @@ class ChartSpecTest {
                 java.util.Map.of("other_column", "kWh"));
 
         assertThat(spec.type()).isEqualTo(ChartSpec.ChartType.TABLE);
+    }
+
+    @Test
+    void acceptsExtendedChartTypesAndSafeRenderingOptions() {
+        TabularResult extended = new TabularResult(
+                List.of("building_name", "stat_date", "hour_of_day", "map_x", "map_y",
+                        "energy_kwh", "occupancy_avg"),
+                List.of(List.of("创新中心", "2026-08-27", 9, 12.5, 35.0, 100, 120)), false, 1);
+
+        ChartSpec ranking = ChartSpec.fromProposal(new ChartSpec.Proposal(
+                "BAR", "楼宇排行", "building_name", List.of("energy_kwh"), "",
+                "kWh", new ChartSpec.RenderOptions("HORIZONTAL", false, null, "", "")),
+                extended, java.util.Map.of("energy_kwh", "kWh"));
+        assertThat(ranking.options().orientation()).isEqualTo("HORIZONTAL");
+
+        ChartSpec heatmap = ChartSpec.fromProposal(new ChartSpec.Proposal(
+                "HEATMAP", "时段热力", "stat_date", List.of("energy_kwh"), "hour_of_day",
+                "kWh", ChartSpec.RenderOptions.defaults()),
+                extended, java.util.Map.of("energy_kwh", "kWh"));
+        assertThat(heatmap.type()).isEqualTo(ChartSpec.ChartType.HEATMAP);
+
+        ChartSpec map = ChartSpec.fromProposal(new ChartSpec.Proposal(
+                "MAP", "楼宇分布", "building_name", List.of("energy_kwh"), "",
+                "kWh", new ChartSpec.RenderOptions("VERTICAL", false, null, "map_x", "map_y")),
+                extended, java.util.Map.of("energy_kwh", "kWh"));
+        assertThat(map.type()).isEqualTo(ChartSpec.ChartType.MAP);
+        assertThat(map.options().coordinateXField()).isEqualTo("map_x");
+    }
+
+    @Test
+    void derivesGaugeTargetAndRejectsInvalidHeatmapCoordinates() {
+        TabularResult gaugeResult = new TabularResult(
+                List.of("energy_target_completion_pct"), List.of(List.of(92.5)), false, 1);
+        ChartSpec gauge = ChartSpec.fromProposal(new ChartSpec.Proposal(
+                "GAUGE", "目标完成率", "energy_target_completion_pct",
+                List.of("energy_target_completion_pct"), "", "%"), gaugeResult,
+                java.util.Map.of("energy_target_completion_pct", "%"));
+        assertThat(gauge.options().targetValue()).isEqualTo(100.0);
+
+        TabularResult invalidHeatmap = new TabularResult(
+                List.of("stat_date", "hour_of_day", "energy_kwh"),
+                List.of(List.of("2026-08-27", 9, 100), List.of("2026-08-27", 9, 200)), false, 2);
+        ChartSpec fallback = ChartSpec.fromProposal(new ChartSpec.Proposal(
+                "HEATMAP", "重复热力", "stat_date", List.of("energy_kwh"), "hour_of_day", "kWh"),
+                invalidHeatmap, java.util.Map.of("energy_kwh", "kWh"));
+        assertThat(fallback.type()).isEqualTo(ChartSpec.ChartType.TABLE);
+    }
+
+    @Test
+    void invalidMapCoordinatesFallBackToTable() {
+        TabularResult withoutCoordinates = new TabularResult(
+                List.of("building_name", "energy_kwh"), List.of(List.of("创新中心", 100)), false, 1);
+        ChartSpec fallback = ChartSpec.fromProposal(new ChartSpec.Proposal(
+                "MAP", "楼宇分布", "building_name", List.of("energy_kwh"), "", "kWh",
+                new ChartSpec.RenderOptions("VERTICAL", false, null, "map_x", "map_y")),
+                withoutCoordinates, java.util.Map.of("energy_kwh", "kWh"));
+        assertThat(fallback.type()).isEqualTo(ChartSpec.ChartType.TABLE);
+    }
+
+    @Test
+    void recommendsTheRequestedVisualizationFromRealResultShape() {
+        TabularResult result = new TabularResult(
+                List.of("building_name", "map_x", "map_y", "energy_kwh"),
+                List.of(List.of("创新中心", 12.5, 35.0, 4618)), false, 1);
+
+        ChartSpec spec = ChartSpec.recommended("过去5天楼宇空间分布", result, Map.of("energy_kwh", "kWh"));
+
+        assertThat(spec.type()).isEqualTo(ChartSpec.ChartType.MAP);
+        assertThat(spec.options().coordinateXField()).isEqualTo("map_x");
+        assertThat(spec.options().coordinateYField()).isEqualTo("map_y");
+    }
+
+    @Test
+    void recommendsScatterOnlyWhenBothRealNumericFieldsExist() {
+        TabularResult result = new TabularResult(
+                List.of("building_id", "occupancy_avg", "energy_kwh"),
+                List.of(List.of("B1", 240, 4618), List.of("B2", 210, 4856)), false, 2);
+
+        ChartSpec spec = ChartSpec.recommended("各楼宇能耗与占用人数关系", result,
+                Map.of("energy_kwh", "kWh", "occupancy_avg", "人"));
+
+        assertThat(spec.type()).isEqualTo(ChartSpec.ChartType.SCATTER);
+        assertThat(spec.xField()).isEqualTo("occupancy_avg");
+        assertThat(spec.yFields()).containsExactly("energy_kwh");
     }
 }

@@ -78,12 +78,14 @@ public sealed interface DisplayPayload
         }
     }
 
-    /** Mirrors the frozen ChartSpec contract: LINE | BAR | TABLE over real result columns. */
+    /** Mirrors the validated ChartSpec contract without carrying raw model configuration. */
     record ChartPayload(String type, String title, String xField, List<String> yFields,
-                        String seriesField, String unit) implements DisplayPayload {
+                        String seriesField, String unit, String orientation, boolean stacked,
+                        Double targetValue, String coordinateXField, String coordinateYField) implements DisplayPayload {
         public ChartPayload {
             Objects.requireNonNull(type, "type");
-            if (!Set.of("LINE", "BAR", "TABLE").contains(type)) {
+            if (!Set.of("LINE", "BAR", "TABLE", "KPI", "STACKED_BAR", "HEATMAP",
+                    "CALENDAR_HEATMAP", "SCATTER", "GAUGE", "MAP").contains(type)) {
                 throw new IllegalArgumentException("unsupported chart type: " + type);
             }
             title = Objects.requireNonNull(title, "title");
@@ -91,6 +93,22 @@ public sealed interface DisplayPayload
             yFields = List.copyOf(Objects.requireNonNullElse(yFields, List.of()));
             seriesField = Objects.requireNonNull(seriesField, "seriesField");
             unit = Objects.requireNonNull(unit, "unit");
+            orientation = orientation == null || orientation.isBlank()
+                    ? "VERTICAL" : orientation.strip().toUpperCase(java.util.Locale.ROOT);
+            if (!Set.of("VERTICAL", "HORIZONTAL").contains(orientation)) {
+                throw new IllegalArgumentException("unsupported chart orientation: " + orientation);
+            }
+            if (targetValue != null && (!Double.isFinite(targetValue) || targetValue < 0)) {
+                throw new IllegalArgumentException("targetValue must be finite and non-negative");
+            }
+            coordinateXField = coordinateXField == null ? "" : coordinateXField.strip();
+            coordinateYField = coordinateYField == null ? "" : coordinateYField.strip();
+        }
+
+        ChartPayload(String type, String title, String xField, List<String> yFields,
+                     String seriesField, String unit) {
+            this(type, title, xField, yFields, seriesField, unit,
+                    "VERTICAL", false, null, "", "");
         }
     }
 

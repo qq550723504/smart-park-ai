@@ -12,16 +12,22 @@ class MetricCatalogTest {
     private final MetricCatalog catalog = new MetricCatalog();
 
     @Test
-    void exposesTheEightContractMetricsWithUnits() {
+    void exposesTheElevenContractMetricsWithUnits() {
         assertThat(catalog.all()).extracting(def -> def.name()).containsExactlyInAnyOrder(
                 "energy_kwh", "night_energy_kwh", "energy_deviation_pct",
                 "alert_count", "high_risk_alert_count",
-                "device_offline_count", "parking_entries", "parking_utilization_pct");
+                "device_offline_count", "parking_entries", "parking_utilization_pct",
+                "peak_kw", "occupancy_avg", "energy_target_completion_pct");
         assertThat(catalog.findByName("energy_kwh").orElseThrow().unit()).isEqualTo("kWh");
         assertThat(catalog.findByName("energy_deviation_pct").orElseThrow().unit()).isEqualTo("%");
         assertThat(catalog.findByName("alert_count").orElseThrow().sourceView()).isEqualTo("analytics.v_alert_fact");
         assertThat(catalog.findByName("device_offline_count").orElseThrow().sourceView()).isEqualTo("analytics.v_device_snapshot");
         assertThat(catalog.findByName("parking_utilization_pct").orElseThrow().sourceView()).isEqualTo("analytics.v_parking_daily");
+        assertThat(catalog.findByName("peak_kw").orElseThrow().unit()).isEqualTo("kW");
+        assertThat(catalog.findByName("occupancy_avg").orElseThrow().unit()).isEqualTo("人");
+        assertThat(catalog.findByName("energy_target_completion_pct").orElseThrow().unit()).isEqualTo("%");
+        assertThat(catalog.findByName("energy_target_completion_pct").orElseThrow().expression())
+                .contains("meter_count");
     }
 
     @Test
@@ -79,5 +85,14 @@ class MetricCatalogTest {
             assertThat(definition.sourceView()).startsWith("analytics.v_");
             assertThat(definition.expression()).doesNotContainIgnoringCase("DROP", "INSERT", "UPDATE", "DELETE");
         }
+    }
+
+    @Test
+    void energyMetricsExposeDimensionsNeededByVisualizationQueries() {
+        var energy = catalog.findByName("energy_kwh").orElseThrow();
+        assertThat(energy.allowedDimensions()).contains("building_name", "stat_date", "hour_of_day",
+                "day_of_week", "area_sqm", "map_x", "map_y");
+        assertThat(catalog.findByName("occupancy_avg").orElseThrow().allowedDimensions())
+                .contains("building_id", "building_name", "stat_date", "hour_of_day");
     }
 }

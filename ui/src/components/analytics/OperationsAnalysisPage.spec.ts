@@ -38,18 +38,27 @@ describe('OperationsAnalysisPage', () => {
 
     expect(wrapper.find('[aria-label="推荐问题"]').attributes('role')).toBe('group')
     expect(presets.map((preset) => preset.text())).toEqual([
+      '过去5天各楼宇能耗',
       '能耗总量',
       '各楼宇能耗对比',
+      '过去5天按小时能耗趋势',
+      '过去5天各楼宇能耗排行',
+      '过去5天各楼宇能耗热力图',
+      '过去5天按日期能耗日历热力图',
+      '过去5天能耗目标完成率',
+      '过去5天各楼宇能耗与占用人数关系',
+      '过去5天各楼宇能耗空间分布',
+      '过去5天各楼宇分时能耗堆叠图',
       '告警数量',
       '高风险告警数量',
       '停车进场量',
       '设备离线数',
     ])
 
-    await presets[1].trigger('click')
+    await presets[0].trigger('click')
 
     expect((wrapper.find('[aria-label="分析问题"]').element as HTMLInputElement).value)
-      .toBe('各楼宇能耗对比')
+      .toBe('过去5天各楼宇能耗')
     wrapper.unmount()
   })
 

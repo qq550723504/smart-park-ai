@@ -21,13 +21,15 @@ public class MetricCatalog {
                 "energy_kwh", "能耗",
                 java.util.Set.of("能耗", "用电量", "电量"),
                 "kWh", "analytics.v_energy_hourly",
-                java.util.Set.of("building_id", "meter_id", "hour_ts"),
+                java.util.Set.of("building_id", "building_name", "meter_id", "hour_ts", "stat_date",
+                        "hour_of_day", "day_of_week", "area_sqm", "map_x", "map_y"),
                 "SUM(kwh)", "hour_ts", 7, null));
         register(new MetricDefinition(
                 "night_energy_kwh", "夜间能耗（22:00–06:00）",
                 java.util.Set.of("夜间用电量", "夜间能耗", "夜间电量"),
                 "kWh", "analytics.v_energy_hourly",
-                java.util.Set.of("building_id", "meter_id", "hour_ts"),
+                java.util.Set.of("building_id", "building_name", "meter_id", "hour_ts", "stat_date",
+                        "hour_of_day", "day_of_week", "area_sqm", "map_x", "map_y"),
                 "SUM(kwh)", "hour_ts", 7,
                 "(EXTRACT(HOUR FROM hour_ts AT TIME ZONE 'Asia/Shanghai') >= 22 OR "
                         + "EXTRACT(HOUR FROM hour_ts AT TIME ZONE 'Asia/Shanghai') < 6)"));
@@ -35,8 +37,31 @@ public class MetricCatalog {
                 "energy_deviation_pct", "能耗基线偏差率",
                 java.util.Set.of("能耗偏差", "基线偏差"),
                 "%", "analytics.v_energy_hourly",
-                java.util.Set.of("building_id", "meter_id", "hour_ts"),
+                java.util.Set.of("building_id", "building_name", "meter_id", "hour_ts", "stat_date",
+                        "hour_of_day", "day_of_week", "area_sqm", "map_x", "map_y"),
                 "ROUND((SUM(kwh) - SUM(baseline_kwh)) * 100.0 / NULLIF(SUM(baseline_kwh), 0), 2)",
+                "hour_ts", 7, null));
+        register(new MetricDefinition(
+                "peak_kw", "峰值功率",
+                java.util.Set.of("峰值功率", "峰值", "最大功率"),
+                "kW", "analytics.v_energy_hourly",
+                java.util.Set.of("building_id", "building_name", "meter_id", "hour_ts", "stat_date",
+                        "hour_of_day", "day_of_week", "area_sqm", "map_x", "map_y"),
+                "MAX(peak_kw)", "hour_ts", 7, null));
+        register(new MetricDefinition(
+                "occupancy_avg", "平均占用人数",
+                java.util.Set.of("占用人数", "平均占用人数", "客流", "人流"),
+                "人", "analytics.v_energy_hourly",
+                java.util.Set.of("building_id", "building_name", "hour_ts", "stat_date",
+                        "hour_of_day", "day_of_week", "area_sqm", "map_x", "map_y"),
+                "AVG(occupancy_count)", "hour_ts", 7, null));
+        register(new MetricDefinition(
+                "energy_target_completion_pct", "能耗目标完成率",
+                java.util.Set.of("目标完成率", "能耗目标完成率", "目标达成率"),
+                "%", "analytics.v_energy_hourly",
+                java.util.Set.of("building_id", "building_name", "hour_ts", "stat_date",
+                        "hour_of_day", "day_of_week", "area_sqm", "map_x", "map_y"),
+                "ROUND(SUM(kwh) * 100.0 / NULLIF(SUM(target_kwh / NULLIF(meter_count, 0) / 24.0), 0), 2)",
                 "hour_ts", 7, null));
         register(new MetricDefinition(
                 "alert_count", "告警数量",

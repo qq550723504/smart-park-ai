@@ -56,7 +56,11 @@ class ExecutionEventControllerTest {
                 event(1, ExecutionEventType.RUN_STARTED, null),
                 event(2, ExecutionEventType.TOOL_CALL_COMPLETED,
                         DisplayPayload.toolCall("EnergyQueryTool", java.util.Map.of("buildingId", "B1"))),
-                event(3, ExecutionEventType.COMPLETED, null));
+                event(3, ExecutionEventType.CHART_SPECIFIED,
+                        new DisplayPayload.ChartPayload("STACKED_BAR", "能耗构成", "building_name",
+                                List.of("energy_kwh"), "meter_id", "kWh", "HORIZONTAL", true,
+                                null, "", "")),
+                event(4, ExecutionEventType.COMPLETED, null));
         scriptSubscription(scripted);
 
         MvcResult async = mockMvc.perform(get("/api/executions/{runId}/events", RUN_ID))
@@ -71,7 +75,9 @@ class ExecutionEventControllerTest {
                 .andExpect(content().string(containsString("\"payloadType\":\"TOOL_CALL\"")))
                 .andExpect(content().string(containsString("\"toolName\":\"EnergyQueryTool\"")))
                 .andExpect(content().string(containsString("\"scenario\":\"ALERT_WORKFLOW\"")))
-                .andExpect(content().string(containsString("\"sequence\":3")))
+                .andExpect(content().string(containsString("\"sequence\":4")))
+                .andExpect(content().string(containsString("\"type\":\"STACKED_BAR\"")))
+                .andExpect(content().string(containsString("\"orientation\":\"HORIZONTAL\"")))
                 // credentials must never appear even if a payload carried them
                 .andExpect(content().string(not(containsString("apiKey"))))
                 .andExpect(content().string(not(containsString("jdbc"))));
