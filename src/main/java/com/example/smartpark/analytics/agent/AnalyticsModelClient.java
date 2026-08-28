@@ -40,19 +40,21 @@ public interface AnalyticsModelClient {
              */
             List<String> requestedTimeMentions,
             /** Server-owned snapshot used only when resuming clarification. */
-            RequestedTimeRange serverResolvedTimeRange) {
+            RequestedTimeRange serverResolvedTimeRange,
+            /** First server reference instant, reused when a clarification resumes. */
+            Instant serverReferenceInstant) {
 
         public QuestionUnderstanding(String normalizedQuestion,
                                      List<String> metricTerms,
                                      List<String> clarificationQuestions) {
-            this(normalizedQuestion, metricTerms, clarificationQuestions, null, List.of(), Map.of(), List.of(), null);
+            this(normalizedQuestion, metricTerms, clarificationQuestions, null, List.of(), Map.of(), List.of(), null, null);
         }
 
         public QuestionUnderstanding(String normalizedQuestion,
                                      List<String> metricTerms,
                                      List<String> clarificationQuestions,
                                      RequestedTimeRange requestedTimeRange) {
-            this(normalizedQuestion, metricTerms, clarificationQuestions, requestedTimeRange, List.of(), Map.of(), List.of(), null);
+            this(normalizedQuestion, metricTerms, clarificationQuestions, requestedTimeRange, List.of(), Map.of(), List.of(), null, null);
         }
 
         public QuestionUnderstanding(String normalizedQuestion,
@@ -61,7 +63,7 @@ public interface AnalyticsModelClient {
                                      RequestedTimeRange requestedTimeRange,
                                      List<String> requestedDimensions) {
             this(normalizedQuestion, metricTerms, clarificationQuestions,
-                    requestedTimeRange, requestedDimensions, Map.of(), List.of(), null);
+                    requestedTimeRange, requestedDimensions, Map.of(), List.of(), null, null);
         }
 
         public QuestionUnderstanding(String normalizedQuestion,
@@ -71,7 +73,7 @@ public interface AnalyticsModelClient {
                                      List<String> requestedDimensions,
                                      Map<String, String> requestedFilters) {
             this(normalizedQuestion, metricTerms, clarificationQuestions,
-                    requestedTimeRange, requestedDimensions, requestedFilters, List.of(), null);
+                    requestedTimeRange, requestedDimensions, requestedFilters, List.of(), null, null);
         }
 
         public QuestionUnderstanding(String normalizedQuestion,
@@ -82,7 +84,7 @@ public interface AnalyticsModelClient {
                                      Map<String, String> requestedFilters,
                                      List<String> requestedTimeMentions) {
             this(normalizedQuestion, metricTerms, clarificationQuestions,
-                    requestedTimeRange, requestedDimensions, requestedFilters, requestedTimeMentions, null);
+                    requestedTimeRange, requestedDimensions, requestedFilters, requestedTimeMentions, null, null);
         }
 
         public QuestionUnderstanding {

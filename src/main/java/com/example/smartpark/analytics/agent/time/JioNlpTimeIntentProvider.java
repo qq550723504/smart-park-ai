@@ -8,6 +8,7 @@ import com.example.smartpark.analytics.model.QuestionTokenScanner;
 
 import java.time.Instant;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -48,7 +49,11 @@ public final class JioNlpTimeIntentProvider implements TimeIntentProvider {
         List<UnicodeOffsetMapper.Span> excluded = QuestionTokenScanner.entityIdentifiers(question).stream()
                 .map(token -> UnicodeOffsetMapper.toCodePoints(question, token.start(), token.end()))
                 .toList();
-        TimeParserRequest request = new TimeParserRequest(question, now.toString(), timezone, excluded);
+        // The sidecar contract uses second-precision canonical UTC strings;
+        // truncating once here keeps request/response echoes stable even when
+        // the JVM clock exposes nanoseconds.
+        Instant requestInstant = now.truncatedTo(ChronoUnit.SECONDS);
+        TimeParserRequest request = new TimeParserRequest(question, requestInstant.toString(), timezone, excluded);
         TimeParserResponse response = resolver.apply(request);
         List<QuestionTokenScanner.Token> entities = QuestionTokenScanner.entityIdentifiers(question);
         List<TimeIntentResult.TimeMention> mentions = new ArrayList<>();

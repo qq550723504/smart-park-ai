@@ -183,6 +183,8 @@ public class OperationsAnalysisService {
                         ? Map.of() : pending.understanding().requestedFilters();
                 List<String> requestedTimeMentions = pending.understanding() == null
                         ? List.of() : pending.understanding().requestedTimeMentions();
+                Instant serverReferenceInstant = pending.understanding() == null
+                        ? null : pending.understanding().serverReferenceInstant();
                 LinkedHashSet<String> metricTerms = new LinkedHashSet<>();
                 if (pending.understanding() != null) {
                     for (String term : pending.understanding().metricTerms()) {
@@ -198,7 +200,7 @@ public class OperationsAnalysisService {
                 pinned = new AnalyticsModelClient.QuestionUnderstanding(
                         normalizedQuestion, List.copyOf(metricTerms),
                         List.of(), requestedTimeRange, requestedDimensions, requestedFilters,
-                        requestedTimeMentions, serverResolvedTimeRange);
+                        requestedTimeMentions, serverResolvedTimeRange, serverReferenceInstant);
                 // Use the snapshot already checked above. Calling the public
                 // getter here would perform lazy clarification expiry again;
                 // a clock crossing the deadline during resume could therefore
@@ -471,7 +473,8 @@ public class OperationsAnalysisService {
                         outcome.result() != null && outcome.result().truncated(),
                         durationMs, null, createdAt, now,
                         outcome.result() == null ? List.of() : outcome.result().columnNames(),
-                        outcome.result() == null ? List.of() : outcome.result().rows());
+                        outcome.result() == null ? List.of() : outcome.result().rows(),
+                        outcome.timeResolution());
                 case NEEDS_CLARIFICATION -> {
                     pendingClarifications.put(runId, new PendingClarification(
                             List.copyOf(outcome.clarificationQuestions()),
@@ -482,7 +485,7 @@ public class OperationsAnalysisService {
                             List.copyOf(outcome.clarificationQuestions()),
                             outcome.clarificationOptions().stream().map(List::copyOf).toList(),
                             "", 0, false, durationMs, null,
-                            createdAt, now, List.of(), List.of());
+                            createdAt, now, List.of(), List.of(), outcome.timeResolution());
                 }
                 case FAILED -> {
                     pendingClarifications.remove(runId);
@@ -575,7 +578,8 @@ public class OperationsAnalysisService {
         AnalysisRunStore.RunRecord previous = store.get(activeRunId);
         AnalysisRunStore.RunRecord expired = new AnalysisRunStore.RunRecord(
                 previous.runId(), previous.question(), "FAILED", List.of(), List.of(), "", 0, false,
-                previous.durationMs(), "CLARIFICATION_TIMEOUT", previous.createdAt(), now, List.of(), List.of());
+                previous.durationMs(), "CLARIFICATION_TIMEOUT", previous.createdAt(), now, List.of(), List.of(),
+                previous.timeResolution());
         store.put(expired);
         pendingClarifications.remove(activeRunId);
         activeRunId = null;
@@ -599,7 +603,7 @@ public class OperationsAnalysisService {
         // The original creation time survives the resume; only updatedAt moves.
         return new AnalysisRunStore.RunRecord(previous.runId(), previous.question(), "RUNNING",
                 List.of(), List.of(), "", 0, false, 0, null,
-                previous.createdAt(), Instant.now(clock), List.of(), List.of());
+                previous.createdAt(), Instant.now(clock), List.of(), List.of(), previous.timeResolution());
     }
 
     private static final class RecordBuilder {

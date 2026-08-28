@@ -134,6 +134,7 @@ public class OperationsAnalysisGraph {
         String schemaDescription = "";
         TimeIntentResult timeIntentResult;
         TimeResolutionMetadata timeResolution;
+        Instant referenceInstant;
         QueryPlan.TimeRange serverTimeRange;
         QueryPlan.TimeRangeSource timeRangeSource;
         QueryPlan plan;
@@ -373,7 +374,9 @@ public class OperationsAnalysisGraph {
             return Map.of();
         }
         // 单一参考时刻：识别、换算与快照共用同一时钟读数。
-        Instant reference = Instant.now(clock);
+        Instant reference = ctx.pinnedUnderstanding != null && ctx.pinnedUnderstanding.serverReferenceInstant() != null
+                ? ctx.pinnedUnderstanding.serverReferenceInstant() : Instant.now(clock);
+        ctx.referenceInstant = reference;
         TimeIntentResult parserResult = timeIntentProvider.resolve(question, reference);
         TimeIntentResult finalTime = timeEvidenceReconciler.reconcile(
                 parserResult, modelUnderstanding.requestedTimeMentions(), question);
@@ -405,7 +408,7 @@ public class OperationsAnalysisGraph {
                 : QueryPlan.TimeRangeSource.DEFAULT_METRIC_LOOKBACK;
         ctx.serverTimeRange = parsedServerTimeRange;
         // 保存服务器拥有的绝对区间快照，供澄清暂停后复用；模型值仅供参考。
-        ctx.understanding = withServerTimeRange(modelUnderstanding, parsedServerTimeRange);
+        ctx.understanding = withServerTimeRange(modelUnderstanding, parsedServerTimeRange, reference);
         if (ctx.understanding.needsClarification()) {
             ctx.clarificationQuestions.addAll(ctx.understanding.clarificationQuestions());
             // No structured candidates from the model: the operator picks from
@@ -508,7 +511,7 @@ public class OperationsAnalysisGraph {
         UUID runId = runId(state);
         RunContext ctx = contexts.get(runId);
         nodeStarted(ctx, runId, ExecutionStage.PLANNING, "构建查询计划");
-        Instant now = Instant.now(clock);
+        Instant now = ctx.referenceInstant != null ? ctx.referenceInstant : Instant.now(clock);
         int lookbackDays = ctx.metrics.stream().mapToInt(m -> m.defaultLookbackDays()).max().orElse(7);
         String originalQuestion = text(state, STATE_QUESTION).strip();
         // The original question is the authority for time semantics. The model
@@ -706,13 +709,14 @@ public class OperationsAnalysisGraph {
     }
 
     private static AnalyticsModelClient.QuestionUnderstanding withServerTimeRange(
-            AnalyticsModelClient.QuestionUnderstanding understanding, QueryPlan.TimeRange timeRange) {
+            AnalyticsModelClient.QuestionUnderstanding understanding, QueryPlan.TimeRange timeRange,
+            Instant referenceInstant) {
         AnalyticsModelClient.RequestedTimeRange requested = timeRange == null ? null
                 : new AnalyticsModelClient.RequestedTimeRange(timeRange.from(), timeRange.to());
         return new AnalyticsModelClient.QuestionUnderstanding(
                 understanding.normalizedQuestion(), understanding.metricTerms(), understanding.clarificationQuestions(),
                 requested, understanding.requestedDimensions(), understanding.requestedFilters(),
-                understanding.requestedTimeMentions(), requested);
+                understanding.requestedTimeMentions(), requested, referenceInstant);
     }
 
     Map<String, Object> generateSql(OverAllState state) {

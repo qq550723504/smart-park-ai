@@ -57,4 +57,18 @@ class JioNlpTimeIntentProviderTest {
         assertThatThrownBy(() -> provider.resolve("MTR-2026-08-01表计能耗", NOW))
                 .isInstanceOf(TimeParserInvalidResponseException.class);
     }
+
+    @Test
+    void truncatesReferenceInstantToSecondPrecisionForSidecarEcho() {
+        var captured = new java.util.concurrent.atomic.AtomicReference<TimeParserRequest>();
+        JioNlpTimeIntentProvider provider = new JioNlpTimeIntentProvider(request -> {
+            captured.set(request);
+            return new TimeParserResponse("jionlp", "1.5.29", request.referenceInstant(), request.timezone(),
+                    "NONE", List.of(), null);
+        });
+
+        provider.resolve("能耗", Instant.parse("2026-08-25T00:00:00.123456Z"));
+
+        assertThat(captured.get().referenceInstant()).isEqualTo("2026-08-25T00:00:00Z");
+    }
 }

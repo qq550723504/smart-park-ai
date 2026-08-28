@@ -3,12 +3,16 @@ package com.example.smartpark.analytics.agent.time;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.MediaType;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -42,8 +46,13 @@ public final class JioNlpClient {
             byte[] body = client.post().uri("/v1/time-intents:resolve")
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(request)
-                    .retrieve()
-                    .body(byte[].class);
+                    .exchange((httpRequest, response) -> {
+                        HttpStatusCode status = response.getStatusCode();
+                        if (status.isError()) {
+                            throw new RestClientException("parser returned HTTP " + status.value());
+                        }
+                        return readLimited(response.getBody(), maxResponseBytes);
+                    });
             if (body == null || body.length == 0 || body.length > maxResponseBytes) {
                 throw new TimeParserInvalidResponseException("parser response size is invalid");
             }
@@ -57,6 +66,21 @@ public final class JioNlpClient {
         } catch (RuntimeException invalid) {
             throw new TimeParserInvalidResponseException("parser response is invalid", invalid);
         }
+    }
+
+    private static byte[] readLimited(InputStream input, int maxBytes) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream(Math.min(maxBytes, 8192));
+        byte[] buffer = new byte[4096];
+        int total = 0;
+        int read;
+        while ((read = input.read(buffer)) != -1) {
+            total += read;
+            if (total > maxBytes) {
+                throw new TimeParserInvalidResponseException("parser response exceeds configured limit");
+            }
+            output.write(buffer, 0, read);
+        }
+        return output.toByteArray();
     }
 
     private TimeParserResponse decode(byte[] body) {

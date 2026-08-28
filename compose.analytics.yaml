@@ -19,6 +19,8 @@ services:
       timeout: 3s
       retries: 12
       start_period: 10s
+    networks:
+      - analytics-internal
 
   analytics-postgres:
     environment:
@@ -48,6 +50,13 @@ services:
     depends_on:
       analytics-time-parser:
         condition: service_healthy
+    networks:
+      - default
+      - analytics-internal
 
 volumes:
   analytics-postgres-analytics-data:
+
+networks:
+  analytics-internal:
+    internal: true
