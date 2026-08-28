@@ -29,21 +29,32 @@ public interface AnalyticsModelClient {
             String normalizedQuestion,
             List<String> metricTerms,
             List<String> clarificationQuestions,
+            // Deprecated: 模型不得再提供最终时间戳；仅作迁移期兼容，图谱不再读取。
             RequestedTimeRange requestedTimeRange,
             List<String> requestedDimensions,
-            Map<String, String> requestedFilters) {
+            Map<String, String> requestedFilters,
+            /**
+             * 模型从原文逐字摘抄的时间表达（如 "上周一到周三"）。仅作为遗漏检测
+             * 证据：由 {@code ModelTimeEvidence} 在原问题中定位，最终区间永远
+             * 来自服务端确定性解析。
+             */
+            List<String> requestedTimeMentions,
+            /** Server-owned snapshot used only when resuming clarification. */
+            RequestedTimeRange serverResolvedTimeRange,
+            /** First server reference instant, reused when a clarification resumes. */
+            Instant serverReferenceInstant) {
 
         public QuestionUnderstanding(String normalizedQuestion,
                                      List<String> metricTerms,
                                      List<String> clarificationQuestions) {
-            this(normalizedQuestion, metricTerms, clarificationQuestions, null, List.of(), Map.of());
+            this(normalizedQuestion, metricTerms, clarificationQuestions, null, List.of(), Map.of(), List.of(), null, null);
         }
 
         public QuestionUnderstanding(String normalizedQuestion,
                                      List<String> metricTerms,
                                      List<String> clarificationQuestions,
                                      RequestedTimeRange requestedTimeRange) {
-            this(normalizedQuestion, metricTerms, clarificationQuestions, requestedTimeRange, List.of(), Map.of());
+            this(normalizedQuestion, metricTerms, clarificationQuestions, requestedTimeRange, List.of(), Map.of(), List.of(), null, null);
         }
 
         public QuestionUnderstanding(String normalizedQuestion,
@@ -52,7 +63,28 @@ public interface AnalyticsModelClient {
                                      RequestedTimeRange requestedTimeRange,
                                      List<String> requestedDimensions) {
             this(normalizedQuestion, metricTerms, clarificationQuestions,
-                    requestedTimeRange, requestedDimensions, Map.of());
+                    requestedTimeRange, requestedDimensions, Map.of(), List.of(), null, null);
+        }
+
+        public QuestionUnderstanding(String normalizedQuestion,
+                                     List<String> metricTerms,
+                                     List<String> clarificationQuestions,
+                                     RequestedTimeRange requestedTimeRange,
+                                     List<String> requestedDimensions,
+                                     Map<String, String> requestedFilters) {
+            this(normalizedQuestion, metricTerms, clarificationQuestions,
+                    requestedTimeRange, requestedDimensions, requestedFilters, List.of(), null, null);
+        }
+
+        public QuestionUnderstanding(String normalizedQuestion,
+                                     List<String> metricTerms,
+                                     List<String> clarificationQuestions,
+                                     RequestedTimeRange requestedTimeRange,
+                                     List<String> requestedDimensions,
+                                     Map<String, String> requestedFilters,
+                                     List<String> requestedTimeMentions) {
+            this(normalizedQuestion, metricTerms, clarificationQuestions,
+                    requestedTimeRange, requestedDimensions, requestedFilters, requestedTimeMentions, null, null);
         }
 
         public QuestionUnderstanding {
@@ -61,6 +93,7 @@ public interface AnalyticsModelClient {
             clarificationQuestions = List.copyOf(clarificationQuestions == null ? List.of() : clarificationQuestions);
             requestedDimensions = List.copyOf(requestedDimensions == null ? List.of() : requestedDimensions);
             requestedFilters = Map.copyOf(requestedFilters == null ? Map.of() : requestedFilters);
+            requestedTimeMentions = List.copyOf(requestedTimeMentions == null ? List.of() : requestedTimeMentions);
         }
 
         public boolean needsClarification() {

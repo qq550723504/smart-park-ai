@@ -1,0 +1,10 @@
+[project]
+name = "time-parser"
+version = "1.0.0"
+description = "Internal JioNLP time-intent parsing sidecar for smartpark analytics"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

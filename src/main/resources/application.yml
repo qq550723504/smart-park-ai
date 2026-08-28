@@ -52,6 +52,15 @@ smartpark:
     max-rows: 500
     max-result-bytes: 1048576
     max-plan-cost: 1000000
+    time-intent:
+      enabled: ${SMARTPARK_ANALYTICS_TIME_INTENT_ENABLED:true}
+      url: ${SMARTPARK_ANALYTICS_TIME_INTENT_URL:http://analytics-time-parser:8081}
+      connect-timeout: ${SMARTPARK_ANALYTICS_TIME_INTENT_CONNECT_TIMEOUT:1s}
+      read-timeout: ${SMARTPARK_ANALYTICS_TIME_INTENT_READ_TIMEOUT:3s}
+      max-response-bytes: ${SMARTPARK_ANALYTICS_TIME_INTENT_MAX_RESPONSE_BYTES:32768}
+      expected-provider: ${SMARTPARK_ANALYTICS_TIME_INTENT_EXPECTED_PROVIDER:jionlp}
+      expected-version: ${SMARTPARK_ANALYTICS_TIME_INTENT_EXPECTED_VERSION:1.5.29}
+      timezone: ${SMARTPARK_ANALYTICS_TIME_INTENT_TIMEZONE:Asia/Shanghai}
     datasource:
       url: ${SMARTPARK_ANALYTICS_DB_URL:}
       username: ${SMARTPARK_ANALYTICS_DB_USER:}

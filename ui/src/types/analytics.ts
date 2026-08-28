@@ -5,6 +5,15 @@ export interface MetricSelectionDto {
   metric: string
 }
 
+export interface TimeResolutionDto {
+  status: 'NONE' | 'PARSED' | 'EMPTY'
+  fromInclusive: string | null
+  toExclusive: string | null
+  source: 'EXPLICIT_USER_RANGE' | 'DEFAULT_METRIC_LOOKBACK'
+  explanation: string
+  empty: boolean
+}
+
 export interface AnalysisStatusDto {
   runId: string
   status: 'RUNNING' | 'NEEDS_CLARIFICATION' | 'COMPLETED' | 'FAILED'
@@ -17,6 +26,8 @@ export interface AnalysisStatusDto {
   columns?: string[]
   rows?: Array<Array<unknown>>
   failureStage?: string
+  /** 用户可见的时间范围与来源；仅安全字段。 */
+  timeResolution?: TimeResolutionDto
   createdAt: string
 }
 

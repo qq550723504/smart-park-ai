@@ -5,14 +5,14 @@ import com.example.smartpark.analytics.model.QueryPlan;
 import java.util.List;
 import java.util.Objects;
 
-record TimeIntentResult(
+public record TimeIntentResult(
         Status status,
         List<TimeMention> mentions,
         TimeIntent intent,
         QueryPlan.TimeRange timeRange,
         String reason) {
 
-    TimeIntentResult {
+    public TimeIntentResult {
         Objects.requireNonNull(status, "status");
         mentions = List.copyOf(Objects.requireNonNull(mentions, "mentions"));
         reason = Objects.requireNonNullElse(reason, "");
@@ -22,15 +22,21 @@ record TimeIntentResult(
         if (status == Status.PARSED && timeRange == null) {
             throw new IllegalArgumentException("PARSED result requires a timeRange");
         }
-        if (status != Status.PARSED && (intent != null || timeRange != null)) {
+        if (status == Status.EMPTY
+                && (timeRange == null || intent == null
+                    || !timeRange.from().equals(timeRange.to()))) {
+            throw new IllegalArgumentException("EMPTY result requires a zero-width range");
+        }
+        if (status != Status.PARSED && status != Status.EMPTY
+                && (intent != null || timeRange != null)) {
             throw new IllegalArgumentException("non-parsed result must not carry a resolved payload");
         }
     }
 
-    enum Status { NONE, PARSED, UNSUPPORTED, MULTIPLE, AMBIGUOUS }
+    public enum Status { NONE, PARSED, UNSUPPORTED, MULTIPLE, AMBIGUOUS, EMPTY }
 
-    record TimeMention(String text, int start, int end) {
-        TimeMention {
+    public record TimeMention(String text, int start, int end) {
+        public TimeMention {
             if (text == null || text.isBlank()) {
                 throw new IllegalArgumentException("mention text must not be blank");
             }

@@ -41,6 +41,15 @@ function resume(): void {
 }
 
 const dto = computed(() => analysis.dto.value)
+
+function formatRange(t: { fromInclusive: string | null; toExclusive: string | null }) {
+  try {
+    const fmt = (iso: string) => new Date(iso).toLocaleString('zh-CN', { hour12: false })
+    return `${fmt(t.fromInclusive ?? '')} ~ ${fmt(t.toExclusive ?? '')}`
+  } catch {
+    return `${t.fromInclusive ?? ''} ~ ${t.toExclusive ?? ''}`
+  }
+}
 const columns = computed(() => dto.value?.columns ?? [])
 const rows = computed(() => dto.value?.rows ?? [])
 
@@ -142,6 +151,18 @@ watch(
         </tbody>
       </table>
       <AnalyticsChart :chart="analysis.chart.value" :columns="columns" :rows="rows" />
+      <div
+        v-if="dto.timeResolution"
+        class="time-resolution-card"
+        data-testid="time-resolution"
+        :data-empty="dto.timeResolution.empty"
+      >
+        <strong>时间范围（{{ dto.timeResolution.status === 'PARSED' ? '已指定' : dto.timeResolution.status === 'EMPTY' ? '空' : '未指定' }}）</strong>
+        <span v-if="!dto.timeResolution.empty && dto.timeResolution.fromInclusive">
+          {{ formatRange(dto.timeResolution) }}
+        </span>
+        <span>{{ dto.timeResolution.explanation }}</span>
+      </div>
       <p v-if="dto.summary" class="result-summary">{{ dto.summary }}</p>
     </section>
 
