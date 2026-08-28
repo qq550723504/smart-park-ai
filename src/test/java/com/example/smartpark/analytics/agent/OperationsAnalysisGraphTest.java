@@ -218,6 +218,22 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
+    void completesWhenModelAddsDateGroupingToRollingBuildingQuestion() {
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding(
+                        "过去5天各楼宇能耗", List.of("能耗"), List.of(), null,
+                        List.of("stat_date", "building_id")),
+                List.of(GOOD_SQL),
+                new ChartSpec.Proposal("BAR", "分楼宇能耗", "building_id", List.of("energy_kwh"), "", "kWh"),
+                "共 0 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "过去5天各楼宇能耗");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().dimensions()).containsExactly("building_id");
+    }
+
+    @Test
     void mapsDailyGroupingToTheSelectedMetricsTimeColumn() {
         String parkingSql = """
                 SELECT stat_date, SUM(entries) AS parking_entries FROM analytics.v_parking_daily
@@ -236,17 +252,21 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
-    void rejectsDailyEnergyAggregationUntilDailyGrainIsCataloged() {
+    void supportsDailyEnergyAggregationFromTheDerivedDailyDimension() {
+        String dailyEnergySql = """
+                SELECT stat_date, SUM(kwh) AS energy_kwh FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                GROUP BY stat_date LIMIT 200""";
         modelClient.reset(
                 new AnalyticsModelClient.QuestionUnderstanding("按日查看能耗", List.of("能耗"), List.of()),
-                List.of(GOOD_TOTAL_SQL),
+                List.of(dailyEnergySql),
                 new ChartSpec.Proposal("LINE", "每日能耗", "energy_kwh", List.of(), "", "kWh"),
-                "不应生成小时粒度结果。");
+                "共 2 行结果。");
 
         var outcome = graph.run(UUID.randomUUID(), "按日查看能耗");
 
-        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.FAILED);
-        assertThat(modelClient.generateSqlInvocations()).isZero();
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().dimensions()).containsExactly("stat_date");
     }
 
     @Test

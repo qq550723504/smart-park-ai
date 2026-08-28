@@ -101,6 +101,9 @@ public class DemoDataRefresher {
                 statement.executeUpdate(
                         "DELETE FROM analytics.energy_hourly_raw WHERE meter_id IN " + ENERGY_METER_IDS);
                 statement.executeUpdate(ENERGY_SEED);
+                statement.executeUpdate(
+                        "DELETE FROM analytics.building_occupancy_demo_hourly_raw");
+                statement.executeUpdate(OCCUPANCY_SEED);
                 statement.executeUpdate("DELETE FROM analytics.alert_fact_raw WHERE alert_id IN " + ALERT_IDS);
                 statement.executeUpdate(ALERT_SEED);
                 statement.executeUpdate("DELETE FROM analytics.parking_daily_raw WHERE " + PARKING_ZONES);
@@ -133,6 +136,17 @@ public class DemoDataRefresher {
             + "('ALT-DOOR-004', 'B2', 'DR-B2-01',  'ACCESS',     'HIGH',   (((CURRENT_DATE - 2)::timestamp + TIME '22:30') AT TIME ZONE 'Asia/Shanghai'), 'OPEN'), "
             + "('ALT-TEMP-005', 'B3', 'AC-B3-03',  'TEMPERATURE', 'LOW',   (((CURRENT_DATE - 1)::timestamp + TIME '11:20') AT TIME ZONE 'Asia/Shanghai'), 'RESOLVED') "
             + "ON CONFLICT DO NOTHING";
+
+    private static final String OCCUPANCY_SEED =
+            "INSERT INTO analytics.building_occupancy_demo_hourly_raw (building_id, occupied_at, occupancy_count) "
+            + "SELECT 'B' || b, "
+            + "((CURRENT_DATE - 6 + d)::timestamp AT TIME ZONE 'Asia/Shanghai') "
+            + "+ make_interval(hours => h), "
+            + "CASE WHEN h BETWEEN 8 AND 18 THEN 90 + b * 28 + ((d * 7 + h) % 22) "
+            + "WHEN h BETWEEN 19 AND 21 THEN 35 + b * 9 + ((d + h) % 10) "
+            + "ELSE 8 + b * 4 + ((d + h) % 6) END "
+            + "FROM generate_series(1, 3) AS b, generate_series(0, 6) AS d, "
+            + "generate_series(0, 23) AS h ON CONFLICT DO NOTHING";
 
     private static final String PARKING_SEED =
             "INSERT INTO analytics.parking_daily_raw (stat_date, parking_zone, entries, peak_occupancy, capacity) VALUES "

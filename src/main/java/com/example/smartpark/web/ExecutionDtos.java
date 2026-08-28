@@ -70,8 +70,9 @@ final class ExecutionDtos {
                 return new PayloadDto.SqlDto(sql.safeSql(), sql.parameterNames(), sql.validationStatus());
             }
             if (payload instanceof DisplayPayload.ChartPayload chart) {
-                return new PayloadDto.ChartDto(chart.type(), chart.title(), chart.xField(), chart.yFields(),
-                        chart.seriesField(), chart.unit());
+                return new PayloadDto.ChartDto("CHART", chart.type(), chart.title(), chart.xField(), chart.yFields(),
+                        chart.seriesField(), chart.unit(), chart.orientation(), chart.stacked(), chart.targetValue(),
+                        chart.coordinateXField(), chart.coordinateYField());
             }
             if (payload instanceof DisplayPayload.AudioPayload audio) {
                 return new PayloadDto.AudioDto(audio.state(), audio.durationMs());
@@ -130,14 +131,16 @@ final class ExecutionDtos {
         }
 
         record ChartDto(String payloadType, String type, String title, String xField, List<String> yFields,
-                        String seriesField, String unit) implements PayloadDto {
+                        String seriesField, String unit, String orientation, boolean stacked,
+                        Double targetValue, String coordinateXField, String coordinateYField) implements PayloadDto {
             public ChartDto {
                 payloadType = "CHART";
             }
 
             ChartDto(String type, String title, String xField, List<String> yFields,
                      String seriesField, String unit) {
-                this("CHART", type, title, xField, yFields, seriesField, unit);
+                this("CHART", type, title, xField, yFields, seriesField, unit,
+                        "VERTICAL", false, null, "", "");
             }
         }
 

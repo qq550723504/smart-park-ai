@@ -89,6 +89,62 @@ class AnalyticsSchemaMigrationTest {
     }
 
     @Test
+    void exposesVisualizationFieldsAndDeterministicDemoDataThroughTheEnergyView() throws Exception {
+        migrate();
+
+        try (Connection ro = DriverManager.getConnection(POSTGRES.getJdbcUrl(), RO_USER, RO_PASSWORD);
+             var columns = ro.prepareStatement(
+                     "SELECT column_name FROM information_schema.columns "
+                             + "WHERE table_schema = 'analytics' AND table_name = 'v_energy_hourly'")) {
+            var names = new java.util.HashSet<String>();
+            try (ResultSet rs = columns.executeQuery()) {
+                while (rs.next()) names.add(rs.getString(1));
+            }
+            assertThat(names).contains("building_name", "stat_date", "hour_of_day", "day_of_week",
+                    "area_sqm", "map_x", "map_y", "occupancy_count", "target_kwh", "meter_count");
+
+            try (var statement = ro.createStatement();
+                 ResultSet rs = statement.executeQuery(
+                         "SELECT COUNT(*), COUNT(DISTINCT building_id), COUNT(DISTINCT building_name), "
+                                 + "COUNT(DISTINCT map_x), COUNT(occupancy_count), COUNT(target_kwh), "
+                                 + "COUNT(DISTINCT meter_count) "
+                                 + "FROM analytics.v_energy_hourly")) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt(1)).isGreaterThan(0);
+                assertThat(rs.getInt(2)).isEqualTo(3);
+                assertThat(rs.getInt(3)).isEqualTo(3);
+                assertThat(rs.getInt(4)).isEqualTo(3);
+                assertThat(rs.getInt(5)).isGreaterThan(0);
+                assertThat(rs.getInt(6)).isGreaterThan(0);
+                assertThat(rs.getInt(7)).isEqualTo(1);
+            }
+        }
+    }
+
+    @Test
+    void keepsOccupancyDemoFactsInASeparateTableFromOperationalFacts() throws Exception {
+        migrate();
+
+        try (Connection admin = DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             var statement = admin.createStatement();
+             ResultSet rs = statement.executeQuery(
+                     "SELECT COUNT(*) FROM analytics.building_occupancy_demo_hourly_raw")) {
+            assertThat(rs.next()).isTrue();
+            assertThat(rs.getInt(1)).isEqualTo(3 * 7 * 24);
+        }
+
+        try (Connection admin = DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             var statement = admin.createStatement();
+             ResultSet rs = statement.executeQuery(
+                     "SELECT COUNT(*) FROM information_schema.tables "
+                             + "WHERE table_schema = 'analytics' "
+                             + "AND table_name = 'building_occupancy_hourly_raw'")) {
+            assertThat(rs.next()).isTrue();
+            assertThat(rs.getInt(1)).isZero();
+        }
+    }
+
+    @Test
     void seedsDeviceSnapshotsInsideTheRollingOneDayLookback() throws Exception {
         // device_offline_count uses a rolling one-day lookback; snapshots
         // anchored to a fixed wall-clock time can already be more than 24h old

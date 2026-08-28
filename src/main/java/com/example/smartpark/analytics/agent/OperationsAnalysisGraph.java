@@ -8,6 +8,8 @@ import com.example.smartpark.analytics.model.QueryPlan;
 import com.example.smartpark.analytics.model.TabularResult;
 import com.example.smartpark.analytics.model.ValidatedSql;
 import com.example.smartpark.analytics.sql.UnsafeSqlException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.example.smartpark.execution.ExecutionEventPublisher;
 import com.example.smartpark.execution.InMemoryExecutionEventPublisher;
 import com.example.smartpark.execution.model.DisplayPayload;
@@ -49,6 +51,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class OperationsAnalysisGraph {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(OperationsAnalysisGraph.class);
+
     private static final String STATE_QUESTION = "question";
     private static final String STATE_RUN_ID = "runId";
     private static final int MAX_SQL_ATTEMPTS = 2; // one original try, at most one repair
@@ -61,6 +65,7 @@ public class OperationsAnalysisGraph {
     private final Clock clock;
     private final Duration executionTimeout;
     private final TimeIntentProvider timeIntentProvider;
+    private final AnalyticsQuestionNormalizer questionNormalizer = new AnalyticsQuestionNormalizer();
     private final TimeEvidenceReconciler timeEvidenceReconciler = new TimeEvidenceReconciler();
     private final TimeConstraintResolver timeConstraintResolver = new TimeConstraintResolver();
     private final CompiledGraph compiled;
@@ -149,6 +154,7 @@ public class OperationsAnalysisGraph {
         String summary = "";
         volatile String status = "RUNNING";
         String failureStage;
+        String currentNode;
         final List<String> clarificationQuestions = new ArrayList<>();
         final List<List<String>> clarificationOptions = new ArrayList<>();
     }
@@ -307,7 +313,11 @@ public class OperationsAnalysisGraph {
                     .blockLast(executionTimeout);
         } catch (RuntimeException exception) {
             ctx.status = "FAILED";
-            ctx.failureStage = "ANALYSIS_ABORTED";
+            ctx.failureStage = ctx.failureStage == null
+                    ? (ctx.currentNode == null ? "analysis" : ctx.currentNode)
+                    : ctx.failureStage;
+            LOGGER.warn("Operations analysis failed at {} ({}) for run {}",
+                    ctx.failureStage, exception.getClass().getSimpleName(), runId);
             return AnalysisRunResult.failed(runId, ctx.failureStage);
         } finally {
             // Unconditional removal: even a raced terminal publish must never
@@ -364,6 +374,7 @@ public class OperationsAnalysisGraph {
         AnalyticsModelClient.QuestionUnderstanding modelUnderstanding = ctx.pinnedUnderstanding != null
                 ? ctx.pinnedUnderstanding
                 : modelClient.understandQuestion(question);
+        modelUnderstanding = questionNormalizer.normalize(question, modelUnderstanding);
         if (ctx.pinnedUnderstanding != null && ctx.pinnedUnderstanding.serverResolvedTimeRange() != null) {
             ctx.serverTimeRange = toTimeRange(ctx.pinnedUnderstanding.serverResolvedTimeRange());
             ctx.timeRangeSource = QueryPlan.TimeRangeSource.EXPLICIT_USER_RANGE;
@@ -613,50 +624,66 @@ public class OperationsAnalysisGraph {
 
     private static List<String> inferredAggregationDimensions(RunContext ctx, String question) {
         List<String> inferred = new ArrayList<>();
-        if (dailyAggregationMentionedInQuestion(question)
-                && ctx.metrics.stream().anyMatch(metric -> !metric.timeColumn().equalsIgnoreCase("stat_date"))) {
-            throw new IllegalArgumentException("当前指标目录没有可验证的日粒度聚合表达式");
+        // A metric's timeColumn controls its safe filter window, not the only
+        // legal GROUP BY grain. The energy view exposes derived stat_date and
+        // hour_of_day columns, so daily/hourly visualizations can aggregate
+        // the hourly source without widening the time predicate.
+        if (dailyAggregationMentionedInQuestion(question)) {
+            addAllowedDimension(ctx, inferred, "stat_date", "日粒度");
         }
-        if (hourlyAggregationMentionedInQuestion(question)
-                && ctx.metrics.stream().anyMatch(metric -> !metric.timeColumn().equalsIgnoreCase("hour_ts"))) {
-            throw new IllegalArgumentException("当前指标目录没有可验证的小时粒度聚合表达式");
+        if (hourlyAggregationMentionedInQuestion(question)) {
+            addAllowedDimension(ctx, inferred, "hour_ts", "小时粒度");
         }
-        if (timeAggregationMentionedInQuestion(question)) {
+        if (containsAny(question == null ? "" : question.toLowerCase(java.util.Locale.ROOT), "热力图", "热力")) {
+            addAllowedDimension(ctx, inferred, "stat_date", "热力图日期粒度");
+        }
+        if (timeAggregationMentionedInQuestion(question)
+                && !dailyAggregationMentionedInQuestion(question)
+                && !hourlyAggregationMentionedInQuestion(question)) {
             for (var metric : ctx.metrics) {
                 String timeColumn = metric.timeColumn();
-                if (!ctx.metrics.stream().allMatch(selected -> selected.allowedDimensions().stream()
-                        .anyMatch(allowed -> allowed.equalsIgnoreCase(timeColumn)))) {
-                    throw new IllegalArgumentException("原始问题要求的时间聚合列未获所有指标目录批准: " + timeColumn);
-                }
-                if (!inferred.contains(timeColumn)) {
-                    inferred.add(timeColumn);
-                }
+                addAllowedDimension(ctx, inferred, timeColumn, "时间粒度");
             }
         }
         List<String> dimensions = List.of(
-                "building_id", "meter_id", "risk_level", "category", "status", "device_type", "parking_zone");
+                "building_id", "building_name", "meter_id", "hour_of_day", "day_of_week", "area_sqm",
+                "map_x", "map_y", "risk_level", "category", "status", "device_type", "parking_zone");
         for (String dimension : dimensions) {
             if (!aggregationDimensionMentionedInQuestion(dimension, question)) continue;
-            boolean allowedByEveryMetric = ctx.metrics.stream()
-                    .allMatch(metric -> metric.allowedDimensions().stream()
-                            .anyMatch(allowed -> allowed.equalsIgnoreCase(dimension)));
-            if (!allowedByEveryMetric) {
-                throw new IllegalArgumentException("原始问题要求的聚合维度未获所有指标目录批准: " + dimension);
-            }
-            inferred.add(dimension);
+            addAllowedDimension(ctx, inferred, dimension, "聚合维度");
         }
         return List.copyOf(inferred);
+    }
+
+    private static void addAllowedDimension(RunContext ctx, List<String> dimensions,
+                                            String dimension, String grainLabel) {
+        boolean allowedByEveryMetric = ctx.metrics.stream()
+                .allMatch(metric -> metric.allowedDimensions().stream()
+                        .anyMatch(allowed -> allowed.equalsIgnoreCase(dimension)));
+        if (!allowedByEveryMetric) {
+            throw new IllegalArgumentException("原始问题要求的" + grainLabel + "未获所有指标目录批准: " + dimension);
+        }
+        if (!dimensions.contains(dimension)) dimensions.add(dimension);
     }
 
     private static boolean aggregationDimensionMentionedInQuestion(String dimension, String question) {
         String normalized = question == null ? "" : question.toLowerCase(java.util.Locale.ROOT);
         return switch (dimension) {
             case "building_id" -> containsAny(normalized,
-                    "按楼宇", "各楼宇", "每个楼宇", "分楼宇", "楼宇对比", "按楼栋", "各楼栋", "每栋", "各栋");
+                    "按楼宇", "各楼宇", "每个楼宇", "分楼宇", "楼宇对比", "楼宇分布", "楼宇空间",
+                    "楼宇排行", "楼宇热力", "楼宇构成",
+                    "按楼栋", "各楼栋", "每栋", "各栋");
+            case "building_name" -> containsAny(normalized,
+                    "楼宇名称", "楼宇分布", "楼宇空间", "楼宇排行", "楼宇热力", "楼宇构成", "空间分布", "地图");
             case "meter_id" -> containsAny(normalized,
                     "按表计", "各表计", "每个表计", "分表计", "按电表", "各电表");
             case "hour_ts" -> containsAny(normalized,
                     "按小时", "逐时", "每小时", "逐小时", "小时趋势");
+            case "hour_of_day" -> containsAny(normalized,
+                    "小时热力", "分时", "时段");
+            case "day_of_week" -> containsAny(normalized, "按星期", "各星期", "周几", "星期");
+            case "area_sqm" -> containsAny(normalized, "按面积", "单位面积", "面积");
+            case "map_x", "map_y" -> containsAny(normalized, "空间分布", "地图", "平面图", "位置分布");
             case "risk_level" -> containsAny(normalized, "按风险", "各风险", "按风险等级");
             case "category" -> containsAny(normalized, "按类别", "各类别", "按分类", "各分类", "按类型", "各类型");
             case "status" -> containsAny(normalized, "按状态", "各状态");
@@ -673,7 +700,7 @@ public class OperationsAnalysisGraph {
 
     private static boolean dailyAggregationMentionedInQuestion(String question) {
         return containsAny(question == null ? "" : question.toLowerCase(java.util.Locale.ROOT),
-                "按日", "每天", "每日", "按日期");
+                "按日", "每天", "每日", "按日期", "日历");
     }
 
     private static boolean hourlyAggregationMentionedInQuestion(String question) {
@@ -685,8 +712,13 @@ public class OperationsAnalysisGraph {
         String normalized = question == null ? "" : question.toLowerCase(java.util.Locale.ROOT);
         return switch (dimension) {
             case "building_id" -> containsAny(normalized, "building", "楼宇", "楼栋", "建筑", "栋", "各楼");
+            case "building_name" -> containsAny(normalized, "building", "楼宇", "楼栋", "建筑", "栋", "各楼", "名称");
             case "meter_id" -> containsAny(normalized, "meter", "表计", "电表", "表号");
             case "hour_ts" -> containsAny(normalized, "hour", "小时", "逐时", "按小时", "每小时");
+            case "hour_of_day" -> containsAny(normalized, "hour", "小时", "逐时", "按小时", "每小时", "分时", "时段");
+            case "day_of_week" -> containsAny(normalized, "星期", "周几", "周");
+            case "area_sqm" -> containsAny(normalized, "面积", "单位面积");
+            case "map_x", "map_y" -> containsAny(normalized, "空间", "地图", "平面图", "位置");
             case "occurred_at" -> containsAny(normalized, "occurred", "发生时间", "时间", "按日", "日期");
             case "snapshot_at" -> containsAny(normalized, "snapshot", "快照", "时间");
             case "stat_date" -> containsAny(normalized, "stat", "日期", "按日", "每天", "每日");
@@ -832,12 +864,25 @@ public class OperationsAnalysisGraph {
             // degrade below
         }
         ctx.chart = ChartSpec.fromProposal(proposal, ctx.result, unitByColumn(ctx.plan));
+        // The model is advisory. If it returns a table for an explicit chart
+        // intent, select a deterministic shape from the executed columns and
+        // run it through the same contract validator. This keeps rendering
+        // useful when the model omits a chart type without inventing data.
+        if (ctx.chart.type() == ChartSpec.ChartType.TABLE
+                && ChartSpec.hasVisualizationIntent(text(state, STATE_QUESTION))) {
+            ChartSpec recommended = ChartSpec.recommended(text(state, STATE_QUESTION), ctx.result,
+                    unitByColumn(ctx.plan));
+            if (recommended.type() != ChartSpec.ChartType.TABLE) ctx.chart = recommended;
+        }
         // The chart payload travels on the dedicated CHART_SPECIFIED event type
         // defined by the public execution contract; the frontend captures it there.
         publish(ctx, runId, ExecutionStage.RENDERING, ExecutionEventType.CHART_SPECIFIED,
                 ExecutionStatus.RUNNING, "图表规格: " + ctx.chart.type(),
                 new DisplayPayload.ChartPayload(ctx.chart.type().name(), ctx.chart.title(), ctx.chart.xField(),
-                        ctx.chart.yFields(), ctx.chart.seriesField(), ctx.chart.unit()));
+                        ctx.chart.yFields(), ctx.chart.seriesField(), ctx.chart.unit(),
+                        ctx.chart.options().orientation(), ctx.chart.options().stacked(),
+                        ctx.chart.options().targetValue(), ctx.chart.options().coordinateXField(),
+                        ctx.chart.options().coordinateYField()));
         return Map.of();
     }
 
@@ -891,6 +936,19 @@ public class OperationsAnalysisGraph {
     }
 
     private void nodeStarted(RunContext ctx, UUID runId, ExecutionStage stage, String summary) {
+        ctx.currentNode = switch (summary) {
+            case "理解问题" -> "understandQuestion";
+            case "解析指标与维度" -> "resolveMetricAndDimensions";
+            case "召回白名单 Schema" -> "recallAllowedSchema";
+            case "构建查询计划" -> "buildQueryPlan";
+            case "生成 SQL" -> "generateSql";
+            case "AST 安全校验" -> "validateSqlAst";
+            case "EXPLAIN 成本检查" -> "explainAndCheckCost";
+            case "只读执行查询" -> "executeReadOnlyQuery";
+            case "生成图表规格" -> "buildChartSpec";
+            case "基于结果总结" -> "summarizeFromResult";
+            default -> summary;
+        };
         publish(ctx, runId, stage, ExecutionEventType.NODE_STARTED, ExecutionStatus.RUNNING, summary, null);
     }
 

@@ -5,6 +5,7 @@ import com.example.smartpark.analytics.catalog.MetricDefinition;
 import com.example.smartpark.analytics.model.ChartSpec;
 import com.example.smartpark.analytics.model.QueryPlan;
 import com.example.smartpark.analytics.model.TabularResult;
+import com.example.smartpark.analytics.sql.QueryPlanSqlRenderer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -34,6 +35,7 @@ public class LlmAnalyticsModelClient implements AnalyticsModelClient {
     private final ChatModel chatModel;
     private final MetricCatalog catalog;
     private final Clock clock;
+    private final QueryPlanSqlRenderer sqlRenderer = new QueryPlanSqlRenderer();
 
     public LlmAnalyticsModelClient(ChatModel chatModel, MetricCatalog catalog) {
         this(chatModel, catalog, Clock.systemUTC());
@@ -83,24 +85,10 @@ public class LlmAnalyticsModelClient implements AnalyticsModelClient {
 
     @Override
     public String generateSql(SqlGenerationRequest request) {
-        QueryPlan plan = request.plan();
-        String metricDescriptions = plan.metrics().stream()
-                .map(metric -> "- " + metric.name() + ": 视图 " + metric.sourceView()
-                        + ", 维度 " + metric.allowedDimensions()
-                        + ", 聚合 " + metric.expression()
-                        + (metric.condition() == null ? "" : ", 固定条件 " + metric.condition()))
-                .collect(Collectors.joining("\n"));
-        String system = sqlSystemPrompt(plan.limit());
-        if (request.rejectionReason() != null && !request.rejectionReason().isBlank()) {
-            system = system + "\n上一次生成被拒绝，必须修复该问题: " + request.rejectionReason();
-        }
-        String filterContract = plan.filters().isEmpty() ? "无" : plan.filters().entrySet().stream()
-                .map(entry -> entry.getKey() + " = :" + QueryPlan.filterParameterName(entry.getKey()))
-                .collect(Collectors.joining(", "));
-        String user = "问题: " + plan.question() + "\n时间范围: :fromTs ~ :toTs\n指标:\n" + metricDescriptions
-                + "\n实体过滤（必须逐项使用绑定参数，不得写字面量）: " + filterContract
-                + "\nSchema:\n" + request.schemaDescription();
-        return stripCodeFences(call(system, user));
+        // SQL is a deterministic projection of the catalog and typed plan.
+        // The model is used for question understanding only; it cannot invent
+        // predicates, joins, aliases, or time columns at this boundary.
+        return sqlRenderer.render(request.plan());
     }
 
     /** The advertised row bound comes from the plan — never a hard-coded wider value. */
@@ -121,15 +109,30 @@ public class LlmAnalyticsModelClient implements AnalyticsModelClient {
     public ChartSpec.Proposal proposeChart(ChartContext context) {
         TabularResult result = context.result();
         String columns = String.join(", ", result.columnNames());
+        String dimensions = String.join(", ", context.plan().dimensions());
+        String metrics = context.plan().metrics().stream()
+                .map(metric -> metric.name() + "(" + metric.unit() + ")")
+                .collect(java.util.stream.Collectors.joining(", "));
         try {
-            JsonNode json = parseJson(call("""
-                            你是图表规格建议器。只输出 JSON: type ("LINE"|"BAR"|"TABLE"), title,
-                            xField, yFields (数组), seriesField (可为空字符串), unit。
-                            只能使用这些结果列: """ + columns,
+            String chartPrompt = """
+                            你是图表规格建议器。只输出 JSON: type ("LINE"|"BAR"|"TABLE"|"KPI"|"STACKED_BAR"|"HEATMAP"|"CALENDAR_HEATMAP"|"SCATTER"|"GAUGE"|"MAP"), title,
+                            xField, yFields (数组), seriesField (可为空字符串), unit,
+                            orientation ("VERTICAL"|"HORIZONTAL"), stacked (布尔值), targetValue (数字或 null),
+                            coordinateXField、coordinateYField（仅 MAP 使用）。
+                            """;
+            JsonNode json = parseJson(call(chartPrompt
+                            + "只允许使用这些执行计划维度: " + dimensions + "；指标及单位: " + metrics + "。\n"
+                            + "选择规则: 总量/完成率用 KPI 或 GAUGE；趋势用 LINE；排行用水平 BAR；"
+                            + "构成/分时用 STACKED_BAR；热力图用 HEATMAP；日历热力图用 CALENDAR_HEATMAP；"
+                            + "关系/相关性用 SCATTER；空间分布用 MAP。\n原始问题: " + context.question()
+                            + "\n只能使用这些结果列: " + columns,
                     sampleRows(result)));
             return new ChartSpec.Proposal(
                     text(json, "type"), text(json, "title"), text(json, "xField"),
-                    stringList(json, "yFields"), text(json, "seriesField"), text(json, "unit"));
+                    stringList(json, "yFields"), text(json, "seriesField"), text(json, "unit"),
+                    new ChartSpec.RenderOptions(text(json, "orientation"), json.path("stacked").asBoolean(false),
+                            nullableDouble(json, "targetValue"), text(json, "coordinateXField"),
+                            text(json, "coordinateYField")));
         } catch (RuntimeException malformedProposal) {
             // fromProposal also degrades to TABLE; an unusable proposal is one too.
             return new ChartSpec.Proposal("TABLE", "查询结果", "", List.of(), "", "");
@@ -179,6 +182,15 @@ public class LlmAnalyticsModelClient implements AnalyticsModelClient {
 
     private static String text(JsonNode json, String field) {
         return json.has(field) && !json.get(field).isNull() ? json.get(field).asText("") : "";
+    }
+
+    private static Double nullableDouble(JsonNode json, String field) {
+        JsonNode value = json.get(field);
+        if (value == null || value.isNull() || value.asText().isBlank()) return null;
+        if (!value.isNumber()) throw new IllegalStateException(field + " must be a number or null");
+        double parsed = value.asDouble();
+        if (!Double.isFinite(parsed)) throw new IllegalStateException(field + " must be finite");
+        return parsed;
     }
 
     private static List<String> stringList(JsonNode json, String field) {

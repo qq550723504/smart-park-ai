@@ -51,12 +51,17 @@ export type DisplayPayload =
   | { payloadType: 'SQL'; safeSql: string; parameterNames: string[]; validationStatus: string }
   | {
       payloadType: 'CHART'
-      type: 'LINE' | 'BAR' | 'TABLE'
+      type: 'LINE' | 'BAR' | 'TABLE' | 'KPI' | 'STACKED_BAR' | 'HEATMAP' | 'CALENDAR_HEATMAP' | 'SCATTER' | 'GAUGE' | 'MAP'
       title: string
       xField: string
       yFields: string[]
       seriesField: string
       unit: string
+      orientation?: 'VERTICAL' | 'HORIZONTAL'
+      stacked?: boolean
+      targetValue?: number | null
+      coordinateXField?: string
+      coordinateYField?: string
     }
   | {
       payloadType: 'TIME_RANGE'

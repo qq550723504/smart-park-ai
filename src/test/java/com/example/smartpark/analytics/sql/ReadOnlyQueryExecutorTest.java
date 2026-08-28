@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.flywaydb.core.Flyway;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -14,6 +15,8 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 
@@ -31,6 +34,7 @@ class ReadOnlyQueryExecutorTest {
     private DataSource readOnlyDataSource;
     private ReadOnlyQueryExecutor executor;
     private NamedParameterJdbcTemplate jdbcTemplate;
+    private LocalDate databaseCurrentDate;
 
     @BeforeAll
     void startContainerAndMigrate() {
@@ -41,6 +45,13 @@ class ReadOnlyQueryExecutorTest {
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
+        var adminDataSource = new SimpleDriverDataSource();
+        adminDataSource.setDriverClass(org.postgresql.Driver.class);
+        adminDataSource.setUrl(postgres.getJdbcUrl());
+        adminDataSource.setUsername(postgres.getUsername());
+        adminDataSource.setPassword(postgres.getPassword());
+        databaseCurrentDate = new JdbcTemplate(adminDataSource)
+                .queryForObject("SELECT CURRENT_DATE", LocalDate.class);
         com.example.smartpark.analytics.AnalyticsRoleCredentials.sync(
                 postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword(), "test-ro-pass");
 
@@ -80,8 +91,8 @@ class ReadOnlyQueryExecutorTest {
                 List.of("fromHour", "toHour"), 100);
 
         TabularResult result = executor.execute(sql, Map.of(
-                "fromHour", java.time.OffsetDateTime.parse("2026-08-20T00:00:00+08:00"),
-                "toHour", java.time.OffsetDateTime.parse("2026-08-25T00:00:00+08:00")));
+                "fromHour", databaseCurrentDate.minusDays(5).atStartOfDay().atOffset(ZoneOffset.ofHours(8)),
+                "toHour", databaseCurrentDate.plusDays(1).atStartOfDay().atOffset(ZoneOffset.ofHours(8))));
 
         assertThat(result.columnNames()).containsExactly("building_id", "total");
         assertThat(result.rowCount()).isEqualTo(3);

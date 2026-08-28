@@ -18,7 +18,10 @@ public interface AnalyticsModelClient {
 
     QuestionUnderstanding understandQuestion(String question);
 
-    /** Returns a raw SQL draft; must be a single SELECT statement text. */
+    /**
+     * Renders SQL for the already validated plan; implementations must not
+     * trust free-form model SQL or add predicates outside that plan.
+     */
     String generateSql(SqlGenerationRequest request);
 
     ChartSpec.Proposal proposeChart(ChartContext context);

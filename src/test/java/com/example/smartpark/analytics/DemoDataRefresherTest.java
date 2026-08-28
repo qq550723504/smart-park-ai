@@ -53,6 +53,11 @@ class DemoDataRefresherTest {
         assertThat(committed).isTrue();
         assertThat(sql).anyMatch(statement -> statement.contains(
                 "meter_id IN ('MTR-1-1', 'MTR-1-2', 'MTR-2-1', 'MTR-2-2', 'MTR-3-1', 'MTR-3-2')"));
+        assertThat(sql).anyMatch(statement -> statement.contains(
+                "DELETE FROM analytics.building_occupancy_demo_hourly_raw"));
+        assertThat(sql).anyMatch(statement -> statement.contains(
+                "INSERT INTO analytics.building_occupancy_demo_hourly_raw"));
+        assertThat(sql).anyMatch(statement -> statement.contains("CURRENT_DATE - 6 + d"));
         assertThat(sql).noneMatch(statement -> statement.contains("meter_id ~"));
     }
 
