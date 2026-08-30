@@ -1,0 +1,72 @@
+.customer-main { padding-top: 42px; }
+.customer-hero { margin-bottom: 26px; }
+.customer-console { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 18px; }
+.customer-sidebar { padding: 24px; }
+.service-metrics { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--showcase-border-soft); margin-bottom: 24px; }
+.service-metrics div { padding: 14px; border-right: 1px solid var(--showcase-border-soft); }
+.service-metrics div:last-child { border: 0; }
+.service-metrics strong, .service-metrics span { display: block; }
+.service-metrics strong { font-family: Georgia, serif; font-size: 22px; color: var(--showcase-cyan); }
+.service-metrics span { font-size: 10px; color: var(--showcase-muted); margin-top: 4px; }
+.customer-sidebar h3 { font-size: 12px; margin: 0 0 10px; }
+.suggestion { display: block; width: 100%; text-align: left; color: var(--showcase-ivory); border: 1px solid var(--showcase-border-soft); background: rgba(12, 17, 26, 0.74); padding: 11px; margin-top: 7px; font-size: 11px; cursor: pointer; }
+.suggestion:hover { border-color: var(--showcase-cyan); background: var(--showcase-cyan-soft); }
+.privacy-note { margin-top: 24px; padding: 13px; border-left: 3px solid var(--showcase-cyan); background: var(--showcase-cyan-soft); }
+.privacy-note strong, .privacy-note span { display: block; }
+.privacy-note strong { font-size: 11px; }
+.privacy-note span { font-size: 10px; line-height: 1.6; color: var(--showcase-muted); margin-top: 5px; }
+.chat-panel { padding: 24px; min-width: 0; }
+.chat-stream { height: 440px; overflow: auto; border-top: 1px solid var(--showcase-border-soft); border-bottom: 1px solid var(--showcase-border-soft); padding: 20px 8px; }
+.chat-empty { height: 100%; display: flex; align-items: center; justify-content: center; flex-direction: column; text-align: center; color: var(--showcase-muted); gap: 8px; }
+.chat-empty strong { color: var(--showcase-ivory); }
+.chat-empty span { font-size: 11px; }
+.chat-message { max-width: 82%; margin-bottom: 18px; }
+.chat-message.user { margin-left: auto; text-align: right; }
+.message-role { font-size: 10px; color: var(--showcase-muted); font-weight: 800; }
+.chat-message p { display: inline-block; text-align: left; margin: 6px 0 0; padding: 12px 14px; color: var(--showcase-ivory); border: 1px solid var(--showcase-border-soft); background: rgba(12, 17, 26, 0.74); font-size: 12px; line-height: 1.7; }
+.chat-message.user p { color: var(--showcase-graphite); background: linear-gradient(135deg, var(--showcase-cyan), #9befff); }
+.answer-meta { display: flex; gap: 12px; justify-content: flex-start; color: var(--showcase-muted); font-size: 9px; margin-top: 6px; }
+.knowledge-citations { margin-top: 8px; padding: 9px 10px; color: var(--showcase-ivory); border: 1px solid var(--showcase-border-soft); background: rgba(12, 17, 26, 0.74); text-align: left; }
+.knowledge-citations-label { display: block; color: var(--showcase-cyan); font-size: 9px; font-weight: 800; margin-bottom: 5px; }
+.knowledge-citation { display: flex; align-items: baseline; gap: 7px; margin-top: 4px; font-size: 10px; color: var(--showcase-ivory); }
+.knowledge-citation small { color: var(--showcase-muted); font-size: 9px; }
+.ticket-strip { display: grid; grid-template-columns: auto auto 1fr; gap: 16px; margin-top: 10px; padding: 12px; color: var(--showcase-amber); border: 1px solid rgba(255, 210, 122, 0.38); background: rgba(255, 210, 122, 0.08); text-align: left; }
+.ticket-strip span, .ticket-strip strong { display: block; }
+.ticket-strip span { font-size: 9px; color: var(--showcase-amber); }
+.ticket-strip strong { font-size: 11px; color: var(--showcase-ivory); margin-top: 4px; }
+.loading-message { color: var(--showcase-muted); font-size: 11px; }
+.chat-composer { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin-top: 16px; }
+.role-select { width: 120px; }
+.risk-reason { padding: 5px 8px; color: var(--showcase-amber); border: 1px solid rgba(255, 210, 122, 0.38); background: rgba(255, 210, 122, 0.08); }
+.ticket-queue { grid-column: 1 / -1; padding: 24px; }
+.ticket-table { display: grid; gap: 8px; }
+.ticket-table article { display: grid; grid-template-columns: 1fr auto auto; gap: 14px; align-items: center; padding: 12px; color: var(--showcase-ivory); border-top: 1px solid var(--showcase-border-soft); background: rgba(12, 17, 26, 0.74); }
+.ticket-table article div strong, .ticket-table article div span { display: block; }
+.ticket-table article div span { font-size: 10px; color: var(--showcase-muted); margin-top: 4px; }
+.retrieval-trace { margin-top: 12px; padding: 10px 12px; border-left: 3px solid var(--showcase-cyan); background: var(--showcase-cyan-soft); display: flex; gap: 10px; align-items: center; font-size: 10px; }
+.retrieval-trace span { color: var(--showcase-muted); }
+.retrieval-trace small { color: var(--showcase-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.feedback-actions { display: flex; gap: 6px; margin-top: 6px; }
+.feedback-actions button { border: 1px solid var(--showcase-border-soft); background: rgba(12, 17, 26, 0.74); color: var(--showcase-ivory); font-size: 9px; padding: 4px 7px; cursor: pointer; }
+.knowledge-admin { grid-column: 1 / -1; display: flex !important; flex-wrap: wrap; gap: 6px; align-items: center; }
+.knowledge-admin button { border: 1px solid var(--showcase-border-soft); background: var(--showcase-cyan-soft); color: var(--showcase-cyan); font-size: 9px; padding: 5px 7px; cursor: pointer; }
+.knowledge-admin button.inactive { opacity: .45; text-decoration: line-through; }
+.knowledge-admin i { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--showcase-cyan); margin-right: 5px; }
+.knowledge-admin button.inactive i { background: var(--showcase-muted); }
+
+@media (max-width: 1050px) {
+  .customer-console { grid-template-columns: 1fr; }
+  .customer-sidebar { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .customer-sidebar .section-heading, .customer-sidebar h3, .privacy-note { grid-column: 1 / -1; }
+  .service-metrics { margin: 0; }
+}
+
+@media (max-width: 650px) {
+  .customer-sidebar { display: block; }
+  .customer-sidebar h3 { margin-top: 20px; }
+  .chat-stream { height: 400px; }
+  .chat-message { max-width: 94%; }
+  .ticket-strip { grid-template-columns: 1fr; }
+  .answer-meta { display: block; }
+  .answer-meta span { display: block; margin-top: 3px; }
+}

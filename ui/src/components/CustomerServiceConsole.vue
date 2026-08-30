@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { askCustomerService, getCustomerConversation, listCustomerTickets, replyCustomerSession, submitFeedback, updateCustomerTicket } from '../services/workflowApi'
 import type { CustomerConversationResponse, CustomerServiceResponse, CustomerTicketResponse, DemoRole } from '../types/workflow'
 import { customerIntentLabel, customerTicketStatusLabel } from '../utils/labels'
+import './customer-service.css'
 
 const props = defineProps<{ role: DemoRole }>()
 const question = ref('')
