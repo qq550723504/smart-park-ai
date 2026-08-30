@@ -46,9 +46,13 @@ export function withDarkTheme(option: Record<string, unknown>): Record<string, u
         itemStyle: { ...itemStyle, color },
         ...(seriesType === 'line' ? { lineStyle: { ...lineStyle, color } } : {}),
       }
-    })
+  })
     : option.series
   const tooltip = asRecord(option.tooltip)
+  const sourceTrigger = tooltip.trigger
+  const trigger = sourceTrigger === 'item' || sourceTrigger === 'axis' || sourceTrigger === 'none'
+    ? sourceTrigger
+    : (option.xAxis || option.yAxis ? 'axis' : 'item')
 
   return {
     ...option,
@@ -57,7 +61,7 @@ export function withDarkTheme(option: Record<string, unknown>): Record<string, u
     textStyle: { ...asRecord(option.textStyle), color: '#c8d3e0' },
     tooltip: {
       ...tooltip,
-      trigger: 'axis',
+      trigger,
       backgroundColor: 'rgba(4, 7, 12, 0.94)',
       borderColor: 'rgba(112, 232, 255, 0.35)',
       textStyle: { ...asRecord(tooltip.textStyle), color: '#fff0d2' },

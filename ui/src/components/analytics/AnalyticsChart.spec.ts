@@ -86,6 +86,32 @@ describe('AnalyticsChart', () => {
     expect(source).toEqual(original)
   })
 
+  it('keeps chart tooltip hover semantics while applying the dark tooltip theme', () => {
+    const cartesian = withDarkTheme({ xAxis: { type: 'category' }, series: [{ type: 'line' }] }) as Record<string, unknown>
+    const calendar = withDarkTheme({ calendar: { range: '2026-08-27' }, series: [{ type: 'heatmap' }] }) as Record<string, unknown>
+    const gauge = withDarkTheme({ series: [{ type: 'gauge' }] }) as Record<string, unknown>
+    const explicit = withDarkTheme({
+      xAxis: { type: 'category' },
+      tooltip: { trigger: 'none', formatter: '{value} kWh', textStyle: { fontWeight: 700 } },
+      series: [{ type: 'line' }],
+    }) as Record<string, unknown>
+
+    expect((cartesian.tooltip as Record<string, unknown>).trigger).toBe('axis')
+    expect((calendar.tooltip as Record<string, unknown>).trigger).toBe('item')
+    expect((gauge.tooltip as Record<string, unknown>).trigger).toBe('item')
+    for (const trigger of ['item', 'axis', 'none']) {
+      const themed = withDarkTheme({ tooltip: { trigger }, series: [{ type: 'gauge' }] }) as Record<string, unknown>
+      expect((themed.tooltip as Record<string, unknown>).trigger).toBe(trigger)
+    }
+    expect(explicit.tooltip).toMatchObject({
+      trigger: 'none',
+      formatter: '{value} kWh',
+      backgroundColor: 'rgba(4, 7, 12, 0.94)',
+      borderColor: 'rgba(112, 232, 255, 0.35)',
+      textStyle: { fontWeight: 700, color: '#fff0d2' },
+    })
+  })
+
   it('renders KPI values as accessible text instead of inventing a chart point', () => {
     const wrapper = mount(AnalyticsChart, {
       props: {
