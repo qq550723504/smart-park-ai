@@ -291,6 +291,7 @@ Remove-Item Env:SERVER_ADDRESS -ErrorAction SilentlyContinue
 | 方法与路径 | 用途 | 备注 |
 | --- | --- | --- |
 | `GET /api/operations/capabilities` | 查看当前运行模式 | 无需演示角色 |
+| `GET /api/showcase/scenarios` | 返回最近在线验证驱动的客户演示场景；未验证或失效场景不可启动。 | 只读，无需演示角色 |
 | `POST /api/customer-service/sessions` | 创建客服会话 | 可传 `Idempotency-Key` |
 | `POST /api/customer-service/sessions/{sessionId}/messages` | 继续提问 | 已转人工的会话停止自动回答 |
 | `GET /api/customer-service/sessions/{sessionId}/conversation` | 查看对话与安全检索轨迹 | 不返回知识正文 |
