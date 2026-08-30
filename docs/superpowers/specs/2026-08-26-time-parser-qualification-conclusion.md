@@ -28,9 +28,13 @@
 | 安全漏洞（pip-audit --strict） | ✅ 无已知漏洞 |
 | 许可证白名单（Apache-2.0 兼容） | ❌ **失败** |
 
+正确性关卡仍由原有 18 个契约/语料测试构成；当前复现命令还会执行 13 个依赖边界与
+许可证策略回归测试，因此完整 `pytest` 套件共 31 项。
+
 失败证据：
 
 ```text
+DISALLOWED LICENSE: certifi -> Mozilla Public License 2.0 (MPL 2.0)
 DISALLOWED LICENSE: jiojio -> GNU General Public License v3 (GPLv3)
 ```
 
@@ -97,10 +101,10 @@ Apache-2.0 兼容白名单内；本项目以 Apache-2.0 生态分发容器镜像
 
 ```powershell
 cd time-parser
-python -m venv .venv
-./.venv/Scripts/python -m pip install pip==24.3.1 pip-tools==7.4.1
-./.venv/Scripts/pip-compile --generate-hashes -o requirements.txt requirements.in
-./.venv/Scripts/python -m pip install --require-hashes -r requirements.txt
+py -3.12 -m venv .venv
+./.venv/Scripts/python -m pip install pip==24.3.1 pip-tools==7.6.1
+powershell -ExecutionPolicy Bypass -File scripts/compile-requirements.ps1 -Python ./.venv/Scripts/python
+./.venv/Scripts/python -m pip install --require-hashes -r requirements-dev.txt
 ./.venv/Scripts/python -m pytest tests -q          # JioNLP 正确性 ✅
 powershell -ExecutionPolicy Bypass -File scripts/verify-time-intent-corpus.ps1
 # → 许可证关卡失败（jiojio GPLv3）
