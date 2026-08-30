@@ -4,8 +4,12 @@ import { describe, expect, it } from 'vitest'
 
 const theme = readFileSync(resolve(process.cwd(), 'src/styles/showcase-theme.css'), 'utf8')
 const homepage = readFileSync(resolve(process.cwd(), 'src/components/showcase/showcase-home.css'), 'utf8')
+const workbenchPrimitivesCss = readFileSync(resolve(process.cwd(), 'src/styles/workbench-primitives.css'), 'utf8')
 const workflowCss = readFileSync(resolve(process.cwd(), 'src/styles/workflow.css'), 'utf8')
 const customerCss = readFileSync(resolve(process.cwd(), 'src/components/customer-service.css'), 'utf8')
+const legacyStyles = readFileSync(resolve(process.cwd(), 'src/styles.css'), 'utf8')
+const operationsWorkbench = readFileSync(resolve(process.cwd(), 'src/components/OperationsWorkbench.vue'), 'utf8')
+const customerConsole = readFileSync(resolve(process.cwd(), 'src/components/CustomerServiceConsole.vue'), 'utf8')
 const compact = (css: string) => css.replace(/\s+/g, '')
 
 describe('showcase theme contract', () => {
@@ -44,5 +48,44 @@ describe('showcase theme contract', () => {
     expect(workflowNode).not.toMatch(/background:(white|#fff)/)
     expect(visitorMessage).toContain('background:linear-gradient(135deg,var(--showcase-cyan),#9befff)')
     expect(visitorMessage).not.toMatch(/background:(white|#fff)/)
+  })
+
+  it('keeps migrated workflow and customer selectors out of the legacy stylesheet', () => {
+    const migratedSelectors = [
+      '.dashboard-grid{', '.workflow-node{', '.timeline-panel{', '.approval-panel{',
+      '.customer-main{', '.customer-console{', '.chat-message{', '.knowledge-admin{',
+    ]
+
+    for (const selector of migratedSelectors) {
+      expect(compact(legacyStyles)).not.toContain(selector)
+    }
+  })
+
+  it('centralizes shared workbench primitives outside scene stylesheets', () => {
+    const sharedSelectors = [
+      '.immersive-workbench.hero-metrics{',
+      '.immersive-workbench.section-heading.compact{',
+      '.immersive-workbench.section-headingh2{',
+      '.immersive-workbench.count-badge{',
+      '.immersive-workbench.live-indicator{',
+    ]
+
+    for (const selector of sharedSelectors) {
+      expect(compact(workbenchPrimitivesCss)).toContain(selector)
+    }
+    expect(compact(workbenchPrimitivesCss)).toMatch(/@keyframesworkbench-pulse\b/)
+    expect(compact(workbenchPrimitivesCss)).toContain('animation:workbench-pulse')
+
+    for (const selector of ['.hero-metrics{', '.section-heading.compact{', '.section-headingh2{', '.count-badge{', '.live-indicator{']) {
+      expect(compact(workflowCss)).not.toContain(selector)
+      expect(compact(customerCss)).not.toContain(selector)
+    }
+    expect(compact(workflowCss)).not.toContain('workflow-pulse')
+  })
+
+  it('loads each scene stylesheet from its owning component', () => {
+    expect(operationsWorkbench).toMatch(/import\s+['"]\.\.\/styles\/workbench-primitives\.css['"]/)
+    expect(operationsWorkbench).toMatch(/import\s+['"]\.\.\/styles\/workflow\.css['"]/)
+    expect(customerConsole).toMatch(/import\s+['"]\.\/customer-service\.css['"]/)
   })
 })
