@@ -80,7 +80,9 @@ describe('showcase theme contract', () => {
     }
     expect(compact(workbenchPrimitivesCss)).toMatch(/@keyframesworkbench-pulse\b/)
     expect(compact(workbenchPrimitivesCss)).toContain('animation:workbench-pulse')
-    expect(compact(workbenchPrimitivesCss)).toMatch(/@media\(max-width:650px\)\{[^@]*\.immersive-workbench\.main-content\{[^}]*padding:34px16px/)
+    const mobilePrimitives = compact(workbenchPrimitivesCss).match(/@media\(max-width:650px\)\{([\s\S]*)\}$/)?.[1]
+    expect(mobilePrimitives).toContain('.immersive-workbench.main-content{padding:34px16px;')
+    expect(mobilePrimitives).toContain('.immersive-workbench.hero-rowh2{font-size:38px;')
 
     for (const selector of [
       '.immersive-workbench.main-content{', '.immersive-workbench.hero-row{',
@@ -92,6 +94,7 @@ describe('showcase theme contract', () => {
       expect(compact(customerCss)).not.toContain(selector)
     }
     expect(compact(workflowCss)).not.toMatch(/@media\(max-width:650px\)\{[^@]*\.immersive-workbench\.main-content\{/)
+    expect(compact(workflowCss)).not.toMatch(/@media\(max-width:650px\)\{[^@]*\.immersive-workbench\.hero-rowh2\{/)
     expect(compact(workflowCss)).not.toContain('workflow-pulse')
   })
 
