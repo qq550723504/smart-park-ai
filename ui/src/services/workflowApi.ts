@@ -18,6 +18,31 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
+export type ShowcaseScenarioStatus = 'READY' | 'NOT_READY' | 'DISABLED'
+
+export interface ShowcaseScenario {
+  id: 'ALERT_WORKFLOW' | 'EXPERT_COLLABORATION' | 'OPERATIONS_ANALYSIS' | 'VOICE_ASSISTANT'
+  status: ShowcaseScenarioStatus
+  live: boolean
+  title: string
+  businessQuestion: string
+  expectedDurationSeconds: number
+  requiredCapabilities: string[]
+  proofTypes: string[]
+  humanBoundary: string
+  unavailableReason: string | null
+  lastVerifiedAt: string | null
+}
+
+export interface ShowcaseScenarioCatalog {
+  capturedAt: string
+  scenarios: ShowcaseScenario[]
+}
+
+export function getShowcaseScenarios() {
+  return request<ShowcaseScenarioCatalog>('/api/showcase/scenarios')
+}
+
 export function askCustomerService(question: string, idempotencyKey: string) {
   return request<CustomerServiceResponse>('/api/customer-service/sessions', {
     method: 'POST',
