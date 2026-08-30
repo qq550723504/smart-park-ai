@@ -306,9 +306,12 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
   async function prepare(): Promise<void> {
     const generation = lifecycleGeneration
     try {
-      await ensureConnected(generation)
+      const connected = await ensureConnected(generation)
+      if (!connected || generation !== lifecycleGeneration) {
+        throw new Error('语音准备已取消')
+      }
     } catch (cause) {
-      if (generation !== lifecycleGeneration) return
+      if (generation !== lifecycleGeneration) throw cause
       errorMessage.value = cause instanceof Error ? cause.message : String(cause)
       connectionPhase.value = 'failed'
       throw cause

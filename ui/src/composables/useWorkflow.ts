@@ -43,7 +43,7 @@ export function useWorkflow() {
     }
   }
 
-  async function start(alertId: string) {
+  async function start(alertId: string): Promise<WorkflowResponse | null> {
     closeStream()
     loading.value = true
     error.value = ''
@@ -55,8 +55,10 @@ export function useWorkflow() {
       eventSource = subscribeToWorkflow(result.workflowId, handleEvent, () => {
         if (!isTerminal.value) error.value = '实时事件连接中断，请检查后端服务。'
       })
+      return result
     } catch (cause) {
       error.value = cause instanceof Error ? cause.message : '无法启动工作流'
+      return null
     } finally {
       loading.value = false
     }

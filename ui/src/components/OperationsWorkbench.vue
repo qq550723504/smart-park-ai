@@ -138,7 +138,7 @@ function selectAlert(id: string) {
 }
 
 async function launch() {
-  await start(selectedAlertId.value)
+  return start(selectedAlertId.value)
 }
 
 useGuidedLaunch({
@@ -146,8 +146,8 @@ useGuidedLaunch({
   request: () => props.launchRequest,
   scenarioId: 'ALERT_WORKFLOW',
   start: async () => {
-    await launch()
-    if (!workflow.value) throw new Error(error.value || '告警工作流启动失败')
+    const started = await launch()
+    if (!started) throw new Error(error.value || '告警工作流启动失败')
     return { state: 'started', message: '告警工作流已启动' }
   },
   onUpdate: handleGuidedLaunchUpdate,

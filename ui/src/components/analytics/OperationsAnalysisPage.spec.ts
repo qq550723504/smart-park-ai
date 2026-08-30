@@ -1,6 +1,9 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { ref } from 'vue'
 import OperationsAnalysisPage from './OperationsAnalysisPage.vue'
+import type { ExecutionTraceLike } from '../../composables/useOperationsAnalysis'
+import type { ExecutionEvent } from '../../types/execution'
 
 type FetchHandler = (url: string, init?: RequestInit) => Response
 
@@ -10,6 +13,12 @@ let handler: FetchHandler = () => new Response('{}', { status: 200 })
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise })
+  return { promise, resolve }
 }
 
 beforeEach(() => {
@@ -193,6 +202,57 @@ describe('OperationsAnalysisPage', () => {
     await flush(2)
     expect(submittedQuestion).toBe('过去5天各楼宇能耗')
     expect(wrapper.emitted('launch-status')?.at(-1)?.[0]).toMatchObject({ requestId: 22, state: 'started' })
+    wrapper.unmount()
+  })
+
+  it('waits for the newer guided request before reporting the accepted run', async () => {
+    const firstPost = deferred<Response>()
+    const secondPost = deferred<Response>()
+    const subscribe = vi.fn()
+    const trace: ExecutionTraceLike = { events: ref<ExecutionEvent[]>([]), subscribe }
+    let posts = 0
+    handler = (_url, init) => {
+      if (init?.method === 'POST') {
+        posts += 1
+        return (posts === 1 ? firstPost.promise : secondPost.promise) as unknown as Response
+      }
+      return jsonResponse({ runId: 'run-b', status: 'RUNNING', createdAt: '' })
+    }
+    const wrapper = mount(OperationsAnalysisPage, {
+      props: {
+        active: true,
+        pollIntervalMs: 1,
+        trace,
+        launchRequest: { requestId: 71, mode: 'guided', scenarioId: 'OPERATIONS_ANALYSIS', view: 'analytics' },
+      },
+    })
+    await flush(1)
+    expect(posts).toBe(1)
+
+    await wrapper.setProps({
+      launchRequest: { requestId: 72, mode: 'guided', scenarioId: 'OPERATIONS_ANALYSIS', view: 'analytics' },
+    })
+    await flush(1)
+    expect(posts).toBe(2)
+    const supersededA = (wrapper.emitted('launch-status') ?? [])
+      .map(([update]) => update as { requestId: number; state: string })
+      .filter((update) => update.requestId === 71)
+    expect(supersededA.some((update) => update.state === 'failed')).toBe(true)
+
+    firstPost.resolve(jsonResponse({ runId: 'run-a' }, 202))
+    await flush(2)
+
+    const updatesBeforeB = (wrapper.emitted('launch-status') ?? [])
+      .map(([update]) => update as { requestId: number; state: string })
+      .filter((update) => update.requestId === 72)
+    expect(updatesBeforeB.some((update) => update.state === 'started')).toBe(false)
+    expect(subscribe).not.toHaveBeenCalledWith('run-a')
+
+    secondPost.resolve(jsonResponse({ runId: 'run-b' }, 202))
+    await flush(2)
+
+    expect(wrapper.emitted('launch-status')?.at(-1)?.[0]).toMatchObject({ requestId: 72, state: 'started' })
+    expect(subscribe).toHaveBeenCalledWith('run-b')
     wrapper.unmount()
   })
 })

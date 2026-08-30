@@ -258,6 +258,54 @@ describe('OperationsWorkbench', () => {
     }
   })
 
+  it('reports a fresh guided workflow failure instead of reusing an older workflow', async () => {
+    let postCount = 0
+    const originalEventSource = globalThis.EventSource
+    globalThis.EventSource = class {
+      onerror: ((event: Event) => void) | null = null
+      constructor(_url: string | URL) {}
+      addEventListener(): void {}
+      close(): void {}
+    } as unknown as typeof EventSource
+    globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        postCount += 1
+        if (postCount === 2) throw new Error('second workflow launch failed')
+        return new Response(JSON.stringify({
+          workflowId: 'wf-guided-first', alertId: 'ALT-TEMP-001', status: 'RUNNING',
+          diagnosis: null, approval: null, workOrder: null, errors: [], eventSequence: 1, riskReasons: [],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({
+        knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }) as typeof fetch
+
+    try {
+      const wrapper = mount(OperationsWorkbench, {
+        props: {
+          active: true,
+          initialView: 'workflow',
+          launchRequest: { requestId: 51, mode: 'guided', scenarioId: 'ALERT_WORKFLOW', view: 'workflow' },
+        },
+        global: { stubs: operatorStubs },
+      })
+      await settleCapabilities()
+      await wrapper.setProps({
+        launchRequest: { requestId: 52, mode: 'guided', scenarioId: 'ALERT_WORKFLOW', view: 'workflow' },
+      })
+      await settleCapabilities()
+
+      const status = wrapper.get('[role="status"]')
+      expect(status.attributes('data-state')).toBe('failed')
+      expect(status.text()).toContain('second workflow launch failed')
+      wrapper.unmount()
+    } finally {
+      globalThis.EventSource = originalEventSource
+    }
+  })
+
   it('keeps the newer guided status when a stale async update arrives', async () => {
     const wrapper = mount(OperationsWorkbench, {
       props: {

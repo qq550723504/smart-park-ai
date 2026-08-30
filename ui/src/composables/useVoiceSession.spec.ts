@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { effectScope, ref } from 'vue'
 import { useVoiceSession } from './useVoiceSession'
+import { useGuidedLaunch } from './useGuidedLaunch'
 import type { UseVoiceSessionDeps, WebSocketLike } from './useVoiceSession'
 import type { VoiceServerFrame } from '../types/voice'
+import type { GuidedLaunchUpdate, ScenarioLaunchRequest } from '../types/workbench'
 
 class FakeWebSocket implements WebSocketLike {
   sent: Array<string | ArrayBuffer> = []
@@ -346,6 +349,49 @@ describe('useVoiceSession', () => {
     expect(openedSockets).toBe(0)
     expect(binding.connectionPhase.value).toBe('idle')
     expect(binding.errorMessage.value).toBe('')
+  })
+
+  it('does not report guided voice ready when close wins the pending socket handshake', async () => {
+    const socket = new FakeWebSocket('')
+    const active = ref(true)
+    const request = ref<ScenarioLaunchRequest | null>({
+      requestId: 61, mode: 'guided', scenarioId: 'VOICE_ASSISTANT', view: 'voice',
+    })
+    const updates: GuidedLaunchUpdate[] = []
+    const scope = effectScope()
+    let binding!: ReturnType<typeof useVoiceSession>
+    scope.run(() => {
+      binding = useVoiceSession({
+        api: {
+          createSession: async () => ({
+            sessionId: 'vs-pending',
+            runId: '00000000-0000-0000-0000-00000000dddd',
+            wsPath: '/ws/voice/sessions/vs-pending',
+          }),
+        },
+        openWebSocket: () => socket,
+      })
+      useGuidedLaunch({
+        active: () => active.value,
+        request: () => request.value,
+        scenarioId: 'VOICE_ASSISTANT',
+        start: async () => {
+          await binding.prepare()
+          return { state: 'ready', message: '语音链路已就绪' }
+        },
+        onUpdate: (update) => updates.push(update),
+      })
+    })
+
+    await Promise.resolve()
+    active.value = false
+    binding.close()
+    socket.open()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(updates.some((update) => update.state === 'ready')).toBe(false)
+    expect(updates.some((update) => update.state === 'failed')).toBe(true)
+    scope.stop()
   })
 
   it('releases a microphone stream that resolves after close', async () => {

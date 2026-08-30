@@ -20,8 +20,13 @@ export interface OperationsAnalysis {
   runId: Ref<string | null>
   chart: Ref<DisplayPayload | null>
   selections: Ref<Array<{ term: string; metric: string }>>
-  submit(question: string): Promise<void>
+  submit(question: string, callbacks?: AnalysisStartCallbacks): Promise<void>
   clarify(): Promise<void>
+}
+
+export interface AnalysisStartCallbacks {
+  onAccepted?(runId: string): void
+  onFailed?(cause: Error): void
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -45,6 +50,7 @@ export function useOperationsAnalysis(
   const selections = ref<Array<{ term: string; metric: string }>>([])
   let clarificationPollTimer: ReturnType<typeof setTimeout> | undefined
   let clarificationPollGeneration = 0
+  let operationGeneration = 0
 
   function stopClarificationPolling(): void {
     clarificationPollGeneration += 1
@@ -56,6 +62,7 @@ export function useOperationsAnalysis(
 
   function pollClarificationExpiry(): void {
     const generation = clarificationPollGeneration
+    const operation = operationGeneration
     const scheduleNext = () => {
       if (generation === clarificationPollGeneration) {
         clarificationPollTimer = setTimeout(pollClarificationExpiry, pollIntervalMs)
@@ -64,7 +71,7 @@ export function useOperationsAnalysis(
 
     clarificationPollTimer = undefined
     void getAnalysisStatus(runId.value!).then((current) => {
-      if (generation !== clarificationPollGeneration) return
+      if (generation !== clarificationPollGeneration || operation !== operationGeneration) return
       dto.value = current
       if (isTerminalAnalysisStatus(current.status)) {
         applyTerminal(current)
@@ -93,21 +100,25 @@ export function useOperationsAnalysis(
     })
   }
 
-  async function pollToTerminal(): Promise<AnalysisStatusDto> {
+  async function pollToTerminal(targetRunId: string, generation: number): Promise<AnalysisStatusDto | null> {
     let lastError = ''
     for (let attempt = 0; attempt < maxPolls; attempt++) {
+      if (generation !== operationGeneration) return null
       try {
-        const current = await getAnalysisStatus(runId.value!)
+        const current = await getAnalysisStatus(targetRunId)
+        if (generation !== operationGeneration) return null
         dto.value = current
         // A clarification pause also stops polling: the run waits for operator input.
         if (isTerminalAnalysisStatus(current.status) || current.status === 'NEEDS_CLARIFICATION') {
           return current
         }
       } catch (cause) {
+        if (generation !== operationGeneration) return null
         lastError = cause instanceof Error ? cause.message : String(cause)
       }
       await sleep(pollIntervalMs)
     }
+    if (generation !== operationGeneration) return null
     throw new Error(lastError || '分析超时，未在预期时间内完成')
   }
 
@@ -125,11 +136,13 @@ export function useOperationsAnalysis(
     }
   }
 
-  async function submit(question: string): Promise<void> {
+  async function submit(question: string, callbacks?: AnalysisStartCallbacks): Promise<void> {
     if (!question.trim()) {
       error.value = '请输入分析问题'
+      callbacks?.onFailed?.(new Error(error.value))
       return
     }
+    const generation = ++operationGeneration
     error.value = ''
     stopClarificationPolling()
     // A failed POST must not leave the previous run addressable to the page;
@@ -138,14 +151,23 @@ export function useOperationsAnalysis(
     chart.value = null
     dto.value = null
     phase.value = 'running'
+    let accepted = false
     try {
       const { runId: startedRunId } = await startAnalysis(question.trim())
+      if (generation !== operationGeneration) return
       runId.value = startedRunId
       options.trace?.subscribe(startedRunId)
-      applyTerminal(await pollToTerminal())
+      accepted = true
+      callbacks?.onAccepted?.(startedRunId)
+      const terminal = await pollToTerminal(startedRunId, generation)
+      if (generation !== operationGeneration || !terminal) return
+      applyTerminal(terminal)
     } catch (cause) {
-      error.value = cause instanceof Error ? cause.message : String(cause)
+      if (generation !== operationGeneration) return
+      const failure = cause instanceof Error ? cause : new Error(String(cause))
+      error.value = failure.message
       phase.value = 'failed'
+      if (!accepted) callbacks?.onFailed?.(failure)
     }
   }
 
@@ -155,15 +177,21 @@ export function useOperationsAnalysis(
       error.value = '请至少选择一个指标口径'
       return
     }
+    const generation = ++operationGeneration
+    const targetRunId = runId.value
     error.value = ''
     stopClarificationPolling()
     chart.value = null
     phase.value = 'running'
     try {
-      await submitClarification(runId.value, selections.value)
-      options.trace?.subscribe(runId.value)
-      applyTerminal(await pollToTerminal())
+      await submitClarification(targetRunId, selections.value)
+      if (generation !== operationGeneration) return
+      options.trace?.subscribe(targetRunId)
+      const terminal = await pollToTerminal(targetRunId, generation)
+      if (generation !== operationGeneration || !terminal) return
+      applyTerminal(terminal)
     } catch (cause) {
+      if (generation !== operationGeneration) return
       error.value = cause instanceof Error ? cause.message : String(cause)
       phase.value = 'failed'
     }
@@ -171,6 +199,9 @@ export function useOperationsAnalysis(
 
   const isBusy = computed(() => phase.value === 'running')
   void isBusy
-  onScopeDispose(stopClarificationPolling)
+  onScopeDispose(() => {
+    operationGeneration++
+    stopClarificationPolling()
+  })
   return { phase, dto, error, runId, chart, selections, submit, clarify }
 }

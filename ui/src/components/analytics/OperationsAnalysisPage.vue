@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed, onScopeDispose, ref, watch } from 'vue'
-import { useOperationsAnalysis, type ExecutionTraceLike } from '../../composables/useOperationsAnalysis'
+import {
+  useOperationsAnalysis,
+  type AnalysisStartCallbacks,
+  type ExecutionTraceLike,
+} from '../../composables/useOperationsAnalysis'
 import { useGuidedLaunch } from '../../composables/useGuidedLaunch'
 import AnalyticsChart from './AnalyticsChart.vue'
 import type { GuidedLaunchUpdate, ScenarioLaunchRequest } from '../../types/workbench'
@@ -40,45 +44,50 @@ const analysis = useOperationsAnalysis({
 })
 const chosenMetrics = ref<string[]>([])
 const DEFAULT_GUIDED_QUESTION = '过去5天各楼宇能耗'
-let cancelAnalysisStart: (() => void) | null = null
+let cancelGuidedAnalysisStart: (() => void) | null = null
 
 onScopeDispose(() => {
-  cancelAnalysisStart?.()
+  cancelGuidedAnalysisStart?.()
 })
 
-function launch(): void {
-  void analysis.submit(question.value).then(() => {
-    if (analysis.runId.value) emit('run-started', analysis.runId.value)
+function launchAnalysis(callbacks?: AnalysisStartCallbacks): void {
+  void analysis.submit(question.value, {
+    onAccepted: (runId) => {
+      emit('run-started', runId)
+      callbacks?.onAccepted?.(runId)
+    },
+    onFailed: (cause) => callbacks?.onFailed?.(cause),
   })
 }
 
-function waitForAnalysisStart(): Promise<void> {
+function submitAnalysisForm(): void {
+  launchAnalysis()
+}
+
+function startGuidedAnalysis(): Promise<void> {
+  cancelGuidedAnalysisStart?.()
   return new Promise((resolve, reject) => {
     let settled = false
-    const stop = watch(
-      [() => analysis.runId.value, () => analysis.phase.value],
-      ([runId, phase]) => {
-        if (runId) {
-          settled = true
-          cancelAnalysisStart = null
-          stop()
-          resolve()
-        } else if (phase === 'failed') {
-          settled = true
-          cancelAnalysisStart = null
-          stop()
-          reject(new Error(analysis.error.value || '运营分析启动失败'))
-        }
-      },
-      { flush: 'post' },
-    )
-    cancelAnalysisStart = () => {
+    const cancel = () => {
       if (settled) return
       settled = true
-      stop()
-      cancelAnalysisStart = null
+      if (cancelGuidedAnalysisStart === cancel) cancelGuidedAnalysisStart = null
       reject(new Error('运营分析启动已取消'))
     }
+    const accept = () => {
+      if (settled) return
+      settled = true
+      if (cancelGuidedAnalysisStart === cancel) cancelGuidedAnalysisStart = null
+      resolve()
+    }
+    const fail = (cause: Error) => {
+      if (settled) return
+      settled = true
+      if (cancelGuidedAnalysisStart === cancel) cancelGuidedAnalysisStart = null
+      reject(cause)
+    }
+    cancelGuidedAnalysisStart = cancel
+    launchAnalysis({ onAccepted: accept, onFailed: fail })
   })
 }
 
@@ -88,9 +97,7 @@ useGuidedLaunch({
   scenarioId: 'OPERATIONS_ANALYSIS',
   start: async () => {
     question.value = DEFAULT_GUIDED_QUESTION
-    const started = waitForAnalysisStart()
-    launch()
-    await started
+    await startGuidedAnalysis()
     return { state: 'started', message: '运营分析已启动' }
   },
   onUpdate: (update) => emit('launch-status', update),
@@ -169,7 +176,7 @@ watch(
       </div>
     </div>
 
-    <form class="question-row" @submit.prevent="launch">
+    <form class="question-row" @submit.prevent="submitAnalysisForm">
       <input v-model="question" type="text" placeholder="例如：上周各楼宇能耗对比、高风险告警有多少…" aria-label="分析问题" />
       <button type="submit" :disabled="analysis.phase.value === 'running'">开始分析</button>
     </form>
