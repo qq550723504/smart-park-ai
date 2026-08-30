@@ -4,6 +4,7 @@ import OperationsWorkbench, { type WorkbenchView } from './components/Operations
 
 const surface = ref<'showcase' | 'workbench'>('showcase')
 const requestedView = ref<WorkbenchView>('workflow')
+const hasEnteredWorkbench = ref(false)
 
 const workbenchEntries: Array<{ view: WorkbenchView; label: string; description: string }> = [
   { view: 'workflow', label: '告警工作流', description: '查看告警分诊、AI 诊断、风险闸门和人工审批。' },
@@ -15,6 +16,7 @@ const workbenchEntries: Array<{ view: WorkbenchView; label: string; description:
 
 function openWorkbench(view: WorkbenchView) {
   requestedView.value = view
+  hasEnteredWorkbench.value = true
   surface.value = 'workbench'
 }
 
@@ -55,7 +57,8 @@ function returnToShowcase() {
   </main>
 
   <OperationsWorkbench
-    v-else
+    v-if="hasEnteredWorkbench"
+    v-show="surface === 'workbench'"
     :initial-view="requestedView"
     @back-to-showcase="returnToShowcase"
   />
