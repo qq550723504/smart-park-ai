@@ -255,4 +255,43 @@ describe('OperationsAnalysisPage', () => {
     expect(subscribe).toHaveBeenCalledWith('run-b')
     wrapper.unmount()
   })
+
+  it('settles a guided start when a manual submission supersedes it', async () => {
+    const guidedPost = deferred<Response>()
+    const manualPost = deferred<Response>()
+    let posts = 0
+    handler = (_url, init) => {
+      if (init?.method === 'POST') {
+        posts += 1
+        return (posts === 1 ? guidedPost.promise : manualPost.promise) as unknown as Response
+      }
+      return jsonResponse({ runId: 'manual-run', status: 'RUNNING', createdAt: '' })
+    }
+    const wrapper = mount(OperationsAnalysisPage, {
+      props: {
+        active: true,
+        pollIntervalMs: 1,
+        launchRequest: { requestId: 81, mode: 'guided', scenarioId: 'OPERATIONS_ANALYSIS', view: 'analytics' },
+      },
+    })
+    await flush(1)
+    expect(posts).toBe(1)
+
+    await wrapper.find('form').trigger('submit')
+    await flush(1)
+    expect(posts).toBe(2)
+    expect((wrapper.emitted('launch-status') ?? [])
+      .some(([update]) => (update as { requestId: number; state: string }).requestId === 81
+        && (update as { state: string }).state === 'failed')).toBe(true)
+
+    guidedPost.resolve(jsonResponse({ runId: 'guided-run' }, 202))
+    manualPost.resolve(jsonResponse({ runId: 'manual-run' }, 202))
+    await flush(2)
+
+    expect(wrapper.emitted('run-started')?.at(-1)).toEqual(['manual-run'])
+    expect((wrapper.emitted('launch-status') ?? [])
+      .some(([update]) => (update as { requestId: number; state: string }).requestId === 81
+        && (update as { state: string }).state === 'started')).toBe(false)
+    wrapper.unmount()
+  })
 })

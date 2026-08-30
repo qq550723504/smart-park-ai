@@ -190,4 +190,27 @@ describe('useOperationsAnalysis', () => {
     await nextTick()
     expect((analysis.chart.value as { payloadType: string }).payloadType).toBe('CHART')
   })
+
+  it('keeps chart state bound to the current analysis run', async () => {
+    const trace = fakeTrace()
+    handler = (url, init) => {
+      if (init?.method === 'POST') return jsonResponse({ runId: 'run-b' }, 202)
+      return jsonResponse({ runId: 'run-b', status: 'COMPLETED', createdAt: '' })
+    }
+    const analysis = useOperationsAnalysis({ trace, pollIntervalMs: 1 })
+    await analysis.submit('B 的分析')
+    const { nextTick } = await import('vue')
+    const chart = (runId: string, title: string) => ({
+      eventId: `chart-${runId}`, runId, sequence: 1, timestamp: '', scenario: 'OPERATIONS_ANALYSIS',
+      actor: 'analytics', stage: 'RENDERING', eventType: 'CHART_SPECIFIED', status: 'RUNNING', safeSummary: title,
+      displayPayload: { payloadType: 'CHART', type: 'BAR', title, xField: 'building', yFields: ['energy_kwh'], seriesField: '-', unit: 'kWh' },
+    } as ExecutionEvent)
+
+    trace.events.value = [chart('run-b', 'B 图表')]
+    await nextTick()
+    trace.events.value = [chart('run-b', 'B 图表'), chart('run-a', 'A 旧图表')]
+    await nextTick()
+
+    expect((analysis.chart.value as { title: string }).title).toBe('B 图表')
+  })
 })

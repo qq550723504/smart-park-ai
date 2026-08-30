@@ -61,6 +61,7 @@ function launchAnalysis(callbacks?: AnalysisStartCallbacks): void {
 }
 
 function submitAnalysisForm(): void {
+  cancelGuidedAnalysisStart?.()
   launchAnalysis()
 }
 

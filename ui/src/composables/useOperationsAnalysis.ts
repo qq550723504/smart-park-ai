@@ -91,8 +91,10 @@ export function useOperationsAnalysis(
 
   if (options.trace) {
     watch(options.trace.events, (events) => {
+      const currentRunId = runId.value
+      if (!currentRunId) return
       for (let i = events.length - 1; i >= 0; i--) {
-        if (events[i].eventType === 'CHART_SPECIFIED') {
+        if (events[i].eventType === 'CHART_SPECIFIED' && events[i].runId === currentRunId) {
           chart.value = events[i].displayPayload
           return
         }
