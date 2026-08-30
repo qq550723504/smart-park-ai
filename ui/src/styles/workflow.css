@@ -119,7 +119,7 @@
 .result-feedback { margin-left: auto; display: flex; }
 .result-footer .result-feedback { margin-left: auto; }
 
-@media (max-width: 1050px) {
+@media (max-width: 1279px) {
   .dashboard-grid, .lower-grid { grid-template-columns: 1fr; }
   .timeline-panel { height: auto; }
   .timeline { height: 300px; }

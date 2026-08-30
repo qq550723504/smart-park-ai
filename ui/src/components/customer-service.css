@@ -54,11 +54,11 @@
 .knowledge-admin i { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--showcase-cyan); margin-right: 5px; }
 .knowledge-admin button.inactive i { background: var(--showcase-muted); }
 
-@media (max-width: 1050px) {
+@media (max-width: 1279px) {
   .customer-console { grid-template-columns: 1fr; }
-  .customer-sidebar { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .customer-sidebar { display: grid; grid-template-columns: 1fr; gap: 12px; }
   .customer-sidebar .section-heading, .customer-sidebar h3, .privacy-note { grid-column: 1 / -1; }
-  .service-metrics { margin: 0; }
+  .service-metrics { grid-template-columns: 1fr; margin: 0; }
 }
 
 @media (max-width: 650px) {

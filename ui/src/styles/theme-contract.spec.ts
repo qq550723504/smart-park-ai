@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest'
 
 const theme = readFileSync(resolve(process.cwd(), 'src/styles/showcase-theme.css'), 'utf8')
 const homepage = readFileSync(resolve(process.cwd(), 'src/components/showcase/showcase-home.css'), 'utf8')
+const analyticsCss = readFileSync(resolve(process.cwd(), 'src/components/analytics/analytics.css'), 'utf8')
+const shellCss = readFileSync(resolve(process.cwd(), 'src/components/workbench/immersive-workbench.css'), 'utf8')
 const workbenchPrimitivesCss = readFileSync(resolve(process.cwd(), 'src/styles/workbench-primitives.css'), 'utf8')
 const workflowCss = readFileSync(resolve(process.cwd(), 'src/styles/workflow.css'), 'utf8')
 const customerCss = readFileSync(resolve(process.cwd(), 'src/components/customer-service.css'), 'utf8')
@@ -139,5 +141,43 @@ describe('showcase theme contract', () => {
     expect(customerConsole).toMatch(/import\s+['"]\.\/customer-service\.css['"]/)
     expect(collaborationPage).toMatch(/import\s+['"]\.\/expert-collaboration\.css['"]/)
     expect(voicePage).toMatch(/import\s+['"]\.\/voice-assistant\.css['"]/)
+  })
+
+  it('uses shared dark surfaces for analytics controls and results', () => {
+    const compactAnalytics = compact(analyticsCss)
+
+    expect(compactAnalytics).toContain('color:var(--showcase-ivory)')
+    expect(compactAnalytics).toContain('background:rgba(8,12,20,0.76)')
+    expect(compactAnalytics).toContain('background:linear-gradient(135deg,var(--showcase-cyan),#9befff)')
+    expect(compactAnalytics).toContain('background:var(--showcase-cyan-soft)')
+    expect(compactAnalytics).toContain('background:rgba(90,25,21,0.3)')
+    for (const legacySurface of ['#fff', '#f3faf8', '#eef8f5', '#f0f7f5', '#fff1ef', '#fff5f3']) {
+      expect(compactAnalytics).not.toContain(legacySurface)
+    }
+  })
+
+  it('keeps responsive and accessibility contracts at the shell boundaries', () => {
+    const compactShell = compact(shellCss)
+    const compactTheme = compact(theme)
+
+    expect(compactShell).toContain('@media(max-width:1279px)')
+    expect(compactShell).toContain('@media(max-width:767px)')
+    expect(compactShell).toContain('@media(prefers-reduced-motion:reduce)')
+    expect(compactTheme).toContain(':focus-visible')
+    expect(compactShell).toContain('.immersive-workbench__topbar{grid-template-columns:1fr;padding:14px12px;}')
+    expect(compactShell).toMatch(/\.immersive-workbench__nav\{[^}]*width:100%;[^}]*overflow-x:auto;[^}]*white-space:nowrap;[^}]*scrollbar-width:thin;/)
+    expect(compactShell).toContain('.immersive-workbench.hero-metrics{display:grid;grid-template-columns:1fr;}')
+    expect(compactShell).toContain('.immersive-workbench__rail>summary{display:list-item;color:var(--showcase-cyan);cursor:pointer;}')
+  })
+
+  it('stacks workflow, customer, and analytics scene grids across the tablet range', () => {
+    const compactWorkflow = compact(workflowCss)
+    const compactCustomer = compact(customerCss)
+    const compactAnalytics = compact(analyticsCss)
+
+    expect(compactWorkflow).toContain('@media(max-width:1279px){.dashboard-grid,.lower-grid{grid-template-columns:1fr;}')
+    expect(compactCustomer).toContain('@media(max-width:1279px){.customer-console{grid-template-columns:1fr;}.customer-sidebar{display:grid;grid-template-columns:1fr;')
+    expect(compactCustomer).toContain('.service-metrics{grid-template-columns:1fr;margin:0;}')
+    expect(compactAnalytics).toContain('@media(max-width:1279px){.question-row{grid-template-columns:1fr;}')
   })
 })

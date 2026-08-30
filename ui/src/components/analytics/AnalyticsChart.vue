@@ -1,3 +1,74 @@
+<script lang="ts">
+const CHART_COLORS = ['#70e8ff', '#8f5cff', '#ffd27a', '#63e6b2', '#ff8f84']
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}
+}
+
+/** Decorates a copied ECharts option without altering backend-derived fields or arrays. */
+export function withDarkTheme(option: Record<string, unknown>): Record<string, unknown> {
+  const axisStyle = {
+    axisLabel: { color: '#98a4b6' },
+    axisLine: { lineStyle: { color: 'rgba(176, 190, 208, 0.28)' } },
+    splitLine: { lineStyle: { color: 'rgba(176, 190, 208, 0.12)' } },
+    nameTextStyle: { color: '#c8d3e0' },
+  }
+  const decorateAxisItem = (axis: unknown) => {
+    const current = asRecord(axis)
+    return {
+      ...axisStyle,
+      ...current,
+      axisLabel: { ...asRecord(current.axisLabel), ...axisStyle.axisLabel },
+      axisLine: {
+        ...asRecord(current.axisLine),
+        lineStyle: { ...asRecord(asRecord(current.axisLine).lineStyle), ...axisStyle.axisLine.lineStyle },
+      },
+      splitLine: {
+        ...asRecord(current.splitLine),
+        lineStyle: { ...asRecord(asRecord(current.splitLine).lineStyle), ...axisStyle.splitLine.lineStyle },
+      },
+      nameTextStyle: { ...asRecord(current.nameTextStyle), ...axisStyle.nameTextStyle },
+    }
+  }
+  const decorateAxis = (axis: unknown) => Array.isArray(axis)
+    ? axis.map(decorateAxisItem)
+    : axis ? decorateAxisItem(axis) : axis
+  const series = Array.isArray(option.series)
+    ? option.series.map((item, index) => {
+      const current = asRecord(item)
+      const seriesType = String(current.type ?? '')
+      if (seriesType === 'heatmap') return current
+      const color = CHART_COLORS[index % CHART_COLORS.length]
+      const itemStyle = asRecord(current.itemStyle)
+      const lineStyle = asRecord(current.lineStyle)
+      return {
+        ...current,
+        itemStyle: { ...itemStyle, color },
+        ...(seriesType === 'line' ? { lineStyle: { ...lineStyle, color } } : {}),
+      }
+    })
+    : option.series
+  const tooltip = asRecord(option.tooltip)
+
+  return {
+    ...option,
+    backgroundColor: 'transparent',
+    color: CHART_COLORS,
+    textStyle: { ...asRecord(option.textStyle), color: '#c8d3e0' },
+    tooltip: {
+      ...tooltip,
+      trigger: 'axis',
+      backgroundColor: 'rgba(4, 7, 12, 0.94)',
+      borderColor: 'rgba(112, 232, 255, 0.35)',
+      textStyle: { ...asRecord(tooltip.textStyle), color: '#fff0d2' },
+    },
+    xAxis: decorateAxis(option.xAxis),
+    yAxis: decorateAxis(option.yAxis),
+    series,
+  }
+}
+</script>
+
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
@@ -36,7 +107,7 @@ function render(): void {
   container.value.style.display = 'block'
   try {
     instance = instance ?? echarts.init(container.value)
-    instance.setOption(buildOption(current), true)
+    instance.setOption(withDarkTheme(buildOption(current)), true)
   } catch {
     // jsdom/test environments have no canvas support; rendering is skipped gracefully.
   }
@@ -113,11 +184,18 @@ function heatmapOption(current: ChartSpec): Record<string, unknown> {
   const valueIndex = props.columns.indexOf(current.yFields[0])
   const xCategories = [...new Set(props.rows.map((row) => String(row[xIndex] ?? '')))]
   const yCategories = [...new Set(props.rows.map((row) => String(row[yIndex] ?? '')))]
+  const max = Math.max(...props.rows.map((row) => Number(row[valueIndex]) || 0), 0)
   return {
     tooltip: {},
     xAxis: { type: 'category', data: xCategories },
     yAxis: { type: 'category', data: yCategories },
-    visualMap: { min: 0, max: Math.max(...props.rows.map((row) => Number(row[valueIndex]) || 0), 0), calculable: true },
+    visualMap: {
+      min: 0,
+      max,
+      calculable: true,
+      textStyle: { color: '#98a4b6' },
+      inRange: { color: ['#172334', '#275c73', '#70e8ff', '#ffd27a'] },
+    },
     series: [{ type: 'heatmap', data: props.rows.map((row) => [
       xCategories.indexOf(String(row[xIndex] ?? '')),
       yCategories.indexOf(String(row[yIndex] ?? '')),
@@ -132,10 +210,25 @@ function calendarOption(current: ChartSpec): Record<string, unknown> {
   const dates = [...new Set(props.rows
     .map((row) => String(row[dateIndex] ?? ''))
     .filter((date) => date.length > 0))].sort()
+  const max = Math.max(...props.rows.map((row) => Number(row[valueIndex]) || 0), 0)
+  const range = dates.length > 1 ? [dates[0], dates[dates.length - 1]] : (dates[0] ?? '')
   return {
     tooltip: {},
-    visualMap: { min: 0, max: Math.max(...props.rows.map((row) => Number(row[valueIndex]) || 0), 0), calculable: true },
-    calendar: { range: dates.length > 1 ? [dates[0], dates[dates.length - 1]] : (dates[0] ?? '') },
+    visualMap: {
+      min: 0,
+      max,
+      calculable: true,
+      textStyle: { color: '#98a4b6' },
+      inRange: { color: ['#172334', '#275c73', '#70e8ff', '#ffd27a'] },
+    },
+    calendar: {
+      range,
+      itemStyle: { color: 'rgba(8, 12, 20, 0.72)', borderColor: 'rgba(176, 190, 208, 0.16)' },
+      splitLine: { lineStyle: { color: 'rgba(176, 190, 208, 0.28)' } },
+      dayLabel: { color: '#98a4b6' },
+      monthLabel: { color: '#c8d3e0' },
+      yearLabel: { color: '#fff0d2' },
+    },
     series: [{ type: 'heatmap', coordinateSystem: 'calendar', data: props.rows.map((row) => [
       String(row[dateIndex] ?? ''), cellValue(row[valueIndex]),
     ]) }],
@@ -157,6 +250,10 @@ function gaugeOption(current: ChartSpec): Record<string, unknown> {
   const valueIndex = props.columns.indexOf(current.yFields[0])
   return {
     series: [{ type: 'gauge', max: current.targetValue ?? 100,
+      axisLine: { lineStyle: { color: [[1, 'rgba(176, 190, 208, 0.2)']] } },
+      axisLabel: { color: '#98a4b6' },
+      detail: { color: '#70e8ff' },
+      title: { color: '#c8d3e0' },
       data: [{ value: cellValue(props.rows[0]?.[valueIndex]), name: current.title }] }],
   }
 }
@@ -197,8 +294,8 @@ onBeforeUnmount(() => instance?.dispose())
 
 <style scoped>
 .analytics-chart { width: 100%; height: 320px; }
-.analytics-kpi { display: grid; gap: 8px; padding: 18px; background: #f0f7f5; border-left: 4px solid #087f78; }
-.analytics-kpi span { color: #5b817b; font-size: 11px; }
-.analytics-kpi strong { color: #174f4a; font-size: 28px; }
+.analytics-kpi { display: grid; gap: 8px; padding: 18px; color: var(--showcase-ivory); border: 1px solid var(--showcase-border-soft); border-left: 4px solid var(--showcase-cyan); background: rgba(8, 12, 20, 0.76); }
+.analytics-kpi span { color: var(--showcase-muted); font-size: 11px; }
+.analytics-kpi strong { color: var(--showcase-ivory); font-size: 28px; }
 .analytics-kpi small { font-size: 12px; font-weight: 500; }
 </style>
