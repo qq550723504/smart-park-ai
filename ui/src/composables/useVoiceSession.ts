@@ -55,6 +55,7 @@ export interface VoiceSessionBinding {
   sessionId: Ref<string | null>
   /** Backend run id; feeds the shared unified execution trace rail. */
   runId: Ref<string | null>
+  prepare(): Promise<void>
   toggleMicrophone(): Promise<void>
   close(): void
 }
@@ -298,6 +299,18 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
     await currentCapture?.stop().catch(() => undefined)
   }
 
+  async function prepare(): Promise<void> {
+    const generation = lifecycleGeneration
+    try {
+      await ensureConnected(generation)
+    } catch (cause) {
+      if (generation !== lifecycleGeneration) return
+      errorMessage.value = cause instanceof Error ? cause.message : String(cause)
+      connectionPhase.value = 'failed'
+      throw cause
+    }
+  }
+
   /**
    * Mic click semantics per backend contract:
    * IDLE/ERROR → begin listening; LISTENING → commit;
@@ -382,6 +395,7 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
     errorMessage,
     sessionId,
     runId,
+    prepare,
     toggleMicrophone,
     close,
   }

@@ -161,6 +161,14 @@ describe('useVoiceSession', () => {
     expect(binarySends).toHaveLength(1)
   })
 
+  it('prepares a backend session without requesting microphone access', async () => {
+    const harness = makeHarness()
+    await harness.binding.prepare()
+
+    expect(harness.fakeCapture.started).toBe(0)
+    expect(harness.binding.connectionPhase.value).toBe('connected')
+  })
+
   it('commit sends COMMIT_INPUT and partial/final frames feed the transcript', async () => {
     const h = makeHarness()
     await h.binding.toggleMicrophone()
