@@ -16,12 +16,12 @@ import { useExecutionTrace } from '../composables/useExecutionTrace'
 import { getOperationsCapabilities, submitFeedback } from '../services/workflowApi'
 import { customerIntentLabel, workflowNodeLabel } from '../utils/labels'
 import { alertWorkflowRunId } from '../utils/runId'
+import type { ScenarioLaunchRequest, WorkbenchView } from '../types/workbench'
 import '../styles.css'
 
-export type WorkbenchView = 'workflow' | 'customer' | 'voice' | 'collaboration' | 'analytics'
-
-const props = withDefaults(defineProps<{ initialView?: WorkbenchView; active?: boolean }>(), {
+const props = withDefaults(defineProps<{ initialView?: WorkbenchView; launchRequest?: ScenarioLaunchRequest | null; active?: boolean }>(), {
   initialView: 'workflow',
+  launchRequest: null,
   active: true,
 })
 const emit = defineEmits<{ 'back-to-showcase': [] }>()

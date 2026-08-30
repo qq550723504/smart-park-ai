@@ -1,0 +1,35 @@
+export type ShowcaseScenarioId =
+  | 'ALERT_WORKFLOW'
+  | 'EXPERT_COLLABORATION'
+  | 'OPERATIONS_ANALYSIS'
+  | 'VOICE_ASSISTANT'
+
+export type WorkbenchView = 'workflow' | 'customer' | 'voice' | 'collaboration' | 'analytics'
+export type GuidedWorkbenchView = Exclude<WorkbenchView, 'customer'>
+
+export interface ScenarioLaunchRequest {
+  requestId: number
+  mode: 'guided'
+  scenarioId: ShowcaseScenarioId
+  view: GuidedWorkbenchView
+}
+
+export type GuidedLaunchState = 'preparing' | 'started' | 'ready' | 'failed'
+
+export interface GuidedLaunchUpdate {
+  requestId: number
+  state: GuidedLaunchState
+  message: string
+}
+
+export interface WorkbenchNavItem {
+  value: WorkbenchView
+  label: string
+  available: boolean
+}
+
+export interface WorkbenchEvidenceItem {
+  label: string
+  value: string
+  tone?: 'default' | 'verified' | 'warning' | 'danger'
+}

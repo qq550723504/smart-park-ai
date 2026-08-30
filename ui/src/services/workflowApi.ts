@@ -1,4 +1,5 @@
 import type { AuditEntry, CustomerConversationResponse, CustomerServiceResponse, DemoRole, FeedbackRating, KnowledgeMetadata, OperationsMetrics, WorkflowEvent, WorkflowObservability, WorkflowResponse } from '../types/workflow'
+import type { ShowcaseScenarioId } from '../types/workbench'
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -21,7 +22,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 export type ShowcaseScenarioStatus = 'READY' | 'NOT_READY' | 'DISABLED'
 
 export interface ShowcaseScenario {
-  id: 'ALERT_WORKFLOW' | 'EXPERT_COLLABORATION' | 'OPERATIONS_ANALYSIS' | 'VOICE_ASSISTANT'
+  id: ShowcaseScenarioId
   status: ShowcaseScenarioStatus
   live: boolean
   title: string

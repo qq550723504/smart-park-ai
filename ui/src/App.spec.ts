@@ -3,8 +3,9 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick, onMounted, onUnmounted, type PropType } from 'vue'
 import App from './App.vue'
 import ShowcaseHome from './components/showcase/ShowcaseHome.vue'
-import OperationsWorkbench, { type WorkbenchView } from './components/OperationsWorkbench.vue'
+import OperationsWorkbench from './components/OperationsWorkbench.vue'
 import type { ShowcaseScenario } from './services/workflowApi'
+import type { ScenarioLaunchRequest, WorkbenchView } from './types/workbench'
 
 const showcaseStub = defineComponent({
   name: 'ShowcaseHome',
@@ -37,6 +38,10 @@ const workbenchStub = defineComponent({
       type: String as PropType<WorkbenchView>,
       required: false,
     },
+    launchRequest: {
+      type: Object as PropType<ScenarioLaunchRequest | null>,
+      default: null,
+    },
   },
   emits: ['back-to-showcase'],
   setup(props, { emit }) {
@@ -63,6 +68,10 @@ function createLifecycleTrackedWorkbench(lifecycle: { mounts: number; unmounts: 
       initialView: {
         type: String as PropType<WorkbenchView>,
         required: false,
+      },
+      launchRequest: {
+        type: Object as PropType<ScenarioLaunchRequest | null>,
+        default: null,
       },
     },
     emits: ['back-to-showcase'],
@@ -117,6 +126,47 @@ function mountApp(operationsWorkbench = workbenchStub) {
 }
 
 describe('App surface coordinator', () => {
+  it('creates a guided one-shot request for a showcase scenario', async () => {
+    const wrapper = mountApp()
+
+    wrapper.getComponent(ShowcaseHome).vm.$emit('start-scenario', 'EXPERT_COLLABORATION')
+    await nextTick()
+
+    expect(wrapper.getComponent(OperationsWorkbench).props('launchRequest')).toMatchObject({
+      requestId: 1,
+      mode: 'guided',
+      scenarioId: 'EXPERT_COLLABORATION',
+      view: 'collaboration',
+    })
+  })
+
+  it('clears guided launch state for the manual workbench entry', async () => {
+    const wrapper = mountApp()
+
+    wrapper.getComponent(ShowcaseHome).vm.$emit('start-scenario', 'ALERT_WORKFLOW')
+    await nextTick()
+    await wrapper.get('[data-testid="back-to-showcase"]').trigger('click')
+    wrapper.getComponent(ShowcaseHome).vm.$emit('enter-workbench')
+    await nextTick()
+
+    expect(wrapper.getComponent(OperationsWorkbench).props('initialView')).toBe('workflow')
+    expect(wrapper.getComponent(OperationsWorkbench).props('launchRequest')).toBeNull()
+  })
+
+  it('issues a fresh request id after returning to the showcase', async () => {
+    const wrapper = mountApp()
+
+    wrapper.getComponent(ShowcaseHome).vm.$emit('start-scenario', 'OPERATIONS_ANALYSIS')
+    await nextTick()
+    const first = wrapper.getComponent(OperationsWorkbench).props('launchRequest') as ScenarioLaunchRequest
+    await wrapper.get('[data-testid="back-to-showcase"]').trigger('click')
+    wrapper.getComponent(ShowcaseHome).vm.$emit('start-scenario', 'OPERATIONS_ANALYSIS')
+    await nextTick()
+    const second = wrapper.getComponent(OperationsWorkbench).props('launchRequest') as ScenarioLaunchRequest
+
+    expect(second.requestId).toBeGreaterThan(first.requestId)
+  })
+
   it('starts on the showcase home without mounting the workbench', () => {
     const wrapper = mountApp()
 
