@@ -1,11 +1,20 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onScopeDispose, ref, watch } from 'vue'
 import { useOperationsAnalysis, type ExecutionTraceLike } from '../../composables/useOperationsAnalysis'
+import { useGuidedLaunch } from '../../composables/useGuidedLaunch'
 import AnalyticsChart from './AnalyticsChart.vue'
+import type { GuidedLaunchUpdate, ScenarioLaunchRequest } from '../../types/workbench'
 
-const props = defineProps<{ trace?: ExecutionTraceLike; pollIntervalMs?: number }>()
-void props
-const emit = defineEmits<{ (event: 'run-started', runId: string): void }>()
+const props = withDefaults(defineProps<{
+  trace?: ExecutionTraceLike
+  pollIntervalMs?: number
+  active?: boolean
+  launchRequest?: ScenarioLaunchRequest | null
+}>(), { active: true, launchRequest: null })
+const emit = defineEmits<{
+  'run-started': [runId: string]
+  'launch-status': [update: GuidedLaunchUpdate]
+}>()
 
 const question = ref('')
 const recommendedQuestions = [
@@ -30,12 +39,62 @@ const analysis = useOperationsAnalysis({
   ...(props.pollIntervalMs != null ? { pollIntervalMs: props.pollIntervalMs } : {}),
 })
 const chosenMetrics = ref<string[]>([])
+const DEFAULT_GUIDED_QUESTION = '过去5天各楼宇能耗'
+let cancelAnalysisStart: (() => void) | null = null
+
+onScopeDispose(() => {
+  cancelAnalysisStart?.()
+})
 
 function launch(): void {
   void analysis.submit(question.value).then(() => {
     if (analysis.runId.value) emit('run-started', analysis.runId.value)
   })
 }
+
+function waitForAnalysisStart(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const stop = watch(
+      [() => analysis.runId.value, () => analysis.phase.value],
+      ([runId, phase]) => {
+        if (runId) {
+          settled = true
+          cancelAnalysisStart = null
+          stop()
+          resolve()
+        } else if (phase === 'failed') {
+          settled = true
+          cancelAnalysisStart = null
+          stop()
+          reject(new Error(analysis.error.value || '运营分析启动失败'))
+        }
+      },
+      { flush: 'post' },
+    )
+    cancelAnalysisStart = () => {
+      if (settled) return
+      settled = true
+      stop()
+      cancelAnalysisStart = null
+      reject(new Error('运营分析启动已取消'))
+    }
+  })
+}
+
+useGuidedLaunch({
+  active: () => props.active,
+  request: () => props.launchRequest,
+  scenarioId: 'OPERATIONS_ANALYSIS',
+  start: async () => {
+    question.value = DEFAULT_GUIDED_QUESTION
+    const started = waitForAnalysisStart()
+    launch()
+    await started
+    return { state: 'started', message: '运营分析已启动' }
+  },
+  onUpdate: (update) => emit('launch-status', update),
+})
 
 function selectRecommendedQuestion(value: string): void {
   question.value = value

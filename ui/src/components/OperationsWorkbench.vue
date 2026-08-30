@@ -13,10 +13,11 @@ import VoiceAssistantPage from './voice/VoiceAssistantPage.vue'
 import { demoAlerts, type DemoRole } from '../types/workflow'
 import { useWorkflow } from '../composables/useWorkflow'
 import { useExecutionTrace } from '../composables/useExecutionTrace'
+import { useGuidedLaunch } from '../composables/useGuidedLaunch'
 import { getOperationsCapabilities, submitFeedback } from '../services/workflowApi'
 import { customerIntentLabel, workflowNodeLabel } from '../utils/labels'
 import { alertWorkflowRunId } from '../utils/runId'
-import type { ScenarioLaunchRequest, WorkbenchView } from '../types/workbench'
+import type { GuidedLaunchUpdate, ScenarioLaunchRequest, ShowcaseScenarioId, WorkbenchView } from '../types/workbench'
 import '../styles.css'
 
 const props = withDefaults(defineProps<{ initialView?: WorkbenchView; launchRequest?: ScenarioLaunchRequest | null; active?: boolean }>(), {
@@ -24,7 +25,10 @@ const props = withDefaults(defineProps<{ initialView?: WorkbenchView; launchRequ
   launchRequest: null,
   active: true,
 })
-const emit = defineEmits<{ 'back-to-showcase': [] }>()
+const emit = defineEmits<{
+  'back-to-showcase': []
+  'retry-guided-launch': [scenarioId: ShowcaseScenarioId]
+}>()
 
 const capabilities = ref<{ knowledgeMode: string; customerAnswerMode: string; vectorStore: string; analyticsEnabled: boolean; collaborationEnabled: boolean; voiceEnabled: boolean } | null>(null)
 const capabilityLabels = computed(() => capabilities.value ? {
@@ -53,6 +57,20 @@ const role = ref<DemoRole>('ADMIN')
 const reviewer = ref('')
 const comment = ref('')
 const { workflow, events, loading, approving, error, isTerminal, start, approve } = useWorkflow()
+const guidedLaunchUpdate = ref<GuidedLaunchUpdate | null>(null)
+
+function handleGuidedLaunchUpdate(update: GuidedLaunchUpdate): void {
+  if (update.requestId !== props.launchRequest?.requestId) return
+  guidedLaunchUpdate.value = update
+}
+
+function retryGuidedLaunch(): void {
+  const request = props.launchRequest
+  if (guidedLaunchUpdate.value?.state === 'failed' && request
+    && guidedLaunchUpdate.value.requestId === request.requestId) {
+    emit('retry-guided-launch', request.scenarioId)
+  }
+}
 
 // 统一执行轨迹：告警工作流通过确定性 runId 同时出现在右侧轨迹栏。
 const trace = useExecutionTrace()
@@ -123,6 +141,18 @@ async function launch() {
   await start(selectedAlertId.value)
 }
 
+useGuidedLaunch({
+  active: () => props.active,
+  request: () => props.launchRequest,
+  scenarioId: 'ALERT_WORKFLOW',
+  start: async () => {
+    await launch()
+    if (!workflow.value) throw new Error(error.value || '告警工作流启动失败')
+    return { state: 'started', message: '告警工作流已启动' }
+  },
+  onUpdate: handleGuidedLaunchUpdate,
+})
+
 async function decide(decision: 'APPROVE' | 'REJECT') {
   if (!reviewer.value.trim() || !comment.value.trim()) {
     ElMessage.warning('请填写审批人和审批意见')
@@ -177,9 +207,29 @@ function confidence(value?: number) {
     </header>
 
     <div class="workspace">
+    <div
+      v-if="guidedLaunchUpdate && guidedLaunchUpdate.requestId === props.launchRequest?.requestId"
+      class="guided-launch-status"
+    >
+      <p :data-state="guidedLaunchUpdate.state" role="status">{{ guidedLaunchUpdate.message }}</p>
+      <button
+        v-if="guidedLaunchUpdate.state === 'failed'"
+        type="button"
+        data-testid="retry-guided-launch"
+        @click="retryGuidedLaunch"
+      >
+        重新开始
+      </button>
+    </div>
     <main v-show="activeView === 'analytics'" class="main-content">
       <section class="hero-row"><div><span class="eyebrow">运营分析 · 03</span><h2>自然语言直达<br /><em>真实只读数据</em></h2><p class="hero-copy">问题解析、指标口径、AST 安全校验、EXPLAIN 成本与只读执行全程可见。</p></div></section>
-      <OperationsAnalysisPage :trace="trace" @run-started="(id: string) => trace.subscribe(id)" />
+      <OperationsAnalysisPage
+        :trace="trace"
+        :active="props.active && activeView === 'analytics'"
+        :launch-request="props.launchRequest"
+        @run-started="(id: string) => trace.subscribe(id)"
+        @launch-status="handleGuidedLaunchUpdate"
+      />
     </main>
 
     <main v-show="activeView === 'customer'" class="main-content customer-main">
@@ -188,11 +238,21 @@ function confidence(value?: number) {
     </main>
 
     <main v-show="activeView === 'voice'" class="main-content">
-      <VoiceAssistantPage :trace="trace" :active="props.active && activeView === 'voice'" />
+      <VoiceAssistantPage
+        :trace="trace"
+        :active="props.active && activeView === 'voice'"
+        :launch-request="props.launchRequest"
+        @launch-status="handleGuidedLaunchUpdate"
+      />
     </main>
 
     <main v-show="activeView === 'collaboration'" class="main-content">
-      <ExpertCollaborationPage :trace="trace" :active="activeView === 'collaboration'" />
+      <ExpertCollaborationPage
+        :trace="trace"
+        :active="props.active && activeView === 'collaboration'"
+        :launch-request="props.launchRequest"
+        @launch-status="handleGuidedLaunchUpdate"
+      />
     </main>
 
     <main v-show="activeView === 'workflow'" class="main-content">

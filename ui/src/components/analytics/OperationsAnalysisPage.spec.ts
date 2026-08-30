@@ -173,4 +173,26 @@ describe('OperationsAnalysisPage', () => {
     spy.mockRestore()
     wrapper.unmount()
   })
+
+  it('starts the verified default question for a matching guided request', async () => {
+    let submittedQuestion = ''
+    handler = (_url, init) => {
+      if (init?.method === 'POST') {
+        submittedQuestion = JSON.parse(String(init.body)).question
+        return jsonResponse({ runId: RUN_ID }, 202)
+      }
+      return jsonResponse({ runId: RUN_ID, status: 'RUNNING', createdAt: '' })
+    }
+    const wrapper = mount(OperationsAnalysisPage, {
+      props: {
+        active: true,
+        pollIntervalMs: 1,
+        launchRequest: { requestId: 22, mode: 'guided', scenarioId: 'OPERATIONS_ANALYSIS', view: 'analytics' },
+      },
+    })
+    await flush(2)
+    expect(submittedQuestion).toBe('过去5天各楼宇能耗')
+    expect(wrapper.emitted('launch-status')?.at(-1)?.[0]).toMatchObject({ requestId: 22, state: 'started' })
+    wrapper.unmount()
+  })
 })

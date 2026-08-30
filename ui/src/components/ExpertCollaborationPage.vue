@@ -3,10 +3,17 @@ import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import ExpertCard from './ExpertCard.vue'
 import { useExpertCollaboration } from '../composables/useExpertCollaboration'
+import { useGuidedLaunch } from '../composables/useGuidedLaunch'
 import type { ExpertDomain } from '../types/collaboration'
 import type { ExecutionTrace } from '../composables/useExecutionTrace'
+import type { GuidedLaunchUpdate, ScenarioLaunchRequest } from '../types/workbench'
 
-const props = withDefaults(defineProps<{ trace: ExecutionTrace; active?: boolean }>(), { active: true })
+const props = withDefaults(defineProps<{
+  trace: ExecutionTrace
+  active?: boolean
+  launchRequest?: ScenarioLaunchRequest | null
+}>(), { active: true, launchRequest: null })
+const emit = defineEmits<{ 'launch-status': [update: GuidedLaunchUpdate] }>()
 const question = ref('电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联')
 const presets = [
   '电表 DEV-ENERGY-001 当前能耗是否高于基线',
@@ -23,6 +30,17 @@ watch(
   ([active, runId]) => { if (active && runId) props.trace.subscribe(runId) },
   { immediate: true },
 )
+
+useGuidedLaunch({
+  active: () => props.active,
+  request: () => props.launchRequest,
+  scenarioId: 'EXPERT_COLLABORATION',
+  start: async () => {
+    await start(question.value)
+    return { state: 'started', message: '专家协作已启动' }
+  },
+  onUpdate: (update) => emit('launch-status', update),
+})
 
 function selectPreset(value: string) { question.value = value }
 

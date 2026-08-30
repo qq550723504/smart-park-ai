@@ -9,6 +9,13 @@ import type { CollaborationRun } from '../types/collaboration'
 
 const RUN_ID = '11111111-2222-3333-4444-555555555555'
 let polls = 0
+let collaborationPosts = 0
+
+const collaborationElementStubs = {
+  'el-tag': { template: '<span><slot /></span>' },
+  'el-input': { props: ['modelValue'], emits: ['update:modelValue'], template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />' },
+  'el-button': { props: ['loading', 'disabled'], template: '<button :disabled="disabled"><slot /></button>' },
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -24,8 +31,12 @@ function traceStub(events: ExecutionEvent[] = [], subscribe = vi.fn()): Executio
 beforeEach(() => {
   __resetSharedCollaborationState()
   polls = 0
+  collaborationPosts = 0
   globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
-    if (init?.method === 'POST') return jsonResponse({ runId: RUN_ID, statusUrl: '/status', eventsUrl: '/events' }, 202)
+    if (init?.method === 'POST') {
+      collaborationPosts += 1
+      return jsonResponse({ runId: RUN_ID, statusUrl: '/status', eventsUrl: '/events' }, 202)
+    }
     polls += 1
     return jsonResponse({
       runId: RUN_ID, question: 'q', status: 'COMPLETED',
@@ -54,11 +65,7 @@ describe('ExpertCollaborationPage', () => {
     const wrapper = mount(ExpertCollaborationPage, {
       props: { trace: traceStub([handoff]) },
       global: {
-        stubs: {
-          'el-tag': { template: '<span><slot /></span>' },
-          'el-input': { props: ['modelValue'], emits: ['update:modelValue'], template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />' },
-          'el-button': { props: ['loading', 'disabled'], template: '<button :disabled="disabled"><slot /></button>' },
-        },
+        stubs: collaborationElementStubs,
       },
     })
     await wrapper.find('input[aria-label="专家协作问题"]').setValue('q')
@@ -83,11 +90,7 @@ describe('ExpertCollaborationPage', () => {
     const wrapper = mount(ExpertCollaborationPage, {
       props: { trace: traceStub() },
       global: {
-        stubs: {
-          'el-tag': { template: '<span><slot /></span>' },
-          'el-input': { props: ['modelValue'], template: '<input :value="modelValue" />' },
-          'el-button': { template: '<button><slot /></button>' },
-        },
+        stubs: collaborationElementStubs,
       },
     })
 
@@ -109,11 +112,7 @@ describe('ExpertCollaborationPage', () => {
     const wrapper = mount(ExpertCollaborationPage, {
       props: { trace: traceStub([], subscribe), active: true },
       global: {
-        stubs: {
-          'el-tag': { template: '<span><slot /></span>' },
-          'el-input': { props: ['modelValue'], emits: ['update:modelValue'], template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />' },
-          'el-button': { props: ['loading', 'disabled'], template: '<button :disabled="disabled"><slot /></button>' },
-        },
+        stubs: collaborationElementStubs,
       },
     })
 
@@ -134,11 +133,7 @@ describe('ExpertCollaborationPage', () => {
     const wrapper = mount(ExpertCollaborationPage, {
       props: { trace: traceStub([], subscribe), active: true },
       global: {
-        stubs: {
-          'el-tag': { template: '<span><slot /></span>' },
-          'el-input': { props: ['modelValue'], emits: ['update:modelValue'], template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />' },
-          'el-button': { props: ['loading', 'disabled'], template: '<button :disabled="disabled"><slot /></button>' },
-        },
+        stubs: collaborationElementStubs,
       },
     })
     const running: CollaborationRun = {
@@ -154,6 +149,23 @@ describe('ExpertCollaborationPage', () => {
     await wrapper.vm.$nextTick()
 
     expect(subscribe.mock.calls.length).toBe(subscriptionsAfterRunId)
+    wrapper.unmount()
+  })
+
+  it('starts the default collaboration once for a matching guided request', async () => {
+    const request = { requestId: 21, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration' } as const
+    const wrapper = mount(ExpertCollaborationPage, {
+      props: { trace: traceStub(), active: true, launchRequest: request },
+      global: { stubs: collaborationElementStubs },
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(collaborationPosts).toBe(1)
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(collaborationPosts).toBe(1)
+    expect(wrapper.emitted('launch-status')?.at(-1)?.[0]).toMatchObject({ requestId: 21, state: 'started' })
     wrapper.unmount()
   })
 })

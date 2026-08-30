@@ -43,7 +43,7 @@ const workbenchStub = defineComponent({
       default: null,
     },
   },
-  emits: ['back-to-showcase'],
+  emits: ['back-to-showcase', 'retry-guided-launch'],
   setup(props, { emit }) {
     return () => h('section', { 'data-testid': 'operations-workbench' }, [
       h('span', { 'data-testid': 'initial-view' }, props.initialView),
@@ -74,7 +74,7 @@ function createLifecycleTrackedWorkbench(lifecycle: { mounts: number; unmounts: 
         default: null,
       },
     },
-    emits: ['back-to-showcase'],
+    emits: ['back-to-showcase', 'retry-guided-launch'],
     setup(props, { emit }) {
       onMounted(() => {
         lifecycle.mounts += 1
@@ -165,6 +165,18 @@ describe('App surface coordinator', () => {
     const second = wrapper.getComponent(OperationsWorkbench).props('launchRequest') as ScenarioLaunchRequest
 
     expect(second.requestId).toBeGreaterThan(first.requestId)
+  })
+
+  it('retries a failed guided launch with a fresh request id', async () => {
+    const wrapper = mountApp()
+    wrapper.getComponent(ShowcaseHome).vm.$emit('start-scenario', 'OPERATIONS_ANALYSIS')
+    await nextTick()
+    const first = wrapper.getComponent(OperationsWorkbench).props('launchRequest') as ScenarioLaunchRequest
+    wrapper.getComponent(OperationsWorkbench).vm.$emit('retry-guided-launch', 'OPERATIONS_ANALYSIS')
+    await nextTick()
+    const retried = wrapper.getComponent(OperationsWorkbench).props('launchRequest') as ScenarioLaunchRequest
+    expect(retried.requestId).toBeGreaterThan(first.requestId)
+    expect(retried.scenarioId).toBe('OPERATIONS_ANALYSIS')
   })
 
   it('starts on the showcase home without mounting the workbench', () => {

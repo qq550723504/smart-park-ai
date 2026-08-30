@@ -1,11 +1,19 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
 import { useVoiceSession } from '../../composables/useVoiceSession'
+import { useGuidedLaunch } from '../../composables/useGuidedLaunch'
 import type { ExecutionTrace } from '../../composables/useExecutionTrace'
+import type { GuidedLaunchUpdate, ScenarioLaunchRequest } from '../../types/workbench'
 
-const props = withDefaults(defineProps<{ trace: ExecutionTrace; active?: boolean }>(), {
+const props = withDefaults(defineProps<{
+  trace: ExecutionTrace
+  active?: boolean
+  launchRequest?: ScenarioLaunchRequest | null
+}>(), {
   active: true,
+  launchRequest: null,
 })
+const emit = defineEmits<{ 'launch-status': [update: GuidedLaunchUpdate] }>()
 
 const {
   voicePhase,
@@ -16,9 +24,21 @@ const {
   toolEvents,
   errorMessage,
   runId,
+  prepare,
   toggleMicrophone,
   close,
 } = useVoiceSession()
+
+useGuidedLaunch({
+  active: () => props.active,
+  request: () => props.launchRequest,
+  scenarioId: 'VOICE_ASSISTANT',
+  start: async () => {
+    await prepare()
+    return { state: 'ready', message: '语音链路已就绪，请点击麦克风授权并开始提问' }
+  },
+  onUpdate: (update) => emit('launch-status', update),
+})
 
 // 共享统一轨迹：语音会话创建后订阅自己的 runId。
 watch(

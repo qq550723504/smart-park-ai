@@ -83,6 +83,7 @@ async function returnToShowcase() {
       :initial-view="requestedView"
       :launch-request="requestedLaunch"
       @back-to-showcase="returnToShowcase"
+      @retry-guided-launch="startScenario"
     />
   </KeepAlive>
 </template>
