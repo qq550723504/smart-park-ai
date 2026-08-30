@@ -1,0 +1,45 @@
+.immersive-workbench {
+  --el-text-color-primary: var(--showcase-ivory);
+  --el-text-color-regular: var(--showcase-muted);
+  --el-text-color-secondary: var(--showcase-muted);
+  --el-fill-color-blank: var(--showcase-graphite-2);
+  --el-fill-color-light: rgba(12, 17, 26, 0.72);
+  --el-fill-color-lighter: var(--showcase-glass);
+  --el-fill-color-dark: var(--showcase-graphite);
+  --el-border-color: var(--showcase-border);
+  --el-border-color-light: var(--showcase-border-soft);
+  --el-border-color-lighter: var(--showcase-border-soft);
+  --el-color-primary: var(--showcase-cyan);
+  --el-color-primary-light-3: var(--showcase-cyan-soft);
+  --el-color-warning: var(--showcase-amber);
+  --el-color-danger: var(--showcase-violet);
+  --el-bg-color: var(--showcase-graphite-2);
+  --el-bg-color-overlay: var(--showcase-glass-strong);
+}
+
+.immersive-workbench .panel {
+  border: 1px solid var(--showcase-border);
+  border-radius: 18px;
+  color: var(--showcase-ivory);
+  background: linear-gradient(180deg, rgba(8, 12, 20, 0.93), rgba(5, 8, 14, 0.86));
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(18px);
+}
+
+.immersive-workbench .hero-row,
+.immersive-workbench .section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.immersive-workbench .section-heading { align-items: center; }
+.immersive-workbench .hero-row h1,
+.immersive-workbench .hero-row h2,
+.immersive-workbench .section-heading h1,
+.immersive-workbench .section-heading h2 { margin: 0; color: var(--showcase-ivory); }
+.immersive-workbench button,
+.immersive-workbench input,
+.immersive-workbench textarea,
+.immersive-workbench select { font: inherit; }
+.immersive-workbench .el-input__wrapper,
+.immersive-workbench .el-select__wrapper,
+.immersive-workbench .el-textarea__inner { color: var(--showcase-ivory); background: rgba(12, 17, 26, 0.72); box-shadow: 0 0 0 1px var(--showcase-border-soft) inset; }
+.immersive-workbench .el-input__inner,
+.immersive-workbench .el-textarea__inner { color: var(--showcase-ivory); }
+.immersive-workbench .el-button--primary { color: var(--showcase-graphite); border-color: var(--showcase-cyan); background: var(--showcase-cyan); }
