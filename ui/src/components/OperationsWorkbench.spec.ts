@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick, onMounted, onUnmounted } from 'vue'
 import OperationsWorkbench from './OperationsWorkbench.vue'
+import ImmersiveWorkbenchShell from './workbench/ImmersiveWorkbenchShell.vue'
 
 const mounts = {
   analysis: 0,
@@ -41,6 +42,11 @@ const voiceStub = defineComponent({
   },
 })
 
+const customerStub = defineComponent({
+  props: { role: { type: String, required: true } },
+  template: '<div data-testid="customer-role">{{ role }}</div>',
+})
+
 const guidedStatusStub = defineComponent({
   props: { active: { type: Boolean, default: true }, launchRequest: { type: Object, default: null } },
   emits: ['launch-status'],
@@ -61,7 +67,7 @@ const operatorStubs = {
   WorkflowGraph: true,
   DemoConsole: true,
   EventTimeline: true,
-  CustomerServiceConsole: true,
+  CustomerServiceConsole: customerStub,
   ExecutionTraceRail: true,
   'el-select': true,
   'el-option': true,
@@ -161,7 +167,7 @@ describe('OperationsWorkbench', () => {
     expect(wrapper.get('[data-workbench-view="collaboration"]').classes()).toContain('active')
   })
 
-  it('keeps every scenario page as a direct workspace sibling of the global rail', async () => {
+  it('keeps every scenario inside one stable stage beside the persistent rail', async () => {
     const wrapper = mount(OperationsWorkbench, {
       props: { initialView: 'workflow' },
       global: { stubs: operatorStubs },
@@ -169,11 +175,11 @@ describe('OperationsWorkbench', () => {
 
     await settleCapabilities()
 
-    const children = Array.from((wrapper.find('.workspace').element as HTMLElement).children)
-    expect(children.filter((child) => child.tagName === 'MAIN' && child.classList.contains('main-content'))).toHaveLength(5)
-    const rail = children.find((child) => child.classList.contains('global-rail'))
-    expect(rail).toBeTruthy()
-    expect(rail?.parentElement).toBe(wrapper.find('.workspace').element)
+    expect(wrapper.findAll('[data-workbench-stage] > .main-content')).toHaveLength(5)
+    expect(wrapper.findAll('[data-workbench-rail] .global-rail')).toHaveLength(1)
+    const shell = wrapper.get('[data-testid="immersive-workbench-shell"]')
+    await wrapper.get('[data-workbench-view="analytics"]').trigger('click')
+    expect(wrapper.get('[data-testid="immersive-workbench-shell"]').element).toBe(shell.element)
   })
 
   it('hides capability-gated operator navigation when backend capabilities are disabled', async () => {
@@ -189,7 +195,7 @@ describe('OperationsWorkbench', () => {
 
     await settleCapabilities()
 
-    const labels = wrapper.findAll('.view-switch button').map((button) => button.text())
+    const labels = wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())
     expect(labels).not.toContain('实时语音')
     expect(labels).not.toContain('专家协作')
     expect(labels).not.toContain('运营分析')
@@ -205,6 +211,75 @@ describe('OperationsWorkbench', () => {
     await wrapper.get('[data-workbench-action="back-to-showcase"]').trigger('click')
 
     expect(wrapper.emitted('back-to-showcase')).toHaveLength(1)
+  })
+
+  it('derives evidence ribbon values from the active scene, trace state, and capabilities', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow' },
+      global: { stubs: operatorStubs },
+    })
+
+    await settleCapabilities()
+
+    expect(wrapper.get('[data-evidence-item="场景"] strong').text()).toBe('告警工作流')
+    expect(wrapper.get('[data-evidence-item="执行轨迹"] strong').text()).toBe('空闲')
+    expect(wrapper.get('[data-evidence-item="知识检索"] strong').text()).toBe('Mock')
+    expect(wrapper.get('[data-evidence-item="数据模式"] strong').text()).toBe('真实只读数据')
+  })
+
+  it('uses the shell view and role event contracts to update the active scene and role', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow' },
+      global: { stubs: operatorStubs },
+    })
+    await settleCapabilities()
+
+    const shell = wrapper.getComponent(ImmersiveWorkbenchShell)
+    shell.vm.$emit('switch-view', 'customer')
+    shell.vm.$emit('update:role', 'CUSTOMER_AGENT')
+    await nextTick()
+
+    expect(wrapper.get('[data-workbench-view="customer"]').classes()).toContain('active')
+    expect(wrapper.get('[data-testid="customer-role"]').text()).toBe('CUSTOMER_AGENT')
+  })
+
+  it('opens the narrow-screen execution rail when the current workflow needs approval', async () => {
+    const originalEventSource = globalThis.EventSource
+    globalThis.EventSource = class {
+      onerror: ((event: Event) => void) | null = null
+      constructor(_url: string | URL) {}
+      addEventListener(): void {}
+      close(): void {}
+    } as unknown as typeof EventSource
+    globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        return new Response(JSON.stringify({
+          workflowId: 'wf-waiting-approval', alertId: 'ALT-TEMP-001', status: 'WAITING_APPROVAL',
+          diagnosis: null, approval: null, workOrder: null, errors: [], eventSequence: 1, riskReasons: [],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({
+        knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }) as typeof fetch
+
+    try {
+      const wrapper = mount(OperationsWorkbench, {
+        props: {
+          initialView: 'workflow',
+          launchRequest: { requestId: 60, mode: 'guided', scenarioId: 'ALERT_WORKFLOW', view: 'workflow' },
+        },
+        global: { stubs: operatorStubs },
+      })
+      await settleCapabilities()
+      await settleCapabilities()
+
+      expect(wrapper.get('[data-workbench-rail]').attributes('open')).toBeDefined()
+      wrapper.unmount()
+    } finally {
+      globalThis.EventSource = originalEventSource
+    }
   })
 
   it('keeps the manual workbench entry idle without a guided status', () => {
@@ -347,11 +422,27 @@ describe('OperationsWorkbench', () => {
       message: '专家协作启动失败',
     })
     await nextTick()
-    const retry = wrapper.find('[data-testid="retry-guided-launch"]')
+    const retry = wrapper.find('[data-workbench-action="retry-guided-launch"]')
     expect(retry.exists()).toBe(true)
     await retry.trigger('click')
 
     expect(wrapper.emitted('retry-guided-launch')?.[0]).toEqual(['EXPERT_COLLABORATION'])
     wrapper.unmount()
+  })
+
+  it('forwards the current launch request scenario when the shell retries', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: {
+        initialView: 'collaboration',
+        launchRequest: { requestId: 43, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration' },
+      },
+      global: { stubs: operatorStubs },
+    })
+    await settleCapabilities()
+
+    wrapper.getComponent(ImmersiveWorkbenchShell).vm.$emit('retry-guided-launch')
+    await nextTick()
+
+    expect(wrapper.emitted('retry-guided-launch')?.[0]).toEqual(['EXPERT_COLLABORATION'])
   })
 })

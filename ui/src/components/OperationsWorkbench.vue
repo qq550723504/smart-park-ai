@@ -7,6 +7,7 @@ import DemoConsole from './DemoConsole.vue'
 import EventTimeline from './EventTimeline.vue'
 import CustomerServiceConsole from './CustomerServiceConsole.vue'
 import ExecutionTraceRail from './execution/ExecutionTraceRail.vue'
+import ImmersiveWorkbenchShell from './workbench/ImmersiveWorkbenchShell.vue'
 import OperationsAnalysisPage from './analytics/OperationsAnalysisPage.vue'
 import ExpertCollaborationPage from './ExpertCollaborationPage.vue'
 import VoiceAssistantPage from './voice/VoiceAssistantPage.vue'
@@ -17,7 +18,7 @@ import { useGuidedLaunch } from '../composables/useGuidedLaunch'
 import { getOperationsCapabilities, submitFeedback } from '../services/workflowApi'
 import { customerIntentLabel, workflowNodeLabel } from '../utils/labels'
 import { alertWorkflowRunId } from '../utils/runId'
-import type { GuidedLaunchUpdate, ScenarioLaunchRequest, ShowcaseScenarioId, WorkbenchView } from '../types/workbench'
+import type { GuidedLaunchUpdate, ScenarioLaunchRequest, ShowcaseScenarioId, WorkbenchEvidenceItem, WorkbenchNavItem, WorkbenchView } from '../types/workbench'
 import '../styles.css'
 
 const props = withDefaults(defineProps<{ initialView?: WorkbenchView; launchRequest?: ScenarioLaunchRequest | null; active?: boolean }>(), {
@@ -36,6 +37,13 @@ const capabilityLabels = computed(() => capabilities.value ? {
   customer: capabilities.value.customerAnswerMode === 'mock' ? 'Mock' : 'DashScope',
   vector: capabilities.value.vectorStore === 'none' ? '无向量库（关键词检索）' : 'SimpleVectorStore（进程内）',
 } : null)
+const navItems = computed<WorkbenchNavItem[]>(() => [
+  { value: 'workflow', label: '告警工作流', available: true },
+  { value: 'customer', label: '园区客服', available: true },
+  { value: 'voice', label: '实时语音', available: capabilities.value?.voiceEnabled === true },
+  { value: 'collaboration', label: '专家协作', available: capabilities.value?.collaborationEnabled === true },
+  { value: 'analytics', label: '运营分析', available: capabilities.value?.analyticsEnabled === true },
+])
 onMounted(() => {
   void getOperationsCapabilities()
     .then((value) => { capabilities.value = value })
@@ -65,15 +73,27 @@ function handleGuidedLaunchUpdate(update: GuidedLaunchUpdate): void {
 }
 
 function retryGuidedLaunch(): void {
-  const request = props.launchRequest
-  if (guidedLaunchUpdate.value?.state === 'failed' && request
-    && guidedLaunchUpdate.value.requestId === request.requestId) {
-    emit('retry-guided-launch', request.scenarioId)
-  }
+  if (props.launchRequest) emit('retry-guided-launch', props.launchRequest.scenarioId)
 }
 
 // 统一执行轨迹：告警工作流通过确定性 runId 同时出现在右侧轨迹栏。
 const trace = useExecutionTrace()
+const traceStatusLabels = {
+  idle: '空闲',
+  streaming: '执行中',
+  completed: '已完成',
+  failed: '执行失败',
+  interrupted: '已中断',
+} as const
+function statusLabelForTrace(status: keyof typeof traceStatusLabels): string {
+  return traceStatusLabels[status]
+}
+const evidenceItems = computed<WorkbenchEvidenceItem[]>(() => [
+  { label: '场景', value: navItems.value.find((item) => item.value === activeView.value)?.label ?? '告警工作流' },
+  { label: '执行轨迹', value: trace.status.value === 'streaming' ? '实时同步' : statusLabelForTrace(trace.status.value), tone: trace.status.value === 'failed' ? 'danger' : 'verified' },
+  { label: '知识检索', value: capabilityLabels.value?.knowledge ?? '检查中' },
+  { label: '数据模式', value: '真实只读数据', tone: 'verified' },
+])
 watch(
   () => workflow.value?.workflowId,
   (workflowId) => {
@@ -186,41 +206,18 @@ function confidence(value?: number) {
 </script>
 
 <template>
-  <div class="app-shell">
-    <header class="topbar">
-      <div class="brand-lockup">
-        <div class="brand-mark"><span></span><span></span><span></span></div>
-        <div><span class="brand-kicker">智慧园区 · 智能运营</span><h1>智慧园区智能运营中心</h1></div>
-      </div>
-      <div class="topbar-actions">
-        <el-select v-model="role" class="role-select" aria-label="演示角色"><el-option label="查看者" value="VIEWER" /><el-option label="操作员" value="OPERATOR" /><el-option label="审批人" value="APPROVER" /><el-option label="客服坐席" value="CUSTOMER_AGENT" /><el-option label="管理员" value="ADMIN" /></el-select>
-        <button type="button" class="ghost-button" data-workbench-action="back-to-showcase" @click="emit('back-to-showcase')">返回展示首页</button>
-        <nav class="view-switch" aria-label="场景导航">
-          <button data-workbench-view="workflow" :class="{ active: activeView === 'workflow' }" @click="activeView = 'workflow'">告警工作流</button>
-          <button data-workbench-view="customer" :class="{ active: activeView === 'customer' }" @click="activeView = 'customer'">园区客服</button>
-          <button v-if="capabilities?.voiceEnabled" data-workbench-view="voice" :class="{ active: activeView === 'voice' }" @click="activeView = 'voice'">实时语音</button>
-          <button v-if="capabilities?.collaborationEnabled" data-workbench-view="collaboration" :class="{ active: activeView === 'collaboration' }" @click="activeView = 'collaboration'">专家协作</button>
-          <button v-if="capabilities?.analyticsEnabled" data-workbench-view="analytics" :class="{ active: activeView === 'analytics' }" @click="activeView = 'analytics'">运营分析</button>
-        </nav>
-        <div class="system-status"><span class="status-pulse"></span><span>模拟园区系统</span><span class="divider"></span><span class="muted">知识检索 {{ capabilityLabels?.knowledge ?? '--' }} · 客服回答 {{ capabilityLabels?.customer ?? '--' }} · 索引存储 {{ capabilityLabels?.vector ?? '--' }}</span></div>
-      </div>
-    </header>
-
-    <div class="workspace">
-    <div
-      v-if="guidedLaunchUpdate && guidedLaunchUpdate.requestId === props.launchRequest?.requestId"
-      class="guided-launch-status"
-    >
-      <p :data-state="guidedLaunchUpdate.state" role="status">{{ guidedLaunchUpdate.message }}</p>
-      <button
-        v-if="guidedLaunchUpdate.state === 'failed'"
-        type="button"
-        data-testid="retry-guided-launch"
-        @click="retryGuidedLaunch"
-      >
-        重新开始
-      </button>
-    </div>
+  <ImmersiveWorkbenchShell
+    :active-view="activeView"
+    :role="role"
+    :nav-items="navItems"
+    :evidence-items="evidenceItems"
+    :guided-launch="guidedLaunchUpdate"
+    :rail-priority="needsApproval"
+    @switch-view="activeView = $event"
+    @update:role="role = $event"
+    @back-to-showcase="emit('back-to-showcase')"
+    @retry-guided-launch="retryGuidedLaunch"
+  >
     <main v-show="activeView === 'analytics'" class="main-content">
       <section class="hero-row"><div><span class="eyebrow">运营分析 · 03</span><h2>自然语言直达<br /><em>真实只读数据</em></h2><p class="hero-copy">问题解析、指标口径、AST 安全校验、EXPLAIN 成本与只读执行全程可见。</p></div></section>
       <OperationsAnalysisPage
@@ -310,14 +307,13 @@ function confidence(value?: number) {
       </section>
     </main>
 
-    <ExecutionTraceRail
-      class="global-rail"
-      :events="trace.events.value"
-      :status="trace.status.value"
-      :error="trace.error.value"
-    />
-    </div>
-
-    <footer><span>智慧园区运营中心</span><span>工作流状态由后端图实时驱动</span></footer>
-  </div>
+    <template #rail>
+      <ExecutionTraceRail
+        class="global-rail"
+        :events="trace.events.value"
+        :status="trace.status.value"
+        :error="trace.error.value"
+      />
+    </template>
+  </ImmersiveWorkbenchShell>
 </template>
