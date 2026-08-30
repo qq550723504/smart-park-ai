@@ -106,15 +106,10 @@ onMounted(async () => {
           <Monitor aria-hidden="true" />
           <span>智慧园区 Agent 体验中心</span>
         </span>
-        <button
-          type="button"
-          class="showcase-home__workbench"
-          data-enter-workbench
-          @click="emit('enter-workbench')"
-        >
-          <User aria-hidden="true" />
-          <span>进入运营工作台</span>
-        </button>
+        <span class="showcase-home__chain">
+          <DocumentChecked aria-hidden="true" />
+          <span>真实只读数据 · 执行证据可追溯 · 高风险动作由人工确认</span>
+        </span>
       </nav>
 
       <div class="showcase-home__hero">
@@ -127,59 +122,15 @@ onMounted(async () => {
           本页只呈现服务端目录确认的可演示任务；不可用能力会保留安全原因，不用前端动画或静态结果伪装在线运行。
         </p>
       </div>
-
-      <section class="showcase-home__evidence" aria-label="能力账本">
-        <article>
-          <DocumentChecked aria-hidden="true" />
-          <span>证据类型来自目录</span>
-        </article>
-        <article>
-          <Checked aria-hidden="true" />
-          <span>状态由在线检查决定</span>
-        </article>
-        <article>
-          <Lock aria-hidden="true" />
-          <span>人工边界持续可见</span>
-        </article>
-      </section>
     </section>
 
     <aside class="showcase-home__panel" aria-label="选择现场演示任务">
-      <p class="showcase-home__panel-kicker">现场任务</p>
-      <h2>选择一个已验证场景</h2>
-      <p class="showcase-home__status" data-showcase-status aria-live="polite">
-        {{ statusMessage }}
-      </p>
-
-      <div v-if="loading" class="showcase-home__loading" role="status">
-        正在读取服务端演示目录…
-      </div>
-
-      <div v-else class="showcase-home__rows" aria-label="演示场景列表">
-        <button
-          v-for="scenario in orderedScenarios"
-          :key="scenario.id"
-          type="button"
-          class="showcase-home__row"
-          :class="{ 'is-selected': selectedId === scenario.id, 'is-unavailable': !isSelectable(scenario) }"
-          data-showcase-scenario-row
-          :data-scenario-id="scenario.id"
-          :aria-pressed="selectedId === scenario.id"
-          :disabled="!isSelectable(scenario)"
-          @click="selectScenario(scenario)"
-        >
-          <span class="showcase-home__row-icon">
-            <component :is="scenarioIcon(scenario.id)" aria-hidden="true" />
-          </span>
-          <span class="showcase-home__row-copy">
-            <span class="showcase-home__row-title">{{ scenario.title }}</span>
-            <span class="showcase-home__row-question">{{ scenario.businessQuestion }}</span>
-            <span v-if="isSelectable(scenario)" class="showcase-home__row-state">READY · live</span>
-            <span v-else class="showcase-home__row-state" data-unavailable-reason>
-              {{ scenario.status }} · {{ safeUnavailableReason(scenario) }}
-            </span>
-          </span>
-        </button>
+      <div class="showcase-home__panel-head">
+        <p class="showcase-home__panel-kicker">现场任务</p>
+        <span class="showcase-home__verified-at">
+          <DocumentChecked aria-hidden="true" />
+          <span>{{ catalog?.capturedAt ?? '正在检查' }}</span>
+        </span>
       </div>
 
       <section
@@ -188,8 +139,11 @@ onMounted(async () => {
         data-selected-scenario
         aria-label="当前选中场景"
       >
+        <span class="showcase-home__selected-icon">
+          <component :is="scenarioIcon(selectedScenario.id)" aria-hidden="true" />
+        </span>
         <p class="showcase-home__selected-label">推荐任务</p>
-        <h3>{{ selectedScenario.title }}</h3>
+        <h2>{{ selectedScenario.title }}</h2>
         <p class="showcase-home__question">{{ selectedScenario.businessQuestion }}</p>
         <dl class="showcase-home__facts">
           <div>
@@ -215,19 +169,106 @@ onMounted(async () => {
 
       <section v-else-if="!loading" class="showcase-home__selected is-empty" data-selected-scenario>
         <VideoPlay aria-hidden="true" />
+        <h2>选择一个已验证场景</h2>
         <p>{{ statusMessage }}</p>
       </section>
 
-      <button
-        type="button"
-        class="showcase-home__start"
-        data-start-showcase
-        :disabled="!selectedScenario"
-        @click="startScenario"
-      >
+      <section v-else class="showcase-home__selected is-empty" role="status">
         <VideoPlay aria-hidden="true" />
-        <span>开始现场演示</span>
-      </button>
+        <h2>选择一个已验证场景</h2>
+        <p>正在读取服务端演示目录…</p>
+      </section>
+
+      <div class="showcase-home__actions">
+        <button
+          type="button"
+          class="showcase-home__start"
+          data-start-showcase
+          :disabled="!selectedScenario"
+          @click="startScenario"
+        >
+          <VideoPlay aria-hidden="true" />
+          <span>开始现场演示</span>
+        </button>
+
+        <button
+          type="button"
+          class="showcase-home__workbench"
+          data-enter-workbench
+          @click="emit('enter-workbench')"
+        >
+          <User aria-hidden="true" />
+          <span>进入运营工作台</span>
+        </button>
+      </div>
+
+      <p class="showcase-home__status" data-showcase-status aria-live="polite">
+        {{ statusMessage }}
+      </p>
+
+      <div v-if="!loading" class="showcase-home__rows" aria-label="演示场景列表">
+        <p class="showcase-home__more">更多可体验任务</p>
+        <button
+          v-for="scenario in orderedScenarios"
+          :key="scenario.id"
+          type="button"
+          class="showcase-home__row"
+          :class="{ 'is-selected': selectedId === scenario.id, 'is-unavailable': !isSelectable(scenario) }"
+          data-showcase-scenario-row
+          :data-scenario-id="scenario.id"
+          :aria-pressed="selectedId === scenario.id"
+          :disabled="!isSelectable(scenario)"
+          @click="selectScenario(scenario)"
+        >
+          <span class="showcase-home__row-icon">
+            <component :is="scenarioIcon(scenario.id)" aria-hidden="true" />
+          </span>
+          <span class="showcase-home__row-copy">
+            <span class="showcase-home__row-title">{{ scenario.title }}</span>
+            <span class="showcase-home__row-question">{{ scenario.businessQuestion }}</span>
+            <span v-if="isSelectable(scenario)" class="showcase-home__row-state">READY · live</span>
+            <span v-else class="showcase-home__row-state" data-unavailable-reason>
+              {{ scenario.status }} · {{ safeUnavailableReason(scenario) }}
+            </span>
+          </span>
+        </button>
+      </div>
     </aside>
+
+    <section class="showcase-home__evidence" aria-label="能力账本">
+      <div class="showcase-home__ribbon-status">
+        <Checked aria-hidden="true" />
+        <span>证据链路</span>
+        <small>实时演绎中</small>
+      </div>
+      <article>
+        <Monitor aria-hidden="true" />
+        <div>
+          <h3>观察</h3>
+          <p>多源数据只读接入，事件与状态采集。</p>
+        </div>
+      </article>
+      <article>
+        <DataLine aria-hidden="true" />
+        <div>
+          <h3>分析</h3>
+          <p>跨域关联分析，形成假设与证据范围。</p>
+        </div>
+      </article>
+      <article>
+        <DocumentChecked aria-hidden="true" />
+        <div>
+          <h3>建议</h3>
+          <p>生成可行建议，附证据与影响说明。</p>
+        </div>
+      </article>
+      <article>
+        <Lock aria-hidden="true" />
+        <div>
+          <h3>人工确认</h3>
+          <p>观点与建议由人工确认，高风险动作不自动执行。</p>
+        </div>
+      </article>
+    </section>
   </main>
 </template>
