@@ -63,6 +63,11 @@ describe('showcase theme contract', () => {
 
   it('centralizes shared workbench primitives outside scene stylesheets', () => {
     const sharedSelectors = [
+      '.immersive-workbench.main-content{',
+      '.immersive-workbench.hero-row{',
+      '.immersive-workbench.hero-rowh2{',
+      '.immersive-workbench.hero-rowh2em{',
+      '.immersive-workbench.hero-copy{',
       '.immersive-workbench.hero-metrics{',
       '.immersive-workbench.section-heading.compact{',
       '.immersive-workbench.section-headingh2{',
@@ -75,11 +80,18 @@ describe('showcase theme contract', () => {
     }
     expect(compact(workbenchPrimitivesCss)).toMatch(/@keyframesworkbench-pulse\b/)
     expect(compact(workbenchPrimitivesCss)).toContain('animation:workbench-pulse')
+    expect(compact(workbenchPrimitivesCss)).toMatch(/@media\(max-width:650px\)\{[^@]*\.immersive-workbench\.main-content\{[^}]*padding:34px16px/)
 
-    for (const selector of ['.hero-metrics{', '.section-heading.compact{', '.section-headingh2{', '.count-badge{', '.live-indicator{']) {
+    for (const selector of [
+      '.immersive-workbench.main-content{', '.immersive-workbench.hero-row{',
+      '.immersive-workbench.hero-rowh2{', '.immersive-workbench.hero-rowh2em{',
+      '.immersive-workbench.hero-copy{', '.hero-metrics{', '.section-heading.compact{',
+      '.section-headingh2{', '.count-badge{', '.live-indicator{',
+    ]) {
       expect(compact(workflowCss)).not.toContain(selector)
       expect(compact(customerCss)).not.toContain(selector)
     }
+    expect(compact(workflowCss)).not.toMatch(/@media\(max-width:650px\)\{[^@]*\.immersive-workbench\.main-content\{/)
     expect(compact(workflowCss)).not.toContain('workflow-pulse')
   })
 

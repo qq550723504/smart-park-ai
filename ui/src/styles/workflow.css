@@ -1,9 +1,3 @@
-.immersive-workbench .main-content { max-width: 1500px; margin: 0 auto; padding: 52px 32px 68px; }
-.immersive-workbench .hero-row { align-items: end; margin-bottom: 36px; }
-.immersive-workbench .hero-row h2 { font-family: Georgia, "Noto Serif SC", serif; font-size: clamp(36px, 4.3vw, 64px); line-height: 1.05; letter-spacing: -.04em; margin: 12px 0 16px; font-weight: 500; }
-.immersive-workbench .hero-row h2 em { font-style: normal; color: var(--showcase-cyan); }
-.immersive-workbench .hero-copy { max-width: 650px; color: var(--showcase-muted); line-height: 1.7; margin: 0; }
-
 .dashboard-grid { display: grid; grid-template-columns: minmax(400px, .85fr) minmax(480px, 1.15fr); gap: 18px; }
 .alert-panel, .summary-panel, .timeline-panel { padding: 26px; }
 .alert-list { display: grid; gap: 9px; }
@@ -136,8 +130,6 @@
 }
 
 @media (max-width: 650px) {
-  .immersive-workbench .main-content { padding: 34px 16px; }
-  .immersive-workbench .hero-row h2 { font-size: 38px; }
   .alert-panel, .summary-panel, .timeline-panel, .graph-panel { padding: 18px; }
   .summary-stats { grid-template-columns: 1fr; }
   .summary-stats div { border-right: 0 !important; border-bottom: 1px solid var(--showcase-border-soft) !important; }
