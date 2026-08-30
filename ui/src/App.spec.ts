@@ -1,8 +1,24 @@
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { defineComponent, h, onMounted, onUnmounted, type PropType } from 'vue'
+import { defineComponent, h, nextTick, onMounted, onUnmounted, type PropType } from 'vue'
 import App from './App.vue'
-import type { WorkbenchView } from './components/OperationsWorkbench.vue'
+import ShowcaseHome from './components/showcase/ShowcaseHome.vue'
+import OperationsWorkbench, { type WorkbenchView } from './components/OperationsWorkbench.vue'
+import type { ShowcaseScenario } from './services/workflowApi'
+
+const showcaseStub = defineComponent({
+  name: 'ShowcaseHome',
+  emits: ['start-scenario', 'enter-workbench'],
+  setup(_, { emit }) {
+    return () => h('main', { 'data-testid': 'showcase-home' }, [
+      h('button', {
+        type: 'button',
+        'data-testid': 'enter-workbench',
+        onClick: () => emit('enter-workbench'),
+      }, 'Enter workbench'),
+    ])
+  },
+})
 
 const workbenchStub = defineComponent({
   name: 'OperationsWorkbench',
@@ -56,6 +72,7 @@ function createLifecycleTrackedWorkbench(lifecycle: { mounts: number; unmounts: 
 }
 
 const appStubs = {
+  ShowcaseHome: showcaseStub,
   OperationsWorkbench: workbenchStub,
   OperationsAnalysisPage: true,
   ExpertCollaborationPage: true,
@@ -84,35 +101,62 @@ function mountApp(operationsWorkbench = workbenchStub) {
 }
 
 describe('App surface coordinator', () => {
-  it('starts on semantic showcase placeholder markup without mounting the workbench', () => {
+  it('starts on the showcase home without mounting the workbench', () => {
     const wrapper = mountApp()
 
-    const showcase = wrapper.get('[data-showcase-surface="placeholder"]')
+    const showcase = wrapper.get('[data-surface="showcase"]')
     expect(showcase.element.tagName).toBe('MAIN')
-    expect(showcase.attributes('aria-labelledby')).toBe('showcase-placeholder-title')
+    expect(showcase.isVisible()).toBe(true)
     expect(wrapper.find('[data-testid="operations-workbench"]').exists()).toBe(false)
   })
 
-  it('opens the extracted workbench with the requested operator view', async () => {
+  it.each([
+    ['ALERT_WORKFLOW', 'workflow'],
+    ['EXPERT_COLLABORATION', 'collaboration'],
+    ['OPERATIONS_ANALYSIS', 'analytics'],
+    ['VOICE_ASSISTANT', 'voice'],
+  ] as Array<[ShowcaseScenario['id'], WorkbenchView]>)(
+    'opens %s in the cached workbench %s view',
+    async (scenarioId, expectedView) => {
+      const wrapper = mountApp()
+
+      expect(wrapper.get('[data-surface="showcase"]').isVisible()).toBe(true)
+      wrapper.getComponent(ShowcaseHome).vm.$emit('start-scenario', scenarioId)
+      await nextTick()
+
+      expect(wrapper.getComponent(OperationsWorkbench).props('initialView')).toBe(expectedView)
+      expect(wrapper.get('[data-surface="workbench"]').isVisible()).toBe(true)
+    },
+  )
+
+  it('opens the workbench entry action on the workflow view by default', async () => {
     const wrapper = mountApp()
 
-    await wrapper.get('[data-showcase-open-workbench="analytics"]').trigger('click')
+    wrapper.getComponent(ShowcaseHome).vm.$emit('enter-workbench')
+    await nextTick()
 
-    expect(wrapper.find('[data-testid="operations-workbench"]').exists()).toBe(true)
-    expect(wrapper.get('[data-testid="initial-view"]').text()).toBe('analytics')
+    expect(wrapper.getComponent(OperationsWorkbench).props('initialView')).toBe('workflow')
+    expect(wrapper.get('[data-surface="workbench"]').isVisible()).toBe(true)
   })
 
   it('keeps the same workbench instance mounted and hidden after returning to showcase', async () => {
     const lifecycle = { mounts: 0, unmounts: 0 }
     const wrapper = mountApp(createLifecycleTrackedWorkbench(lifecycle))
 
-    await wrapper.get('[data-showcase-open-workbench="workflow"]').trigger('click')
+    wrapper.getComponent(ShowcaseHome).vm.$emit('start-scenario', 'EXPERT_COLLABORATION')
+    await nextTick()
     expect(lifecycle).toEqual({ mounts: 1, unmounts: 0 })
 
     await wrapper.get('[data-testid="back-to-showcase"]').trigger('click')
 
-    expect(wrapper.find('[data-showcase-surface="placeholder"]').exists()).toBe(true)
+    expect(wrapper.get('[data-surface="showcase"]').isVisible()).toBe(true)
     expect(wrapper.get('[data-testid="operations-workbench"]').isVisible()).toBe(false)
+    expect(lifecycle).toEqual({ mounts: 1, unmounts: 0 })
+
+    wrapper.getComponent(ShowcaseHome).vm.$emit('start-scenario', 'ALERT_WORKFLOW')
+    await nextTick()
+
+    expect(wrapper.getComponent(OperationsWorkbench).props('initialView')).toBe('workflow')
     expect(lifecycle).toEqual({ mounts: 1, unmounts: 0 })
   })
 })
