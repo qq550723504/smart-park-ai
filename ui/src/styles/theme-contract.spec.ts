@@ -65,6 +65,23 @@ describe('showcase theme contract', () => {
     expect(existsSync(legacyStylesPath)).toBe(false)
   })
 
+  it('keeps evidence chips isolated within their scenes', () => {
+    const voiceEvidenceChip = compact(voiceCss).match(/\.voice-tools\.evidence-listspan\{([^}]*)\}/)?.[1]
+
+    expect(collaborationCss).toContain('.collaboration-main .evidence-list {')
+    expect(collaborationCss).toContain('.collaboration-main .evidence-list span {')
+    expect(collaborationCss).not.toMatch(/(?:^|\n)\.evidence-list(?:\s|\{)/)
+    expect(voiceEvidenceChip).toContain('font-family:ui-monospace,monospace')
+    expect(voiceEvidenceChip).toContain('padding:4px6px')
+    expect(voiceEvidenceChip).toContain('color:var(--showcase-cyan)')
+    expect(voiceEvidenceChip).toContain('background:var(--showcase-cyan-soft)')
+  })
+
+  it('stacks collaboration and voice layouts for the full tablet range', () => {
+    expect(compact(collaborationCss)).toContain('@media(max-width:1279px){.collaboration-layout{grid-template-columns:1fr;}')
+    expect(compact(voiceCss)).toContain('@media(max-width:1279px){.voice-layout{grid-template-columns:1fr;}')
+  })
+
   it('keeps collaboration, voice, and execution scenes free of legacy light surfaces', () => {
     const forbiddenLegacySurfaces = [
       '#edf3f2', '#f0f7f5', '#f9fbfa', '#f3faf8', '#eef8f5',

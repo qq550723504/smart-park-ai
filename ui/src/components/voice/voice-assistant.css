@@ -31,14 +31,13 @@
 .voice-privacy-note { margin: 16px 0 0; color: var(--showcase-muted); font-size: 11px; line-height: 1.6; }
 .voice-tools { display: grid; gap: 8px; margin-top: 16px; color: var(--showcase-muted); font-size: 10px; }
 .voice-tools .evidence-list { display: flex; flex-wrap: wrap; gap: 5px; }
-.voice-tools .evidence-list span { font-family: ui-monospace, monospace; font-size: 9px; padding: 4px 6px; }
-.voice-tool-card { color: var(--showcase-cyan); background: var(--showcase-cyan-soft); }
+.voice-tools .evidence-list span { font-family: ui-monospace, monospace; font-size: 9px; padding: 4px 6px; color: var(--showcase-cyan); background: var(--showcase-cyan-soft); }
 .voice-trace-list { display: grid; gap: 10px; margin: 16px 0 0; padding: 0; list-style: none; }
 .voice-trace-list li { display: grid; gap: 4px; padding: 10px; border-left: 2px solid var(--showcase-cyan); background: rgba(112, 232, 255, 0.06); }
 .voice-trace-list strong { color: var(--showcase-ivory); font-size: 10px; }
 .voice-trace-list span { color: var(--showcase-muted); font-size: 10px; line-height: 1.5; }
 
-@media (max-width: 1050px) {
+@media (max-width: 1279px) {
   .voice-layout { grid-template-columns: 1fr; }
 }
 
