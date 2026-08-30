@@ -64,12 +64,19 @@ export function useWorkflow() {
       const result = await startWorkflow(alertId)
       if (generation !== operationGeneration) return null
       mergeWorkflow(result)
-      eventSource = subscribeToWorkflow(result.workflowId,
-        (event) => handleEvent(event, generation, result.workflowId), () => {
+      try {
+        eventSource = subscribeToWorkflow(result.workflowId,
+          (event) => handleEvent(event, generation, result.workflowId), () => {
+          if (isCurrent(generation, result.workflowId) && !isTerminal.value) {
+            error.value = '实时事件连接中断，请检查后端服务。'
+          }
+        })
+      } catch {
         if (isCurrent(generation, result.workflowId) && !isTerminal.value) {
           error.value = '实时事件连接中断，请检查后端服务。'
         }
-      })
+        eventSource = null
+      }
       return result
     } catch (cause) {
       if (generation !== operationGeneration) return null
