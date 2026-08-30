@@ -1,8 +1,8 @@
 # Qualification gate for the JioNLP time-parser sidecar.
 #
 # Runs, in order:
-#   1. installation of the hash-locked requirements;
-#   2. sidecar contract tests and the golden-corpus suite;
+#   1. installation of the hash-locked development requirements;
+#   2. all sidecar correctness and dependency-governance tests;
 #   3. pip-audit against known vulnerabilities;
 #   4. pip-licenses with an Apache-2.0-compatible allowlist.
 #
@@ -18,39 +18,33 @@ if (Test-Path ".venv/Scripts/python.exe") {
     $Python = ".venv/Scripts/python.exe"
 }
 
-Write-Host "==> Installing locked requirements" -ForegroundColor Cyan
-& $Python -m pip install --require-hashes -r requirements.txt
-if ($LASTEXITCODE -ne 0) { throw "locked requirement installation failed" }
+Write-Host "==> Installing locked development requirements" -ForegroundColor Cyan
+& $Python -m pip install --quiet --disable-pip-version-check --require-hashes -r requirements-dev.txt
+if ($LASTEXITCODE -ne 0) { throw "locked development requirement installation failed" }
 
-Write-Host "==> Running contract and golden-corpus tests" -ForegroundColor Cyan
-& $Python -m pytest tests/test_contract.py tests/test_golden_corpus.py -q
-if ($LASTEXITCODE -ne 0) { throw "contract/corpus tests failed" }
+Write-Host "==> Running all time-parser tests" -ForegroundColor Cyan
+& $Python -m pytest tests -q
+if ($LASTEXITCODE -ne 0) { throw "time-parser tests failed" }
 
 Write-Host "==> Auditing dependencies for known vulnerabilities" -ForegroundColor Cyan
-& $Python -m pip install --quiet pip-audit
-& $Python -m pip_audit -r requirements.txt --strict --progress-spinner off
-if ($LASTEXITCODE -ne 0) { throw "pip-audit found vulnerabilities or failed" }
+$auditCacheRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+$auditCache = Join-Path $auditCacheRoot ("smartpark-pip-audit-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $auditCache | Out-Null
+try {
+    & $Python -m pip_audit -r requirements.txt --strict --progress-spinner off --cache-dir $auditCache
+    $auditExitCode = $LASTEXITCODE
+}
+finally {
+    $resolvedAuditCache = [IO.Path]::GetFullPath($auditCache)
+    if (-not $resolvedAuditCache.StartsWith($auditCacheRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "refusing to remove audit cache outside the system temp directory"
+    }
+    Remove-Item -LiteralPath $resolvedAuditCache -Recurse -Force
+}
+if ($auditExitCode -ne 0) { throw "pip-audit found vulnerabilities or failed" }
 
 Write-Host "==> Checking licenses against the Apache-2.0-compatible allowlist" -ForegroundColor Cyan
-& $Python -m pip install --quiet pip-licenses
-$allowlist = @(
-    "Apache Software License", "Apache-2.0", "Apache License 2.0",
-    "MIT", "MIT License",
-    "BSD", "BSD License", "BSD-2-Clause", "BSD-3-Clause",
-    "ISC", "ISC License (ISCL)",
-    "Python Software Foundation License", "PSF-2.0", "Python-2.0",
-    "The Unlicense", "Unlicense", "CC0", "Public Domain"
-)
-$json = & .venv/Scripts/pip-licenses --format=json 2>$null | ConvertFrom-Json
-$violations = @($json | Where-Object {
-        $name = $_.License
-        -not ($allowlist | Where-Object { $name -like "*$_*" })
-    })
-if ($violations.Count -gt 0) {
-    $violations | ForEach-Object {
-        Write-Host ("DISALLOWED LICENSE: {0} -> {1}" -f $_.Name, $_.License) -ForegroundColor Red
-    }
-    throw "dependency license check failed"
-}
+& $Python scripts/license_policy.py --requirements requirements.txt
+if ($LASTEXITCODE -ne 0) { throw "dependency license check failed" }
 
 Write-Host "==> Qualification passed" -ForegroundColor Green
