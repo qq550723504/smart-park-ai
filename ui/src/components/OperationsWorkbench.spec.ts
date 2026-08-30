@@ -5,16 +5,26 @@ import OperationsWorkbench from './OperationsWorkbench.vue'
 
 const mounts = {
   analysis: 0,
+  workflow: 0,
 }
 
 const unmounts = {
   analysis: 0,
+  workflow: 0,
 }
 
 const analysisStub = defineComponent({
   setup() {
     onMounted(() => { mounts.analysis += 1 })
     onUnmounted(() => { unmounts.analysis += 1 })
+    return () => null
+  },
+})
+
+const workflowStub = defineComponent({
+  setup() {
+    onMounted(() => { mounts.workflow += 1 })
+    onUnmounted(() => { unmounts.workflow += 1 })
     return () => null
   },
 })
@@ -45,7 +55,9 @@ describe('OperationsWorkbench', () => {
 
   beforeEach(() => {
     mounts.analysis = 0
+    mounts.workflow = 0
     unmounts.analysis = 0
+    unmounts.workflow = 0
     originalFetch = globalThis.fetch
     globalThis.fetch = (async () => new Response(JSON.stringify({
       knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
@@ -67,6 +79,29 @@ describe('OperationsWorkbench', () => {
     await wrapper.get('[data-workbench-view="workflow"]').trigger('click')
     expect(mounts.analysis).toBe(1)
     expect(unmounts.analysis).toBe(0)
+  })
+
+  it('defers the workflow graph until its visible view is first opened', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'collaboration' },
+      global: {
+        stubs: {
+          ...operatorStubs,
+          WorkflowGraph: workflowStub,
+        },
+      },
+    })
+
+    await settleCapabilities()
+    expect(mounts.workflow).toBe(0)
+
+    await wrapper.get('[data-workbench-view="workflow"]').trigger('click')
+    await nextTick()
+    expect(mounts.workflow).toBe(1)
+
+    await wrapper.get('[data-workbench-view="collaboration"]').trigger('click')
+    expect(mounts.workflow).toBe(1)
+    expect(unmounts.workflow).toBe(0)
   })
 
   it('keeps every scenario page as a direct workspace sibling of the global rail', async () => {

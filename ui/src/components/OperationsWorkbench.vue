@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import AlertSelector from './AlertSelector.vue'
 import WorkflowGraph from './WorkflowGraph.vue'
@@ -38,7 +38,13 @@ onMounted(() => {
 })
 const selectedAlertId = ref(demoAlerts[0].id)
 const activeView = ref<WorkbenchView>(props.initialView)
+const hasVisitedWorkflow = ref(props.initialView === 'workflow')
 watch(() => props.initialView, (view) => { activeView.value = view })
+watch(activeView, async (view) => {
+  if (view !== 'workflow' || hasVisitedWorkflow.value) return
+  await nextTick()
+  if (activeView.value === 'workflow') hasVisitedWorkflow.value = true
+})
 const role = ref<DemoRole>('ADMIN')
 const reviewer = ref('')
 const comment = ref('')
@@ -215,7 +221,7 @@ function confidence(value?: number) {
       </section>
 
       <section class="lower-grid">
-        <WorkflowGraph :workflow="workflow" :events="events" />
+        <WorkflowGraph v-if="hasVisitedWorkflow" :workflow="workflow" :events="events" />
         <EventTimeline :events="events" />
       </section>
 
