@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
   Connection,
   DataLine,
@@ -21,11 +21,18 @@ const emit = defineEmits<{
   'enter-workbench': []
 }>()
 
+const props = withDefaults(defineProps<{
+  active?: boolean
+}>(), {
+  active: true,
+})
+
 const priority = ['EXPERT_COLLABORATION', 'ALERT_WORKFLOW', 'OPERATIONS_ANALYSIS', 'VOICE_ASSISTANT'] as const
 const catalog = ref<ShowcaseScenarioCatalog | null>(null)
 const selectedId = ref<ShowcaseScenario['id'] | null>(null)
 const loading = ref(true)
 const failed = ref(false)
+let catalogRequestGeneration = 0
 
 const isSelectable = (scenario: ShowcaseScenario) => scenario.status === 'READY' && scenario.live
 
@@ -36,8 +43,10 @@ const orderedScenarios = computed(() => {
   return [...catalog.value.scenarios]
     .sort((a, b) => Number(isSelectable(b)) - Number(isSelectable(a))
       || priority.indexOf(a.id) - priority.indexOf(b.id))
-    .slice(0, 3)
 })
+
+const visibleScenarios = computed(() => orderedScenarios.value.slice(0, 3))
+const omittedScenarios = computed(() => orderedScenarios.value.slice(3))
 
 const selectedScenario = computed(() => {
   if (!selectedId.value) {
@@ -92,25 +101,59 @@ function selectScenario(scenario: ShowcaseScenario) {
   }
 }
 
-function startScenario() {
-  if (selectedScenario.value) {
-    emit('start-scenario', selectedScenario.value.id)
-  }
-}
+async function refreshCatalog() {
+  const requestGeneration = ++catalogRequestGeneration
+  const previouslySelectedId = selectedId.value
 
-onMounted(async () => {
   loading.value = true
   failed.value = false
   try {
-    catalog.value = await getShowcaseScenarios()
-    selectedId.value = orderedScenarios.value.find(isSelectable)?.id ?? null
+    const nextCatalog = await getShowcaseScenarios()
+    if (requestGeneration !== catalogRequestGeneration) {
+      return null
+    }
+
+    catalog.value = nextCatalog
+    const previousSelection = orderedScenarios.value.find((scenario) => (
+      scenario.id === previouslySelectedId && isSelectable(scenario)
+    ))
+    selectedId.value = previousSelection?.id ?? orderedScenarios.value.find(isSelectable)?.id ?? null
+    return nextCatalog
   } catch {
+    if (requestGeneration !== catalogRequestGeneration) {
+      return null
+    }
+
     catalog.value = null
     selectedId.value = null
     failed.value = true
+    return null
   } finally {
-    loading.value = false
+    if (requestGeneration === catalogRequestGeneration) {
+      loading.value = false
+    }
   }
+}
+
+async function startScenario() {
+  const intendedScenarioId = selectedScenario.value?.id
+  if (!intendedScenarioId || loading.value) {
+    return
+  }
+
+  const verifiedCatalog = await refreshCatalog()
+  const verifiedScenario = verifiedCatalog?.scenarios.find((scenario) => scenario.id === intendedScenarioId)
+  if (verifiedScenario && isSelectable(verifiedScenario)) {
+    emit('start-scenario', intendedScenarioId)
+  }
+}
+
+watch(() => props.active, (active) => {
+  if (active) {
+    void refreshCatalog()
+  }
+}, {
+  immediate: true,
 })
 </script>
 
@@ -199,7 +242,7 @@ onMounted(async () => {
           type="button"
           class="showcase-home__start"
           data-start-showcase
-          :disabled="!selectedScenario"
+          :disabled="loading || !selectedScenario"
           @click="startScenario"
         >
           <VideoPlay aria-hidden="true" />
@@ -218,13 +261,22 @@ onMounted(async () => {
       </div>
 
       <p class="showcase-home__status" data-showcase-status aria-live="polite">
-        {{ statusMessage }}
+        <span>{{ statusMessage }}</span>
+        <button
+          v-if="failed"
+          type="button"
+          class="showcase-home__retry"
+          data-retry-catalog
+          @click="refreshCatalog"
+        >
+          重试验证
+        </button>
       </p>
 
       <div v-if="!loading" class="showcase-home__rows" aria-label="演示场景列表">
         <p class="showcase-home__more">可体验任务</p>
         <button
-          v-for="scenario in orderedScenarios"
+          v-for="scenario in visibleScenarios"
           :key="scenario.id"
           type="button"
           class="showcase-home__row"
@@ -247,6 +299,16 @@ onMounted(async () => {
             </span>
           </span>
         </button>
+        <p
+          v-for="scenario in omittedScenarios"
+          :key="scenario.id"
+          class="showcase-home__omitted"
+          data-omitted-scenario
+        >
+          <span>{{ scenario.title }}</span>
+          <span v-if="isSelectable(scenario)">READY · live</span>
+          <span v-else>{{ scenario.status }} · {{ safeUnavailableReason(scenario) }}</span>
+        </p>
       </div>
     </aside>
 

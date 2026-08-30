@@ -16,7 +16,7 @@
 
 ## Runtime states checked
 
-The production UI continued to consume `/api/showcase/scenarios`. A local visual-QA proxy was used only to supply a verified `READY`/`live` catalog state on port 5182; the real backend state on port 5181 was checked separately and correctly rendered the no-ready state. The frontend contains no fixture or manufactured readiness data.
+The production UI continued to consume `/api/showcase/scenarios`. A local visual-QA proxy was used only to supply a verified `READY`/`live` catalog state on port 5182; the real backend state on port 5181 was checked separately and correctly rendered the no-ready state. The frontend contains no fixture or manufactured readiness data. Readiness is revalidated when the showcase becomes active and immediately before a run; stale overlapping responses are ignored and transient failures expose a retry action.
 
 | State | Evidence | Result |
 | --- | --- | --- |
@@ -50,16 +50,19 @@ Resolution: reduced only the right-panel flex gap from 10px to 6px. `overflow: a
 - Document: `1440 × 1024`, no horizontal or document-level vertical overflow.
 - Stage: `979.19 × 839.67`.
 - Task panel: `clientHeight 817`, `scrollHeight 817`; no baseline scrollbar.
+- Typography: no rendered showcase text below the 14px body minimum.
 - Heading count: one `h1`.
 - Evidence state: `证据链路 / 流程说明`; no pre-run activity claim.
+- Capability ledger: three detailed scenario rows plus one compact fourth entry; no service-provided unavailability reason is dropped.
 - Same-input visual comparison retained the selected reference's dominant geometry: immersive park stage, right-side task theater, and full-width evidence ribbon.
 
 ## Responsive and interaction QA
 
-- 1249 × 1024: the panel stacks below the 655.36px stage, panel content fits (`729 = 729`), the evidence ribbon remains readable, and horizontal overflow is false.
-- 759 × 1024: single-column order is preserved, decorative chain and extra-task label are hidden, the selected question and 58px start action remain visible, panel content fits (`943 = 943`), and horizontal overflow is false.
+- 1249 × 1024: the panel stacks below the stage, panel content fits (`645 = 645`), the evidence ribbon remains readable, no showcase text is below 14px, and horizontal overflow is false.
+- 759 × 1024: single-column order is preserved, decorative chain and extra-task label are hidden, the selected question and primary start action remain visible, panel content fits (`899 = 899`), no showcase text is below 14px, and horizontal overflow is false.
 - The verified start action is enabled only for `READY && live`, routes to the existing collaboration workbench, hides the showcase surface, and does not invoke a scenario execution API.
-- The real-backend no-ready state disables the start action, retains all unavailable reasons, and reports `暂无已验证场景`.
+- The real-backend no-ready state disables the start action, retains all four unavailable reasons, reports `暂无已验证场景`, and fits the baseline panel (`817 = 817`).
+- Surface transitions move keyboard focus to the destination root. Returning to the same requested workbench scenario reapplies its view, while hiding the workbench deactivates voice capture and invalidates in-flight session or microphone setup.
 - Native buttons, text-plus-icon status, `aria-live`, `:focus-visible`, and `prefers-reduced-motion` treatments remain present.
 
 ## Console and initialization QA

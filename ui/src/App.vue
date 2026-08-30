@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import OperationsWorkbench, { type WorkbenchView } from './components/OperationsWorkbench.vue'
 import ShowcaseHome from './components/showcase/ShowcaseHome.vue'
 import type { ShowcaseScenario } from './services/workflowApi'
@@ -7,6 +7,8 @@ import type { ShowcaseScenario } from './services/workflowApi'
 const surface = ref<'showcase' | 'workbench'>('showcase')
 const requestedView = ref<WorkbenchView>('workflow')
 const hasEnteredWorkbench = ref(false)
+const showcaseSurface = ref<InstanceType<typeof ShowcaseHome> | null>(null)
+const workbenchSurface = ref<InstanceType<typeof OperationsWorkbench> | null>(null)
 
 const scenarioView: Record<ShowcaseScenario['id'], WorkbenchView> = {
   ALERT_WORKFLOW: 'workflow',
@@ -15,10 +17,21 @@ const scenarioView: Record<ShowcaseScenario['id'], WorkbenchView> = {
   VOICE_ASSISTANT: 'voice',
 }
 
-function showWorkbench(view: WorkbenchView) {
+function focusComponentRoot(component: InstanceType<typeof ShowcaseHome> | InstanceType<typeof OperationsWorkbench> | null) {
+  const root = component?.$el
+  if (root instanceof HTMLElement) {
+    root.focus()
+  }
+}
+
+async function showWorkbench(view: WorkbenchView) {
   requestedView.value = view
   hasEnteredWorkbench.value = true
   surface.value = 'workbench'
+  await nextTick()
+  if (surface.value === 'workbench') {
+    focusComponentRoot(workbenchSurface.value)
+  }
 }
 
 function startScenario(id: ShowcaseScenario['id']) {
@@ -29,15 +42,21 @@ function enterWorkbench() {
   showWorkbench('workflow')
 }
 
-function returnToShowcase() {
+async function returnToShowcase() {
   surface.value = 'showcase'
+  await nextTick()
+  if (surface.value === 'showcase') {
+    focusComponentRoot(showcaseSurface.value)
+  }
 }
 </script>
 
 <template>
   <ShowcaseHome
+    ref="showcaseSurface"
     v-show="surface === 'showcase'"
     data-surface="showcase"
+    tabindex="-1"
     :active="surface === 'showcase'"
     @start-scenario="startScenario"
     @enter-workbench="enterWorkbench"
@@ -45,9 +64,11 @@ function returnToShowcase() {
 
   <KeepAlive>
     <OperationsWorkbench
+      ref="workbenchSurface"
       v-if="hasEnteredWorkbench"
       v-show="surface === 'workbench'"
       data-surface="workbench"
+      tabindex="-1"
       :active="surface === 'workbench'"
       :initial-view="requestedView"
       @back-to-showcase="returnToShowcase"

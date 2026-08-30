@@ -59,6 +59,16 @@ async function mountLoaded() {
   return wrapper
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 afterEach(() => {
   vi.clearAllMocks()
 })
@@ -75,6 +85,69 @@ describe('ShowcaseHome truthful catalog selection', () => {
     expect(wrapper.get('[data-selected-scenario]').text()).toContain('跨域专家协作')
     await wrapper.get('[data-start-showcase]').trigger('click')
     expect(wrapper.emitted('start-scenario')).toEqual([['EXPERT_COLLABORATION']])
+  })
+
+  it('revalidates immediately before start and fails closed when readiness expired', async () => {
+    vi.mocked(getShowcaseScenarios)
+      .mockResolvedValueOnce(catalog([
+        scenario('EXPERT_COLLABORATION', 'READY', true, null),
+      ]))
+      .mockResolvedValueOnce(catalog([
+        scenario('EXPERT_COLLABORATION', 'NOT_READY', false, '在线验证已过期'),
+      ]))
+
+    const wrapper = await mountLoaded()
+    await wrapper.get('[data-start-showcase]').trigger('click')
+    await flushPromises()
+
+    expect(getShowcaseScenarios).toHaveBeenCalledTimes(2)
+    expect(wrapper.emitted('start-scenario')).toBeUndefined()
+    expect(wrapper.get('[data-showcase-status]').text()).toContain('暂无已验证场景')
+    expect(wrapper.text()).toContain('在线验证已过期')
+  })
+
+  it('revalidates whenever the showcase becomes active again', async () => {
+    vi.mocked(getShowcaseScenarios)
+      .mockResolvedValueOnce(catalog([
+        scenario('EXPERT_COLLABORATION', 'READY', true, null),
+      ]))
+      .mockResolvedValueOnce(catalog([
+        scenario('ALERT_WORKFLOW', 'READY', true, null),
+        scenario('EXPERT_COLLABORATION', 'NOT_READY', false, '在线验证已过期'),
+      ]))
+
+    const wrapper = mount(ShowcaseHome, { props: { active: true } })
+    await flushPromises()
+    expect(wrapper.get('[data-selected-scenario]').text()).toContain('跨域专家协作')
+
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+    await flushPromises()
+
+    expect(getShowcaseScenarios).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-selected-scenario]').text()).toContain('告警处置')
+  })
+
+  it('ignores an older catalog response that resolves after a newer activation refresh', async () => {
+    const first = deferred<ShowcaseScenarioCatalog>()
+    vi.mocked(getShowcaseScenarios)
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValueOnce(catalog([
+        scenario('ALERT_WORKFLOW', 'READY', true, null),
+      ]))
+
+    const wrapper = mount(ShowcaseHome, { props: { active: true } })
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+    await flushPromises()
+    expect(wrapper.get('[data-selected-scenario]').text()).toContain('告警处置')
+
+    first.resolve(catalog([
+      scenario('EXPERT_COLLABORATION', 'READY', true, null),
+    ]))
+    await flushPromises()
+
+    expect(wrapper.get('[data-selected-scenario]').text()).toContain('告警处置')
   })
 
   it('keeps the pre-run evidence ribbon explanatory instead of implying execution', async () => {
@@ -107,6 +180,8 @@ describe('ShowcaseHome truthful catalog selection', () => {
       'ALERT_WORKFLOW',
       'OPERATIONS_ANALYSIS',
     ])
+    expect(wrapper.get('[data-omitted-scenario]').text()).toContain('实时语音助手')
+    expect(wrapper.get('[data-omitted-scenario]').text()).toContain('READY · live')
     expect(wrapper.get('[data-selected-scenario]').text()).toContain('跨域专家协作')
   })
 
@@ -186,6 +261,22 @@ describe('ShowcaseHome truthful catalog selection', () => {
     expect(wrapper.text()).not.toContain('internal service detail')
   })
 
+  it('recovers from a transient catalog failure through the visible retry action', async () => {
+    vi.mocked(getShowcaseScenarios)
+      .mockRejectedValueOnce(new Error('temporary failure'))
+      .mockResolvedValueOnce(catalog([
+        scenario('EXPERT_COLLABORATION', 'READY', true, null),
+      ]))
+
+    const wrapper = await mountLoaded()
+    await wrapper.get('[data-retry-catalog]').trigger('click')
+    await flushPromises()
+
+    expect(getShowcaseScenarios).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-catalog-stamp]').attributes('data-catalog-state')).toBe('verified')
+    expect(wrapper.get('[data-selected-scenario]').text()).toContain('跨域专家协作')
+  })
+
   it('disables start and shows the safe no-ready message when no scenario is selectable', async () => {
     vi.mocked(getShowcaseScenarios).mockResolvedValue(catalog([
       scenario('ALERT_WORKFLOW', 'NOT_READY', false, '本次部署尚未完成在线验证'),
@@ -197,6 +288,21 @@ describe('ShowcaseHome truthful catalog selection', () => {
 
     expect(wrapper.get('[data-showcase-status]').text()).toContain('暂无已验证场景')
     expect(wrapper.get('[data-start-showcase]').attributes('disabled')).toBeDefined()
+  })
+
+  it('retains the fourth unavailable capability reason in a compact ledger', async () => {
+    vi.mocked(getShowcaseScenarios).mockResolvedValue(catalog([
+      scenario('EXPERT_COLLABORATION', 'DISABLED', false, '本次部署未启用专家协作'),
+      scenario('ALERT_WORKFLOW', 'NOT_READY', false, '本次部署尚未完成在线验证'),
+      scenario('OPERATIONS_ANALYSIS', 'DISABLED', false, '本次部署未启用运营分析'),
+      scenario('VOICE_ASSISTANT', 'DISABLED', false, '本次展台未启用语音链路'),
+    ]))
+
+    const wrapper = await mountLoaded()
+
+    expect(wrapper.findAll('[data-showcase-scenario-row]')).toHaveLength(3)
+    expect(wrapper.get('[data-omitted-scenario]').text()).toContain('实时语音助手')
+    expect(wrapper.get('[data-omitted-scenario]').text()).toContain('本次展台未启用语音链路')
   })
 
   it('emits the workbench intent without a payload', async () => {

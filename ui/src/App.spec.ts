@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick, onMounted, onUnmounted, type PropType } from 'vue'
 import App from './App.vue'
 import ShowcaseHome from './components/showcase/ShowcaseHome.vue'
@@ -8,6 +8,12 @@ import type { ShowcaseScenario } from './services/workflowApi'
 
 const showcaseStub = defineComponent({
   name: 'ShowcaseHome',
+  props: {
+    active: {
+      type: Boolean,
+      default: true,
+    },
+  },
   emits: ['start-scenario', 'enter-workbench'],
   setup(_, { emit }) {
     return () => h('main', { 'data-testid': 'showcase-home' }, [
@@ -179,5 +185,32 @@ describe('App surface coordinator', () => {
 
     await wrapper.get('[data-testid="back-to-showcase"]').trigger('click')
     expect(wrapper.getComponent(OperationsWorkbench).props('active')).toBe(false)
+  })
+
+  it('moves focus to the destination surface after each surface transition', async () => {
+    const wrapper = mount(App, {
+      attachTo: document.body,
+      global: {
+        stubs: appStubs,
+      },
+    })
+
+    try {
+      wrapper.getComponent(ShowcaseHome).vm.$emit('start-scenario', 'EXPERT_COLLABORATION')
+      await flushPromises()
+
+      const workbench = wrapper.get('[data-surface="workbench"]')
+      expect(workbench.attributes('tabindex')).toBe('-1')
+      expect(document.activeElement).toBe(workbench.element)
+
+      await wrapper.get('[data-testid="back-to-showcase"]').trigger('click')
+      await flushPromises()
+
+      const showcase = wrapper.get('[data-surface="showcase"]')
+      expect(showcase.attributes('tabindex')).toBe('-1')
+      expect(document.activeElement).toBe(showcase.element)
+    } finally {
+      wrapper.unmount()
+    }
   })
 })
