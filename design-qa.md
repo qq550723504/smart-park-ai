@@ -1,8 +1,8 @@
 # Evidence Theater Design QA
 
-Date: 2026-08-30  
-Baseline viewport: 1440 × 1024  
-Target surface: customer-facing Agent showcase home
+- Date: 2026-08-30
+- Baseline viewport: 1440 × 1024
+- Target surface: customer-facing Agent showcase home
 
 ## Visual sources
 
@@ -23,9 +23,9 @@ The production UI continued to consume `/api/showcase/scenarios`. A local visual
 | Verified collaboration selected | `.superpowers/sdd/2026-08-30-showcase-home-option-2/qa/final-verified-viewport-1440x1024.png` | Passed |
 | Reference + implementation, same comparison input | `.superpowers/sdd/2026-08-30-showcase-home-option-2/qa/final-comparison.png` | Passed |
 | Real-backend no-ready state | `.superpowers/sdd/2026-08-30-showcase-home-option-2/qa/final-disabled-1440x1024.png` | Passed |
-| CTA-routed collaboration workbench | `.superpowers/sdd/2026-08-30-showcase-home-option-2/qa/final-workbench-collaboration-1440x1024.png` | Passed |
-| Tablet breakpoint | `.superpowers/sdd/2026-08-30-showcase-home-option-2/qa/final-tablet-1249x1024.png` | Passed |
-| Mobile breakpoint | `.superpowers/sdd/2026-08-30-showcase-home-option-2/qa/final-mobile-759x1024.png` | Passed |
+| CTA-routed collaboration workbench | `.superpowers/sdd/2026-08-30-showcase-home-option-2/qa/final-workbench-collaboration-1440x1024.png` | Passed; PNG content area 1425 × 1013 inside the 1440 × 1024 CSS viewport |
+| Tablet breakpoint | `.superpowers/sdd/2026-08-30-showcase-home-option-2/qa/final-tablet-1249x1024.png` | Passed; PNG content area 1234 × 1012 inside the 1249 × 1024 CSS viewport |
+| Mobile breakpoint | `.superpowers/sdd/2026-08-30-showcase-home-option-2/qa/final-mobile-759x1024.png` | Passed; PNG content area 744 × 1004 inside the 759 × 1024 CSS viewport |
 
 ## Comparison history
 

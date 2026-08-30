@@ -196,6 +196,10 @@
   font-size: 0.8rem;
 }
 
+.showcase-home__verified-at.is-failed {
+  color: var(--showcase-amber);
+}
+
 .showcase-home__selected {
   display: grid;
   gap: 8px;
@@ -558,10 +562,6 @@
     min-height: 480px;
     padding: 24px 18px;
     background-position: 47% center;
-  }
-
-  .showcase-home__topbar {
-    align-items: flex-start;
   }
 
   .showcase-home__brand {

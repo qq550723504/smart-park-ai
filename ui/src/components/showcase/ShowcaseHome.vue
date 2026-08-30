@@ -5,10 +5,12 @@ import {
   DataLine,
   DocumentChecked,
   Checked,
+  Loading,
   Lock,
   Monitor,
   User,
   VideoPlay,
+  WarningFilled,
 } from '@element-plus/icons-vue'
 import { getShowcaseScenarios } from '../../services/workflowApi'
 import type { ShowcaseScenario, ShowcaseScenarioCatalog } from '../../services/workflowApi'
@@ -55,6 +57,20 @@ const statusMessage = computed(() => {
     return '暂无已验证场景'
   }
   return `已验证场景：${selectedScenario.value.title}`
+})
+
+const catalogStamp = computed(() => {
+  if (loading.value) {
+    return { state: 'loading', label: '正在检查', icon: Loading } as const
+  }
+  if (failed.value) {
+    return { state: 'failed', label: '无法确认演示链路', icon: WarningFilled } as const
+  }
+  return {
+    state: 'verified',
+    label: catalog.value?.capturedAt ?? '目录已返回',
+    icon: DocumentChecked,
+  } as const
 })
 
 function safeUnavailableReason(scenario: ShowcaseScenario) {
@@ -122,9 +138,14 @@ onMounted(async () => {
     <aside class="showcase-home__panel" aria-label="选择现场演示任务">
       <div class="showcase-home__panel-head">
         <p class="showcase-home__panel-kicker">现场任务</p>
-        <span class="showcase-home__verified-at">
-          <DocumentChecked aria-hidden="true" />
-          <span>{{ catalog?.capturedAt ?? '正在检查' }}</span>
+        <span
+          class="showcase-home__verified-at"
+          :class="`is-${catalogStamp.state}`"
+          data-catalog-stamp
+          :data-catalog-state="catalogStamp.state"
+        >
+          <component :is="catalogStamp.icon" aria-hidden="true" />
+          <span>{{ catalogStamp.label }}</span>
         </span>
       </div>
 
