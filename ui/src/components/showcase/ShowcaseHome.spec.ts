@@ -77,6 +77,19 @@ describe('ShowcaseHome truthful catalog selection', () => {
     expect(wrapper.emitted('start-scenario')).toEqual([['EXPERT_COLLABORATION']])
   })
 
+  it('keeps the pre-run evidence ribbon explanatory instead of implying execution', async () => {
+    vi.mocked(getShowcaseScenarios).mockResolvedValue(catalog([
+      scenario('ALERT_WORKFLOW', 'NOT_READY', false, '最近一次在线检查未通过'),
+      scenario('EXPERT_COLLABORATION', 'READY', true, null),
+    ]))
+
+    const wrapper = await mountLoaded()
+    const ribbon = wrapper.get('[aria-label="能力账本"]').text()
+
+    expect(ribbon).toContain('流程说明')
+    expect(ribbon).not.toContain('实时演绎中')
+  })
+
   it('orders selectable scenarios by customer-demo priority and exposes at most three rows', async () => {
     vi.mocked(getShowcaseScenarios).mockResolvedValue(catalog([
       scenario('VOICE_ASSISTANT', 'READY', true, null),

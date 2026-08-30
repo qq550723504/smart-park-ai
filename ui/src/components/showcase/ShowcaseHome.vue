@@ -101,27 +101,22 @@ onMounted(async () => {
 <template>
   <main class="showcase-home" data-showcase-surface="home" aria-labelledby="showcase-home-title">
     <section class="showcase-home__stage" aria-describedby="showcase-home-subtitle">
-      <nav class="showcase-home__topbar" aria-label="展示导航">
-        <span class="showcase-home__brand">
+      <header class="showcase-home__lockup">
+        <h1 id="showcase-home-title" class="showcase-home__brand">
           <Monitor aria-hidden="true" />
           <span>智慧园区 Agent 体验中心</span>
-        </span>
-        <span class="showcase-home__chain">
-          <DocumentChecked aria-hidden="true" />
-          <span>真实只读数据 · 执行证据可追溯 · 高风险动作由人工确认</span>
-        </span>
-      </nav>
-
-      <div class="showcase-home__hero">
-        <p class="showcase-home__eyebrow">Evidence Theater</p>
-        <h1 id="showcase-home-title">智慧园区 Agent 体验中心</h1>
+        </h1>
         <p id="showcase-home-subtitle" class="showcase-home__subtitle">
           从真实问题开始，看见 Agent 如何形成可信结论
+        </p>
+        <p class="showcase-home__chain">
+          <DocumentChecked aria-hidden="true" />
+          <span>真实只读数据 · 执行证据可追溯 · 高风险动作由人工确认</span>
         </p>
         <p class="showcase-home__promise">
           本页只呈现服务端目录确认的可演示任务；不可用能力会保留安全原因，不用前端动画或静态结果伪装在线运行。
         </p>
-      </div>
+      </header>
     </section>
 
     <aside class="showcase-home__panel" aria-label="选择现场演示任务">
@@ -142,9 +137,8 @@ onMounted(async () => {
         <span class="showcase-home__selected-icon">
           <component :is="scenarioIcon(selectedScenario.id)" aria-hidden="true" />
         </span>
-        <p class="showcase-home__selected-label">推荐任务</p>
-        <h2>{{ selectedScenario.title }}</h2>
-        <p class="showcase-home__question">{{ selectedScenario.businessQuestion }}</p>
+        <p class="showcase-home__selected-label">推荐任务 · {{ selectedScenario.title }}</p>
+        <h2>{{ selectedScenario.businessQuestion }}</h2>
         <dl class="showcase-home__facts">
           <div>
             <dt>预计时长</dt>
@@ -207,7 +201,7 @@ onMounted(async () => {
       </p>
 
       <div v-if="!loading" class="showcase-home__rows" aria-label="演示场景列表">
-        <p class="showcase-home__more">更多可体验任务</p>
+        <p class="showcase-home__more">可体验任务</p>
         <button
           v-for="scenario in orderedScenarios"
           :key="scenario.id"
@@ -239,7 +233,7 @@ onMounted(async () => {
       <div class="showcase-home__ribbon-status">
         <Checked aria-hidden="true" />
         <span>证据链路</span>
-        <small>实时演绎中</small>
+        <small>流程说明</small>
       </div>
       <article>
         <Monitor aria-hidden="true" />
