@@ -21,7 +21,6 @@ import { alertWorkflowRunId } from '../utils/runId'
 import type { GuidedLaunchUpdate, ScenarioLaunchRequest, ShowcaseScenarioId, WorkbenchEvidenceItem, WorkbenchNavItem, WorkbenchView } from '../types/workbench'
 import '../styles/workbench-primitives.css'
 import '../styles/workflow.css'
-import '../styles.css'
 
 const props = withDefaults(defineProps<{ initialView?: WorkbenchView; launchRequest?: ScenarioLaunchRequest | null; active?: boolean }>(), {
   initialView: 'workflow',

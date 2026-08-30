@@ -68,6 +68,8 @@ describe('VoiceAssistantPage', () => {
     const { wrapper } = mountPage()
     expect(text(wrapper, '[data-testid="voice-mic"]')).toContain('点击开始提问')
     expect(text(wrapper, '[data-testid="voice-phase"]')).toContain('点击麦克风开始提问')
+    expect(wrapper.find('.voice-mic-icon svg').exists()).toBe(true)
+    expect(wrapper.find('.voice-mic-icon').text()).not.toContain('🎙')
   })
 
   it('clicking the mic delegates to the composable without faking phase', async () => {

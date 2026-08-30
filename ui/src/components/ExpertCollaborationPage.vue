@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import './expert-collaboration.css'
 import ExpertCard from './ExpertCard.vue'
 import { useExpertCollaboration } from '../composables/useExpertCollaboration'
 import { useGuidedLaunch } from '../composables/useGuidedLaunch'

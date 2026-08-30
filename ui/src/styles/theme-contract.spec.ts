@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -7,9 +7,15 @@ const homepage = readFileSync(resolve(process.cwd(), 'src/components/showcase/sh
 const workbenchPrimitivesCss = readFileSync(resolve(process.cwd(), 'src/styles/workbench-primitives.css'), 'utf8')
 const workflowCss = readFileSync(resolve(process.cwd(), 'src/styles/workflow.css'), 'utf8')
 const customerCss = readFileSync(resolve(process.cwd(), 'src/components/customer-service.css'), 'utf8')
-const legacyStyles = readFileSync(resolve(process.cwd(), 'src/styles.css'), 'utf8')
+const readIfPresent = (path: string) => existsSync(path) ? readFileSync(path, 'utf8') : ''
+const collaborationCss = readIfPresent(resolve(process.cwd(), 'src/components/expert-collaboration.css'))
+const voiceCss = readIfPresent(resolve(process.cwd(), 'src/components/voice/voice-assistant.css'))
+const executionRailCss = readIfPresent(resolve(process.cwd(), 'src/components/execution/execution-rail.css'))
+const legacyStylesPath = resolve(process.cwd(), 'src', ['styles', 'css'].join('.'))
 const operationsWorkbench = readFileSync(resolve(process.cwd(), 'src/components/OperationsWorkbench.vue'), 'utf8')
 const customerConsole = readFileSync(resolve(process.cwd(), 'src/components/CustomerServiceConsole.vue'), 'utf8')
+const collaborationPage = readFileSync(resolve(process.cwd(), 'src/components/ExpertCollaborationPage.vue'), 'utf8')
+const voicePage = readFileSync(resolve(process.cwd(), 'src/components/voice/VoiceAssistantPage.vue'), 'utf8')
 const compact = (css: string) => css.replace(/\s+/g, '')
 
 describe('showcase theme contract', () => {
@@ -50,14 +56,25 @@ describe('showcase theme contract', () => {
     expect(visitorMessage).not.toMatch(/background:(white|#fff)/)
   })
 
-  it('keeps migrated workflow and customer selectors out of the legacy stylesheet', () => {
-    const migratedSelectors = [
-      '.dashboard-grid{', '.workflow-node{', '.timeline-panel{', '.approval-panel{',
-      '.customer-main{', '.customer-console{', '.chat-message{', '.knowledge-admin{',
+  it('owns collaboration and voice rules in their scenes and removes the monolithic stylesheet', () => {
+    expect(compact(collaborationCss)).toContain('.collaboration-main{')
+    expect(compact(collaborationCss)).toContain('.expert-card{')
+    expect(compact(voiceCss)).toContain('.voice-page{')
+    expect(compact(voiceCss)).toContain('.voice-mic-button{')
+    expect(compact(voiceCss)).toContain('.voice-tools.evidence-list{')
+    expect(existsSync(legacyStylesPath)).toBe(false)
+  })
+
+  it('keeps collaboration, voice, and execution scenes free of legacy light surfaces', () => {
+    const forbiddenLegacySurfaces = [
+      '#edf3f2', '#f0f7f5', '#f9fbfa', '#f3faf8', '#eef8f5',
+      'rgba(251,253,252,.94)', 'rgba(255,255,255,.92)',
     ]
 
-    for (const selector of migratedSelectors) {
-      expect(compact(legacyStyles)).not.toContain(selector)
+    for (const color of forbiddenLegacySurfaces) {
+      expect(compact(collaborationCss)).not.toContain(color)
+      expect(compact(voiceCss)).not.toContain(color)
+      expect(compact(executionRailCss)).not.toContain(color)
     }
   })
 
@@ -101,6 +118,9 @@ describe('showcase theme contract', () => {
   it('loads each scene stylesheet from its owning component', () => {
     expect(operationsWorkbench).toMatch(/import\s+['"]\.\.\/styles\/workbench-primitives\.css['"]/)
     expect(operationsWorkbench).toMatch(/import\s+['"]\.\.\/styles\/workflow\.css['"]/)
+    expect(operationsWorkbench).not.toMatch(new RegExp(['styles', 'css'].join('\\.')))
     expect(customerConsole).toMatch(/import\s+['"]\.\/customer-service\.css['"]/)
+    expect(collaborationPage).toMatch(/import\s+['"]\.\/expert-collaboration\.css['"]/)
+    expect(voicePage).toMatch(/import\s+['"]\.\/voice-assistant\.css['"]/)
   })
 })

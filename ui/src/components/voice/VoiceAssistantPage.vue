@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
+import { Microphone } from '@element-plus/icons-vue'
+import './voice-assistant.css'
 import { useVoiceSession } from '../../composables/useVoiceSession'
 import { useGuidedLaunch } from '../../composables/useGuidedLaunch'
 import type { ExecutionTrace } from '../../composables/useExecutionTrace'
@@ -129,7 +131,7 @@ function retry(): Promise<void> {
             data-testid="voice-mic"
             @click="onMicClick"
           >
-            <span class="voice-mic-icon">🎙</span>
+            <span class="voice-mic-icon"><el-icon><Microphone /></el-icon></span>
             <span v-if="interruptible" class="voice-mic-label">点击打断并继续提问</span>
             <span v-else-if="micActive" class="voice-mic-label">点击结束输入</span>
             <span v-else class="voice-mic-label">点击开始提问</span>
