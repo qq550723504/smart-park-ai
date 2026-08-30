@@ -54,6 +54,18 @@ class ShowcaseScenarioCatalogTest {
     }
 
     @Test
+    void keepsAFutureVerificationReceiptNotReady() {
+        registry.recordSuccess(ShowcaseScenarioId.EXPERT_COLLABORATION, NOW.plusSeconds(1));
+
+        ShowcaseScenario scenario = scenario(ShowcaseScenarioId.EXPERT_COLLABORATION);
+
+        assertThat(scenario.status()).isEqualTo(ShowcaseScenarioStatus.NOT_READY);
+        assertThat(scenario.live()).isFalse();
+        assertThat(scenario.unavailableReason()).isEqualTo("本次部署尚未完成在线验证");
+        assertThat(scenario.lastVerifiedAt()).isNull();
+    }
+
+    @Test
     void returnsDisabledWithoutDisclosingConfigurationDetails() {
         catalog = catalog("rag", "dashscope", true, false, collaborationProvider(true));
         registry.recordSuccess(ShowcaseScenarioId.VOICE_ASSISTANT, NOW.minusSeconds(1));

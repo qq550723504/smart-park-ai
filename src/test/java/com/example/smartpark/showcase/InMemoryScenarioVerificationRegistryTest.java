@@ -29,6 +29,15 @@ class InMemoryScenarioVerificationRegistryTest {
     }
 
     @Test
+    void doesNotExposeAFutureSuccessAtCurrentTime() {
+        Instant now = Instant.parse("2026-08-30T10:00:00Z");
+        registry.recordSuccess(ShowcaseScenarioId.EXPERT_COLLABORATION, now.plusSeconds(1));
+
+        assertThat(registry.lastSuccessfulAt(ShowcaseScenarioId.EXPERT_COLLABORATION,
+                now, Duration.ofMinutes(15))).isEmpty();
+    }
+
+    @Test
     void failureInvalidatesAnEarlierSuccess() {
         registry.recordSuccess(ShowcaseScenarioId.OPERATIONS_ANALYSIS,
                 Instant.parse("2026-08-30T10:00:00Z"));

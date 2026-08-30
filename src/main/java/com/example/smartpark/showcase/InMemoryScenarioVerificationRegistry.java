@@ -24,7 +24,7 @@ public final class InMemoryScenarioVerificationRegistry implements ScenarioVerif
     @Override
     public Optional<Instant> lastSuccessfulAt(ShowcaseScenarioId id, Instant now, Duration ttl) {
         Instant verifiedAt = successes.get(Objects.requireNonNull(id));
-        return verifiedAt != null && verifiedAt.plus(ttl).isAfter(now)
+        return verifiedAt != null && !verifiedAt.isAfter(now) && verifiedAt.plus(ttl).isAfter(now)
                 ? Optional.of(verifiedAt)
                 : Optional.empty();
     }

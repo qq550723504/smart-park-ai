@@ -37,8 +37,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class ShowcaseScenarioControllerTest {
 
     private static final Instant CAPTURED_AT = Instant.parse("2026-08-30T10:00:00Z");
-    private static final String HOSTILE_INTERNAL_EXCEPTION_TEXT =
-            "SQLException: jdbc:postgresql://internal/showcase?api-key=secret; prompt=system";
 
     @Autowired
     private MockMvc mockMvc;
@@ -76,8 +74,19 @@ class ShowcaseScenarioControllerTest {
                 .andReturn();
 
         String responseBody = result.getResponse().getContentAsString().toLowerCase(Locale.ROOT);
-        assertThat(responseBody).doesNotContain(
-                "jdbc:", "api-key", "prompt", HOSTILE_INTERNAL_EXCEPTION_TEXT.toLowerCase(Locale.ROOT));
+        assertThat(responseBody).doesNotContain("jdbc:", "api-key", "prompt");
+    }
+
+    @Test
+    void doesNotPublishAFutureVerificationReceipt() throws Exception {
+        registry.recordSuccess(ShowcaseScenarioId.OPERATIONS_ANALYSIS, CAPTURED_AT.plusSeconds(1));
+
+        mockMvc.perform(get("/api/showcase/scenarios"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.capturedAt").value("2026-08-30T10:00:00Z"))
+                .andExpect(jsonPath("$.scenarios[2].status").value("NOT_READY"))
+                .andExpect(jsonPath("$.scenarios[2].live").value(false))
+                .andExpect(jsonPath("$.scenarios[2].lastVerifiedAt").doesNotExist());
     }
 
     @Test

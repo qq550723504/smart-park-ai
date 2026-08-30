@@ -88,7 +88,7 @@ void failureInvalidatesAnEarlierSuccess() {
 Run:
 
 ~~~powershell
-.mvnw.cmd -B "-Dtest=InMemoryScenarioVerificationRegistryTest" test
+.\mvnw.cmd -B "-Dtest=InMemoryScenarioVerificationRegistryTest" test
 ~~~
 
 Expected: compilation fails because com.example.smartpark.showcase types do not exist.
@@ -125,7 +125,7 @@ Implement ShowcaseScenario as a record with fields exactly id, status, live, tit
 Run:
 
 ~~~powershell
-.mvnw.cmd -B "-Dtest=InMemoryScenarioVerificationRegistryTest" test
+.\mvnw.cmd -B "-Dtest=InMemoryScenarioVerificationRegistryTest" test
 ~~~
 
 Expected: PASS with no time-based sleeps.
@@ -196,7 +196,7 @@ void returnsDisabledWithoutDisclosingConfigurationDetails() {
 Run:
 
 ~~~powershell
-.mvnw.cmd -B "-Dtest=ShowcaseScenarioCatalogTest" test
+.\mvnw.cmd -B "-Dtest=ShowcaseScenarioCatalogTest" test
 ~~~
 
 Expected: compilation fails because ShowcaseScenarioCatalog and ShowcaseProperties do not exist.
@@ -234,7 +234,7 @@ Wire the catalog in ShowcaseConfiguration with Clock.systemUTC() as the producti
 Run:
 
 ~~~powershell
-.mvnw.cmd -B "-Dtest=ShowcaseScenarioCatalogTest,OperationsCapabilitiesControllerTest" test
+.\mvnw.cmd -B "-Dtest=ShowcaseScenarioCatalogTest,OperationsCapabilitiesControllerTest" test
 ~~~
 
 Expected: PASS; legacy controller assertions remain unchanged and the new catalog never returns READY without a fresh receipt.
@@ -279,14 +279,14 @@ class ShowcaseScenarioControllerTest {
 }
 ~~~
 
-The fixture must also serialize a deliberately hostile internal exception string into neither unavailableReason nor any other response field; assert the JSON body does not contain jdbc:, api-key, prompt, or the injected exception text.
+Assert that the customer-visible response omits internal implementation tokens such as jdbc:, api-key, and prompt; do not add a production exception-text seam solely for this assertion.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run:
 
 ~~~powershell
-.mvnw.cmd -B "-Dtest=ShowcaseScenarioControllerTest" test
+.\mvnw.cmd -B "-Dtest=ShowcaseScenarioControllerTest" test
 ~~~
 
 Expected: compilation fails because ShowcaseScenarioController is absent.
@@ -315,7 +315,7 @@ Place ShowcaseScenarioCatalogResponse beside the controller as a record. Do not 
 Run:
 
 ~~~powershell
-.mvnw.cmd -B "-Dtest=ShowcaseScenarioControllerTest,OperationsCapabilitiesControllerTest" test
+.\mvnw.cmd -B "-Dtest=ShowcaseScenarioControllerTest,OperationsCapabilitiesControllerTest" test
 ~~~
 
 Expected: PASS; POST /api/showcase/scenarios has no handler and legacy capability tests still pass.
@@ -453,7 +453,7 @@ Document these exact interpretations: READY represents a recent same-process onl
 Run:
 
 ~~~powershell
-.mvnw.cmd -B "-Dtest=InMemoryScenarioVerificationRegistryTest,ShowcaseScenarioCatalogTest,ShowcaseScenarioControllerTest,OperationsCapabilitiesControllerTest" test
+.\mvnw.cmd -B "-Dtest=InMemoryScenarioVerificationRegistryTest,ShowcaseScenarioCatalogTest,ShowcaseScenarioControllerTest,OperationsCapabilitiesControllerTest" test
 Push-Location ui
 npm.cmd ci
 npm.cmd run test:unit
