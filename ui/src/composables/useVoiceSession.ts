@@ -88,13 +88,10 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
     return player
   }
 
-  function ensureCapture(): CaptureLike {
-    if (!capture) {
-      capture = deps.createCapture
-        ? deps.createCapture()
-        : (new VoicePcmCapture(browserPcmCaptureDeps() as PcmCaptureDeps) as CaptureLike)
-    }
-    return capture
+  function createCapture(): CaptureLike {
+    return deps.createCapture
+      ? deps.createCapture()
+      : (new VoicePcmCapture(browserPcmCaptureDeps() as PcmCaptureDeps) as CaptureLike)
   }
 
   const voicePhase = ref<VoiceSessionState | null>(null)
@@ -112,6 +109,7 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
   let stream: MediaStream | null = null
   let suppressAudio = false
   let intentionalClose = false
+  let lifecycleGeneration = 0
 
   function messageId(prefix: string): string {
     return `${prefix}-${Date.now()}-${++controlSequence}`
@@ -130,38 +128,52 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
     toolEvents.value = []
   }
 
-  async function ensureConnected(): Promise<void> {
-    if (socket) return
+  async function ensureConnected(generation: number): Promise<boolean> {
+    if (socket) return true
     connectionPhase.value = 'connecting'
     const created = await api.createSession()
+    if (generation !== lifecycleGeneration) return false
     sessionId.value = created.sessionId
     runId.value = created.runId
-    socket = openWebSocket(
+    intentionalClose = false
+    const currentSocket = openWebSocket(
       `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${created.wsPath}`,
     )
-    socket.onopen = () => {
+    socket = currentSocket
+    currentSocket.onopen = () => {
+      if (generation !== lifecycleGeneration || socket !== currentSocket) {
+        currentSocket.close()
+        return
+      }
       connectionPhase.value = 'connected'
     }
-    socket.onerror = () => {
+    currentSocket.onerror = () => {
+      if (generation !== lifecycleGeneration || socket !== currentSocket) return
       connectionPhase.value = 'failed'
       errorMessage.value = '语音连接失败，请重试'
     }
-    socket.onmessage = (event) => {
+    currentSocket.onmessage = (event) => {
+      if (generation !== lifecycleGeneration || socket !== currentSocket) return
       handleSocketMessage(event.data)
     }
-    socket.onclose = () => {
-      socket = null
+    currentSocket.onclose = () => {
+      if (socket === currentSocket) socket = null
       // Unexpected server-side drop surfaces as a failure; intentional
       // local close() must not overwrite a clean shutdown state.
-      if (!intentionalClose && connectionPhase.value === 'connected') {
+      if (generation === lifecycleGeneration
+        && !intentionalClose
+        && connectionPhase.value === 'connected') {
         connectionPhase.value = 'failed'
         errorMessage.value = '语音连接已断开'
       }
     }
-    await waitUntil(() => String(connectionPhase.value) !== 'connecting')
+    await waitUntil(() => generation !== lifecycleGeneration
+      || String(connectionPhase.value) !== 'connecting')
+    if (generation !== lifecycleGeneration) return false
     if (String(connectionPhase.value) !== 'connected') {
       throw new Error(errorMessage.value || '语音连接未就绪')
     }
+    return true
   }
 
   function waitUntil(condition: () => boolean): Promise<void> {
@@ -243,23 +255,47 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
     ensurePlayer().enqueue(sequence, buffer.slice(4))
   }
 
-  async function startListening(): Promise<void> {
+  async function startListening(generation: number): Promise<void> {
     // Request the microphone BEFORE telling the backend to start the turn:
     // a first-use permission prompt must not eat into the 10 s input budget.
-    stream = await requestMicrophone()
+    const requestedStream = await requestMicrophone()
+    if (generation !== lifecycleGeneration) {
+      requestedStream.getTracks?.().forEach((track) => track.stop())
+      return
+    }
+    stream = requestedStream
     sendControl('START_INPUT')
-    await ensureCapture().start(stream, (pcm) => {
-      // 服务器确认 LISTENING 之前不发音频，避免中断窗口期被拒。
-      if (voicePhase.value === 'LISTENING') {
-        socket?.send(pcm)
-      }
-    })
+    const currentCapture = createCapture()
+    capture = currentCapture
+    try {
+      await currentCapture.start(requestedStream, (pcm) => {
+        // 服务器确认 LISTENING 之前不发音频，避免中断窗口期被拒。
+        if (generation === lifecycleGeneration && capture === currentCapture
+          && voicePhase.value === 'LISTENING') {
+          socket?.send(pcm)
+        }
+      })
+    } catch (error) {
+      if (capture === currentCapture) capture = null
+      if (stream === requestedStream) stream = null
+      await currentCapture.stop().catch(() => undefined)
+      requestedStream.getTracks?.().forEach((track) => track.stop())
+      throw error
+    }
+    if (generation !== lifecycleGeneration || capture !== currentCapture) {
+      await currentCapture.stop().catch(() => undefined)
+      requestedStream.getTracks?.().forEach((track) => track.stop())
+      if (stream === requestedStream) stream = null
+    }
   }
 
   async function stopInput(): Promise<void> {
-    await capture?.stop().catch(() => undefined)
-    stream?.getTracks?.().forEach((track) => track.stop())
+    const currentCapture = capture
+    const currentStream = stream
+    capture = null
     stream = null
+    currentStream?.getTracks?.().forEach((track) => track.stop())
+    await currentCapture?.stop().catch(() => undefined)
   }
 
   /**
@@ -268,8 +304,10 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
    * any output stage → interrupt current output first, then listen again.
    */
   async function toggleMicrophone(): Promise<void> {
+    const generation = lifecycleGeneration
     try {
-      await ensureConnected()
+      const connected = await ensureConnected(generation)
+      if (!connected || generation !== lifecycleGeneration) return
       const phase = voicePhase.value as string | null
       switch (phase as VoiceSessionState | null) {
         case 'LISTENING':
@@ -282,23 +320,25 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
         case 'TOOL_CALLING':
           suppressAudio = true
           ensurePlayer().cancel()
-          await startListening()
+          await startListening(generation)
           break
         case 'IDLE':
         case 'ERROR':
         case 'ASR_FINALIZED':
         case null:
           errorMessage.value = ''
-          await startListening()
+          await startListening(generation)
           break
       }
     } catch (ex) {
+      if (generation !== lifecycleGeneration) return
       errorMessage.value = ex instanceof Error ? ex.message : String(ex)
       connectionPhase.value = 'failed'
     }
   }
 
   function close(): void {
+    lifecycleGeneration++
     intentionalClose = true
     if (socket && sessionId.value) {
       const frame = buildControlFrame(
@@ -313,11 +353,18 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
         // socket already gone
       }
     }
-    capture?.stop().catch(() => undefined)
-    stream?.getTracks?.().forEach((track) => track.stop())
+    const closingCapture = capture
+    const closingStream = stream
+    capture = null
     stream = null
+    closingStream?.getTracks?.().forEach((track) => track.stop())
+    closingCapture?.stop().catch(() => undefined)
     socket?.close()
     socket = null
+    sessionId.value = null
+    runId.value = null
+    connectionPhase.value = 'idle'
+    voicePhase.value = null
     suppressAudio = false
     player?.cancel()
     player?.beginTurnReset()

@@ -1,122 +1,216 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mount } from '@vue/test-utils'
-import { defineComponent, nextTick, onMounted, onUnmounted } from 'vue'
+import { describe, expect, it } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import { defineComponent, h, nextTick, onMounted, onUnmounted, type PropType } from 'vue'
 import App from './App.vue'
+import ShowcaseHome from './components/showcase/ShowcaseHome.vue'
+import OperationsWorkbench, { type WorkbenchView } from './components/OperationsWorkbench.vue'
+import type { ShowcaseScenario } from './services/workflowApi'
 
-describe('App view persistence', () => {
-  let originalFetch: typeof fetch
+const showcaseStub = defineComponent({
+  name: 'ShowcaseHome',
+  props: {
+    active: {
+      type: Boolean,
+      default: true,
+    },
+  },
+  emits: ['start-scenario', 'enter-workbench'],
+  setup(_, { emit }) {
+    return () => h('main', { 'data-testid': 'showcase-home' }, [
+      h('button', {
+        type: 'button',
+        'data-testid': 'enter-workbench',
+        onClick: () => emit('enter-workbench'),
+      }, 'Enter workbench'),
+    ])
+  },
+})
 
-  beforeEach(() => {
-    originalFetch = globalThis.fetch
-    globalThis.fetch = (async () => new Response(JSON.stringify({
-      knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
-      analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as typeof fetch
-  })
+const workbenchStub = defineComponent({
+  name: 'OperationsWorkbench',
+  props: {
+    active: {
+      type: Boolean,
+      default: true,
+    },
+    initialView: {
+      type: String as PropType<WorkbenchView>,
+      required: false,
+    },
+  },
+  emits: ['back-to-showcase'],
+  setup(props, { emit }) {
+    return () => h('section', { 'data-testid': 'operations-workbench' }, [
+      h('span', { 'data-testid': 'initial-view' }, props.initialView),
+      h('span', { 'data-testid': 'workbench-active' }, String(props.active)),
+      h('button', {
+        type: 'button',
+        'data-testid': 'back-to-showcase',
+        onClick: () => emit('back-to-showcase'),
+      }, 'Back to showcase'),
+    ])
+  },
+})
 
-  afterEach(() => {
-    globalThis.fetch = originalFetch
-  })
-
-  it('keeps the analysis page mounted while switching to another view', async () => {
-    let mounts = 0
-    let unmounts = 0
-    const analysisStub = defineComponent({
-      setup() {
-        onMounted(() => { mounts += 1 })
-        onUnmounted(() => { unmounts += 1 })
-        return () => null
+function createLifecycleTrackedWorkbench(lifecycle: { mounts: number; unmounts: number }) {
+  return defineComponent({
+    name: 'OperationsWorkbench',
+    props: {
+      active: {
+        type: Boolean,
+        default: true,
       },
-    })
+      initialView: {
+        type: String as PropType<WorkbenchView>,
+        required: false,
+      },
+    },
+    emits: ['back-to-showcase'],
+    setup(props, { emit }) {
+      onMounted(() => {
+        lifecycle.mounts += 1
+      })
+      onUnmounted(() => {
+        lifecycle.unmounts += 1
+      })
+
+      return () => h('section', { 'data-testid': 'operations-workbench' }, [
+        h('span', { 'data-testid': 'initial-view' }, props.initialView),
+        h('span', { 'data-testid': 'workbench-active' }, String(props.active)),
+        h('button', {
+          type: 'button',
+          'data-testid': 'back-to-showcase',
+          onClick: () => emit('back-to-showcase'),
+        }, 'Back to showcase'),
+      ])
+    },
+  })
+}
+
+const appStubs = {
+  ShowcaseHome: showcaseStub,
+  OperationsWorkbench: workbenchStub,
+  OperationsAnalysisPage: true,
+  ExpertCollaborationPage: true,
+  AlertSelector: true,
+  WorkflowGraph: true,
+  DemoConsole: true,
+  EventTimeline: true,
+  CustomerServiceConsole: true,
+  ExecutionTraceRail: true,
+  'el-select': true,
+  'el-option': true,
+  'el-tag': true,
+  'el-button': true,
+  'el-input': true,
+}
+
+function mountApp(operationsWorkbench = workbenchStub) {
+  return mount(App, {
+    global: {
+      stubs: {
+        ...appStubs,
+        OperationsWorkbench: operationsWorkbench,
+      },
+    },
+  })
+}
+
+describe('App surface coordinator', () => {
+  it('starts on the showcase home without mounting the workbench', () => {
+    const wrapper = mountApp()
+
+    const showcase = wrapper.get('[data-surface="showcase"]')
+    expect(showcase.element.tagName).toBe('MAIN')
+    expect(showcase.isVisible()).toBe(true)
+    expect(wrapper.find('[data-testid="operations-workbench"]').exists()).toBe(false)
+  })
+
+  it.each([
+    ['ALERT_WORKFLOW', 'workflow'],
+    ['EXPERT_COLLABORATION', 'collaboration'],
+    ['OPERATIONS_ANALYSIS', 'analytics'],
+    ['VOICE_ASSISTANT', 'voice'],
+  ] as Array<[ShowcaseScenario['id'], WorkbenchView]>)(
+    'opens %s in the cached workbench %s view',
+    async (scenarioId, expectedView) => {
+      const wrapper = mountApp()
+
+      expect(wrapper.get('[data-surface="showcase"]').isVisible()).toBe(true)
+      wrapper.getComponent(ShowcaseHome).vm.$emit('start-scenario', scenarioId)
+      await nextTick()
+
+      expect(wrapper.getComponent(OperationsWorkbench).props('initialView')).toBe(expectedView)
+      expect(wrapper.get('[data-surface="workbench"]').isVisible()).toBe(true)
+    },
+  )
+
+  it('opens the workbench entry action on the workflow view by default', async () => {
+    const wrapper = mountApp()
+
+    wrapper.getComponent(ShowcaseHome).vm.$emit('enter-workbench')
+    await nextTick()
+
+    expect(wrapper.getComponent(OperationsWorkbench).props('initialView')).toBe('workflow')
+    expect(wrapper.get('[data-surface="workbench"]').isVisible()).toBe(true)
+  })
+
+  it('keeps the same workbench instance mounted and hidden after returning to showcase', async () => {
+    const lifecycle = { mounts: 0, unmounts: 0 }
+    const wrapper = mountApp(createLifecycleTrackedWorkbench(lifecycle))
+
+    wrapper.getComponent(ShowcaseHome).vm.$emit('start-scenario', 'EXPERT_COLLABORATION')
+    await nextTick()
+    expect(lifecycle).toEqual({ mounts: 1, unmounts: 0 })
+
+    await wrapper.get('[data-testid="back-to-showcase"]').trigger('click')
+
+    expect(wrapper.get('[data-surface="showcase"]').isVisible()).toBe(true)
+    expect(wrapper.get('[data-testid="operations-workbench"]').isVisible()).toBe(false)
+    expect(lifecycle).toEqual({ mounts: 1, unmounts: 0 })
+
+    wrapper.getComponent(ShowcaseHome).vm.$emit('start-scenario', 'ALERT_WORKFLOW')
+    await nextTick()
+
+    expect(wrapper.getComponent(OperationsWorkbench).props('initialView')).toBe('workflow')
+    expect(lifecycle).toEqual({ mounts: 1, unmounts: 0 })
+  })
+
+  it('deactivates the cached workbench whenever the showcase surface is visible', async () => {
+    const wrapper = mountApp()
+
+    wrapper.getComponent(ShowcaseHome).vm.$emit('start-scenario', 'VOICE_ASSISTANT')
+    await nextTick()
+    expect(wrapper.getComponent(OperationsWorkbench).props('active')).toBe(true)
+
+    await wrapper.get('[data-testid="back-to-showcase"]').trigger('click')
+    expect(wrapper.getComponent(OperationsWorkbench).props('active')).toBe(false)
+  })
+
+  it('moves focus to the destination surface after each surface transition', async () => {
     const wrapper = mount(App, {
+      attachTo: document.body,
       global: {
-        stubs: {
-          OperationsAnalysisPage: analysisStub,
-          ExpertCollaborationPage: true,
-          AlertSelector: true,
-          WorkflowGraph: true,
-          DemoConsole: true,
-          EventTimeline: true,
-          CustomerServiceConsole: true,
-          ExecutionTraceRail: true,
-          'el-select': true,
-          'el-option': true,
-          'el-tag': true,
-          'el-button': true,
-          'el-input': true,
-        },
+        stubs: appStubs,
       },
     })
 
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    await nextTick()
-    const analyticsButton = wrapper.findAll('.view-switch button')
-      .find((button) => button.text() === '运营分析')
-    const workflowButton = wrapper.findAll('.view-switch button')
-      .find((button) => button.text() === '告警工作流')
-    await analyticsButton!.trigger('click')
-    await nextTick()
-    await workflowButton!.trigger('click')
-    await nextTick()
+    try {
+      wrapper.getComponent(ShowcaseHome).vm.$emit('start-scenario', 'EXPERT_COLLABORATION')
+      await flushPromises()
 
-    expect(mounts).toBe(1)
-    expect(unmounts).toBe(0)
-    wrapper.unmount()
-    expect(unmounts).toBe(1)
-  })
+      const workbench = wrapper.get('[data-surface="workbench"]')
+      expect(workbench.attributes('tabindex')).toBe('-1')
+      expect(document.activeElement).toBe(workbench.element)
 
-  it('keeps every scenario page as a direct workspace sibling of the global rail', async () => {
-    const wrapper = mount(App, {
-      global: {
-        stubs: {
-          OperationsAnalysisPage: true,
-          ExpertCollaborationPage: true,
-          AlertSelector: true,
-          WorkflowGraph: true,
-          DemoConsole: true,
-          EventTimeline: true,
-          CustomerServiceConsole: true,
-          ExecutionTraceRail: true,
-          'el-select': true,
-          'el-option': true,
-          'el-tag': true,
-          'el-button': true,
-          'el-input': true,
-        },
-      },
-    })
+      await wrapper.get('[data-testid="back-to-showcase"]').trigger('click')
+      await flushPromises()
 
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    await nextTick()
-
-    const children = Array.from((wrapper.find('.workspace').element as HTMLElement).children)
-    // 4 个既有场景页 + 语音助手页（voice）。
-    expect(children.filter((child) => child.classList.contains('main-content'))).toHaveLength(5)
-    expect(children.some((child) => child.classList.contains('global-rail'))).toBe(true)
-    wrapper.unmount()
-  })
-
-  it('hides realtime voice navigation when the backend capability is disabled', async () => {
-    globalThis.fetch = (async () => new Response(JSON.stringify({
-      knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
-      analyticsEnabled: false, collaborationEnabled: false, voiceEnabled: false,
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as typeof fetch
-    const wrapper = mount(App, {
-      global: {
-        stubs: {
-          OperationsAnalysisPage: true, ExpertCollaborationPage: true, AlertSelector: true,
-          WorkflowGraph: true, DemoConsole: true, EventTimeline: true,
-          CustomerServiceConsole: true, ExecutionTraceRail: true,
-          'el-select': true, 'el-option': true, 'el-tag': true, 'el-button': true,
-          'el-input': true,
-        },
-      },
-    })
-
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    await nextTick()
-    expect(wrapper.findAll('.view-switch button').map((button) => button.text()))
-      .not.toContain('实时语音')
-    wrapper.unmount()
+      const showcase = wrapper.get('[data-surface="showcase"]')
+      expect(showcase.attributes('tabindex')).toBe('-1')
+      expect(document.activeElement).toBe(showcase.element)
+    } finally {
+      wrapper.unmount()
+    }
   })
 })
