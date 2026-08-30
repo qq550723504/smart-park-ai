@@ -254,4 +254,72 @@ describe('useVoiceSession', () => {
     expect(h.fakeCapture.stoppedCount).toBe(1)
     expect(h.fakeTrack.stopped).toBe(1)
   })
+
+  it('does not open a socket when close wins an in-flight session creation', async () => {
+    let resolveSession!: (value: { sessionId: string; runId: string; wsPath: string }) => void
+    const sessionPromise = new Promise<{ sessionId: string; runId: string; wsPath: string }>((resolve) => {
+      resolveSession = resolve
+    })
+    let openedSockets = 0
+    const binding = useVoiceSession({
+      api: { createSession: () => sessionPromise },
+      openWebSocket: () => {
+        openedSockets++
+        return new FakeWebSocket('ws://late')
+      },
+      requestMicrophone: async () => ({ getTracks: () => [] }) as unknown as MediaStream,
+    })
+
+    const connecting = binding.toggleMicrophone()
+    binding.close()
+    resolveSession({
+      sessionId: 'vs-late',
+      runId: '00000000-0000-0000-0000-00000000bbbb',
+      wsPath: '/ws/voice/sessions/vs-late',
+    })
+    await connecting
+
+    expect(openedSockets).toBe(0)
+    expect(binding.connectionPhase.value).toBe('idle')
+    expect(binding.errorMessage.value).toBe('')
+  })
+
+  it('releases a microphone stream that resolves after close', async () => {
+    let resolveMicrophone!: (stream: MediaStream) => void
+    let microphoneRequested!: () => void
+    const requested = new Promise<void>((resolve) => { microphoneRequested = resolve })
+    const microphonePromise = new Promise<MediaStream>((resolve) => { resolveMicrophone = resolve })
+    const fakeWs = new FakeWebSocket('')
+    const fakeCapture = new FakeCapture()
+    const fakeTrack = { stopped: 0, stop() { this.stopped++ } }
+    const binding = useVoiceSession({
+      api: {
+        createSession: async () => ({
+          sessionId: 'vs-mic-late',
+          runId: '00000000-0000-0000-0000-00000000cccc',
+          wsPath: '/ws/voice/sessions/vs-mic-late',
+        }),
+      },
+      openWebSocket: (url) => {
+        Object.assign(fakeWs, new FakeWebSocket(url))
+        queueMicrotask(() => fakeWs.open())
+        return fakeWs
+      },
+      requestMicrophone: () => {
+        microphoneRequested()
+        return microphonePromise
+      },
+      createCapture: () => fakeCapture,
+    })
+
+    const starting = binding.toggleMicrophone()
+    await requested
+    binding.close()
+    resolveMicrophone({ getTracks: () => [fakeTrack] } as unknown as MediaStream)
+    await starting
+
+    expect(fakeTrack.stopped).toBe(1)
+    expect(fakeCapture.started).toBe(0)
+    expect(binding.connectionPhase.value).toBe('idle')
+  })
 })

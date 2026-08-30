@@ -23,6 +23,10 @@ const showcaseStub = defineComponent({
 const workbenchStub = defineComponent({
   name: 'OperationsWorkbench',
   props: {
+    active: {
+      type: Boolean,
+      default: true,
+    },
     initialView: {
       type: String as PropType<WorkbenchView>,
       required: false,
@@ -32,6 +36,7 @@ const workbenchStub = defineComponent({
   setup(props, { emit }) {
     return () => h('section', { 'data-testid': 'operations-workbench' }, [
       h('span', { 'data-testid': 'initial-view' }, props.initialView),
+      h('span', { 'data-testid': 'workbench-active' }, String(props.active)),
       h('button', {
         type: 'button',
         'data-testid': 'back-to-showcase',
@@ -45,6 +50,10 @@ function createLifecycleTrackedWorkbench(lifecycle: { mounts: number; unmounts: 
   return defineComponent({
     name: 'OperationsWorkbench',
     props: {
+      active: {
+        type: Boolean,
+        default: true,
+      },
       initialView: {
         type: String as PropType<WorkbenchView>,
         required: false,
@@ -61,6 +70,7 @@ function createLifecycleTrackedWorkbench(lifecycle: { mounts: number; unmounts: 
 
       return () => h('section', { 'data-testid': 'operations-workbench' }, [
         h('span', { 'data-testid': 'initial-view' }, props.initialView),
+        h('span', { 'data-testid': 'workbench-active' }, String(props.active)),
         h('button', {
           type: 'button',
           'data-testid': 'back-to-showcase',
@@ -158,5 +168,16 @@ describe('App surface coordinator', () => {
 
     expect(wrapper.getComponent(OperationsWorkbench).props('initialView')).toBe('workflow')
     expect(lifecycle).toEqual({ mounts: 1, unmounts: 0 })
+  })
+
+  it('deactivates the cached workbench whenever the showcase surface is visible', async () => {
+    const wrapper = mountApp()
+
+    wrapper.getComponent(ShowcaseHome).vm.$emit('start-scenario', 'VOICE_ASSISTANT')
+    await nextTick()
+    expect(wrapper.getComponent(OperationsWorkbench).props('active')).toBe(true)
+
+    await wrapper.get('[data-testid="back-to-showcase"]').trigger('click')
+    expect(wrapper.getComponent(OperationsWorkbench).props('active')).toBe(false)
   })
 })

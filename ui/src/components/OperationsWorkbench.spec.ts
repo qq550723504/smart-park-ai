@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { defineComponent, nextTick, onMounted, onUnmounted } from 'vue'
+import { defineComponent, h, nextTick, onMounted, onUnmounted } from 'vue'
 import OperationsWorkbench from './OperationsWorkbench.vue'
 
 const mounts = {
@@ -26,6 +26,18 @@ const workflowStub = defineComponent({
     onMounted(() => { mounts.workflow += 1 })
     onUnmounted(() => { unmounts.workflow += 1 })
     return () => null
+  },
+})
+
+const voiceStub = defineComponent({
+  props: {
+    active: {
+      type: Boolean,
+      default: true,
+    },
+  },
+  setup(props) {
+    return () => h('div', { 'data-testid': 'voice-active' }, String(props.active))
   },
 })
 
@@ -102,6 +114,38 @@ describe('OperationsWorkbench', () => {
     await wrapper.get('[data-workbench-view="collaboration"]').trigger('click')
     expect(mounts.workflow).toBe(1)
     expect(unmounts.workflow).toBe(0)
+  })
+
+  it('deactivates voice when the outer workbench surface is hidden', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'voice', active: true },
+      global: {
+        stubs: {
+          ...operatorStubs,
+          VoiceAssistantPage: voiceStub,
+        },
+      },
+    })
+
+    expect(wrapper.get('[data-testid="voice-active"]').text()).toBe('true')
+    await wrapper.setProps({ active: false })
+    expect(wrapper.get('[data-testid="voice-active"]').text()).toBe('false')
+  })
+
+  it('reapplies the requested view when the cached workbench is shown again', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'collaboration', active: true },
+      global: { stubs: operatorStubs },
+    })
+    await settleCapabilities()
+
+    await wrapper.get('[data-workbench-view="analytics"]').trigger('click')
+    expect(wrapper.get('[data-workbench-view="analytics"]').classes()).toContain('active')
+
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+
+    expect(wrapper.get('[data-workbench-view="collaboration"]').classes()).toContain('active')
   })
 
   it('keeps every scenario page as a direct workspace sibling of the global rail', async () => {

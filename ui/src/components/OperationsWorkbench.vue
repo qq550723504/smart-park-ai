@@ -20,8 +20,9 @@ import '../styles.css'
 
 export type WorkbenchView = 'workflow' | 'customer' | 'voice' | 'collaboration' | 'analytics'
 
-const props = withDefaults(defineProps<{ initialView?: WorkbenchView }>(), {
+const props = withDefaults(defineProps<{ initialView?: WorkbenchView; active?: boolean }>(), {
   initialView: 'workflow',
+  active: true,
 })
 const emit = defineEmits<{ 'back-to-showcase': [] }>()
 
@@ -40,6 +41,9 @@ const selectedAlertId = ref(demoAlerts[0].id)
 const activeView = ref<WorkbenchView>(props.initialView)
 const hasVisitedWorkflow = ref(props.initialView === 'workflow')
 watch(() => props.initialView, (view) => { activeView.value = view })
+watch(() => props.active, (active) => {
+  if (active) activeView.value = props.initialView
+})
 watch(activeView, async (view) => {
   if (view !== 'workflow' || hasVisitedWorkflow.value) return
   await nextTick()
@@ -184,7 +188,7 @@ function confidence(value?: number) {
     </main>
 
     <main v-show="activeView === 'voice'" class="main-content">
-      <VoiceAssistantPage :trace="trace" :active="activeView === 'voice'" />
+      <VoiceAssistantPage :trace="trace" :active="props.active && activeView === 'voice'" />
     </main>
 
     <main v-show="activeView === 'collaboration'" class="main-content">

@@ -38,6 +38,7 @@ function returnToShowcase() {
   <ShowcaseHome
     v-show="surface === 'showcase'"
     data-surface="showcase"
+    :active="surface === 'showcase'"
     @start-scenario="startScenario"
     @enter-workbench="enterWorkbench"
   />
@@ -47,6 +48,7 @@ function returnToShowcase() {
       v-if="hasEnteredWorkbench"
       v-show="surface === 'workbench'"
       data-surface="workbench"
+      :active="surface === 'workbench'"
       :initial-view="requestedView"
       @back-to-showcase="returnToShowcase"
     />
