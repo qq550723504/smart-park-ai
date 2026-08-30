@@ -1,0 +1,117 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { mount } from '@vue/test-utils'
+import { defineComponent, nextTick, onMounted, onUnmounted } from 'vue'
+import OperationsWorkbench from './OperationsWorkbench.vue'
+
+const mounts = {
+  analysis: 0,
+}
+
+const unmounts = {
+  analysis: 0,
+}
+
+const analysisStub = defineComponent({
+  setup() {
+    onMounted(() => { mounts.analysis += 1 })
+    onUnmounted(() => { unmounts.analysis += 1 })
+    return () => null
+  },
+})
+
+const operatorStubs = {
+  OperationsAnalysisPage: analysisStub,
+  ExpertCollaborationPage: true,
+  AlertSelector: true,
+  WorkflowGraph: true,
+  DemoConsole: true,
+  EventTimeline: true,
+  CustomerServiceConsole: true,
+  ExecutionTraceRail: true,
+  'el-select': true,
+  'el-option': true,
+  'el-tag': true,
+  'el-button': true,
+  'el-input': true,
+}
+
+async function settleCapabilities() {
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  await nextTick()
+}
+
+describe('OperationsWorkbench', () => {
+  let originalFetch: typeof fetch
+
+  beforeEach(() => {
+    mounts.analysis = 0
+    unmounts.analysis = 0
+    originalFetch = globalThis.fetch
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+      analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as typeof fetch
+  })
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  it('keeps analysis mounted while switching operator views', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow' },
+      global: { stubs: operatorStubs },
+    })
+    await settleCapabilities()
+    await wrapper.get('[data-workbench-view="analytics"]').trigger('click')
+    await wrapper.get('[data-workbench-view="workflow"]').trigger('click')
+    expect(mounts.analysis).toBe(1)
+    expect(unmounts.analysis).toBe(0)
+  })
+
+  it('keeps every scenario page as a direct workspace sibling of the global rail', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow' },
+      global: { stubs: operatorStubs },
+    })
+
+    await settleCapabilities()
+
+    const children = Array.from((wrapper.find('.workspace').element as HTMLElement).children)
+    expect(children.filter((child) => child.tagName === 'MAIN' && child.classList.contains('main-content'))).toHaveLength(5)
+    const rail = children.find((child) => child.classList.contains('global-rail'))
+    expect(rail).toBeTruthy()
+    expect(rail?.parentElement).toBe(wrapper.find('.workspace').element)
+  })
+
+  it('hides capability-gated operator navigation when backend capabilities are disabled', async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+      analyticsEnabled: false, collaborationEnabled: false, voiceEnabled: false,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as typeof fetch
+
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow' },
+      global: { stubs: operatorStubs },
+    })
+
+    await settleCapabilities()
+
+    const labels = wrapper.findAll('.view-switch button').map((button) => button.text())
+    expect(labels).not.toContain('实时语音')
+    expect(labels).not.toContain('专家协作')
+    expect(labels).not.toContain('运营分析')
+  })
+
+  it('emits an intent to return to the showcase surface', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow' },
+      global: { stubs: operatorStubs },
+    })
+
+    await settleCapabilities()
+    await wrapper.get('[data-workbench-action="back-to-showcase"]').trigger('click')
+
+    expect(wrapper.emitted('back-to-showcase')).toHaveLength(1)
+  })
+})
