@@ -88,13 +88,10 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
     return player
   }
 
-  function ensureCapture(): CaptureLike {
-    if (!capture) {
-      capture = deps.createCapture
-        ? deps.createCapture()
-        : (new VoicePcmCapture(browserPcmCaptureDeps() as PcmCaptureDeps) as CaptureLike)
-    }
-    return capture
+  function createCapture(): CaptureLike {
+    return deps.createCapture
+      ? deps.createCapture()
+      : (new VoicePcmCapture(browserPcmCaptureDeps() as PcmCaptureDeps) as CaptureLike)
   }
 
   const voicePhase = ref<VoiceSessionState | null>(null)
@@ -268,14 +265,24 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
     }
     stream = requestedStream
     sendControl('START_INPUT')
-    const currentCapture = ensureCapture()
-    await currentCapture.start(requestedStream, (pcm) => {
-      // 服务器确认 LISTENING 之前不发音频，避免中断窗口期被拒。
-      if (generation === lifecycleGeneration && voicePhase.value === 'LISTENING') {
-        socket?.send(pcm)
-      }
-    })
-    if (generation !== lifecycleGeneration) {
+    const currentCapture = createCapture()
+    capture = currentCapture
+    try {
+      await currentCapture.start(requestedStream, (pcm) => {
+        // 服务器确认 LISTENING 之前不发音频，避免中断窗口期被拒。
+        if (generation === lifecycleGeneration && capture === currentCapture
+          && voicePhase.value === 'LISTENING') {
+          socket?.send(pcm)
+        }
+      })
+    } catch (error) {
+      if (capture === currentCapture) capture = null
+      if (stream === requestedStream) stream = null
+      await currentCapture.stop().catch(() => undefined)
+      requestedStream.getTracks?.().forEach((track) => track.stop())
+      throw error
+    }
+    if (generation !== lifecycleGeneration || capture !== currentCapture) {
       await currentCapture.stop().catch(() => undefined)
       requestedStream.getTracks?.().forEach((track) => track.stop())
       if (stream === requestedStream) stream = null
@@ -283,9 +290,12 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
   }
 
   async function stopInput(): Promise<void> {
-    await capture?.stop().catch(() => undefined)
-    stream?.getTracks?.().forEach((track) => track.stop())
+    const currentCapture = capture
+    const currentStream = stream
+    capture = null
     stream = null
+    currentStream?.getTracks?.().forEach((track) => track.stop())
+    await currentCapture?.stop().catch(() => undefined)
   }
 
   /**
@@ -343,9 +353,12 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
         // socket already gone
       }
     }
-    capture?.stop().catch(() => undefined)
-    stream?.getTracks?.().forEach((track) => track.stop())
+    const closingCapture = capture
+    const closingStream = stream
+    capture = null
     stream = null
+    closingStream?.getTracks?.().forEach((track) => track.stop())
+    closingCapture?.stop().catch(() => undefined)
     socket?.close()
     socket = null
     sessionId.value = null

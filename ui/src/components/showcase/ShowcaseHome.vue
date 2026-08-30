@@ -143,7 +143,7 @@ async function startScenario() {
 
   const verifiedCatalog = await refreshCatalog()
   const verifiedScenario = verifiedCatalog?.scenarios.find((scenario) => scenario.id === intendedScenarioId)
-  if (verifiedScenario && isSelectable(verifiedScenario)) {
+  if (props.active && verifiedScenario && isSelectable(verifiedScenario)) {
     emit('start-scenario', intendedScenarioId)
   }
 }
@@ -151,6 +151,9 @@ async function startScenario() {
 watch(() => props.active, (active) => {
   if (active) {
     void refreshCatalog()
+  } else {
+    catalogRequestGeneration++
+    loading.value = false
   }
 }, {
   immediate: true,

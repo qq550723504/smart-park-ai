@@ -106,6 +106,30 @@ describe('ShowcaseHome truthful catalog selection', () => {
     expect(wrapper.text()).toContain('在线验证已过期')
   })
 
+  it('does not complete a pending scenario start after navigation deactivates the showcase', async () => {
+    const pendingValidation = deferred<ShowcaseScenarioCatalog>()
+    vi.mocked(getShowcaseScenarios)
+      .mockResolvedValueOnce(catalog([
+        scenario('EXPERT_COLLABORATION', 'READY', true, null),
+      ]))
+      .mockReturnValueOnce(pendingValidation.promise)
+
+    const wrapper = mount(ShowcaseHome, { props: { active: true } })
+    await flushPromises()
+
+    await wrapper.get('[data-start-showcase]').trigger('click')
+    await wrapper.get('[data-enter-workbench]').trigger('click')
+    await wrapper.setProps({ active: false })
+
+    pendingValidation.resolve(catalog([
+      scenario('EXPERT_COLLABORATION', 'READY', true, null),
+    ]))
+    await flushPromises()
+
+    expect(wrapper.emitted('enter-workbench')).toEqual([[]])
+    expect(wrapper.emitted('start-scenario')).toBeUndefined()
+  })
+
   it('revalidates whenever the showcase becomes active again', async () => {
     vi.mocked(getShowcaseScenarios)
       .mockResolvedValueOnce(catalog([

@@ -62,7 +62,7 @@ Resolution: reduced only the right-panel flex gap from 10px to 6px. `overflow: a
 - 759 × 1024: single-column order is preserved, decorative chain and extra-task label are hidden, the selected question and primary start action remain visible, panel content fits (`899 = 899`), no showcase text is below 14px, and horizontal overflow is false.
 - The verified start action is enabled only for `READY && live`, routes to the existing collaboration workbench, hides the showcase surface, and does not invoke a scenario execution API.
 - The real-backend no-ready state disables the start action, retains all four unavailable reasons, reports `暂无已验证场景`, and fits the baseline panel (`817 = 817`).
-- Surface transitions move keyboard focus to the destination root. Returning to the same requested workbench scenario reapplies its view, while hiding the workbench deactivates voice capture and invalidates in-flight session or microphone setup.
+- Surface transitions move keyboard focus to the destination root. Returning to the same requested workbench scenario reapplies its view. Leaving during pre-start catalog validation invalidates the pending start, while hiding the workbench deactivates voice capture, invalidates in-flight session or microphone setup, and isolates any pending capture startup from immediate reentry.
 - Native buttons, text-plus-icon status, `aria-live`, `:focus-visible`, and `prefers-reduced-motion` treatments remain present.
 
 ## Console and initialization QA

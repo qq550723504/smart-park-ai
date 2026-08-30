@@ -74,6 +74,16 @@ class FakeCapture {
   }
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 function makeHarness(frameScript: VoiceServerFrame[] = []) {
   const fakeWs = new FakeWebSocket('')
   const fakePlayer = new FakePlayer()
@@ -321,5 +331,62 @@ describe('useVoiceSession', () => {
     expect(fakeTrack.stopped).toBe(1)
     expect(fakeCapture.started).toBe(0)
     expect(binding.connectionPhase.value).toBe('idle')
+  })
+
+  it('isolates a pending capture startup from immediate close and reentry', async () => {
+    const firstStartEntered = deferred<void>()
+    const releaseFirstStart = deferred<void>()
+    const captures: FakeCapture[] = []
+    const sockets: FakeWebSocket[] = []
+    let sessionNumber = 0
+
+    const binding = useVoiceSession({
+      api: {
+        createSession: async () => {
+          sessionNumber++
+          return {
+            sessionId: `vs-race-${sessionNumber}`,
+            runId: `00000000-0000-0000-0000-${String(sessionNumber).padStart(12, '0')}`,
+            wsPath: `/ws/voice/sessions/vs-race-${sessionNumber}`,
+          }
+        },
+      },
+      openWebSocket: (url) => {
+        const socket = new FakeWebSocket(url)
+        sockets.push(socket)
+        queueMicrotask(() => socket.open())
+        return socket
+      },
+      requestMicrophone: async () => ({ getTracks: () => [{ stop() {} }] }) as unknown as MediaStream,
+      createCapture: () => {
+        const capture = new FakeCapture()
+        const captureIndex = captures.length
+        const originalStart = capture.start.bind(capture)
+        capture.start = async (stream, onChunk) => {
+          await originalStart(stream, onChunk)
+          if (captureIndex === 0 && capture.started === 1) {
+            firstStartEntered.resolve()
+            await releaseFirstStart.promise
+          }
+        }
+        captures.push(capture)
+        return capture
+      },
+    })
+
+    const firstToggle = binding.toggleMicrophone()
+    await firstStartEntered.promise
+    binding.close()
+
+    const secondToggle = binding.toggleMicrophone()
+    await secondToggle
+    releaseFirstStart.resolve()
+    await firstToggle
+
+    expect(sockets).toHaveLength(2)
+    expect(captures).toHaveLength(2)
+    expect(captures[0]?.stoppedCount).toBeGreaterThanOrEqual(1)
+    expect(captures[1]?.started).toBe(1)
+    expect(captures[1]?.stoppedCount).toBe(0)
   })
 })
