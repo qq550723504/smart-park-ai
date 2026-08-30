@@ -5,6 +5,12 @@ import ImmersiveWorkbenchShell from './ImmersiveWorkbenchShell.vue'
 import type { WorkbenchEvidenceItem, WorkbenchNavItem } from '../../types/workbench'
 
 const roleSelectStub = defineComponent({
+  props: {
+    teleported: {
+      type: null,
+      default: undefined,
+    },
+  },
   emits: ['update:modelValue'],
   template: '<button type="button" data-role-switch @click="$emit(\'update:modelValue\', \'OPERATOR\')">切换角色</button>',
 })
@@ -74,6 +80,19 @@ describe('ImmersiveWorkbenchShell', () => {
     await wrapper.get('[data-role-switch]').trigger('click')
 
     expect(wrapper.emitted('update:role')).toEqual([['OPERATOR']])
+  })
+
+  it('keeps the role dropdown inside the immersive workbench scope', () => {
+    const wrapper = mountShell()
+
+    expect(wrapper.getComponent(roleSelectStub).props('teleported')).toBe(false)
+  })
+
+  it('announces only the active navigation view as the current page', () => {
+    const wrapper = mountShell()
+
+    expect(wrapper.get('[data-workbench-view="workflow"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-workbench-view="analytics"]').attributes('aria-current')).toBeUndefined()
   })
 
   it('emits back and retry actions from the supplied guided status', async () => {

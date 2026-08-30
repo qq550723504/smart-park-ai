@@ -30,10 +30,10 @@ function updateRole(role: DemoRole): void { emit('update:role', role) }
     <header class="immersive-workbench__topbar">
       <div class="immersive-workbench__brand"><Monitor aria-hidden="true" /><div><span>智慧园区 · 智能运营</span><strong>智慧园区智能运营中心</strong></div></div>
       <nav class="immersive-workbench__nav" aria-label="场景导航">
-        <button v-for="item in availableNavItems" :key="item.value" type="button" :class="{ active: item.value === activeView }" :data-workbench-view="item.value" @click="emit('switch-view', item.value)">{{ item.label }}</button>
+        <button v-for="item in availableNavItems" :key="item.value" type="button" :class="{ active: item.value === activeView }" :aria-current="item.value === activeView ? 'page' : undefined" :data-workbench-view="item.value" @click="emit('switch-view', item.value)">{{ item.label }}</button>
       </nav>
       <div class="immersive-workbench__actions">
-        <el-select :model-value="role" aria-label="演示角色" @update:model-value="updateRole">
+        <el-select :model-value="role" :teleported="false" aria-label="演示角色" @update:model-value="updateRole">
           <el-option label="查看者" value="VIEWER" /><el-option label="操作员" value="OPERATOR" /><el-option label="审批人" value="APPROVER" /><el-option label="客服坐席" value="CUSTOMER_AGENT" /><el-option label="管理员" value="ADMIN" />
         </el-select>
         <button type="button" data-workbench-action="back-to-showcase" @click="emit('back-to-showcase')">返回展示首页</button>
