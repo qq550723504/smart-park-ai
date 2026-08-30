@@ -27,6 +27,10 @@ class FakeWebSocket implements WebSocketLike {
     this.onopen?.()
   }
 
+  fail(): void {
+    this.onerror?.()
+  }
+
   emitText(payload: unknown): void {
     const raw = typeof payload === 'string' ? payload : JSON.stringify(payload)
     this.onmessage?.({ data: raw })
@@ -89,6 +93,7 @@ function makeHarness(frameScript: VoiceServerFrame[] = []) {
   const fakePlayer = new FakePlayer()
   const fakeCapture = new FakeCapture()
   const fakeTrack = { stopped: 0, stop() { this.stopped++ } }
+  let microphoneRequests = 0
 
   const deps: UseVoiceSessionDeps = {
     api: {
@@ -104,7 +109,10 @@ function makeHarness(frameScript: VoiceServerFrame[] = []) {
       queueMicrotask(() => fakeWs.open())
       return fakeWs as WebSocketLike
     },
-    requestMicrophone: async () => ({ getTracks: () => [fakeTrack] }) as unknown as MediaStream,
+    requestMicrophone: async () => {
+      microphoneRequests++
+      return { getTracks: () => [fakeTrack] } as unknown as MediaStream
+    },
     createPlayer: () => fakePlayer,
     createCapture: () => fakeCapture,
   }
@@ -133,7 +141,10 @@ function makeHarness(frameScript: VoiceServerFrame[] = []) {
     return undefined
   }
 
-  return { binding, fakeWs, fakePlayer, fakeCapture, fakeTrack, serverSendsState, lastSentControl }
+  return {
+    binding, fakeWs, fakePlayer, fakeCapture, fakeTrack, microphoneRequests: () => microphoneRequests,
+    serverSendsState, lastSentControl,
+  }
 }
 
 describe('useVoiceSession', () => {
@@ -166,7 +177,42 @@ describe('useVoiceSession', () => {
     await harness.binding.prepare()
 
     expect(harness.fakeCapture.started).toBe(0)
+    expect(harness.microphoneRequests()).toBe(0)
     expect(harness.binding.connectionPhase.value).toBe('connected')
+  })
+
+  it('creates a fresh connection when preparation follows a transport failure', async () => {
+    const sockets: FakeWebSocket[] = []
+    let sessionsCreated = 0
+    const binding = useVoiceSession({
+      api: {
+        createSession: async () => {
+          sessionsCreated++
+          return {
+            sessionId: `vs-retry-${sessionsCreated}`,
+            runId: `00000000-0000-0000-0000-${String(sessionsCreated).padStart(12, '0')}`,
+            wsPath: `/ws/voice/sessions/vs-retry-${sessionsCreated}`,
+          }
+        },
+      },
+      openWebSocket: (url) => {
+        const socket = new FakeWebSocket(url)
+        sockets.push(socket)
+        queueMicrotask(() => socket.open())
+        return socket
+      },
+    })
+
+    await binding.prepare()
+    sockets[0]?.fail()
+    expect(binding.connectionPhase.value).toBe('failed')
+
+    await binding.prepare()
+
+    expect(sessionsCreated).toBe(2)
+    expect(sockets).toHaveLength(2)
+    expect(sockets[0]?.closed).toBe(true)
+    expect(binding.connectionPhase.value).toBe('connected')
   })
 
   it('commit sends COMMIT_INPUT and partial/final frames feed the transcript', async () => {

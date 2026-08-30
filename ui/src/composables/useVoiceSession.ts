@@ -150,20 +150,24 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
     }
     currentSocket.onerror = () => {
       if (generation !== lifecycleGeneration || socket !== currentSocket) return
+      socket = null
       connectionPhase.value = 'failed'
       errorMessage.value = '语音连接失败，请重试'
+      currentSocket.close()
     }
     currentSocket.onmessage = (event) => {
       if (generation !== lifecycleGeneration || socket !== currentSocket) return
       handleSocketMessage(event.data)
     }
     currentSocket.onclose = () => {
-      if (socket === currentSocket) socket = null
+      const isCurrentSocket = socket === currentSocket
+      if (isCurrentSocket) socket = null
       // Unexpected server-side drop surfaces as a failure; intentional
       // local close() must not overwrite a clean shutdown state.
       if (generation === lifecycleGeneration
+        && isCurrentSocket
         && !intentionalClose
-        && connectionPhase.value === 'connected') {
+        && connectionPhase.value !== 'failed') {
         connectionPhase.value = 'failed'
         errorMessage.value = '语音连接已断开'
       }
