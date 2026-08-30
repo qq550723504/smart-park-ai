@@ -178,8 +178,10 @@ describe('OperationsWorkbench', () => {
     expect(wrapper.findAll('[data-workbench-stage] > .main-content')).toHaveLength(5)
     expect(wrapper.findAll('[data-workbench-rail] .global-rail')).toHaveLength(1)
     const shell = wrapper.get('[data-testid="immersive-workbench-shell"]')
+    const rail = wrapper.get('[data-workbench-rail] .global-rail')
     await wrapper.get('[data-workbench-view="analytics"]').trigger('click')
     expect(wrapper.get('[data-testid="immersive-workbench-shell"]').element).toBe(shell.element)
+    expect(wrapper.get('[data-workbench-rail] .global-rail').element).toBe(rail.element)
   })
 
   it('hides capability-gated operator navigation when backend capabilities are disabled', async () => {
@@ -225,6 +227,42 @@ describe('OperationsWorkbench', () => {
     expect(wrapper.get('[data-evidence-item="执行轨迹"] strong').text()).toBe('空闲')
     expect(wrapper.get('[data-evidence-item="知识检索"] strong').text()).toBe('Mock')
     expect(wrapper.get('[data-evidence-item="数据模式"] strong').text()).toBe('真实只读数据')
+  })
+
+  it('keeps knowledge evidence in a loading state until capabilities resolve', async () => {
+    let resolveCapabilities!: (response: Response) => void
+    globalThis.fetch = (() => new Promise<Response>((resolve) => { resolveCapabilities = resolve })) as typeof fetch
+
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow' },
+      global: { stubs: operatorStubs },
+    })
+    await nextTick()
+
+    expect(wrapper.get('[data-evidence-item="知识检索"] strong').text()).toBe('检查中')
+    expect(wrapper.get('[data-evidence-item="知识检索"]').attributes('data-tone')).toBe('default')
+
+    resolveCapabilities(new Response(JSON.stringify({
+      knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+      analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    await settleCapabilities()
+
+    expect(wrapper.get('[data-evidence-item="知识检索"] strong').text()).toBe('Mock')
+  })
+
+  it('shows an explicit unverified capability error when capability loading fails', async () => {
+    globalThis.fetch = (async () => { throw new Error('capability request failed') }) as typeof fetch
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow' },
+      global: { stubs: operatorStubs },
+    })
+
+    await settleCapabilities()
+
+    expect(wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())).toEqual(['告警工作流', '园区客服'])
+    expect(wrapper.get('[data-evidence-item="知识检索"] strong').text()).toBe('能力检查失败')
+    expect(wrapper.get('[data-evidence-item="知识检索"]').attributes('data-tone')).toBe('warning')
   })
 
   it('uses the shell view and role event contracts to update the active scene and role', async () => {
@@ -405,6 +443,48 @@ describe('OperationsWorkbench', () => {
     wrapper.unmount()
   })
 
+  it('clears a failed guided status when a newer request arrives before it updates', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: {
+        active: true,
+        initialView: 'collaboration',
+        launchRequest: { requestId: 71, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration' },
+      },
+      global: { stubs: { ...operatorStubs, ExpertCollaborationPage: guidedStatusStub } },
+    })
+    await settleCapabilities()
+    const scene = wrapper.getComponent(guidedStatusStub)
+    scene.vm.sendLaunchStatus({ requestId: 71, state: 'failed', message: '请求 A 失败' })
+    await nextTick()
+    expect(wrapper.get('[role="status"]').text()).toBe('请求 A 失败重新开始')
+
+    await wrapper.setProps({
+      launchRequest: { requestId: 72, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration' },
+    })
+
+    expect(wrapper.find('[role="status"]').exists()).toBe(false)
+    expect(wrapper.find('[data-workbench-action="retry-guided-launch"]').exists()).toBe(false)
+  })
+
+  it('clears a failed guided status when manual entry removes the launch request', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: {
+        active: true,
+        initialView: 'collaboration',
+        launchRequest: { requestId: 73, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration' },
+      },
+      global: { stubs: { ...operatorStubs, ExpertCollaborationPage: guidedStatusStub } },
+    })
+    await settleCapabilities()
+    wrapper.getComponent(guidedStatusStub).vm.sendLaunchStatus({ requestId: 73, state: 'failed', message: '引导启动失败' })
+    await nextTick()
+
+    await wrapper.setProps({ launchRequest: null })
+
+    expect(wrapper.find('[role="status"]').exists()).toBe(false)
+    expect(wrapper.find('[data-workbench-action="retry-guided-launch"]').exists()).toBe(false)
+  })
+
   it('offers a retry for the current failed guided launch', async () => {
     const wrapper = mount(OperationsWorkbench, {
       props: {
@@ -430,18 +510,27 @@ describe('OperationsWorkbench', () => {
     wrapper.unmount()
   })
 
-  it('forwards the current launch request scenario when the shell retries', async () => {
+  it('retries only a visible failure for the current launch request', async () => {
     const wrapper = mount(OperationsWorkbench, {
       props: {
         initialView: 'collaboration',
         launchRequest: { requestId: 43, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration' },
       },
-      global: { stubs: operatorStubs },
+      global: { stubs: { ...operatorStubs, ExpertCollaborationPage: guidedStatusStub } },
     })
     await settleCapabilities()
 
+    await wrapper.setProps({
+      launchRequest: { requestId: 44, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration' },
+    })
     wrapper.getComponent(ImmersiveWorkbenchShell).vm.$emit('retry-guided-launch')
     await nextTick()
+
+    expect(wrapper.emitted('retry-guided-launch')).toBeUndefined()
+
+    wrapper.getComponent(guidedStatusStub).vm.sendLaunchStatus({ requestId: 44, state: 'failed', message: '请求 B 失败' })
+    await nextTick()
+    await wrapper.get('[data-workbench-action="retry-guided-launch"]').trigger('click')
 
     expect(wrapper.emitted('retry-guided-launch')?.[0]).toEqual(['EXPERT_COLLABORATION'])
   })

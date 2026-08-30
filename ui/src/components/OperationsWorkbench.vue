@@ -32,11 +32,17 @@ const emit = defineEmits<{
 }>()
 
 const capabilities = ref<{ knowledgeMode: string; customerAnswerMode: string; vectorStore: string; analyticsEnabled: boolean; collaborationEnabled: boolean; voiceEnabled: boolean } | null>(null)
+const capabilityLoadState = ref<'loading' | 'ready' | 'failed'>('loading')
 const capabilityLabels = computed(() => capabilities.value ? {
   knowledge: capabilities.value.knowledgeMode === 'mock' ? 'Mock' : 'RAG',
   customer: capabilities.value.customerAnswerMode === 'mock' ? 'Mock' : 'DashScope',
   vector: capabilities.value.vectorStore === 'none' ? '无向量库（关键词检索）' : 'SimpleVectorStore（进程内）',
 } : null)
+const knowledgeEvidence = computed<Pick<WorkbenchEvidenceItem, 'value' | 'tone'>>(() => {
+  if (capabilityLoadState.value === 'loading') return { value: '检查中' }
+  if (capabilityLoadState.value === 'failed') return { value: '能力检查失败', tone: 'warning' }
+  return { value: capabilityLabels.value?.knowledge ?? '未知', tone: 'verified' }
+})
 const navItems = computed<WorkbenchNavItem[]>(() => [
   { value: 'workflow', label: '告警工作流', available: true },
   { value: 'customer', label: '园区客服', available: true },
@@ -46,8 +52,14 @@ const navItems = computed<WorkbenchNavItem[]>(() => [
 ])
 onMounted(() => {
   void getOperationsCapabilities()
-    .then((value) => { capabilities.value = value })
-    .catch(() => { capabilities.value = null })
+    .then((value) => {
+      capabilities.value = value
+      capabilityLoadState.value = 'ready'
+    })
+    .catch(() => {
+      capabilities.value = null
+      capabilityLoadState.value = 'failed'
+    })
 })
 const selectedAlertId = ref(demoAlerts[0].id)
 const activeView = ref<WorkbenchView>(props.initialView)
@@ -66,6 +78,11 @@ const reviewer = ref('')
 const comment = ref('')
 const { workflow, events, loading, approving, error, isTerminal, start, approve } = useWorkflow()
 const guidedLaunchUpdate = ref<GuidedLaunchUpdate | null>(null)
+const currentGuidedLaunchUpdate = computed(() => {
+  const request = props.launchRequest
+  const update = guidedLaunchUpdate.value
+  return update && request && update.requestId === request.requestId ? update : null
+})
 
 function handleGuidedLaunchUpdate(update: GuidedLaunchUpdate): void {
   if (update.requestId !== props.launchRequest?.requestId) return
@@ -73,7 +90,11 @@ function handleGuidedLaunchUpdate(update: GuidedLaunchUpdate): void {
 }
 
 function retryGuidedLaunch(): void {
-  if (props.launchRequest) emit('retry-guided-launch', props.launchRequest.scenarioId)
+  const request = props.launchRequest
+  const update = currentGuidedLaunchUpdate.value
+  if (request && update?.requestId === request.requestId && update.state === 'failed') {
+    emit('retry-guided-launch', request.scenarioId)
+  }
 }
 
 // 统一执行轨迹：告警工作流通过确定性 runId 同时出现在右侧轨迹栏。
@@ -91,7 +112,7 @@ function statusLabelForTrace(status: keyof typeof traceStatusLabels): string {
 const evidenceItems = computed<WorkbenchEvidenceItem[]>(() => [
   { label: '场景', value: navItems.value.find((item) => item.value === activeView.value)?.label ?? '告警工作流' },
   { label: '执行轨迹', value: trace.status.value === 'streaming' ? '实时同步' : statusLabelForTrace(trace.status.value), tone: trace.status.value === 'failed' ? 'danger' : 'verified' },
-  { label: '知识检索', value: capabilityLabels.value?.knowledge ?? '检查中' },
+  { label: '知识检索', ...knowledgeEvidence.value },
   { label: '数据模式', value: '真实只读数据', tone: 'verified' },
 ])
 watch(
@@ -211,7 +232,7 @@ function confidence(value?: number) {
     :role="role"
     :nav-items="navItems"
     :evidence-items="evidenceItems"
-    :guided-launch="guidedLaunchUpdate"
+    :guided-launch="currentGuidedLaunchUpdate"
     :rail-priority="needsApproval"
     @switch-view="activeView = $event"
     @update:role="role = $event"
