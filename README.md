@@ -84,6 +84,18 @@ export SPRING_AI_DASHSCOPE_ENABLED=true
 ./mvnw spring-boot:run
 ```
 
+### Agent 客户演示目录
+
+后端启动后，可读取当前进程的客户演示场景目录：
+
+```powershell
+Invoke-WebRequest -UseBasicParsing http://localhost:8080/api/showcase/scenarios | Select-Object -ExpandProperty Content
+```
+
+`READY` 只表示候选场景已在**同一进程**内完成最近一次显式在线验证，并留下仍在有效期内的成功收据；它不表示仅凭配置项、能力开关或 Bean 存在就已在线可用。新启动的进程没有历史收据，因此已启用但尚未验证的场景会正确返回 `NOT_READY`。面向客户演示前，操作人员必须先运行后续提供的显式在线预检，并仅在每个候选场景实际完成后由预检调用 `ScenarioVerificationRegistry` 记录结果。
+
+这个只读目录接口本身不会调用模型或供应商，也不会探测或改变场景就绪状态。
+
 ### 3. 启动前端
 
 保持后端运行，打开第二个终端：
