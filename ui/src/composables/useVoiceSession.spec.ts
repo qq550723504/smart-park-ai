@@ -377,6 +377,25 @@ describe('useVoiceSession', () => {
     expect(startControls).toHaveLength(1)
   })
 
+  it('ignores a second toggle until the server acknowledges listening', async () => {
+    const h = makeHarness()
+
+    await h.binding.toggleMicrophone()
+    await h.binding.toggleMicrophone()
+
+    let controlTypes = h.fakeWs.sent
+      .filter((sent): sent is string => typeof sent === 'string')
+      .map((sent) => (JSON.parse(sent) as { type: string }).type)
+    expect(controlTypes).toEqual(['START_INPUT'])
+
+    h.serverSendsState('LISTENING')
+    await h.binding.toggleMicrophone()
+    controlTypes = h.fakeWs.sent
+      .filter((sent): sent is string => typeof sent === 'string')
+      .map((sent) => (JSON.parse(sent) as { type: string }).type)
+    expect(controlTypes).toEqual(['START_INPUT', 'COMMIT_INPUT'])
+  })
+
   it('retires a timed-out handshake before late open and creates one fresh retry connection', async () => {
     vi.useFakeTimers()
     const sockets: FakeWebSocket[] = []
