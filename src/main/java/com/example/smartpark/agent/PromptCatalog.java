@@ -13,6 +13,9 @@ import java.util.stream.Collectors;
 
 final class PromptCatalog {
 
+    static final String INSUFFICIENT_EVIDENCE_MARKER =
+            "INSUFFICIENT_EVIDENCE: no knowledge documents matched the request";
+
     private PromptCatalog() {
     }
 
@@ -154,7 +157,7 @@ final class PromptCatalog {
 
     private static String renderKnowledgeDocuments(List<KnowledgeDocument> documents) {
         if (documents.isEmpty()) {
-            return "INSUFFICIENT_EVIDENCE: no knowledge documents matched the request";
+            return INSUFFICIENT_EVIDENCE_MARKER;
         }
         return documents.stream()
                 .map(document -> """

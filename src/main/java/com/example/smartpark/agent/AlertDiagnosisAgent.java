@@ -173,6 +173,10 @@ public class AlertDiagnosisAgent {
             DiagnosisModelOutput output,
             Alert alert,
             List<KnowledgeDocument> safeDocuments) {
+        List<String> evidence = new ArrayList<>(output.evidence());
+        if (safeDocuments.isEmpty() && evidence.stream().noneMatch(item -> item.contains("INSUFFICIENT_EVIDENCE"))) {
+            evidence.add(PromptCatalog.INSUFFICIENT_EVIDENCE_MARKER);
+        }
         Diagnosis diagnosis = new Diagnosis(
                 UUID.randomUUID().toString(),
                 alert.id(),
@@ -180,16 +184,10 @@ public class AlertDiagnosisAgent {
                 output.riskLevel(),
                 output.rootCause(),
                 output.summary(),
-                output.evidence(),
+                List.copyOf(evidence),
                 output.recommendedAction(),
                 output.confidence(),
                 Instant.now());
-
-        if (safeDocuments.isEmpty() && diagnosis.evidence().stream().noneMatch(item -> item.contains("INSUFFICIENT_EVIDENCE"))) {
-            throw new ModelOutputException(
-                    "diagnosis must acknowledge insufficient evidence when no knowledge documents are available",
-                    AlertModelFailureStage.DIAGNOSIS_PARSE);
-        }
 
         return diagnosis;
     }

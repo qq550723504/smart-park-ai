@@ -219,13 +219,13 @@ class AlertDiagnosisAgentTest {
     }
 
     @Test
-    void emptyKnowledgeProducesEvidenceInsufficiencyInsteadOfFabricatedEvidence() {
+    void emptyKnowledgeAddsServerOwnedEvidenceInsufficiencyMarker() {
         TestChatModel model = new TestChatModel("""
                 {
                   "riskLevel":"LOW",
                   "rootCause":"Insufficient evidence to determine the root cause",
                   "summary":"No supporting knowledge documents were available for a confident diagnosis.",
-                  "evidence":["INSUFFICIENT_EVIDENCE: no knowledge documents matched the request"],
+                  "evidence":["Device telemetry was unavailable"],
                   "recommendedAction":"Collect additional telemetry and consult a technician before acting.",
                   "confidence":0.31
                 }
@@ -240,7 +240,9 @@ class AlertDiagnosisAgentTest {
 
         Diagnosis result = agent.diagnose(sampleAlert(), sampleContext(), List.of());
 
-        assertThat(result.evidence()).containsExactly("INSUFFICIENT_EVIDENCE: no knowledge documents matched the request");
+        assertThat(result.evidence()).containsExactly(
+                "Device telemetry was unavailable",
+                "INSUFFICIENT_EVIDENCE: no knowledge documents matched the request");
         assertThat(model.lastPrompt().getUserMessage().getText()).contains("INSUFFICIENT_EVIDENCE");
         assertThat(model.lastPrompt().getSystemMessage().getText())
                 .contains("copy the exact INSUFFICIENT_EVIDENCE marker into the evidence array");
