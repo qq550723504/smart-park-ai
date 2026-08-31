@@ -54,6 +54,8 @@ public class CollaborationRuntimeConfiguration {
 
     private static final BeanOutputConverter<SupervisorPlanModelOutput> SUPERVISOR_OUTPUT_CONVERTER =
             new BeanOutputConverter<>(SupervisorPlanModelOutput.class);
+    private static final BeanOutputConverter<SynthesisModelOutput> SYNTHESIS_OUTPUT_CONVERTER =
+            new BeanOutputConverter<>(SynthesisModelOutput.class);
     private static final String SUPERVISOR_SYSTEM_PROMPT =
             "You are the park collaboration supervisor. Return only JSON with normalizedQuestion, "
                     + "selectedDomains, assignments, selectionReason. normalizedQuestion must exactly echo "
@@ -133,9 +135,10 @@ public class CollaborationRuntimeConfiguration {
                         SUPERVISOR_SYSTEM_PROMPT + SUPERVISOR_OUTPUT_CONVERTER.getFormat(), question,
                         supervisorProviderOptions())),
                 graph,
-                (plan, findings) -> synthesizer.parseAndValidate(modelText(model,
-                        "You are a tool-free supervisor. Return only JSON with status, selectedDomains, evidenceRefs, confidence, uncertainties. The status must be exactly SUPPORTED, INSUFFICIENT_EVIDENCE, or FAILED. If status is SUPPORTED, select every SUPPORTED finding and copy only its evidence references. If status is INSUFFICIENT_EVIDENCE or FAILED, selectedDomains and evidenceRefs must both be empty and confidence must be 0. Do not write a conclusion; the service derives it verbatim from selected findings.",
-                        "plan=" + plan + "\nfindings=" + findings), plan, findings),
+                (plan, findings) -> synthesizer.parseAndValidate(supervisorModelText(model,
+                        "You are a tool-free supervisor. Return only JSON with status, selectedDomains, evidenceRefs, confidence, uncertainties. The status must be exactly SUPPORTED, INSUFFICIENT_EVIDENCE, or FAILED. If status is SUPPORTED, select every SUPPORTED finding and copy only its evidence references. If status is INSUFFICIENT_EVIDENCE or FAILED, selectedDomains and evidenceRefs must both be empty and confidence must be 0. Do not write a conclusion; the service derives it verbatim from selected findings."
+                                + SYNTHESIS_OUTPUT_CONVERTER.getFormat(),
+                        "plan=" + plan + "\nfindings=" + findings, synthesisProviderOptions()), plan, findings),
                 new CollaborationRunStore(), events, runExecutor, properties.getRunTimeout(), Clock.systemUTC());
     }
 
@@ -261,6 +264,21 @@ public class CollaborationRuntimeConfiguration {
                 .build();
     }
 
+    private static DashScopeChatOptions synthesisProviderOptions() {
+        DashScopeResponseFormat.JsonSchemaConfig schema = DashScopeResponseFormat.JsonSchemaConfig.builder()
+                .name("collaboration_supervisor_synthesis")
+                .description("Strict structured output for the collaboration supervisor synthesis")
+                .schema(SYNTHESIS_OUTPUT_CONVERTER.getJsonSchemaMap())
+                .strict(true)
+                .build();
+        return DashScopeChatOptions.builder()
+                .responseFormat(DashScopeResponseFormat.builder()
+                        .type(DashScopeResponseFormat.Type.JSON_SCHEMA)
+                        .jsonScheme(schema)
+                        .build())
+                .build();
+    }
+
     private static String modelTextWithTools(ChatModel model, String system, String user, ToolCallback[] callbacks) {
         var client = org.springframework.ai.chat.client.ChatClient.builder(model).build();
         return extract(client.prompt(new Prompt(new SystemMessage(system), new UserMessage(user)))
@@ -349,5 +367,13 @@ public class CollaborationRuntimeConfiguration {
     }
 
     private record SupervisorAssignmentModelOutput(ExpertDomain domain, String assignment) {
+    }
+
+    private record SynthesisModelOutput(
+            com.example.smartpark.collaboration.model.FindingStatus status,
+            List<ExpertDomain> selectedDomains,
+            List<String> evidenceRefs,
+            double confidence,
+            List<String> uncertainties) {
     }
 }
