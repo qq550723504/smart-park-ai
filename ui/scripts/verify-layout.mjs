@@ -4,8 +4,15 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
-const stylesPath = fileURLToPath(new URL('../src/styles.css', import.meta.url))
-const styles = readFileSync(stylesPath, 'utf8')
+const styleUrls = [
+  new URL('../src/styles/showcase-theme.css', import.meta.url),
+  new URL('../src/styles/workbench-primitives.css', import.meta.url),
+  new URL('../src/components/workbench/immersive-workbench.css', import.meta.url),
+  new URL('../src/components/customer-service.css', import.meta.url),
+]
+const styles = styleUrls
+  .map((url) => readFileSync(fileURLToPath(url), 'utf8'))
+  .join('\n')
 
 function findChrome() {
   const candidates = [
@@ -30,17 +37,26 @@ function findChrome() {
 const fixture = `<!doctype html>
 <html><head><meta charset="utf-8"><style>${styles}</style></head>
 <body>
-  <div class="workspace">
-    <main class="main-content customer-main" style="min-height:400px">
-      <section class="customer-console">
-        <aside class="customer-sidebar" style="height:300px"></aside>
-        <section class="panel chat-panel" style="height:300px"></section>
+  <div class="immersive-workbench">
+    <div class="immersive-workbench__workspace">
+      <section class="immersive-workbench__stage">
+        <main class="main-content customer-main" style="min-height:400px">
+          <section class="customer-console">
+            <aside class="customer-sidebar panel" style="height:300px"></aside>
+            <section class="panel chat-panel" style="height:300px"></section>
+          </section>
+        </main>
       </section>
-    </main>
-    <aside class="trace-rail panel global-rail" style="height:400px"></aside>
+      <details class="immersive-workbench__rail" open>
+        <summary>执行轨迹</summary>
+        <div class="immersive-workbench__rail-content">
+          <aside class="trace-rail panel global-rail" style="height:400px"></aside>
+        </div>
+      </details>
+    </div>
   </div>
   <script>
-    const selectors = ['.workspace', '.main-content', '.customer-console', '.customer-sidebar', '.chat-panel', '.global-rail']
+    const selectors = ['.immersive-workbench__workspace', '.immersive-workbench__stage', '.main-content', '.customer-console', '.customer-sidebar', '.chat-panel', '.immersive-workbench__rail', '.global-rail']
     const layout = Object.fromEntries(selectors.map((selector) => {
       const rect = document.querySelector(selector).getBoundingClientRect()
       return [selector, { x: rect.x, y: rect.y, width: rect.width, right: rect.right, bottom: rect.bottom }]
@@ -68,12 +84,12 @@ const chrome = findChrome()
 
 try {
   const wide = capture(chrome, 1465)
-  if (wide['.main-content'].width < 900 || wide['.chat-panel'].width < 500 || wide['.global-rail'].x - wide['.main-content'].right > 19) {
+  if (wide['.immersive-workbench__stage'].width < 900 || wide['.chat-panel'].width < 500 || wide['.immersive-workbench__rail'].x - wide['.immersive-workbench__stage'].right > 19) {
     throw new Error(`Wide layout did not fill the left workspace column: ${JSON.stringify(wide)}`)
   }
 
   const stacked = capture(chrome, 1100)
-  if (stacked['.global-rail'].y <= stacked['.main-content'].bottom) {
+  if (stacked['.immersive-workbench__rail'].y <= stacked['.immersive-workbench__stage'].bottom) {
     throw new Error(`Responsive layout did not stack the execution rail: ${JSON.stringify(stacked)}`)
   }
 
