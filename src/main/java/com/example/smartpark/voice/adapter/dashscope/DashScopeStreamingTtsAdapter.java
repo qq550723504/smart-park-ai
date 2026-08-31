@@ -1,10 +1,12 @@
 package com.example.smartpark.voice.adapter.dashscope;
 
+import com.alibaba.cloud.ai.dashscope.audio.tts.DashScopeAudioSpeechOptions;
 import com.alibaba.cloud.ai.dashscope.audio.tts.StreamingInputTextToSpeechModel;
 import com.example.smartpark.voice.model.VoiceErrorCode;
 import com.example.smartpark.voice.port.StreamingTtsPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.model.ModelOptionsUtils;
 import org.springframework.beans.factory.DisposableBean;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
@@ -46,20 +48,19 @@ public final class DashScopeStreamingTtsAdapter implements StreamingTtsPort, Dis
     });
     private final Map<String, TurnState> activeTurnsBySession = new ConcurrentHashMap<>();
 
-    public DashScopeStreamingTtsAdapter(StreamingInputTextToSpeechModel speechModel) {
-        this((TtsSdkFacade) speechModel::stream);
-    }
-
-    DashScopeStreamingTtsAdapter(TtsSdkFacade facade) {
-        this(facade, null);
+    public DashScopeStreamingTtsAdapter(
+            StreamingInputTextToSpeechModel speechModel,
+            DashScopeAudioSpeechOptions configuredOptions) {
+        this((TtsSdkFacade) speechModel::stream, configuredOptions);
     }
 
     DashScopeStreamingTtsAdapter(TtsSdkFacade facade,
                                  org.springframework.ai.audio.tts.TextToSpeechOptions options) {
         this.facade = Objects.requireNonNull(facade, "facade");
-        this.options = options == null
-                ? org.springframework.ai.audio.tts.TextToSpeechOptions.builder().build()
-                : options;
+        this.options = ModelOptionsUtils.mapToClass(
+                ModelOptionsUtils.objectToMap(
+                        Objects.requireNonNull(options, "configuredOptions")),
+                DashScopeAudioSpeechOptions.class);
     }
 
     @Override

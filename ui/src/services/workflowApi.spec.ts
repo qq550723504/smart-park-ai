@@ -21,6 +21,7 @@ it('loads the server-owned showcase catalog without manufacturing readiness', as
       requiredCapabilities: ['模型', '只读数据'],
       proofTypes: ['指标口径', '只读查询'],
       humanBoundary: '只读数据，不自动执行操作',
+      launchInput: { alertId: null, question: '过去5天各楼宇能耗' },
       unavailableReason: '本次部署尚未完成在线验证',
       lastVerifiedAt: null,
     }],

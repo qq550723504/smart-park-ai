@@ -1,11 +1,15 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { effectScope, ref } from 'vue'
 import { useVoiceSession } from './useVoiceSession'
+import { useGuidedLaunch } from './useGuidedLaunch'
 import type { UseVoiceSessionDeps, WebSocketLike } from './useVoiceSession'
 import type { VoiceServerFrame } from '../types/voice'
+import type { GuidedLaunchUpdate, ScenarioLaunchRequest } from '../types/workbench'
 
 class FakeWebSocket implements WebSocketLike {
   sent: Array<string | ArrayBuffer> = []
   closed = false
+  binaryType: BinaryType = 'blob'
   onopen: (() => void) | null = null
   onmessage: ((event: { data: unknown }) => void) | null = null
   onerror: (() => void) | null = null
@@ -25,6 +29,10 @@ class FakeWebSocket implements WebSocketLike {
   /** Simulates the transport finishing the handshake. */
   open(): void {
     this.onopen?.()
+  }
+
+  fail(): void {
+    this.onerror?.()
   }
 
   emitText(payload: unknown): void {
@@ -89,6 +97,7 @@ function makeHarness(frameScript: VoiceServerFrame[] = []) {
   const fakePlayer = new FakePlayer()
   const fakeCapture = new FakeCapture()
   const fakeTrack = { stopped: 0, stop() { this.stopped++ } }
+  let microphoneRequests = 0
 
   const deps: UseVoiceSessionDeps = {
     api: {
@@ -104,7 +113,10 @@ function makeHarness(frameScript: VoiceServerFrame[] = []) {
       queueMicrotask(() => fakeWs.open())
       return fakeWs as WebSocketLike
     },
-    requestMicrophone: async () => ({ getTracks: () => [fakeTrack] }) as unknown as MediaStream,
+    requestMicrophone: async () => {
+      microphoneRequests++
+      return { getTracks: () => [fakeTrack] } as unknown as MediaStream
+    },
     createPlayer: () => fakePlayer,
     createCapture: () => fakeCapture,
   }
@@ -133,7 +145,10 @@ function makeHarness(frameScript: VoiceServerFrame[] = []) {
     return undefined
   }
 
-  return { binding, fakeWs, fakePlayer, fakeCapture, fakeTrack, serverSendsState, lastSentControl }
+  return {
+    binding, fakeWs, fakePlayer, fakeCapture, fakeTrack, microphoneRequests: () => microphoneRequests,
+    serverSendsState, lastSentControl,
+  }
 }
 
 describe('useVoiceSession', () => {
@@ -161,6 +176,390 @@ describe('useVoiceSession', () => {
     expect(binarySends).toHaveLength(1)
   })
 
+  it('releases active capture and resets the turn when the transport fails', async () => {
+    const h = makeHarness()
+
+    await h.binding.toggleMicrophone()
+    h.serverSendsState('LISTENING')
+    h.fakeWs.fail()
+    await Promise.resolve()
+
+    expect(h.fakeWs.closed).toBe(true)
+    expect(h.binding.connectionPhase.value).toBe('failed')
+    expect(h.binding.voicePhase.value).toBeNull()
+    expect(h.fakeTrack.stopped).toBe(1)
+    expect(h.fakeCapture.stoppedCount).toBe(1)
+
+    await h.binding.toggleMicrophone()
+
+    expect(h.microphoneRequests()).toBe(2)
+    expect(h.fakeCapture.started).toBe(2)
+    expect(h.lastSentControl('START_INPUT')).toBeDefined()
+    expect(h.lastSentControl('COMMIT_INPUT')).toBeUndefined()
+  })
+
+  it('releases active capture when the remote socket closes unexpectedly', async () => {
+    const h = makeHarness()
+
+    await h.binding.toggleMicrophone()
+    h.serverSendsState('LISTENING')
+    h.fakeWs.onclose?.()
+    await Promise.resolve()
+
+    expect(h.binding.connectionPhase.value).toBe('failed')
+    expect(h.binding.errorMessage.value).toBe('语音连接已断开')
+    expect(h.binding.voicePhase.value).toBeNull()
+    expect(h.fakeTrack.stopped).toBe(1)
+    expect(h.fakeCapture.stoppedCount).toBe(1)
+  })
+
+  it('prepares a backend session without requesting microphone access', async () => {
+    const harness = makeHarness()
+    await harness.binding.prepare()
+
+    expect(harness.fakeCapture.started).toBe(0)
+    expect(harness.microphoneRequests()).toBe(0)
+    expect(harness.binding.connectionPhase.value).toBe('connected')
+  })
+
+  it('configures the socket to deliver binary audio as ArrayBuffers', async () => {
+    const harness = makeHarness()
+
+    await harness.binding.prepare()
+
+    expect(harness.fakeWs.binaryType).toBe('arraybuffer')
+  })
+
+  it('creates a fresh connection when preparation follows a transport failure', async () => {
+    const sockets: FakeWebSocket[] = []
+    let sessionsCreated = 0
+    const binding = useVoiceSession({
+      api: {
+        createSession: async () => {
+          sessionsCreated++
+          return {
+            sessionId: `vs-retry-${sessionsCreated}`,
+            runId: `00000000-0000-0000-0000-${String(sessionsCreated).padStart(12, '0')}`,
+            wsPath: `/ws/voice/sessions/vs-retry-${sessionsCreated}`,
+          }
+        },
+      },
+      openWebSocket: (url) => {
+        const socket = new FakeWebSocket(url)
+        sockets.push(socket)
+        queueMicrotask(() => socket.open())
+        return socket
+      },
+    })
+
+    await binding.prepare()
+    sockets[0]?.fail()
+    expect(binding.connectionPhase.value).toBe('failed')
+
+    await binding.prepare()
+
+    expect(sessionsCreated).toBe(2)
+    expect(sockets).toHaveLength(2)
+    expect(sockets[0]?.closed).toBe(true)
+    expect(binding.connectionPhase.value).toBe('connected')
+    expect(binding.errorMessage.value).toBe('')
+  })
+
+  it('ignores late callbacks from a failed socket after a new turn starts', async () => {
+    const sockets: FakeWebSocket[] = []
+    const captures: FakeCapture[] = []
+    const tracks: Array<{ stopped: number; stop(): void }> = []
+    let sessionsCreated = 0
+    const binding = useVoiceSession({
+      api: {
+        createSession: async () => {
+          sessionsCreated++
+          return {
+            sessionId: `vs-late-callback-${sessionsCreated}`,
+            runId: `00000000-0000-0000-0000-${String(sessionsCreated).padStart(12, '0')}`,
+            wsPath: `/ws/voice/sessions/vs-late-callback-${sessionsCreated}`,
+          }
+        },
+      },
+      openWebSocket: (url) => {
+        const socket = new FakeWebSocket(url)
+        sockets.push(socket)
+        queueMicrotask(() => socket.open())
+        return socket
+      },
+      requestMicrophone: async () => {
+        const track = { stopped: 0, stop() { this.stopped++ } }
+        tracks.push(track)
+        return { getTracks: () => [track] } as unknown as MediaStream
+      },
+      createCapture: () => {
+        const capture = new FakeCapture()
+        captures.push(capture)
+        return capture
+      },
+      createPlayer: () => new FakePlayer(),
+    })
+
+    await binding.toggleMicrophone()
+    const oldSocket = sockets[0]!
+    oldSocket.emitText({
+      type: 'SESSION_STATE', sessionId: 'vs-late-callback-1', messageId: 'old-listening',
+      sequence: 1, state: 'LISTENING', turnId: 'turn-old',
+    })
+    const lateError = oldSocket.onerror
+    const lateClose = oldSocket.onclose
+    oldSocket.fail()
+    await Promise.resolve()
+
+    await binding.toggleMicrophone()
+    const currentSocket = sockets[1]!
+    currentSocket.emitText({
+      type: 'SESSION_STATE', sessionId: 'vs-late-callback-2', messageId: 'new-listening',
+      sequence: 1, state: 'LISTENING', turnId: 'turn-new',
+    })
+    lateError?.()
+    lateClose?.()
+    await Promise.resolve()
+
+    expect(binding.sessionId.value).toBe('vs-late-callback-2')
+    expect(binding.connectionPhase.value).toBe('connected')
+    expect(binding.voicePhase.value).toBe('LISTENING')
+    expect(captures[1]?.stoppedCount).toBe(0)
+    expect(tracks[1]?.stopped).toBe(0)
+  })
+
+  it('reuses a connected transport after microphone permission fails', async () => {
+    const sockets: FakeWebSocket[] = []
+    let sessionsCreated = 0
+    let microphoneAttempts = 0
+    const binding = useVoiceSession({
+      api: {
+        createSession: async () => {
+          sessionsCreated++
+          return {
+            sessionId: 'vs-microphone-retry',
+            runId: '00000000-0000-0000-0000-000000000222',
+            wsPath: '/ws/voice/sessions/vs-microphone-retry',
+          }
+        },
+      },
+      openWebSocket: (url) => {
+        const socket = new FakeWebSocket(url)
+        sockets.push(socket)
+        queueMicrotask(() => socket.open())
+        return socket
+      },
+      requestMicrophone: async () => {
+        microphoneAttempts++
+        if (microphoneAttempts === 1) throw new Error('microphone permission denied')
+        return { getTracks: () => [] } as unknown as MediaStream
+      },
+      createCapture: () => new FakeCapture(),
+    })
+
+    await binding.toggleMicrophone()
+    await binding.toggleMicrophone()
+
+    expect(sessionsCreated).toBe(1)
+    expect(sockets).toHaveLength(1)
+    expect(binding.connectionPhase.value).toBe('connected')
+    expect(binding.errorMessage.value).toBe('')
+  })
+
+  it('cancels the server turn when capture startup fails before retrying', async () => {
+    const h = makeHarness()
+    let captureAttempts = 0
+    h.fakeCapture.start = async (_stream, onChunk) => {
+      captureAttempts++
+      if (captureAttempts === 1) throw new Error('capture startup failed')
+      h.fakeCapture.started++
+      h.fakeCapture.onChunk = onChunk
+    }
+
+    await h.binding.toggleMicrophone()
+    h.serverSendsState('LISTENING')
+
+    // The reset acknowledgement has not arrived yet. A rapid retry must not
+    // commit the empty server-side turn.
+    await h.binding.toggleMicrophone()
+    let controlTypes = h.fakeWs.sent
+      .filter((sent): sent is string => typeof sent === 'string')
+      .map((sent) => (JSON.parse(sent) as { type: string }).type)
+    expect(controlTypes).toEqual(['START_INPUT', 'INTERRUPT_OUTPUT'])
+
+    h.serverSendsState('IDLE')
+    await h.binding.toggleMicrophone()
+
+    controlTypes = h.fakeWs.sent
+      .filter((sent): sent is string => typeof sent === 'string')
+      .map((sent) => (JSON.parse(sent) as { type: string }).type)
+    expect(controlTypes).toEqual(['START_INPUT', 'INTERRUPT_OUTPUT', 'START_INPUT'])
+    expect(h.binding.connectionPhase.value).toBe('connected')
+    expect(captureAttempts).toBe(2)
+  })
+
+  it('shares one pending handshake between prepare and an immediate microphone toggle', async () => {
+    const pendingSession = deferred<{ sessionId: string; runId: string; wsPath: string }>()
+    const sockets: FakeWebSocket[] = []
+    const capture = new FakeCapture()
+    let sessionsCreated = 0
+    let microphoneRequests = 0
+    const binding = useVoiceSession({
+      api: {
+        createSession: () => {
+          sessionsCreated++
+          return pendingSession.promise
+        },
+      },
+      openWebSocket: (url) => {
+        const socket = new FakeWebSocket(url)
+        sockets.push(socket)
+        return socket
+      },
+      requestMicrophone: async () => {
+        microphoneRequests++
+        return { getTracks: () => [] } as unknown as MediaStream
+      },
+      createCapture: () => capture,
+    })
+
+    const preparing = binding.prepare()
+    const toggling = binding.toggleMicrophone()
+    pendingSession.resolve({
+      sessionId: 'vs-single-flight',
+      runId: '00000000-0000-0000-0000-000000000111',
+      wsPath: '/ws/voice/sessions/vs-single-flight',
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(microphoneRequests).toBe(0)
+    sockets.forEach((socket) => socket.open())
+    await Promise.all([preparing, toggling])
+
+    expect(sessionsCreated).toBe(1)
+    expect(sockets).toHaveLength(1)
+    expect(microphoneRequests).toBe(1)
+    expect(capture.started).toBe(1)
+    expect(binding.connectionPhase.value).toBe('connected')
+  })
+
+  it('coalesces concurrent microphone toggles across the full capture startup', async () => {
+    const pendingSession = deferred<{ sessionId: string; runId: string; wsPath: string }>()
+    const socket = new FakeWebSocket('')
+    const capture = new FakeCapture()
+    let sessionsCreated = 0
+    let microphoneRequests = 0
+    const binding = useVoiceSession({
+      api: {
+        createSession: () => {
+          sessionsCreated++
+          return pendingSession.promise
+        },
+      },
+      openWebSocket: () => socket,
+      requestMicrophone: async () => {
+        microphoneRequests++
+        return { getTracks: () => [] } as unknown as MediaStream
+      },
+      createCapture: () => capture,
+    })
+
+    const firstToggle = binding.toggleMicrophone()
+    const secondToggle = binding.toggleMicrophone()
+    pendingSession.resolve({
+      sessionId: 'vs-toggle-single-flight',
+      runId: '00000000-0000-0000-0000-000000000333',
+      wsPath: '/ws/voice/sessions/vs-toggle-single-flight',
+    })
+    await Promise.resolve()
+    socket.open()
+    await Promise.all([firstToggle, secondToggle])
+
+    const startControls = socket.sent
+      .filter((sent): sent is string => typeof sent === 'string')
+      .map((sent) => JSON.parse(sent) as { type: string })
+      .filter((frame) => frame.type === 'START_INPUT')
+    expect(sessionsCreated).toBe(1)
+    expect(microphoneRequests).toBe(1)
+    expect(capture.started).toBe(1)
+    expect(startControls).toHaveLength(1)
+  })
+
+  it('ignores a second toggle until the server acknowledges listening', async () => {
+    const h = makeHarness()
+
+    await h.binding.toggleMicrophone()
+    await h.binding.toggleMicrophone()
+
+    let controlTypes = h.fakeWs.sent
+      .filter((sent): sent is string => typeof sent === 'string')
+      .map((sent) => (JSON.parse(sent) as { type: string }).type)
+    expect(controlTypes).toEqual(['START_INPUT'])
+
+    h.serverSendsState('LISTENING')
+    await h.binding.toggleMicrophone()
+    controlTypes = h.fakeWs.sent
+      .filter((sent): sent is string => typeof sent === 'string')
+      .map((sent) => (JSON.parse(sent) as { type: string }).type)
+    expect(controlTypes).toEqual(['START_INPUT', 'COMMIT_INPUT'])
+  })
+
+  it('retires a timed-out handshake before late open and creates one fresh retry connection', async () => {
+    vi.useFakeTimers()
+    const sockets: FakeWebSocket[] = []
+    let sessionsCreated = 0
+    const binding = useVoiceSession({
+      api: {
+        createSession: async () => {
+          sessionsCreated++
+          return {
+            sessionId: `vs-timeout-${sessionsCreated}`,
+            runId: `00000000-0000-0000-0000-${String(sessionsCreated).padStart(12, '0')}`,
+            wsPath: `/ws/voice/sessions/vs-timeout-${sessionsCreated}`,
+          }
+        },
+      },
+      openWebSocket: (url) => {
+        const socket = new FakeWebSocket(url)
+        sockets.push(socket)
+        return socket
+      },
+    })
+
+    try {
+      let firstFailure = ''
+      void binding.prepare().catch((error: unknown) => {
+        firstFailure = error instanceof Error ? error.message : String(error)
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(sockets).toHaveLength(1)
+
+      await vi.advanceTimersByTimeAsync(5000)
+
+      expect(firstFailure).toBe('等待语音连接超时')
+      expect(sockets[0]?.closed).toBe(true)
+      expect(binding.connectionPhase.value).toBe('failed')
+
+      sockets[0]?.open()
+      expect(binding.connectionPhase.value).toBe('failed')
+
+      const retryA = binding.prepare()
+      const retryB = binding.prepare()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(sessionsCreated).toBe(2)
+      expect(sockets).toHaveLength(2)
+
+      sockets[1]?.open()
+      await vi.advanceTimersByTimeAsync(10)
+      await Promise.all([retryA, retryB])
+      expect(binding.connectionPhase.value).toBe('connected')
+    } finally {
+      binding.close()
+      vi.useRealTimers()
+    }
+  })
+
   it('commit sends COMMIT_INPUT and partial/final frames feed the transcript', async () => {
     const h = makeHarness()
     await h.binding.toggleMicrophone()
@@ -180,6 +579,26 @@ describe('useVoiceSession', () => {
     expect(h.lastSentControl('COMMIT_INPUT')).toBeDefined()
     expect(h.fakeCapture.stoppedCount).toBe(1)
     expect(h.fakeTrack.stopped).toBe(1)
+  })
+
+  it('releases active input on server ERROR and allows retry in the same session', async () => {
+    const h = makeHarness()
+    await h.binding.toggleMicrophone()
+    h.serverSendsState('LISTENING')
+
+    h.serverSendsState('ERROR')
+
+    expect(h.fakeCapture.stoppedCount).toBe(1)
+    expect(h.fakeTrack.stopped).toBe(1)
+    await h.binding.toggleMicrophone()
+
+    const startControls = h.fakeWs.sent
+      .filter((sent): sent is string => typeof sent === 'string')
+      .map((sent) => JSON.parse(sent) as { type: string })
+      .filter((frame) => frame.type === 'START_INPUT')
+    expect(startControls).toHaveLength(2)
+    expect(h.microphoneRequests()).toBe(2)
+    expect(h.binding.connectionPhase.value).toBe('connected')
   })
 
   it('answer deltas append in order and tool events come from backend facts', async () => {
@@ -292,6 +711,49 @@ describe('useVoiceSession', () => {
     expect(openedSockets).toBe(0)
     expect(binding.connectionPhase.value).toBe('idle')
     expect(binding.errorMessage.value).toBe('')
+  })
+
+  it('does not report guided voice ready when close wins the pending socket handshake', async () => {
+    const socket = new FakeWebSocket('')
+    const active = ref(true)
+    const request = ref<ScenarioLaunchRequest | null>({
+      requestId: 61, mode: 'guided', scenarioId: 'VOICE_ASSISTANT', view: 'voice',
+    })
+    const updates: GuidedLaunchUpdate[] = []
+    const scope = effectScope()
+    let binding!: ReturnType<typeof useVoiceSession>
+    scope.run(() => {
+      binding = useVoiceSession({
+        api: {
+          createSession: async () => ({
+            sessionId: 'vs-pending',
+            runId: '00000000-0000-0000-0000-00000000dddd',
+            wsPath: '/ws/voice/sessions/vs-pending',
+          }),
+        },
+        openWebSocket: () => socket,
+      })
+      useGuidedLaunch({
+        active: () => active.value,
+        request: () => request.value,
+        scenarioId: 'VOICE_ASSISTANT',
+        start: async () => {
+          await binding.prepare()
+          return { state: 'ready', message: '语音链路已就绪' }
+        },
+        onUpdate: (update) => updates.push(update),
+      })
+    })
+
+    await Promise.resolve()
+    active.value = false
+    binding.close()
+    socket.open()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(updates.some((update) => update.state === 'ready')).toBe(false)
+    expect(updates.some((update) => update.state === 'failed')).toBe(true)
+    scope.stop()
   })
 
   it('releases a microphone stream that resolves after close', async () => {

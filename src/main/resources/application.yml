@@ -22,6 +22,16 @@ spring:
         completions-path: ${SPRING_AI_DASHSCOPE_CHAT_COMPLETIONS_PATH:/api/v1/services/aigc/text-generation/generation}
         options:
           model: qwen-plus
+      audio:
+        transcription:
+          options:
+            model: ${SPRING_AI_DASHSCOPE_AUDIO_TRANSCRIPTION_OPTIONS_MODEL:paraformer-realtime-v2}
+            format: pcm
+            sample-rate: 16000
+        speech:
+          options:
+            model: ${SPRING_AI_DASHSCOPE_AUDIO_SPEECH_OPTIONS_MODEL:cosyvoice-v2}
+            voice: ${SPRING_AI_DASHSCOPE_AUDIO_SPEECH_OPTIONS_VOICE:longxiaochun_v2}
     mcp:
       server:
         enabled: ${smartpark.mcp.enabled}
@@ -42,6 +52,8 @@ spring:
         streamable-http:
           mcp-endpoint: /mcp
 smartpark:
+  local-demo:
+    enabled: ${SMARTPARK_LOCAL_DEMO_ENABLED:false}
   analytics:
     enabled: ${SMARTPARK_ANALYTICS_ENABLED:false}
     # Re-anchors the time-windowed V1 demo fixtures (energy, alerts, device
@@ -75,6 +87,8 @@ smartpark:
     max-parallel: ${SMARTPARK_EXPERT_MAX_PARALLEL:3}
   customer:
     minimum-knowledge-score: ${SMARTPARK_CUSTOMER_MINIMUM_KNOWLEDGE_SCORE:0.70}
+  showcase:
+    preflight-timeout: ${SMARTPARK_SHOWCASE_PREFLIGHT_TIMEOUT:90s}
   mcp:
     enabled: ${SMARTPARK_MCP_ENABLED:false}
   voice:

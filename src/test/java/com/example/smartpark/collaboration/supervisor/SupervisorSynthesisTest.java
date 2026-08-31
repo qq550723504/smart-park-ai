@@ -5,6 +5,11 @@ import com.example.smartpark.collaboration.model.ExpertFinding;
 import com.example.smartpark.collaboration.model.FindingStatus;
 import com.example.smartpark.collaboration.model.SupervisorPlan;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.prompt.Prompt;
 
 import java.util.List;
 import java.util.Map;
@@ -15,6 +20,57 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SupervisorSynthesisTest {
     private final SupervisorSynthesizer synthesizer = new SupervisorSynthesizer();
+
+    @Test
+    void usesModelBackedSupervisorToDecideCrossDomainCorrelation() {
+        ChatModel model = prompt -> new ChatResponse(List.of(new Generation(new AssistantMessage("""
+                {"status":"SUPPORTED","selectedDomains":["ENERGY","DEVICE","SECURITY"],
+                 "evidenceRefs":["energy:MTR-2","device:D-2","security:SEC-1"],"confidence":0.7,
+                 "conclusion":"三项观测在同一时段相互印证，存在关联。","uncertainties":[]}
+                """))));
+
+        var result = synthesizer.synthesize(model, crossDomainPlan(), List.of(
+                supported(),
+                new ExpertFinding(ExpertDomain.DEVICE, FindingStatus.SUPPORTED,
+                        "device D-2 is offline", List.of("device:D-2"), .7, List.of()),
+                new ExpertFinding(ExpertDomain.SECURITY, FindingStatus.SUPPORTED,
+                        "security event SEC-1 is active", List.of("security:SEC-1"), .7, List.of())));
+
+        assertThat(result.conclusion()).isEqualTo("三项观测在同一时段相互印证，存在关联。");
+    }
+
+    @Test
+    void acceptsUnableToConfirmWhenSupportedObservationsDoNotEstablishCorrelation() {
+        ChatModel model = prompt -> new ChatResponse(List.of(new Generation(new AssistantMessage("""
+                {"status":"INSUFFICIENT_EVIDENCE","selectedDomains":[],"evidenceRefs":[],"confidence":0,
+                 "conclusion":"无法确认关联","uncertainties":[]}
+                """))));
+
+        var result = synthesizer.synthesize(model, crossDomainPlan(), List.of(
+                supported(),
+                new ExpertFinding(ExpertDomain.DEVICE, FindingStatus.SUPPORTED,
+                        "device D-2 is offline", List.of("device:D-2"), .7, List.of()),
+                new ExpertFinding(ExpertDomain.SECURITY, FindingStatus.SUPPORTED,
+                        "security event SEC-1 is active", List.of("security:SEC-1"), .7, List.of())));
+
+        assertThat(result.status()).isEqualTo(FindingStatus.INSUFFICIENT_EVIDENCE);
+        assertThat(result.conclusion()).isEqualTo("无法确认关联");
+        assertThat(result.evidenceRefs()).isEmpty();
+    }
+
+    @Test
+    void synthesizesAllValidatedSupportedFindingsWithoutAProviderEcho() {
+        ExpertFinding device = new ExpertFinding(ExpertDomain.DEVICE, FindingStatus.SUPPORTED,
+                "device D-2 is offline", List.of("device:D-2"), .7, List.of());
+
+        var result = synthesizer.synthesize(plan(), List.of(device, supported()));
+
+        assertThat(result.status()).isEqualTo(FindingStatus.SUPPORTED);
+        assertThat(result.conclusion())
+                .isEqualTo("MTR-2 consumption is 18.5 above baseline；device D-2 is offline");
+        assertThat(result.evidenceRefs()).containsExactlyInAnyOrder("energy:MTR-2", "device:D-2");
+        assertThat(result.confidence()).isEqualTo(.7);
+    }
 
     @Test
     void buildsConclusionVerbatimFromSelectedSupportedFinding() {
@@ -181,5 +237,10 @@ class SupervisorSynthesisTest {
     private static SupervisorPlan plan() {
         return new SupervisorPlan("energy question", Set.of(ExpertDomain.ENERGY, ExpertDomain.DEVICE),
                 Map.of(ExpertDomain.ENERGY, "energy", ExpertDomain.DEVICE, "device"), "cross-domain");
+    }
+
+    private static SupervisorPlan crossDomainPlan() {
+        return new SupervisorPlan("energy question", Set.of(ExpertDomain.ENERGY, ExpertDomain.DEVICE, ExpertDomain.SECURITY),
+                Map.of(ExpertDomain.ENERGY, "energy", ExpertDomain.DEVICE, "device", ExpertDomain.SECURITY, "security"), "cross-domain");
     }
 }

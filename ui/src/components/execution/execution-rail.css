@@ -2,13 +2,15 @@
   display: grid;
   gap: 7px;
   padding: 12px 13px;
-  border: 1px solid var(--line);
-  border-left: 3px solid #8fb5af;
-  background: rgba(255, 255, 255, 0.92);
+  color: var(--showcase-ivory);
+  border: 1px solid var(--showcase-border-soft);
+  border-left: 3px solid rgba(112, 232, 255, 0.58);
+  background: rgba(8, 12, 20, 0.82);
 }
 .execution-event-card.is-error {
-  border-left-color: #d95f53;
-  background: #fff5f3;
+  color: #ffb1aa;
+  border-color: rgba(255, 143, 132, 0.4);
+  background: rgba(90, 25, 21, 0.3);
 }
 .event-meta {
   display: flex;
@@ -16,46 +18,46 @@
   align-items: center;
   gap: 8px;
   font-size: 10px;
-  color: #6b8581;
+  color: var(--showcase-muted);
 }
 .event-actor {
   font-weight: 800;
-  color: #2c4a47;
+  color: var(--showcase-ivory);
 }
 .event-status[data-status='FAILED'],
 .event-status[data-status='INTERRUPTED'] {
-  color: #c04a40;
+  color: #ffb1aa;
   font-weight: 700;
 }
 .event-status[data-status='SUCCEEDED'] {
-  color: #17826a;
+  color: #63e6b2;
   font-weight: 700;
 }
 .event-time {
   margin-left: auto;
-  color: #93a7a4;
+  color: var(--showcase-muted);
 }
 .event-summary {
   margin: 0;
   font-size: 11px;
-  color: #45605d;
+  color: var(--showcase-ivory);
 }
 .payload {
   display: grid;
   gap: 5px;
   padding: 9px 10px;
-  background: #f2f8f6;
-  border: 1px solid #dde9e6;
+  background: rgba(112, 232, 255, 0.06);
+  border: 1px solid var(--showcase-border-soft);
   font-size: 10px;
-  color: #47615e;
+  color: #c8d3e0;
 }
 .payload strong {
   font-size: 11px;
-  color: #22423f;
+  color: var(--showcase-ivory);
 }
 .partial-mark,
 .retry-hint {
-  color: #b07a2c;
+  color: var(--showcase-amber);
 }
 .tool-arguments {
   display: flex;
@@ -64,7 +66,7 @@
   margin: 0;
 }
 .tool-arguments dt {
-  color: #7d938f;
+  color: var(--showcase-muted);
 }
 .tool-arguments dd {
   margin: 0;
@@ -77,7 +79,7 @@
   white-space: pre-wrap;
 }
 .payload-error strong {
-  color: #b03a30;
+  color: #ffb1aa;
 }
 
 .trace-rail {
@@ -94,18 +96,19 @@
   display: grid;
   gap: 10px;
   overflow-y: auto;
+  scrollbar-color: rgba(112, 232, 255, 0.38) transparent;
 }
 .trace-empty {
   margin: auto;
   text-align: center;
   font-size: 11px;
-  color: #7c9490;
+  color: var(--showcase-muted);
 }
 .trace-error {
   margin: 0;
   padding: 10px 12px;
-  background: #fff1ef;
-  border: 1px solid #e8b5ae;
-  color: #a33c34;
+  color: #ffb1aa;
+  border: 1px solid rgba(255, 143, 132, 0.4);
+  background: rgba(90, 25, 21, 0.3);
   font-size: 11px;
 }

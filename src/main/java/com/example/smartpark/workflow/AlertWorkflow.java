@@ -12,6 +12,7 @@ import com.alibaba.cloud.ai.graph.checkpoint.savers.MemorySaver;
 import com.alibaba.cloud.ai.graph.serializer.StateSerializer;
 import com.alibaba.cloud.ai.graph.serializer.plain_text.jackson.SpringAIJacksonStateSerializer;
 import com.example.smartpark.agent.AlertDiagnosisAgent;
+import com.example.smartpark.agent.AlertModelFailureStage;
 import com.example.smartpark.agent.AlertTriageAgent;
 import com.example.smartpark.model.common.ApprovalDecision;
 import com.example.smartpark.model.common.WorkflowStatus;
@@ -31,6 +32,7 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import static com.alibaba.cloud.ai.graph.action.AsyncEdgeAction.edge_async;
@@ -85,6 +87,23 @@ public final class AlertWorkflow {
                 energyPort, securityPort);
     }
 
+    public AlertWorkflow(
+            AlertTriageAgent triageAgent,
+            AlertDiagnosisAgent diagnosisAgent,
+            DevicePort devicePort,
+            AlertPort alertPort,
+            WorkOrderPort workOrderPort,
+            KnowledgePort knowledgePort,
+            WorkflowExecutionStore executionStore,
+            WorkflowEventPublisher eventPublisher,
+            EnergyPort energyPort,
+            SecurityPort securityPort,
+            Consumer<AlertModelFailureStage> failureObserver) {
+        this(triageAgent, diagnosisAgent, devicePort, alertPort, workOrderPort, knowledgePort,
+                executionStore, eventPublisher, Clock.systemUTC(), () -> UUID.randomUUID().toString(),
+                energyPort, securityPort, Objects.requireNonNull(failureObserver, "failureObserver"));
+    }
+
     AlertWorkflow(
             AlertTriageAgent triageAgent,
             AlertDiagnosisAgent diagnosisAgent,
@@ -113,6 +132,24 @@ public final class AlertWorkflow {
             Supplier<String> workflowIds,
             EnergyPort energyPort,
             SecurityPort securityPort) {
+        this(triageAgent, diagnosisAgent, devicePort, alertPort, workOrderPort, knowledgePort,
+                executionStore, eventPublisher, clock, workflowIds, energyPort, securityPort, null);
+    }
+
+    AlertWorkflow(
+            AlertTriageAgent triageAgent,
+            AlertDiagnosisAgent diagnosisAgent,
+            DevicePort devicePort,
+            AlertPort alertPort,
+            WorkOrderPort workOrderPort,
+            KnowledgePort knowledgePort,
+            WorkflowExecutionStore executionStore,
+            WorkflowEventPublisher eventPublisher,
+            Clock clock,
+            Supplier<String> workflowIds,
+            EnergyPort energyPort,
+            SecurityPort securityPort,
+            Consumer<AlertModelFailureStage> failureObserver) {
         this.executionStore = Objects.requireNonNull(executionStore, "executionStore");
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher");
         this.workflowIds = Objects.requireNonNull(workflowIds, "workflowIds");
@@ -127,7 +164,8 @@ public final class AlertWorkflow {
                 clock,
                 CONFIDENCE_THRESHOLD,
                 energyPort,
-                securityPort);
+                securityPort,
+                failureObserver);
         this.compiledGraph = compileGraph();
     }
 

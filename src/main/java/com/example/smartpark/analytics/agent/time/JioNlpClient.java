@@ -33,7 +33,8 @@ public final class JioNlpClient {
             throw new IllegalArgumentException("invalid parser client configuration");
         }
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(
-                HttpClient.newBuilder().connectTimeout(connectTimeout).build());
+                HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
+                        .connectTimeout(connectTimeout).build());
         factory.setReadTimeout(readTimeout);
         this.client = RestClient.builder().baseUrl(baseUrl).requestFactory(factory).build();
         this.maxResponseBytes = maxResponseBytes;

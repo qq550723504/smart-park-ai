@@ -18,6 +18,19 @@ public final class SynthesisValidator {
     public Synthesis validate(Synthesis synthesis,
                               List<ExpertFinding> findings,
                               Set<ExpertDomain> selectedDomains) {
+        return validate(synthesis, findings, selectedDomains, false);
+    }
+
+    public Synthesis validateModelSynthesis(Synthesis synthesis,
+                                            List<ExpertFinding> findings,
+                                            Set<ExpertDomain> selectedDomains) {
+        return validate(synthesis, findings, selectedDomains, true);
+    }
+
+    private Synthesis validate(Synthesis synthesis,
+                               List<ExpertFinding> findings,
+                               Set<ExpertDomain> selectedDomains,
+                               boolean modelConclusion) {
         List<ExpertFinding> safeFindings = List.copyOf(findings);
         Set<ExpertDomain> safeSelection = Set.copyOf(selectedDomains);
         Map<ExpertDomain, ExpertFinding> byDomain = indexByDomain(safeFindings);
@@ -35,10 +48,6 @@ public final class SynthesisValidator {
         if (synthesis.status() == FindingStatus.SUPPORTED && !safeSelection.equals(supportedDomains)) {
             throw new IllegalArgumentException(
                     "synthesis selected findings must include all SUPPORTED findings");
-        }
-        if (synthesis.status() != FindingStatus.SUPPORTED && !supportedDomains.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "synthesis must be SUPPORTED when any SUPPORTED finding exists");
         }
         for (ExpertDomain domain : safeSelection) {
             ExpertFinding finding = byDomain.get(domain);
@@ -72,7 +81,7 @@ public final class SynthesisValidator {
             expectedConclusion = synthesis.status() == FindingStatus.FAILED
                     ? "专家协作失败" : "没有可验证的专家结论";
         }
-        if (!expectedConclusion.equals(synthesis.conclusion())) {
+        if (!modelConclusion && !expectedConclusion.equals(synthesis.conclusion())) {
             throw new IllegalArgumentException("synthesis conclusion must be derived from selected findings");
         }
 

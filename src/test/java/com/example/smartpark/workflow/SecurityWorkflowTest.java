@@ -30,16 +30,12 @@ class SecurityWorkflowTest {
                 new AlertDiagnosisAgent(
                         new TestChatModel("""
                                 {
-                                  "id":"diag-security-workflow-1",
-                                  "alertId":"ALT-ACCESS-001",
-                                  "deviceId":"DEV-ACCESS-001",
                                   "riskLevel":"HIGH",
                                   "rootCause":"Repeated denied access outside opening hours requires operator review.",
                                   "summary":"The redacted event indicates three denied attempts.",
                                   "evidence":["security: redacted rule match only","knowledge: require human review"],
                                   "recommendedAction":"Notify authorized security staff and create a review work order after approval.",
-                                  "confidence":0.92,
-                                  "diagnosedAt":"2026-08-23T01:50:00Z"
+                                  "confidence":0.92
                                 }
                                 """),
                         new DeviceQueryTool(fixture.devices()),

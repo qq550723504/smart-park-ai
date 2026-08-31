@@ -437,24 +437,19 @@ class AlertWorkflowTest {
             String riskLevel,
             double confidence,
             boolean insufficientEvidence) {
-        String deviceId = alertId.contains("POWER") ? "DEV-POWER-001" : "DEV-HVAC-001";
         String evidence = insufficientEvidence
                 ? "INSUFFICIENT_EVIDENCE: no knowledge documents matched the request"
                 : "knowledge: matching playbook and device history";
         return """
                 {
-                  "id":"diag-%s",
-                  "alertId":"%s",
-                  "deviceId":"%s",
                   "riskLevel":"%s",
                   "rootCause":"fixture root cause",
                   "summary":"fixture diagnosis summary",
                   "evidence":["%s"],
                   "recommendedAction":"inspect the device",
-                  "confidence":%s,
-                  "diagnosedAt":"2026-08-23T01:30:00Z"
+                  "confidence":%s
                 }
-                """.formatted(alertId, alertId, deviceId, riskLevel, evidence, confidence);
+                """.formatted(riskLevel, evidence, confidence);
     }
 
     private static Diagnosis diagnosis(

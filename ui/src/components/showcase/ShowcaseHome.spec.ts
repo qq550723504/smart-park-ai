@@ -29,6 +29,15 @@ function scenario(
     OPERATIONS_ANALYSIS: '过去几天哪座楼能耗偏离基线？',
     VOICE_ASSISTANT: '通过语音询问园区问题并获得在线回答',
   }
+  const launchInputs = {
+    ALERT_WORKFLOW: { alertId: 'ALT-POWER-001', question: null },
+    EXPERT_COLLABORATION: {
+      alertId: null,
+      question: '电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联',
+    },
+    OPERATIONS_ANALYSIS: { alertId: null, question: '过去5天各楼宇能耗' },
+    VOICE_ASSISTANT: { alertId: null, question: null },
+  } as const
 
   return {
     id,
@@ -40,6 +49,7 @@ function scenario(
     requiredCapabilities: ['在线模型', '领域工具'],
     proofTypes: ['专家分工', '工具证据'],
     humanBoundary: '证据不足时保留人工复核',
+    launchInput: launchInputs[id],
     unavailableReason,
     lastVerifiedAt: status === 'READY' && live ? verifiedAt : null,
     ...overrides,
@@ -70,7 +80,7 @@ function deferred<T>() {
 }
 
 afterEach(() => {
-  vi.clearAllMocks()
+  vi.resetAllMocks()
 })
 
 describe('ShowcaseHome truthful catalog selection', () => {
@@ -84,7 +94,13 @@ describe('ShowcaseHome truthful catalog selection', () => {
 
     expect(wrapper.get('[data-selected-scenario]').text()).toContain('跨域专家协作')
     await wrapper.get('[data-start-showcase]').trigger('click')
-    expect(wrapper.emitted('start-scenario')).toEqual([['EXPERT_COLLABORATION']])
+    expect(wrapper.emitted('start-scenario')).toEqual([[
+      'EXPERT_COLLABORATION',
+      {
+        alertId: null,
+        question: '电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联',
+      },
+    ]])
   })
 
   it('revalidates immediately before start and fails closed when readiness expired', async () => {
@@ -187,7 +203,7 @@ describe('ShowcaseHome truthful catalog selection', () => {
     expect(ribbon).not.toContain('实时演绎中')
   })
 
-  it('orders selectable scenarios by customer-demo priority and exposes at most three rows', async () => {
+  it('orders every scenario by customer-demo priority and exposes each as a real row', async () => {
     vi.mocked(getShowcaseScenarios).mockResolvedValue(catalog([
       scenario('VOICE_ASSISTANT', 'READY', true, null),
       scenario('OPERATIONS_ANALYSIS', 'READY', true, null),
@@ -198,15 +214,37 @@ describe('ShowcaseHome truthful catalog selection', () => {
     const wrapper = await mountLoaded()
     const rows = wrapper.findAll('[data-showcase-scenario-row]')
 
-    expect(rows).toHaveLength(3)
+    expect(rows).toHaveLength(4)
     expect(rows.map((row) => row.attributes('data-scenario-id'))).toEqual([
       'EXPERT_COLLABORATION',
       'ALERT_WORKFLOW',
       'OPERATIONS_ANALYSIS',
+      'VOICE_ASSISTANT',
     ])
-    expect(wrapper.get('[data-omitted-scenario]').text()).toContain('实时语音助手')
-    expect(wrapper.get('[data-omitted-scenario]').text()).toContain('READY · live')
     expect(wrapper.get('[data-selected-scenario]').text()).toContain('跨域专家协作')
+  })
+
+  it('selects the fourth ready voice scenario from its real row and starts it after revalidation', async () => {
+    const allReady = catalog([
+      scenario('VOICE_ASSISTANT', 'READY', true, null),
+      scenario('OPERATIONS_ANALYSIS', 'READY', true, null),
+      scenario('ALERT_WORKFLOW', 'READY', true, null),
+      scenario('EXPERT_COLLABORATION', 'READY', true, null),
+    ])
+    vi.mocked(getShowcaseScenarios).mockResolvedValueOnce(allReady).mockResolvedValueOnce(allReady)
+
+    const wrapper = await mountLoaded()
+    const voiceRow = wrapper.get('[data-showcase-scenario-row][data-scenario-id="VOICE_ASSISTANT"]')
+    await voiceRow.trigger('click')
+    expect(wrapper.get('[data-selected-scenario]').text()).toContain('实时语音助手')
+
+    await wrapper.get('[data-start-showcase]').trigger('click')
+    await flushPromises()
+
+    expect(getShowcaseScenarios).toHaveBeenCalledTimes(2)
+    expect(wrapper.emitted('start-scenario')).toEqual([
+      ['VOICE_ASSISTANT', { alertId: null, question: null }],
+    ])
   })
 
   it('renders server-provided selected scenario facts truthfully', async () => {
@@ -314,7 +352,7 @@ describe('ShowcaseHome truthful catalog selection', () => {
     expect(wrapper.get('[data-start-showcase]').attributes('disabled')).toBeDefined()
   })
 
-  it('retains the fourth unavailable capability reason in a compact ledger', async () => {
+  it('retains the fourth unavailable capability reason in its disabled row', async () => {
     vi.mocked(getShowcaseScenarios).mockResolvedValue(catalog([
       scenario('EXPERT_COLLABORATION', 'DISABLED', false, '本次部署未启用专家协作'),
       scenario('ALERT_WORKFLOW', 'NOT_READY', false, '本次部署尚未完成在线验证'),
@@ -324,9 +362,12 @@ describe('ShowcaseHome truthful catalog selection', () => {
 
     const wrapper = await mountLoaded()
 
-    expect(wrapper.findAll('[data-showcase-scenario-row]')).toHaveLength(3)
-    expect(wrapper.get('[data-omitted-scenario]').text()).toContain('实时语音助手')
-    expect(wrapper.get('[data-omitted-scenario]').text()).toContain('本次展台未启用语音链路')
+    const rows = wrapper.findAll('[data-showcase-scenario-row]')
+    const voice = rows.find((row) => row.attributes('data-scenario-id') === 'VOICE_ASSISTANT')
+    expect(rows).toHaveLength(4)
+    expect(voice?.attributes('disabled')).toBeDefined()
+    expect(voice?.text()).toContain('实时语音助手')
+    expect(voice?.text()).toContain('本次展台未启用语音链路')
   })
 
   it('emits the workbench intent without a payload', async () => {

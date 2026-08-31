@@ -1,12 +1,20 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import './expert-collaboration.css'
 import ExpertCard from './ExpertCard.vue'
 import { useExpertCollaboration } from '../composables/useExpertCollaboration'
+import { useGuidedLaunch } from '../composables/useGuidedLaunch'
 import type { ExpertDomain } from '../types/collaboration'
 import type { ExecutionTrace } from '../composables/useExecutionTrace'
+import type { GuidedLaunchUpdate, ScenarioLaunchRequest } from '../types/workbench'
 
-const props = withDefaults(defineProps<{ trace: ExecutionTrace; active?: boolean }>(), { active: true })
+const props = withDefaults(defineProps<{
+  trace: ExecutionTrace
+  active?: boolean
+  launchRequest?: ScenarioLaunchRequest | null
+}>(), { active: true, launchRequest: null })
+const emit = defineEmits<{ 'launch-status': [update: GuidedLaunchUpdate] }>()
 const question = ref('电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联')
 const presets = [
   '电表 DEV-ENERGY-001 当前能耗是否高于基线',
@@ -16,6 +24,11 @@ const presets = [
 const { run, loading, error, isRunning, start } = useExpertCollaboration()
 const domainLabels: Record<ExpertDomain, string> = { ENERGY: '能耗专家', DEVICE: '设备专家', SECURITY: '安防专家' }
 const domains = computed(() => run.value?.plan?.selectedDomains ?? [])
+const evidenceCoverage = computed(() => {
+  if (!domains.value.length) return null
+  const backedDomains = run.value?.findings.filter((finding) => finding.evidenceRefs.length > 0).length ?? 0
+  return Math.round((backedDomains / domains.value.length) * 100)
+})
 const handoffs = computed(() => props.trace.events.value.filter((event) => event.eventType === 'EXPERT_HANDOFF'))
 
 watch(
@@ -23,6 +36,20 @@ watch(
   ([active, runId]) => { if (active && runId) props.trace.subscribe(runId) },
   { immediate: true },
 )
+
+useGuidedLaunch({
+  active: () => props.active,
+  request: () => props.launchRequest,
+  scenarioId: 'EXPERT_COLLABORATION',
+  start: async (request) => {
+    const guidedQuestion = request.launchInput?.question?.trim()
+    if (!guidedQuestion) throw new Error('专家协作演示配置无效')
+    question.value = guidedQuestion
+    await start(question.value)
+    return { state: 'started', message: '专家协作已启动' }
+  },
+  onUpdate: (update) => emit('launch-status', update),
+})
 
 function selectPreset(value: string) { question.value = value }
 
@@ -36,7 +63,7 @@ function timeLabel(timestamp: string) { return new Date(timestamp).toLocaleTimeS
 
 <template>
   <div class="collaboration-main">
-    <section class="hero-row collaboration-hero"><div><span class="eyebrow">专家协作 · 04</span><h2>让复杂问题<br /><em>由合适的专家共同回答</em></h2><p class="hero-copy">主管先拆解问题，再动态分派领域专家并汇总有证据的结论。每一次交接都可追踪。</p></div><div class="hero-metrics"><div><strong>{{ domains.length || '—' }}</strong><span>本次专家</span></div><div><strong>{{ run?.findings.length || '—' }}</strong><span>已返回结论</span></div><div><strong>{{ run?.synthesis ? `${Math.round(run.synthesis.confidence * 100)}%` : '—' }}</strong><span>汇总置信度</span></div></div></section>
+    <section class="hero-row collaboration-hero"><div><span class="eyebrow">专家协作 · 04</span><h2>让复杂问题<br /><em>由合适的专家共同回答</em></h2><p class="hero-copy">主管先拆解问题，再动态分派领域专家并汇总有证据的结论。每一次交接都可追踪。</p></div><div class="hero-metrics"><div><strong>{{ domains.length || '—' }}</strong><span>本次专家</span></div><div><strong>{{ run?.findings.length || '—' }}</strong><span>已返回结论</span></div><div><strong>{{ evidenceCoverage === null ? '—' : `${evidenceCoverage}%` }}</strong><span>证据覆盖</span></div></div></section>
 
     <section class="collaboration-layout">
       <div class="collaboration-primary">
@@ -50,7 +77,7 @@ function timeLabel(timestamp: string) { return new Date(timestamp).toLocaleTimeS
 
         <section class="expert-section"><div class="section-heading"><div><span class="eyebrow">动态专家卡</span><h2>本次参与的专家</h2></div><span class="count-badge">{{ domains.length }} 个分支</span></div><div v-if="domains.length" class="expert-grid"><ExpertCard v-for="domain in domains" :key="domain" :domain="domain" :plan="run?.plan ?? null" :finding="findingFor(domain)" /></div><div v-else class="collaboration-empty">提交问题后，系统会根据问题内容动态选择专家。</div></section>
 
-        <section v-if="run?.synthesis" class="panel synthesis-panel"><div class="section-heading"><div><span class="eyebrow">主管汇总</span><h2>协作结论</h2></div><span class="synthesis-confidence">置信度 {{ Math.round(run.synthesis.confidence * 100) }}%</span></div><p>{{ run.synthesis.conclusion }}</p><div class="evidence-list"><span v-for="ref in run.synthesis.evidenceRefs" :key="ref">{{ ref }}</span></div><p v-if="run.synthesis.uncertainties.length" class="uncertainty">不确定性：{{ run.synthesis.uncertainties.join('、') }}</p></section>
+        <section v-if="run?.synthesis" class="panel synthesis-panel"><div class="section-heading"><div><span class="eyebrow">主管汇总</span><h2>协作结论</h2></div><span class="synthesis-confidence">工具证据覆盖 {{ evidenceCoverage }}%</span></div><p>{{ run.synthesis.conclusion }}</p><div class="evidence-list"><span v-for="ref in run.synthesis.evidenceRefs" :key="ref">{{ ref }}</span></div><p v-if="run.synthesis.uncertainties.length" class="uncertainty">不确定性：{{ run.synthesis.uncertainties.join('、') }}</p></section>
       </div>
 
       <aside class="panel handoff-panel"><div class="section-heading"><div><span class="eyebrow">交接轨迹</span><h2>专家之间如何协作</h2></div><span class="live-indicator"><i></i>实时</span></div><ol v-if="handoffs.length" class="handoff-list"><li v-for="event in handoffs" :key="event.eventId"><span class="handoff-node"></span><div><div class="handoff-meta"><strong>{{ event.actor }}</strong><time>{{ timeLabel(event.timestamp) }}</time></div><p>{{ event.safeSummary }}</p><span v-if="event.displayPayload?.payloadType === 'EXPERT_HANDOFF'" class="handoff-detail">{{ domainLabels[event.displayPayload.domain as ExpertDomain] ?? event.displayPayload.domain }} · {{ event.displayPayload.direction }} · {{ event.displayPayload.findingStatus }}</span></div></li></ol><div v-else class="collaboration-empty">启动协作后，主管分派与专家回传会按时间记录在这里。</div></aside>

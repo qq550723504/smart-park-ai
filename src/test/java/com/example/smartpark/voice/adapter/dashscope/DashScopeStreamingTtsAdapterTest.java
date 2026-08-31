@@ -1,5 +1,6 @@
 package com.example.smartpark.voice.adapter.dashscope;
 
+import com.alibaba.cloud.ai.dashscope.audio.tts.DashScopeAudioSpeechOptions;
 import com.example.smartpark.voice.model.VoiceErrorCode;
 import com.example.smartpark.voice.port.StreamingTtsPort;
 import org.junit.jupiter.api.AfterEach;
@@ -24,6 +25,7 @@ class DashScopeStreamingTtsAdapterTest {
 
     private CapturingFacade facade;
     private DashScopeStreamingTtsAdapter adapter;
+    private DashScopeAudioSpeechOptions configuredOptions;
 
     @AfterEach
     void shutdownAdapter() {
@@ -34,7 +36,11 @@ class DashScopeStreamingTtsAdapterTest {
 
     private void newAdapter() {
         facade = new CapturingFacade();
-        adapter = new DashScopeStreamingTtsAdapter(facade);
+        configuredOptions = new DashScopeAudioSpeechOptions();
+        configuredOptions.setModel("cosyvoice-v2");
+        configuredOptions.setVoice("longxiaochun_v2");
+        configuredOptions.setSpeed(1.25);
+        adapter = new DashScopeStreamingTtsAdapter(facade, configuredOptions);
     }
 
     @Test
@@ -45,6 +51,12 @@ class DashScopeStreamingTtsAdapterTest {
 
         await(() -> facade.receivedTexts.size() == 3);
         assertThat(facade.receivedTexts).containsExactly("你好", "，", "世界");
+        assertThat(facade.capturedOptions).isInstanceOf(DashScopeAudioSpeechOptions.class);
+        DashScopeAudioSpeechOptions passed = (DashScopeAudioSpeechOptions) facade.capturedOptions;
+        assertThat(passed.getModel()).isEqualTo("cosyvoice-v2");
+        assertThat(passed.getVoice()).isEqualTo("longxiaochun_v2");
+        assertThat(passed.getSpeed()).isEqualTo(1.25);
+        assertThat(passed).isNotSameAs(configuredOptions);
     }
 
     @Test
@@ -147,10 +159,12 @@ class DashScopeStreamingTtsAdapterTest {
                 Sinks.many().multicast().onBackpressureBuffer();
         final java.util.concurrent.atomic.AtomicBoolean cancelled =
                 new java.util.concurrent.atomic.AtomicBoolean(false);
+        volatile org.springframework.ai.audio.tts.TextToSpeechOptions capturedOptions;
 
         @Override
         public Flux<TextToSpeechResponse> streamSpeech(
                 Flux<String> text, org.springframework.ai.audio.tts.TextToSpeechOptions options) {
+            capturedOptions = options;
             text.subscribe(receivedTexts::add, error -> { /* drained by test */ });
             return outbound.asFlux()
                     .doOnCancel(() -> cancelled.set(true));

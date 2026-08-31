@@ -22,6 +22,7 @@ const assignment = computed(() => props.plan?.assignments[props.domain] ?? '')
 const status = computed(() => props.finding?.status ?? (props.plan ? 'RUNNING' : 'PENDING'))
 const statusLabel = computed(() => statusLabels[status.value] ?? status.value)
 const confidence = computed(() => props.finding ? `${Math.round(props.finding.confidence * 100)}%` : '--')
+const evidenceStatus = computed(() => props.finding?.evidenceRefs.length ? '工具证据已验证' : `模型置信度 ${confidence.value}`)
 </script>
 
 <template>
@@ -33,7 +34,7 @@ const confidence = computed(() => props.finding ? `${Math.round(props.finding.co
     <div class="expert-assignment"><span>交接任务</span><p>{{ assignment || '等待主管分配任务' }}</p></div>
     <div v-if="finding" class="expert-finding">
       <p class="expert-conclusion">{{ finding.conclusion }}</p>
-      <div class="expert-stats"><span>置信度 <strong>{{ confidence }}</strong></span><span>证据 <strong>{{ finding.evidenceRefs.length }} 条</strong></span></div>
+      <div class="expert-stats"><span><strong>{{ evidenceStatus }}</strong></span><span>证据 <strong>{{ finding.evidenceRefs.length }} 条</strong></span></div>
       <div v-if="finding.evidenceRefs.length" class="evidence-list"><span v-for="ref in finding.evidenceRefs" :key="ref">{{ ref }}</span></div>
       <p v-if="finding.nextChecks.length" class="next-checks">后续核查：{{ finding.nextChecks.join('、') }}</p>
     </div>

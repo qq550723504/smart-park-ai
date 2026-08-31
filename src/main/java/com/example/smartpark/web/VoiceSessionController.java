@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 import java.util.Map;
 import java.util.Optional;
@@ -23,6 +24,7 @@ import java.util.Optional;
 @RestController
 @RequestMapping("/api/voice")
 @Conditional(VoiceActiveCondition.class)
+@ConditionalOnProperty(prefix = "smartpark.local-demo", name = "enabled", havingValue = "true")
 public class VoiceSessionController {
 
     private final VoiceSessionService service;

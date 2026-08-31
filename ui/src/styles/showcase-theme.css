@@ -1,0 +1,25 @@
+:root {
+  --showcase-graphite: #06090f;
+  --showcase-graphite-2: #0c111a;
+  --showcase-border: rgba(176, 190, 208, 0.28);
+  --showcase-border-soft: rgba(176, 190, 208, 0.16);
+  --showcase-cyan: #70e8ff;
+  --showcase-cyan-soft: rgba(112, 232, 255, 0.14);
+  --showcase-violet: #8f5cff;
+  --showcase-violet-soft: rgba(143, 92, 255, 0.32);
+  --showcase-ivory: #fff0d2;
+  --showcase-muted: #98a4b6;
+  --showcase-amber: #ffd27a;
+  --showcase-glass: rgba(4, 7, 12, 0.78);
+  --showcase-glass-strong: rgba(4, 7, 12, 0.9);
+  color: var(--showcase-ivory);
+  background: var(--showcase-graphite);
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+html, body, #app { min-width: 320px; min-height: 100%; margin: 0; }
+body { min-height: 100vh; background: var(--showcase-graphite); }
+button, input, textarea, select { font: inherit; }
+:focus-visible { outline: 3px solid rgba(112, 232, 255, 0.95); outline-offset: 3px; }

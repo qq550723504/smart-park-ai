@@ -18,6 +18,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
 import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistration;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Opt-in voice session wiring via smartpark.voice.enabled=true.
@@ -86,12 +87,13 @@ public class VoiceSessionConfiguration {
     @Bean
     VoiceWebSocketHandler voiceWebSocketHandler(
             VoiceSessionService service,
-            com.fasterxml.jackson.databind.ObjectMapper objectMapper,
+            ObjectMapper objectMapper,
             VoiceProperties properties) {
         return new VoiceWebSocketHandler(service, objectMapper, properties.getMaxBinaryFrameBytes());
     }
 
     @Bean
+    @ConditionalOnProperty(prefix = "smartpark.local-demo", name = "enabled", havingValue = "true")
     public WebSocketConfigurer voiceWebSocketConfigurer(
             VoiceWebSocketHandler handler, VoiceProperties properties) {
         return registry -> register(registry, handler, properties);

@@ -9,16 +9,23 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public final class SupervisorPlanner {
+    private static final Logger log = LoggerFactory.getLogger(SupervisorPlanner.class);
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Pattern ENERGY_DEVICE_ID = Pattern.compile("DEV-ENERGY-[A-Z0-9-]+", Pattern.CASE_INSENSITIVE);
     private static final Pattern DEVICE_ID = Pattern.compile("DEV-[A-Z0-9-]+", Pattern.CASE_INSENSITIVE);
     private static final Pattern NON_ENERGY_DEVICE_ID = Pattern.compile("DEV-(?!ENERGY-)[A-Z0-9-]+", Pattern.CASE_INSENSITIVE);
     private static final Pattern SECURITY_EVENT_ID = Pattern.compile("SEC-[A-Z0-9-]+", Pattern.CASE_INSENSITIVE);
+    private static final Pattern CONCRETE_ENTITY_IDENTIFIER = Pattern.compile(
+            "(?i)(?<![A-Z0-9_-])(?:[A-Z][A-Z0-9]{0,15}(?:-[A-Z0-9]+)+|[A-Z]{1,8}\\d+)(?![A-Z0-9_-])");
     private static final Map<String, ExpertDomain> DOMAIN_ALIASES = Map.ofEntries(
             Map.entry("energy", ExpertDomain.ENERGY),
             Map.entry("energetics", ExpertDomain.ENERGY),
@@ -37,6 +44,9 @@ public final class SupervisorPlanner {
             Map.entry("door", ExpertDomain.SECURITY),
             Map.entry("安防", ExpertDomain.SECURITY),
             Map.entry("门禁", ExpertDomain.SECURITY));
+    private static final Set<String> PLAN_FIELDS = Set.of(
+            "normalizedQuestion", "selectedDomains", "assignments", "selectionReason");
+    private static final Set<String> ASSIGNMENT_FIELDS = Set.of("domain", "assignment");
     private final SupervisorPlanValidator validator;
 
     public SupervisorPlanner() { this(new SupervisorPlanValidator()); }
@@ -45,51 +55,92 @@ public final class SupervisorPlanner {
         this.validator = validator;
     }
 
+    public SupervisorPlan planDeterministically(String question) {
+        String normalizedQuestion = normalize(question);
+        Set<ExpertDomain> requiredDomains = validator.expectedDomains(normalizedQuestion);
+        if (requiredDomains.isEmpty()) {
+            throw new SupervisorPlanValidator.SupervisorPlanValidationException(
+                    "question is ambiguous or outside expert collaboration scope");
+        }
+        EnumMap<ExpertDomain, String> assignments = new EnumMap<>(ExpertDomain.class);
+        requiredDomains.forEach(domain -> assignments.put(domain, normalizedQuestion));
+        return validator.validate(new SupervisorPlan(normalizedQuestion, requiredDomains, assignments,
+                "server-owned deterministic routing"));
+    }
+
     public SupervisorPlan parseAndValidate(String question, String modelJson) {
         String normalizedQuestion = normalize(question);
         JsonNode root = parseObject(modelJson);
-        if (!root.fieldNames().hasNext()) throw new ModelOutputException("planner response must not be empty");
+        if (!root.fieldNames().hasNext()) {
+            throw reject(PlannerRejection.EMPTY_OBJECT, "planner response must not be empty");
+        }
+        rejectUnknownFields(root, PLAN_FIELDS);
         JsonNode selected = root.get("selectedDomains");
         JsonNode assignments = root.get("assignments");
         if (!root.has("normalizedQuestion") || !root.has("selectionReason") || selected == null || assignments == null) {
-            throw new ModelOutputException("planner response is missing required fields");
+            throw reject(PlannerRejection.MISSING_REQUIRED_FIELD, "planner response is missing required fields");
         }
-        requireText(root, "normalizedQuestion");
-        EnumSet<ExpertDomain> domains = EnumSet.noneOf(ExpertDomain.class);
-        if (!selected.isArray()) throw new ModelOutputException("selectedDomains must be an array");
+        String providerQuestion = requireText(root, "normalizedQuestion", PlannerRejection.NORMALIZED_QUESTION_TYPE);
+        if (!normalize(providerQuestion).equals(normalizedQuestion)) {
+            throw reject(PlannerRejection.QUESTION_MISMATCH,
+                    "normalizedQuestion must exactly match the normalized input question");
+        }
+        EnumSet<ExpertDomain> modelDomains = EnumSet.noneOf(ExpertDomain.class);
+        if (!selected.isArray()) {
+            throw reject(PlannerRejection.SELECTED_DOMAINS_TYPE, "selectedDomains must be an array");
+        }
         for (JsonNode value : selected) {
-            domains.add(parseDomain(value.asText(), value, normalizedQuestion));
+            if (!value.isTextual()) {
+                throw reject(PlannerRejection.SELECTED_DOMAIN_TYPE,
+                        "selectedDomains entries must be strings");
+            }
+            if (!modelDomains.add(parseDomain(value.textValue(), value, normalizedQuestion))) {
+                throw reject(PlannerRejection.COVERAGE,
+                        "selectedDomains must not contain duplicate domains");
+            }
         }
-        if (!assignments.isObject()) throw new ModelOutputException("assignments must be an object");
-        EnumMap<ExpertDomain, String> assignmentMap = new EnumMap<>(ExpertDomain.class);
-        Iterator<Map.Entry<String, JsonNode>> fields = assignments.fields();
-        while (fields.hasNext()) {
-            Map.Entry<String, JsonNode> field = fields.next();
-            assignmentMap.put(parseDomain(field.getKey(), field.getKey(), normalizedQuestion), field.getValue().asText());
+        EnumMap<ExpertDomain, String> modelAssignments = new EnumMap<>(ExpertDomain.class);
+        Set<String> assignmentIdentifiers = new LinkedHashSet<>();
+        if (assignments.isArray()) {
+            parseTypedAssignments(assignments, normalizedQuestion, modelAssignments, assignmentIdentifiers);
+        } else if (assignments.isObject()) {
+            parseLegacyAssignments(assignments, normalizedQuestion, modelAssignments, assignmentIdentifiers);
+        } else {
+            throw reject(PlannerRejection.ASSIGNMENTS_TYPE,
+                    "assignments must be an array or an object");
         }
-        if (!assignmentMap.keySet().equals(domains)) {
-            throw new ModelOutputException("assignments must exactly cover selectedDomains");
+        if (!modelAssignments.keySet().equals(modelDomains)) {
+            throw reject(PlannerRejection.COVERAGE, "assignments must exactly cover selectedDomains");
         }
-        // The model may choose domains and explain that choice, but it does not
-        // own entity scope. Every expert receives the exact user question so a
-        // generated assignment cannot replace D1 with D2 or drop another
-        // concrete identifier.
+        requireCompleteEntityScope(normalizedQuestion, assignmentIdentifiers);
+
+        // The provider response is mandatory structured confirmation and its
+        // explanation is retained, but routing has exactly one authority: the
+        // server-owned deterministic classifier. Provider grouping may differ
+        // without dropping or adding an expert branch in the executable plan.
+        Set<ExpertDomain> requiredDomains = validator.expectedDomains(normalizedQuestion);
+        if (requiredDomains.isEmpty()) {
+            throw new SupervisorPlanValidator.SupervisorPlanValidationException(
+                    "question is ambiguous or outside expert collaboration scope");
+        }
         EnumMap<ExpertDomain, String> canonicalAssignments = new EnumMap<>(ExpertDomain.class);
-        domains.forEach(domain -> canonicalAssignments.put(domain, normalizedQuestion));
+        requiredDomains.forEach(domain -> canonicalAssignments.put(domain, normalizedQuestion));
         SupervisorPlan plan = new SupervisorPlan(
-                normalizedQuestion, domains, canonicalAssignments,
-                requireText(root, "selectionReason"));
+                normalizedQuestion, requiredDomains, canonicalAssignments,
+                requireText(root, "selectionReason", PlannerRejection.SELECTION_REASON_TYPE));
         return validator.validate(plan);
     }
 
     private static JsonNode parseObject(String text) {
         try {
             JsonNode node = JSON.readTree(text);
-            if (node == null || !node.isObject()) throw new ModelOutputException("planner response must be a JSON object");
+            if (node == null || !node.isObject()) {
+                throw reject(PlannerRejection.NON_OBJECT, "planner response must be a JSON object");
+            }
             return node;
         } catch (Exception ex) {
             if (ex instanceof ModelOutputException e) throw e;
-            throw new ModelOutputException("planner response was not valid JSON", ex);
+            throw reject(PlannerRejection.MALFORMED_JSON, "planner response was not valid JSON", ex);
         }
     }
 
@@ -98,10 +149,125 @@ public final class SupervisorPlanner {
         return text.trim();
     }
 
-    private static String requireText(JsonNode root, String field) {
-        JsonNode value = root.get(field);
-        if (value == null || !value.isTextual() || value.asText().isBlank()) throw new ModelOutputException(field + " must be a non-empty string");
+    private static String requireText(JsonNode root, String field, PlannerRejection rejection) {
+        return requireTextValue(root.get(field), field, rejection);
+    }
+
+    private static ModelOutputException reject(PlannerRejection rejection, String message) {
+        log.warn(rejection.name());
+        return new ModelOutputException(message);
+    }
+
+    private static ModelOutputException reject(PlannerRejection rejection, String message, Exception cause) {
+        log.warn(rejection.name());
+        return new ModelOutputException(message, cause);
+    }
+
+    private enum PlannerRejection {
+        MALFORMED_JSON,
+        NON_OBJECT,
+        EMPTY_OBJECT,
+        MISSING_REQUIRED_FIELD,
+        UNKNOWN_FIELD,
+        NORMALIZED_QUESTION_TYPE,
+        QUESTION_MISMATCH,
+        SELECTED_DOMAINS_TYPE,
+        SELECTED_DOMAIN_TYPE,
+        DOMAIN,
+        ASSIGNMENTS_TYPE,
+        ASSIGNMENT_ENTRY_TYPE,
+        ASSIGNMENT_DOMAIN_TYPE,
+        ASSIGNMENT_TYPE,
+        ASSIGNMENT_SCOPE,
+        COVERAGE,
+        SELECTION_REASON_TYPE
+    }
+
+    private static String requireTextValue(JsonNode value, String description, PlannerRejection rejection) {
+        if (value == null || !value.isTextual() || value.asText().isBlank()) {
+            throw reject(rejection, description + " must be a non-empty string");
+        }
         return value.asText().trim();
+    }
+
+    private static void rejectUnknownFields(JsonNode object, Set<String> allowedFields) {
+        object.fieldNames().forEachRemaining(field -> {
+            if (!allowedFields.contains(field)) {
+                throw reject(PlannerRejection.UNKNOWN_FIELD, "planner response contains an unknown field");
+            }
+        });
+    }
+
+    private static void parseTypedAssignments(
+            JsonNode assignments, String question, EnumMap<ExpertDomain, String> normalizedAssignments,
+            Set<String> assignmentIdentifiers) {
+        for (JsonNode value : assignments) {
+            if (!value.isObject()) {
+                throw reject(PlannerRejection.ASSIGNMENT_ENTRY_TYPE,
+                        "assignments entries must be objects");
+            }
+            rejectUnknownFields(value, ASSIGNMENT_FIELDS);
+            JsonNode domainValue = value.get("domain");
+            if (domainValue == null || !domainValue.isTextual()) {
+                throw reject(PlannerRejection.ASSIGNMENT_DOMAIN_TYPE,
+                        "assignment domain must be a string");
+            }
+            addAssignment(normalizedAssignments,
+                    parseDomain(domainValue.textValue(), domainValue, question),
+                    requireTextValue(value.get("assignment"), "assignment", PlannerRejection.ASSIGNMENT_TYPE),
+                    question, assignmentIdentifiers);
+        }
+    }
+
+    private static void parseLegacyAssignments(
+            JsonNode assignments, String question, EnumMap<ExpertDomain, String> normalizedAssignments,
+            Set<String> assignmentIdentifiers) {
+        Iterator<Map.Entry<String, JsonNode>> fields = assignments.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> field = fields.next();
+            addAssignment(normalizedAssignments,
+                    parseDomain(field.getKey(), field.getKey(), question),
+                    requireTextValue(field.getValue(), "assignment", PlannerRejection.ASSIGNMENT_TYPE),
+                    question, assignmentIdentifiers);
+        }
+    }
+
+    private static void addAssignment(
+            EnumMap<ExpertDomain, String> assignments, ExpertDomain domain, String assignment, String question,
+            Set<String> assignmentIdentifiers) {
+        Set<String> identifiers = entityIdentifiers(assignment);
+        requireNoUnexpectedEntityScope(question, identifiers, domain);
+        assignmentIdentifiers.addAll(identifiers);
+        if (assignments.put(domain, assignment) != null) {
+            throw reject(PlannerRejection.COVERAGE, "assignments must not contain duplicate domains");
+        }
+    }
+
+    private static void requireNoUnexpectedEntityScope(
+            String question, Set<String> assignmentIdentifiers, ExpertDomain domain) {
+        Set<String> requiredIdentifiers = entityIdentifiers(question);
+        Set<String> unexpected = new LinkedHashSet<>(assignmentIdentifiers);
+        unexpected.removeAll(requiredIdentifiers);
+        if (!unexpected.isEmpty()) {
+            throw reject(PlannerRejection.ASSIGNMENT_SCOPE,
+                    "assignment for " + domain + " contains identifiers outside the input scope");
+        }
+    }
+
+    private static void requireCompleteEntityScope(String question, Set<String> assignmentIdentifiers) {
+        if (!assignmentIdentifiers.equals(entityIdentifiers(question))) {
+            throw reject(PlannerRejection.ASSIGNMENT_SCOPE,
+                    "assignments must collectively preserve the complete input entity scope");
+        }
+    }
+
+    private static Set<String> entityIdentifiers(String text) {
+        Set<String> identifiers = new LinkedHashSet<>();
+        var matcher = CONCRETE_ENTITY_IDENTIFIER.matcher(text);
+        while (matcher.find()) {
+            identifiers.add(matcher.group().toUpperCase(Locale.ROOT));
+        }
+        return Set.copyOf(identifiers);
     }
 
     private static ExpertDomain parseDomain(String raw, Object original, String question) {
@@ -123,12 +289,12 @@ public final class SupervisorPlanner {
                 return ExpertDomain.DEVICE;
             }
             if (questionText.contains("dev-energy-")) return ExpertDomain.ENERGY;
-            throw new ModelOutputException("ambiguous expert domain: " + original);
+            throw reject(PlannerRejection.DOMAIN, "ambiguous expert domain: " + original);
         }
         if (ENERGY_DEVICE_ID.matcher(normalized).matches()) return ExpertDomain.ENERGY;
         if (SECURITY_EVENT_ID.matcher(normalized).matches()) return ExpertDomain.SECURITY;
         if (DEVICE_ID.matcher(normalized).matches()) return ExpertDomain.DEVICE;
         try { return ExpertDomain.valueOf(normalized.toUpperCase(Locale.ROOT)); }
-        catch (Exception ex) { throw new ModelOutputException("unknown expert domain: " + original); }
+        catch (Exception ex) { throw reject(PlannerRejection.DOMAIN, "unknown expert domain: " + original); }
     }
 }

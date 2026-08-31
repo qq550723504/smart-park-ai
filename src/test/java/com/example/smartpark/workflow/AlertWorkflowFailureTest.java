@@ -433,21 +433,16 @@ class AlertWorkflowFailureTest {
     }
 
     private static TestChatModel validDiagnosisModel(String alertId, String riskLevel) {
-        String deviceId = alertId.contains("POWER") ? "DEV-POWER-001" : "DEV-HVAC-001";
         return new TestChatModel("""
                 {
-                  "id":"diag-%s",
-                  "alertId":"%s",
-                  "deviceId":"%s",
                   "riskLevel":"%s",
                   "rootCause":"fixture root cause",
                   "summary":"fixture diagnosis summary",
                   "evidence":["knowledge: matching playbook and device history"],
                   "recommendedAction":"inspect the device",
-                  "confidence":0.95,
-                  "diagnosedAt":"2026-08-23T02:59:00Z"
+                  "confidence":0.95
                 }
-                """.formatted(alertId, alertId, deviceId, riskLevel));
+                """.formatted(riskLevel));
     }
 
     private static ApprovalDecision approval(

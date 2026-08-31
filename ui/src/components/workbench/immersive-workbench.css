@@ -1,0 +1,91 @@
+.immersive-workbench {
+  --ink: var(--showcase-ivory);
+  --ink-soft: var(--showcase-muted);
+  --teal: var(--showcase-cyan);
+  --accent: var(--showcase-cyan);
+  --line: var(--showcase-border-soft);
+  --surface-muted: rgba(12, 17, 26, 0.72);
+  min-height: 100vh;
+  color: var(--showcase-ivory);
+  background:
+    radial-gradient(circle at 18% 8%, rgba(112, 232, 255, 0.1), transparent 30%),
+    radial-gradient(circle at 78% 18%, rgba(143, 92, 255, 0.14), transparent 28%),
+    var(--showcase-graphite);
+}
+
+.immersive-workbench__topbar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 18px; align-items: center; padding: 14px 24px; border-bottom: 1px solid var(--showcase-border-soft); background: var(--showcase-glass-strong); backdrop-filter: blur(18px); }
+.immersive-workbench__brand,
+.immersive-workbench__actions,
+.immersive-workbench__nav,
+.immersive-workbench__evidence ul,
+.immersive-workbench__evidence li { display: flex; align-items: center; }
+.immersive-workbench__brand { gap: 10px; }
+.immersive-workbench__brand > svg { width: 30px; height: 30px; color: var(--showcase-cyan); }
+.immersive-workbench__brand div { display: grid; gap: 2px; }
+.immersive-workbench__brand span { color: var(--showcase-cyan); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.1em; }
+.immersive-workbench__brand strong { color: var(--showcase-ivory); }
+.immersive-workbench__nav { justify-content: center; gap: 6px; min-width: 0; overflow-x: auto; }
+.immersive-workbench__nav button,
+.immersive-workbench__actions > button,
+.immersive-workbench .guided-launch-status button { border: 1px solid var(--showcase-border-soft); border-radius: 10px; color: var(--showcase-ivory); background: rgba(12, 17, 26, 0.72); cursor: pointer; }
+.immersive-workbench__nav button { padding: 8px 10px; white-space: nowrap; }
+.immersive-workbench__nav button.active { border-color: var(--showcase-cyan); color: var(--showcase-cyan); background: var(--showcase-cyan-soft); }
+.immersive-workbench__actions { justify-content: flex-end; gap: 10px; }
+.immersive-workbench__actions > button { padding: 8px 10px; white-space: nowrap; }
+.immersive-workbench .guided-launch-status { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--showcase-border-soft); border-radius: 10px; color: var(--showcase-ivory); background: var(--showcase-cyan-soft); }
+.immersive-workbench .guided-launch-status[data-state='failed'] { border-color: var(--showcase-amber); color: var(--showcase-amber); }
+.immersive-workbench .guided-launch-status button { padding: 6px 8px; }
+
+.immersive-workbench__workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 380px); gap: 18px; padding: 18px 24px; align-items: start; }
+.immersive-workbench__stage { position: relative; min-width: 0; isolation: isolate; }
+.immersive-workbench__stage::before { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: 0.14; background: linear-gradient(rgba(6, 9, 15, 0.62), rgba(6, 9, 15, 0.92)), url('../../assets/showcase/evidence-theater-park.png') 47% center / cover no-repeat; }
+.immersive-workbench__rail { position: sticky; top: 18px; max-height: calc(100vh - 132px); overflow: hidden; }
+.immersive-workbench__rail-content { overflow: auto; max-height: inherit; }
+.immersive-workbench__rail > summary { padding: 10px 12px; border: 1px solid var(--showcase-border-soft); border-radius: 12px; color: var(--showcase-ivory); background: var(--showcase-glass); cursor: pointer; }
+
+.immersive-workbench__evidence { padding: 0 24px 24px; }
+.immersive-workbench__evidence ul { justify-content: space-between; gap: 12px; margin: 0; padding: 14px 18px; border: 1px solid var(--showcase-border); border-radius: 18px; list-style: none; background: var(--showcase-glass); }
+.immersive-workbench__evidence li { min-width: 0; gap: 8px; color: var(--showcase-muted); }
+.immersive-workbench__evidence li strong { color: var(--showcase-ivory); }
+.immersive-workbench__evidence li[data-tone='verified'] strong { color: var(--showcase-cyan); }
+.immersive-workbench__evidence li[data-tone='warning'] strong { color: var(--showcase-amber); }
+.immersive-workbench__evidence li[data-tone='danger'] strong { color: var(--showcase-violet); }
+
+@media (min-width: 768px) {
+  .immersive-workbench__rail > summary { display: none; }
+}
+
+@media (max-width: 1279px) {
+  .immersive-workbench__workspace { grid-template-columns: 1fr; }
+  .immersive-workbench__rail { position: static; max-height: 440px; }
+}
+
+@media (max-width: 767px) {
+  .immersive-workbench__topbar { grid-template-columns: 1fr; padding: 14px 12px; }
+  .immersive-workbench__nav { width: 100%; justify-content: flex-start; overflow-x: auto; white-space: nowrap; scrollbar-width: thin; }
+  .immersive-workbench__actions { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr) auto; justify-content: initial; }
+  .immersive-workbench__actions .el-select { width: 100%; min-width: 0; }
+  .immersive-workbench__workspace { padding: 12px; }
+  .immersive-workbench__rail { max-height: none; }
+  .immersive-workbench__evidence { padding: 0 12px 12px; }
+  .immersive-workbench__evidence ul { align-items: flex-start; flex-direction: column; }
+  .immersive-workbench .hero-row { display: grid; gap: 18px; }
+  .immersive-workbench .hero-row h2 { font-size: clamp(32px, 11vw, 44px); }
+  .immersive-workbench .hero-metrics { display: grid; grid-template-columns: 1fr; }
+  .immersive-workbench .collaboration-form,
+  .immersive-workbench .question-row,
+  .immersive-workbench .chat-composer,
+  .immersive-workbench .approval-form { grid-template-columns: 1fr; }
+  .immersive-workbench .result-panel,
+  .immersive-workbench .analytics-page { min-width: 0; overflow-x: auto; }
+  .immersive-workbench__rail > summary { display: list-item; color: var(--showcase-cyan); cursor: pointer; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .immersive-workbench *, .immersive-workbench *::before, .immersive-workbench *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

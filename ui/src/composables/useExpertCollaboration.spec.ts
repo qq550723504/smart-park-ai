@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { __resetSharedCollaborationState, useExpertCollaboration } from './useExpertCollaboration'
+import { useExpertCollaboration } from './useExpertCollaboration'
 import { getCollaborationRun, startCollaboration } from '../services/collaborationApi'
 
 import type { CollaborationRun } from '../types/collaboration'
@@ -28,9 +28,6 @@ function completed(): CollaborationRun {
 beforeEach(() => {
   vi.clearAllMocks()
   vi.useFakeTimers()
-  // Run state is shared across composable instances (module scope); every
-  // test starts from a clean slate.
-  __resetSharedCollaborationState()
   mockedStart.mockResolvedValue({ runId: 'run-1', statusUrl: '/status', eventsUrl: '/events' })
   mockedGet.mockReset()
 })
@@ -117,27 +114,32 @@ describe('useExpertCollaboration', () => {
     expect(state.run.value?.runId).toBe('run-2')
   })
 
-  it('preserves a RUNNING collaboration across view changes and resumes polling on remount', async () => {
+  it('does not publish a start failure from a superseded collaboration', async () => {
+    let rejectOld!: (reason?: unknown) => void
+    const oldStart = new Promise<{ runId: string; statusUrl: string; eventsUrl: string }>((_resolve, reject) => {
+      rejectOld = reject
+    })
+    mockedStart.mockImplementationOnce(() => oldStart)
+      .mockResolvedValueOnce({ runId: 'run-2', statusUrl: '', eventsUrl: '' })
+    mockedGet.mockResolvedValue({ ...running, runId: 'run-2' })
+    const state = useExpertCollaboration(10)
+
+    const superseded = state.start('first')
+    await state.start('second')
+    rejectOld(new Error('superseded launch failed'))
+
+    await expect(superseded).resolves.toBeNull()
+    expect(state.error.value).toBe('')
+  })
+
+  it('does not leak a running collaboration into a new composable instance', async () => {
     mockedGet.mockResolvedValue(running)
     const firstView = useExpertCollaboration(10)
     await firstView.start('q')
     expect(firstView.isRunning.value).toBe(true)
 
-    // Simulate navigating away: App.vue removes the view, its onBeforeUnmount
-    // stops the timer, and the run record survives in module scope. Any stale
-    // scheduled callback becomes a no-op once the remount bumps the generation.
-    vi.clearAllMocks()
-
-    // Remounting creates a fresh composable instance sharing module state.
-    const remountedView = useExpertCollaboration(10)
-    expect(remountedView.run.value?.runId).toBe('run-1')
-    expect(remountedView.isRunning.value).toBe(true)
-
-    // Polling resumed for the same run and reaches the terminal status.
-    mockedGet.mockResolvedValue(completed())
-    await vi.runAllTimersAsync()
-    expect(mockedGet).toHaveBeenCalledWith('run-1')
-    expect(remountedView.run.value?.status).toBe('COMPLETED')
-    expect(remountedView.isRunning.value).toBe(false)
+    const freshView = useExpertCollaboration(10)
+    expect(freshView.run.value).toBeNull()
+    expect(freshView.isRunning.value).toBe(false)
   })
 })

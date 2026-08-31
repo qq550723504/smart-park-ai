@@ -82,7 +82,7 @@ public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
             String normalized = validateQuery(query);
             if (normalized.isBlank()) return List.of();
             faultInjector.failIfRequested(DemoFaultInjector.FaultPoint.KNOWLEDGE_SEARCH);
-            return vectorStore(domain).similaritySearch(SearchRequest.builder()
+            List<KnowledgeMatch> semanticMatches = vectorStore(domain).similaritySearch(SearchRequest.builder()
                             .query(normalized)
                             .topK(MAX_RESULTS)
                             .similarityThreshold(minSimilarityScore)
@@ -90,9 +90,41 @@ public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
                     .map(document -> toMatch(domain, document))
                     .filter(Objects::nonNull)
                     .toList();
+            if (!semanticMatches.isEmpty()) return semanticMatches;
+            return lexicalFallback(domain, normalized);
         } finally {
             indexLock.readLock().unlock();
         }
+    }
+
+    private List<KnowledgeMatch> lexicalFallback(KnowledgeDomain domain, String query) {
+        return metadata.values().stream()
+                .filter(managed -> managed.active() && managed.document().domain() == domain)
+                .map(ManagedDocument::document)
+                .map(document -> lexicalMatch(document, query))
+                .filter(Objects::nonNull)
+                .filter(match -> match.score() >= minSimilarityScore)
+                .sorted(Comparator.comparingDouble(KnowledgeMatch::score).reversed()
+                        .thenComparing(KnowledgeMatch::documentId))
+                .limit(MAX_RESULTS)
+                .toList();
+    }
+
+    private static KnowledgeMatch lexicalMatch(KnowledgeDocument document, String query) {
+        String normalizedQuery = query.toLowerCase(java.util.Locale.ROOT);
+        if (document.tags().stream().anyMatch(tag -> tag.toLowerCase(java.util.Locale.ROOT).equals(normalizedQuery))) {
+            return new KnowledgeMatch(document, 1.0);
+        }
+        if (document.title().toLowerCase(java.util.Locale.ROOT).contains(normalizedQuery)) {
+            return new KnowledgeMatch(document, 0.85);
+        }
+        if (document.tags().stream().anyMatch(tag -> tag.toLowerCase(java.util.Locale.ROOT).contains(normalizedQuery))) {
+            return new KnowledgeMatch(document, 0.75);
+        }
+        if (document.content().toLowerCase(java.util.Locale.ROOT).contains(normalizedQuery)) {
+            return new KnowledgeMatch(document, 0.70);
+        }
+        return null;
     }
 
     @Override

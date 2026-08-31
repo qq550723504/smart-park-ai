@@ -1,11 +1,24 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { useOperationsAnalysis, type ExecutionTraceLike } from '../../composables/useOperationsAnalysis'
+import { computed, onScopeDispose, ref, watch } from 'vue'
+import {
+  useOperationsAnalysis,
+  type AnalysisStartCallbacks,
+  type ExecutionTraceLike,
+} from '../../composables/useOperationsAnalysis'
+import { useGuidedLaunch } from '../../composables/useGuidedLaunch'
 import AnalyticsChart from './AnalyticsChart.vue'
+import type { GuidedLaunchUpdate, ScenarioLaunchRequest } from '../../types/workbench'
 
-const props = defineProps<{ trace?: ExecutionTraceLike; pollIntervalMs?: number }>()
-void props
-const emit = defineEmits<{ (event: 'run-started', runId: string): void }>()
+const props = withDefaults(defineProps<{
+  trace?: ExecutionTraceLike
+  pollIntervalMs?: number
+  active?: boolean
+  launchRequest?: ScenarioLaunchRequest | null
+}>(), { active: true, launchRequest: null })
+const emit = defineEmits<{
+  'run-started': [runId: string]
+  'launch-status': [update: GuidedLaunchUpdate]
+}>()
 
 const question = ref('')
 const recommendedQuestions = [
@@ -30,12 +43,106 @@ const analysis = useOperationsAnalysis({
   ...(props.pollIntervalMs != null ? { pollIntervalMs: props.pollIntervalMs } : {}),
 })
 const chosenMetrics = ref<string[]>([])
+let cancelGuidedAnalysisStart: (() => void) | null = null
+let pendingGuidedAnalysisStart: { promise: Promise<void>; cancel: () => void; question: string } | null = null
+let returnedFromShowcase = !props.active
 
-function launch(): void {
-  void analysis.submit(question.value).then(() => {
-    if (analysis.runId.value) emit('run-started', analysis.runId.value)
+onScopeDispose(() => {
+  cancelGuidedAnalysisStart?.()
+})
+
+watch(() => props.active, (active) => {
+  if (!active) {
+    returnedFromShowcase = true
+    return
+  }
+  // The analysis composable keeps an accepted run alive while its page is
+  // hidden. Reclaim the shared execution trace when the page becomes active.
+  if (analysis.runId.value) props.trace?.subscribe(analysis.runId.value)
+})
+
+function launchAnalysis(callbacks?: AnalysisStartCallbacks): void {
+  void analysis.submit(question.value, {
+    onAccepted: (runId) => {
+      emit('run-started', runId)
+      callbacks?.onAccepted?.(runId)
+    },
+    onFailed: (cause) => callbacks?.onFailed?.(cause),
   })
 }
+
+function submitAnalysisForm(): void {
+  cancelGuidedAnalysisStart?.()
+  launchAnalysis()
+}
+
+function startGuidedAnalysis(): Promise<void> {
+  cancelGuidedAnalysisStart?.()
+  const submittedQuestion = question.value.trim()
+  let pending: { promise: Promise<void>; cancel: () => void; question: string }
+  const promise = new Promise<void>((resolve, reject) => {
+    let settled = false
+    const clearPending = () => {
+      if (pendingGuidedAnalysisStart === pending) pendingGuidedAnalysisStart = null
+    }
+    const cancel = () => {
+      if (settled) return
+      settled = true
+      if (cancelGuidedAnalysisStart === cancel) cancelGuidedAnalysisStart = null
+      clearPending()
+      reject(new Error('运营分析启动已取消'))
+    }
+    const accept = () => {
+      if (settled) return
+      settled = true
+      if (cancelGuidedAnalysisStart === cancel) cancelGuidedAnalysisStart = null
+      clearPending()
+      resolve()
+    }
+    const fail = (cause: Error) => {
+      if (settled) return
+      settled = true
+      if (cancelGuidedAnalysisStart === cancel) cancelGuidedAnalysisStart = null
+      clearPending()
+      reject(cause)
+    }
+    cancelGuidedAnalysisStart = cancel
+    launchAnalysis({ onAccepted: accept, onFailed: fail })
+  })
+  pending = { promise, cancel: cancelGuidedAnalysisStart!, question: submittedQuestion }
+  pendingGuidedAnalysisStart = pending
+  return promise
+}
+
+useGuidedLaunch({
+  active: () => props.active,
+  request: () => props.launchRequest,
+  scenarioId: 'OPERATIONS_ANALYSIS',
+  start: async (request) => {
+    const guidedQuestion = request.launchInput?.question?.trim()
+    if (!guidedQuestion) throw new Error('运营分析演示配置无效')
+    const preservingExistingRun = returnedFromShowcase
+      && analysis.runId.value
+      && (analysis.phase.value === 'running' || analysis.phase.value === 'clarification')
+    const preservingPendingRun = returnedFromShowcase
+      && !analysis.runId.value
+      && analysis.phase.value === 'running'
+      && pendingGuidedAnalysisStart?.question === guidedQuestion
+    returnedFromShowcase = false
+    if (preservingExistingRun) {
+      return { state: 'started', message: '已保留当前运营分析，请继续查看' }
+    }
+    if (preservingPendingRun) {
+      question.value = guidedQuestion
+      await pendingGuidedAnalysisStart!.promise
+      return { state: 'started', message: '已保留当前运营分析，请继续查看' }
+    }
+    question.value = guidedQuestion
+    await startGuidedAnalysis()
+    return { state: 'started', message: '运营分析已启动' }
+  },
+  onUpdate: (update) => emit('launch-status', update),
+})
 
 function selectRecommendedQuestion(value: string): void {
   question.value = value
@@ -110,7 +217,7 @@ watch(
       </div>
     </div>
 
-    <form class="question-row" @submit.prevent="launch">
+    <form class="question-row" @submit.prevent="submitAnalysisForm">
       <input v-model="question" type="text" placeholder="例如：上周各楼宇能耗对比、高风险告警有多少…" aria-label="分析问题" />
       <button type="submit" :disabled="analysis.phase.value === 'running'">开始分析</button>
     </form>

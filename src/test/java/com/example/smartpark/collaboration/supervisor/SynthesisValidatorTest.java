@@ -60,4 +60,13 @@ class SynthesisValidatorTest {
         assertThat(validator.validate(
                 synthesis, List.of(energy, device), Set.of(ExpertDomain.ENERGY))).isEqualTo(synthesis);
     }
+
+    @Test
+    void allowsModelToReportUnableToConfirmWithSupportedObservations() {
+        Synthesis synthesis = new Synthesis(FindingStatus.INSUFFICIENT_EVIDENCE,
+                "无法确认关联", List.of(), 0, List.of());
+
+        assertThat(validator.validateModelSynthesis(synthesis, List.of(energy), Set.of()))
+                .isEqualTo(synthesis);
+    }
 }

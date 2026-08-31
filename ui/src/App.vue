@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { nextTick, ref } from 'vue'
-import OperationsWorkbench, { type WorkbenchView } from './components/OperationsWorkbench.vue'
+import OperationsWorkbench from './components/OperationsWorkbench.vue'
 import ShowcaseHome from './components/showcase/ShowcaseHome.vue'
-import type { ShowcaseScenario } from './services/workflowApi'
+import type { GuidedWorkbenchView, ScenarioLaunchRequest, ShowcaseLaunchInput, ShowcaseScenarioId, WorkbenchView } from './types/workbench'
 
 const surface = ref<'showcase' | 'workbench'>('showcase')
 const requestedView = ref<WorkbenchView>('workflow')
+const requestedLaunch = ref<ScenarioLaunchRequest | null>(null)
+let nextLaunchRequestId = 0
 const hasEnteredWorkbench = ref(false)
 const showcaseSurface = ref<InstanceType<typeof ShowcaseHome> | null>(null)
 const workbenchSurface = ref<InstanceType<typeof OperationsWorkbench> | null>(null)
 
-const scenarioView: Record<ShowcaseScenario['id'], WorkbenchView> = {
+const scenarioView: Record<ShowcaseScenarioId, GuidedWorkbenchView> = {
   ALERT_WORKFLOW: 'workflow',
   EXPERT_COLLABORATION: 'collaboration',
   OPERATIONS_ANALYSIS: 'analytics',
@@ -34,12 +36,26 @@ async function showWorkbench(view: WorkbenchView) {
   }
 }
 
-function startScenario(id: ShowcaseScenario['id']) {
-  showWorkbench(scenarioView[id])
+function startScenario(id: ShowcaseScenarioId, launchInput?: ShowcaseLaunchInput) {
+  const view = scenarioView[id]
+  const previousInput = requestedLaunch.value?.scenarioId === id
+    ? requestedLaunch.value.launchInput
+    : undefined
+  requestedLaunch.value = {
+    requestId: ++nextLaunchRequestId,
+    mode: 'guided',
+    scenarioId: id,
+    view,
+    launchInput: launchInput ?? previousInput ?? { alertId: null, question: null },
+  }
+  void showWorkbench(view)
 }
 
 function enterWorkbench() {
-  showWorkbench('workflow')
+  requestedLaunch.value = null
+  // Keep the long-lived workbench instance: an analytics run may still be
+  // polling or waiting for clarification while the showcase is visible.
+  void showWorkbench('workflow')
 }
 
 async function returnToShowcase() {
@@ -62,16 +78,16 @@ async function returnToShowcase() {
     @enter-workbench="enterWorkbench"
   />
 
-  <KeepAlive>
-    <OperationsWorkbench
-      ref="workbenchSurface"
-      v-if="hasEnteredWorkbench"
-      v-show="surface === 'workbench'"
-      data-surface="workbench"
-      tabindex="-1"
-      :active="surface === 'workbench'"
-      :initial-view="requestedView"
-      @back-to-showcase="returnToShowcase"
-    />
-  </KeepAlive>
+  <OperationsWorkbench
+    v-if="hasEnteredWorkbench"
+    ref="workbenchSurface"
+    v-show="surface === 'workbench'"
+    data-surface="workbench"
+    tabindex="-1"
+    :active="surface === 'workbench'"
+    :initial-view="requestedView"
+    :launch-request="requestedLaunch"
+    @back-to-showcase="returnToShowcase"
+    @retry-guided-launch="startScenario"
+  />
 </template>

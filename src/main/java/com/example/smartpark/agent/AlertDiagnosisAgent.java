@@ -11,12 +11,12 @@ import com.example.smartpark.tool.energy.EnergyQueryTool;
 import com.example.smartpark.tool.security.SecurityQueryTool;
 import com.example.smartpark.tool.knowledge.ParkKnowledgeTool;
 import com.example.smartpark.tool.workorder.WorkOrderTool;
-import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectReader;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.support.ToolCallbacks;
@@ -28,13 +28,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
+import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
@@ -42,17 +39,10 @@ import java.util.stream.Stream;
 @ConditionalOnProperty(name = "spring.ai.dashscope.enabled", havingValue = "true", matchIfMissing = true)
 public class AlertDiagnosisAgent {
 
-    private static final Set<String> EXPECTED_FIELDS = Set.of(
-            "id",
-            "alertId",
-            "deviceId",
-            "riskLevel",
-            "rootCause",
-            "summary",
-            "evidence",
-            "recommendedAction",
-            "confidence",
-            "diagnosedAt");
+    private static final BeanOutputConverter<DiagnosisModelOutput> OUTPUT_CONVERTER =
+            AlertStructuredOutputSupport.converter(DiagnosisModelOutput.class);
+    private static final ObjectReader OUTPUT_READER =
+            AlertStructuredOutputSupport.reader(DiagnosisModelOutput.class);
 
     private final ChatClient chatClient;
     private final ToolCallback[] toolCallbacks;
@@ -108,7 +98,7 @@ public class AlertDiagnosisAgent {
     }
 
     public Diagnosis diagnose(Alert alert, ParkContext context, List<KnowledgeDocument> documents) {
-        return diagnose(alert, context, documents, ignored -> { });
+        return diagnose(alert, context, documents, ignored -> { }, ignored -> { });
     }
 
     public Diagnosis diagnose(
@@ -116,52 +106,88 @@ public class AlertDiagnosisAgent {
             ParkContext context,
             List<KnowledgeDocument> documents,
             Consumer<String> toolAuditor) {
+        return diagnose(alert, context, documents, toolAuditor, ignored -> { });
+    }
+
+    public Diagnosis diagnose(
+            Alert alert,
+            ParkContext context,
+            List<KnowledgeDocument> documents,
+            Consumer<String> toolAuditor,
+            Consumer<AlertModelFailureStage> failureObserver) {
         Objects.requireNonNull(alert, "alert");
         Objects.requireNonNull(context, "context");
         List<KnowledgeDocument> safeDocuments = List.copyOf(Objects.requireNonNull(documents, "documents"));
         Consumer<String> requiredToolAuditor = Objects.requireNonNull(toolAuditor, "toolAuditor");
+        Consumer<AlertModelFailureStage> requiredFailureObserver = Objects.requireNonNull(
+                failureObserver, "failureObserver");
 
         Prompt prompt = new Prompt(
-                new SystemMessage(PromptCatalog.diagnosisSystemPrompt(toolNames())),
+                new SystemMessage(PromptCatalog.diagnosisSystemPrompt(toolNames()) + OUTPUT_CONVERTER.getFormat()),
                 new UserMessage(PromptCatalog.diagnosisUserPrompt(alert, context, safeDocuments)));
         try {
-            return parseDiagnosis(callModel(prompt, requiredToolAuditor), alert, safeDocuments);
+            return createDiagnosis(callModel(prompt, requiredToolAuditor), alert, safeDocuments);
         }
         catch (ModelOutputException firstFailure) {
             Prompt retry = new Prompt(
                     new SystemMessage(PromptCatalog.diagnosisSystemPrompt(toolNames())
+                            + OUTPUT_CONVERTER.getFormat()
                             + PromptCatalog.strictRetryInstruction()),
                     new UserMessage(PromptCatalog.diagnosisUserPrompt(alert, context, safeDocuments)));
-            return parseDiagnosis(callModel(retry, requiredToolAuditor), alert, safeDocuments);
+            try {
+                return createDiagnosis(callModel(retry, requiredToolAuditor), alert, safeDocuments);
+            }
+            catch (ModelOutputException terminalFailure) {
+                reportBoundaryFailure(requiredFailureObserver, terminalFailure);
+                throw terminalFailure;
+            }
+            catch (RuntimeException exception) {
+                requiredFailureObserver.accept(AlertModelFailureStage.PROVIDER_CALL);
+                throw exception;
+            }
+        }
+        catch (RuntimeException exception) {
+            requiredFailureObserver.accept(AlertModelFailureStage.PROVIDER_CALL);
+            throw exception;
         }
     }
 
-    private String callModel(Prompt prompt, Consumer<String> toolAuditor) {
-        return extractText(chatClient.prompt(prompt)
+    private DiagnosisModelOutput callModel(Prompt prompt, Consumer<String> toolAuditor) {
+        String content = chatClient.prompt(prompt)
+                .options(AlertStructuredOutputSupport.providerOptions("alert_diagnosis", OUTPUT_CONVERTER))
                 .toolCallbacks(auditedToolCallbacks(toolAuditor))
                 .call()
-                .chatResponse(), "diagnosis");
+                .content();
+        if (content == null || content.isBlank()) {
+            throw new ModelOutputException("diagnosis response was empty", AlertModelFailureStage.EMPTY_RESPONSE);
+        }
+        try {
+            return AlertStructuredOutputSupport.convert(OUTPUT_READER, content, "diagnosis");
+        }
+        catch (ModelOutputException exception) {
+            throw new ModelOutputException(exception.getMessage(), AlertModelFailureStage.DIAGNOSIS_PARSE);
+        }
     }
 
-    private Diagnosis parseDiagnosis(String text, Alert alert, List<KnowledgeDocument> safeDocuments) {
-        JsonNode root = ModelJsonSupport.parseObject(text, "diagnosis");
-        validateFields(root, EXPECTED_FIELDS, "diagnosis");
-
-        Diagnosis diagnosis = new Diagnosis(
-                requireText(root, "id", "diagnosis"),
-                requireMatchingId(root, "alertId", alert.id(), "diagnosis"),
-                requireMatchingId(root, "deviceId", alert.deviceId(), "diagnosis"),
-                parseEnum(RiskLevel.class, requireText(root, "riskLevel", "diagnosis"), "riskLevel", "diagnosis"),
-                requireText(root, "rootCause", "diagnosis"),
-                requireText(root, "summary", "diagnosis"),
-                requireEvidence(root.get("evidence"), "diagnosis"),
-                requireText(root, "recommendedAction", "diagnosis"),
-                requireConfidence(root, "diagnosis"),
-                requireInstant(root, "diagnosedAt", "diagnosis"));
-
-        if (safeDocuments.isEmpty() && diagnosis.evidence().stream().noneMatch(item -> item.contains("INSUFFICIENT_EVIDENCE"))) {
-            throw new ModelOutputException("diagnosis must acknowledge insufficient evidence when no knowledge documents are available");
+    private Diagnosis createDiagnosis(
+            DiagnosisModelOutput output,
+            Alert alert,
+            List<KnowledgeDocument> safeDocuments) {
+        List<String> evidence = new ArrayList<>(output.evidence());
+        if (safeDocuments.isEmpty() && evidence.stream().noneMatch(item -> item.contains("INSUFFICIENT_EVIDENCE"))) {
+            evidence.add(PromptCatalog.INSUFFICIENT_EVIDENCE_MARKER);
         }
+        Diagnosis diagnosis = new Diagnosis(
+                UUID.randomUUID().toString(),
+                alert.id(),
+                alert.deviceId(),
+                output.riskLevel(),
+                output.rootCause(),
+                output.summary(),
+                List.copyOf(evidence),
+                output.recommendedAction(),
+                output.confidence(),
+                Instant.now());
 
         return diagnosis;
     }
@@ -176,6 +202,13 @@ public class AlertDiagnosisAgent {
                 .toArray(ToolCallback[]::new);
     }
 
+    private static void reportBoundaryFailure(
+            Consumer<AlertModelFailureStage> failureObserver,
+            ModelOutputException failure) {
+        AlertModelFailureStage stage = failure.failureStage();
+        failureObserver.accept(stage == null ? AlertModelFailureStage.DIAGNOSIS_PARSE : stage);
+    }
+
     private List<String> toolNames() {
         return Stream.of(toolCallbacks)
                 .map(ToolCallback::getToolDefinition)
@@ -184,84 +217,39 @@ public class AlertDiagnosisAgent {
                 .toList();
     }
 
-    private static String extractText(ChatResponse response, String context) {
-        if (response == null || response.getResult() == null || response.getResult().getOutput() == null) {
-            throw new ModelOutputException(context + " response was empty");
-        }
-        String text = response.getResult().getOutput().getText();
-        if (text == null || text.isBlank()) {
-            throw new ModelOutputException(context + " response text was blank");
-        }
-        return text;
-    }
+    private record DiagnosisModelOutput(
+            RiskLevel riskLevel,
+            String rootCause,
+            String summary,
+            List<String> evidence,
+            String recommendedAction,
+            double confidence) {
 
-    private static void validateFields(JsonNode root, Set<String> expectedFields, String context) {
-        Set<String> actualFields = new LinkedHashSet<>();
-        Iterator<String> fieldNames = root.fieldNames();
-        fieldNames.forEachRemaining(actualFields::add);
-        if (!actualFields.equals(expectedFields)) {
-            throw new ModelOutputException(context + " response fields did not match expected shape: " + actualFields);
-        }
-    }
-
-    private static String requireText(JsonNode root, String fieldName, String context) {
-        JsonNode value = root.get(fieldName);
-        if (value == null || !value.isTextual() || value.textValue().isBlank()) {
-            throw new ModelOutputException(context + " output field '" + fieldName + "' must be a non-empty string");
-        }
-        return value.textValue().trim();
-    }
-
-    private static String requireMatchingId(JsonNode root, String fieldName, String expectedValue, String context) {
-        String actualValue = requireText(root, fieldName, context);
-        if (!expectedValue.equals(actualValue)) {
-            throw new ModelOutputException(context + " output field '" + fieldName + "' must match " + expectedValue);
-        }
-        return actualValue;
-    }
-
-    private static List<String> requireEvidence(JsonNode node, String context) {
-        if (node == null || !node.isArray() || node.isEmpty()) {
-            throw new ModelOutputException(context + " output field 'evidence' must be a non-empty array");
-        }
-        List<String> evidence = new ArrayList<>();
-        node.forEach(item -> {
-            if (!item.isTextual() || item.textValue().isBlank()) {
-                throw new ModelOutputException(context + " evidence items must be non-empty strings");
+        private DiagnosisModelOutput {
+            riskLevel = Objects.requireNonNull(riskLevel, "riskLevel");
+            rootCause = requireText(rootCause, "rootCause");
+            summary = requireText(summary, "summary");
+            recommendedAction = requireText(recommendedAction, "recommendedAction");
+            evidence = validatedEvidence(evidence);
+            if (!Double.isFinite(confidence) || confidence < 0.0 || confidence > 1.0) {
+                throw new IllegalArgumentException("confidence must be between 0 and 1");
             }
-            evidence.add(item.textValue().trim());
-        });
-        return List.copyOf(evidence);
-    }
+        }
 
-    private static Instant requireInstant(JsonNode root, String fieldName, String context) {
-        String value = requireText(root, fieldName, context);
-        try {
-            return Instant.parse(value);
+        private static String requireText(String value, String fieldName) {
+            if (value == null || value.isBlank()) {
+                throw new IllegalArgumentException(fieldName + " must be a non-empty string");
+            }
+            return value.trim();
         }
-        catch (DateTimeParseException ex) {
-            throw new ModelOutputException(context + " output field '" + fieldName + "' must be an ISO-8601 instant", ex);
-        }
-    }
 
-    private static double requireConfidence(JsonNode root, String context) {
-        JsonNode value = root.get("confidence");
-        if (value == null || !value.isNumber()) {
-            throw new ModelOutputException(context + " output field 'confidence' must be numeric");
-        }
-        double confidence = value.doubleValue();
-        if (!Double.isFinite(confidence) || confidence < 0.0 || confidence > 1.0) {
-            throw new ModelOutputException(context + " output field 'confidence' must be between 0 and 1");
-        }
-        return confidence;
-    }
-
-    private static <E extends Enum<E>> E parseEnum(Class<E> enumType, String value, String fieldName, String context) {
-        try {
-            return Enum.valueOf(enumType, value);
-        }
-        catch (IllegalArgumentException ex) {
-            throw new ModelOutputException(context + " output field '" + fieldName + "' must be one of " + List.of(enumType.getEnumConstants()), ex);
+        private static List<String> validatedEvidence(List<String> values) {
+            if (values == null || values.isEmpty()) {
+                throw new IllegalArgumentException("evidence must be non-empty");
+            }
+            return values.stream()
+                    .map(value -> requireText(value, "evidence item"))
+                    .toList();
         }
     }
 

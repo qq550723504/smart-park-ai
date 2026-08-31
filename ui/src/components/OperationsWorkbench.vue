@@ -7,35 +7,60 @@ import DemoConsole from './DemoConsole.vue'
 import EventTimeline from './EventTimeline.vue'
 import CustomerServiceConsole from './CustomerServiceConsole.vue'
 import ExecutionTraceRail from './execution/ExecutionTraceRail.vue'
+import ImmersiveWorkbenchShell from './workbench/ImmersiveWorkbenchShell.vue'
 import OperationsAnalysisPage from './analytics/OperationsAnalysisPage.vue'
 import ExpertCollaborationPage from './ExpertCollaborationPage.vue'
 import VoiceAssistantPage from './voice/VoiceAssistantPage.vue'
 import { demoAlerts, type DemoRole } from '../types/workflow'
 import { useWorkflow } from '../composables/useWorkflow'
 import { useExecutionTrace } from '../composables/useExecutionTrace'
+import { useGuidedLaunch } from '../composables/useGuidedLaunch'
 import { getOperationsCapabilities, submitFeedback } from '../services/workflowApi'
 import { customerIntentLabel, workflowNodeLabel } from '../utils/labels'
 import { alertWorkflowRunId } from '../utils/runId'
-import '../styles.css'
+import type { GuidedLaunchUpdate, ScenarioLaunchRequest, ShowcaseLaunchInput, ShowcaseScenarioId, WorkbenchEvidenceItem, WorkbenchNavItem, WorkbenchView } from '../types/workbench'
+import '../styles/workbench-primitives.css'
+import '../styles/workflow.css'
 
-export type WorkbenchView = 'workflow' | 'customer' | 'voice' | 'collaboration' | 'analytics'
-
-const props = withDefaults(defineProps<{ initialView?: WorkbenchView; active?: boolean }>(), {
+const props = withDefaults(defineProps<{ initialView?: WorkbenchView; launchRequest?: ScenarioLaunchRequest | null; active?: boolean }>(), {
   initialView: 'workflow',
+  launchRequest: null,
   active: true,
 })
-const emit = defineEmits<{ 'back-to-showcase': [] }>()
+const emit = defineEmits<{
+  'back-to-showcase': []
+  'retry-guided-launch': [scenarioId: ShowcaseScenarioId, launchInput: ShowcaseLaunchInput]
+}>()
 
 const capabilities = ref<{ knowledgeMode: string; customerAnswerMode: string; vectorStore: string; analyticsEnabled: boolean; collaborationEnabled: boolean; voiceEnabled: boolean } | null>(null)
+const capabilityLoadState = ref<'loading' | 'ready' | 'failed'>('loading')
 const capabilityLabels = computed(() => capabilities.value ? {
   knowledge: capabilities.value.knowledgeMode === 'mock' ? 'Mock' : 'RAG',
   customer: capabilities.value.customerAnswerMode === 'mock' ? 'Mock' : 'DashScope',
   vector: capabilities.value.vectorStore === 'none' ? '无向量库（关键词检索）' : 'SimpleVectorStore（进程内）',
 } : null)
+const knowledgeEvidence = computed<Pick<WorkbenchEvidenceItem, 'value' | 'tone'>>(() => {
+  if (capabilityLoadState.value === 'loading') return { value: '检查中' }
+  if (capabilityLoadState.value === 'failed') return { value: '能力检查失败', tone: 'warning' }
+  return { value: capabilityLabels.value?.knowledge ?? '未知', tone: 'verified' }
+})
+const navItems = computed<WorkbenchNavItem[]>(() => [
+  { value: 'workflow', label: '告警工作流', available: true },
+  { value: 'customer', label: '园区客服', available: true },
+  { value: 'voice', label: '实时语音', available: capabilities.value?.voiceEnabled === true },
+  { value: 'collaboration', label: '专家协作', available: capabilities.value?.collaborationEnabled === true },
+  { value: 'analytics', label: '运营分析', available: capabilities.value?.analyticsEnabled === true },
+])
 onMounted(() => {
   void getOperationsCapabilities()
-    .then((value) => { capabilities.value = value })
-    .catch(() => { capabilities.value = null })
+    .then((value) => {
+      capabilities.value = value
+      capabilityLoadState.value = 'ready'
+    })
+    .catch(() => {
+      capabilities.value = null
+      capabilityLoadState.value = 'failed'
+    })
 })
 const selectedAlertId = ref(demoAlerts[0].id)
 const activeView = ref<WorkbenchView>(props.initialView)
@@ -52,15 +77,76 @@ watch(activeView, async (view) => {
 const role = ref<DemoRole>('ADMIN')
 const reviewer = ref('')
 const comment = ref('')
-const { workflow, events, loading, approving, error, isTerminal, start, approve } = useWorkflow()
+const { workflow, events, loading, approving, error, isTerminal, start, approve, reset: resetWorkflow } = useWorkflow()
+const guidedLaunchUpdate = ref<GuidedLaunchUpdate | null>(null)
+const currentGuidedLaunchUpdate = computed(() => {
+  const request = props.launchRequest
+  const update = guidedLaunchUpdate.value
+  return update && request && update.requestId === request.requestId ? update : null
+})
+
+function handleGuidedLaunchUpdate(update: GuidedLaunchUpdate): void {
+  if (update.requestId !== props.launchRequest?.requestId) return
+  guidedLaunchUpdate.value = update
+}
+
+function retryGuidedLaunch(): void {
+  const request = props.launchRequest
+  const update = currentGuidedLaunchUpdate.value
+  if (request && update?.requestId === request.requestId && update.state === 'failed') {
+    emit('retry-guided-launch', request.scenarioId,
+      request.launchInput ?? { alertId: null, question: null })
+  }
+}
 
 // 统一执行轨迹：告警工作流通过确定性 runId 同时出现在右侧轨迹栏。
 const trace = useExecutionTrace()
 watch(
-  () => workflow.value?.workflowId,
-  (workflowId) => {
-    if (workflowId) {
-      // 订阅会重放统一发布器中的全部历史事件，重复调用是安全的。
+  () => props.launchRequest,
+  (request, previousRequest) => {
+    if (request || !previousRequest) return
+    resetWorkflow()
+    reviewer.value = ''
+    comment.value = ''
+    guidedLaunchUpdate.value = null
+    // A generic workflow entry starts a clean alert surface. Preserve only an
+    // active or clarification-pending analytics trace; terminal traces are
+    // evidence from the previous run and must not leak into the idle view.
+    if (previousRequest.scenarioId !== 'OPERATIONS_ANALYSIS' || trace.status.value !== 'streaming') {
+      trace.reset()
+    }
+  },
+)
+const traceStatusLabels = {
+  idle: '空闲',
+  streaming: '执行中',
+  completed: '已完成',
+  failed: '执行失败',
+  interrupted: '已中断',
+} as const
+function statusLabelForTrace(status: keyof typeof traceStatusLabels): string {
+  return traceStatusLabels[status]
+}
+const executionEvidenceByView: Record<WorkbenchView, Pick<WorkbenchEvidenceItem, 'value' | 'tone'>> = {
+  workflow: { value: '受控写入 · 高风险或证据不足需审批', tone: 'warning' },
+  customer: { value: '受控写入 · 可创建客服工单', tone: 'warning' },
+  voice: { value: '只读查询 · 实时语音会话', tone: 'verified' },
+  collaboration: { value: '只读查询 · 多专家汇总', tone: 'verified' },
+  analytics: { value: '真实只读数据', tone: 'verified' },
+}
+const evidenceItems = computed<WorkbenchEvidenceItem[]>(() => [
+  { label: '场景', value: navItems.value.find((item) => item.value === activeView.value)?.label ?? '告警工作流' },
+  { label: '执行轨迹', value: trace.status.value === 'streaming' ? '实时同步' : statusLabelForTrace(trace.status.value), tone: trace.status.value === 'failed' ? 'danger' : 'verified' },
+  { label: '知识检索', ...knowledgeEvidence.value },
+  { label: '执行模式', ...executionEvidenceByView[activeView.value] },
+])
+watch(
+  () => [workflow.value?.workflowId, activeView.value] as const,
+  ([workflowId, view]) => {
+    if (view === 'workflow' && workflowId) {
+      // The trace is shared by all scenario pages. Reclaim it whenever the
+      // alert view becomes active again, otherwise another page's run remains
+      // visible while this workflow is still running.
       trace.subscribe(alertWorkflowRunId(workflowId))
     }
   },
@@ -120,8 +206,25 @@ function selectAlert(id: string) {
 }
 
 async function launch() {
-  await start(selectedAlertId.value)
+  return start(selectedAlertId.value)
 }
+
+useGuidedLaunch({
+  active: () => props.active,
+  request: () => props.launchRequest,
+  scenarioId: 'ALERT_WORKFLOW',
+  start: async (request) => {
+    const alertId = request.launchInput?.alertId
+    if (!alertId || !demoAlerts.some((alert) => alert.id === alertId)) {
+      throw new Error('告警演示配置无效')
+    }
+    selectedAlertId.value = alertId
+    const started = await launch()
+    if (!started) throw new Error(error.value || '告警工作流启动失败')
+    return { state: 'started', message: '告警工作流已启动' }
+  },
+  onUpdate: handleGuidedLaunchUpdate,
+})
 
 async function decide(decision: 'APPROVE' | 'REJECT') {
   if (!reviewer.value.trim() || !comment.value.trim()) {
@@ -156,30 +259,27 @@ function confidence(value?: number) {
 </script>
 
 <template>
-  <div class="app-shell">
-    <header class="topbar">
-      <div class="brand-lockup">
-        <div class="brand-mark"><span></span><span></span><span></span></div>
-        <div><span class="brand-kicker">智慧园区 · 智能运营</span><h1>智慧园区智能运营中心</h1></div>
-      </div>
-      <div class="topbar-actions">
-        <el-select v-model="role" class="role-select" aria-label="演示角色"><el-option label="查看者" value="VIEWER" /><el-option label="操作员" value="OPERATOR" /><el-option label="审批人" value="APPROVER" /><el-option label="客服坐席" value="CUSTOMER_AGENT" /><el-option label="管理员" value="ADMIN" /></el-select>
-        <button type="button" class="ghost-button" data-workbench-action="back-to-showcase" @click="emit('back-to-showcase')">返回展示首页</button>
-        <nav class="view-switch" aria-label="场景导航">
-          <button data-workbench-view="workflow" :class="{ active: activeView === 'workflow' }" @click="activeView = 'workflow'">告警工作流</button>
-          <button data-workbench-view="customer" :class="{ active: activeView === 'customer' }" @click="activeView = 'customer'">园区客服</button>
-          <button v-if="capabilities?.voiceEnabled" data-workbench-view="voice" :class="{ active: activeView === 'voice' }" @click="activeView = 'voice'">实时语音</button>
-          <button v-if="capabilities?.collaborationEnabled" data-workbench-view="collaboration" :class="{ active: activeView === 'collaboration' }" @click="activeView = 'collaboration'">专家协作</button>
-          <button v-if="capabilities?.analyticsEnabled" data-workbench-view="analytics" :class="{ active: activeView === 'analytics' }" @click="activeView = 'analytics'">运营分析</button>
-        </nav>
-        <div class="system-status"><span class="status-pulse"></span><span>模拟园区系统</span><span class="divider"></span><span class="muted">知识检索 {{ capabilityLabels?.knowledge ?? '--' }} · 客服回答 {{ capabilityLabels?.customer ?? '--' }} · 索引存储 {{ capabilityLabels?.vector ?? '--' }}</span></div>
-      </div>
-    </header>
-
-    <div class="workspace">
+  <ImmersiveWorkbenchShell
+    :active-view="activeView"
+    :role="role"
+    :nav-items="navItems"
+    :evidence-items="evidenceItems"
+    :guided-launch="currentGuidedLaunchUpdate"
+    :rail-priority="needsApproval"
+    @switch-view="activeView = $event"
+    @update:role="role = $event"
+    @back-to-showcase="emit('back-to-showcase')"
+    @retry-guided-launch="retryGuidedLaunch"
+  >
     <main v-show="activeView === 'analytics'" class="main-content">
       <section class="hero-row"><div><span class="eyebrow">运营分析 · 03</span><h2>自然语言直达<br /><em>真实只读数据</em></h2><p class="hero-copy">问题解析、指标口径、AST 安全校验、EXPLAIN 成本与只读执行全程可见。</p></div></section>
-      <OperationsAnalysisPage :trace="trace" @run-started="(id: string) => trace.subscribe(id)" />
+      <OperationsAnalysisPage
+        :trace="trace"
+        :active="props.active && activeView === 'analytics'"
+        :launch-request="props.launchRequest"
+        @run-started="(id: string) => trace.subscribe(id)"
+        @launch-status="handleGuidedLaunchUpdate"
+      />
     </main>
 
     <main v-show="activeView === 'customer'" class="main-content customer-main">
@@ -188,11 +288,21 @@ function confidence(value?: number) {
     </main>
 
     <main v-show="activeView === 'voice'" class="main-content">
-      <VoiceAssistantPage :trace="trace" :active="props.active && activeView === 'voice'" />
+      <VoiceAssistantPage
+        :trace="trace"
+        :active="props.active && activeView === 'voice'"
+        :launch-request="props.launchRequest"
+        @launch-status="handleGuidedLaunchUpdate"
+      />
     </main>
 
     <main v-show="activeView === 'collaboration'" class="main-content">
-      <ExpertCollaborationPage :trace="trace" :active="activeView === 'collaboration'" />
+      <ExpertCollaborationPage
+        :trace="trace"
+        :active="props.active && activeView === 'collaboration'"
+        :launch-request="props.launchRequest"
+        @launch-status="handleGuidedLaunchUpdate"
+      />
     </main>
 
     <main v-show="activeView === 'workflow'" class="main-content">
@@ -233,7 +343,7 @@ function confidence(value?: number) {
 
       <section v-if="needsApproval" class="approval-panel panel">
         <div class="approval-accent"></div><div class="approval-copy"><span class="eyebrow">人工参与</span><h2>需要人工审批</h2><p>风险闸门已暂停工作流。确认现场情况后，决定是否创建处置工单。</p><div class="approval-facts"><span v-for="reason in (workflow?.riskReasons ?? [])" :key="reason" class="risk-reason">{{ reason }}</span></div></div>
-        <div class="approval-form"><el-input v-model="reviewer" placeholder="审批人姓名" /><el-input v-model="comment" type="textarea" :rows="2" placeholder="审批意见" /><div class="approval-actions"><el-button :loading="approving" @click="decide('REJECT')">拒绝处置</el-button><el-button type="primary" :loading="approving" @click="decide('APPROVE')">批准并创建工单</el-button></div></div>
+        <div class="approval-form"><el-input v-model="reviewer" aria-label="审批人姓名" placeholder="审批人姓名" /><el-input v-model="comment" aria-label="审批意见" type="textarea" :rows="2" placeholder="审批意见" /><div class="approval-actions"><el-button :loading="approving" @click="decide('REJECT')">拒绝处置</el-button><el-button type="primary" :loading="approving" @click="decide('APPROVE')">批准并创建工单</el-button></div></div>
       </section>
 
       <section v-if="isTerminal && workflow" class="result-panel panel">
@@ -250,14 +360,13 @@ function confidence(value?: number) {
       </section>
     </main>
 
-    <ExecutionTraceRail
-      class="global-rail"
-      :events="trace.events.value"
-      :status="trace.status.value"
-      :error="trace.error.value"
-    />
-    </div>
-
-    <footer><span>智慧园区运营中心</span><span>工作流状态由后端图实时驱动</span></footer>
-  </div>
+    <template #rail>
+      <ExecutionTraceRail
+        class="global-rail"
+        :events="trace.events.value"
+        :status="trace.status.value"
+        :error="trace.error.value"
+      />
+    </template>
+  </ImmersiveWorkbenchShell>
 </template>

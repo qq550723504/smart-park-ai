@@ -1,11 +1,21 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
+import { Microphone } from '@element-plus/icons-vue'
+import './voice-assistant.css'
 import { useVoiceSession } from '../../composables/useVoiceSession'
+import { useGuidedLaunch } from '../../composables/useGuidedLaunch'
 import type { ExecutionTrace } from '../../composables/useExecutionTrace'
+import type { GuidedLaunchUpdate, ScenarioLaunchRequest } from '../../types/workbench'
 
-const props = withDefaults(defineProps<{ trace: ExecutionTrace; active?: boolean }>(), {
+const props = withDefaults(defineProps<{
+  trace: ExecutionTrace
+  active?: boolean
+  launchRequest?: ScenarioLaunchRequest | null
+}>(), {
   active: true,
+  launchRequest: null,
 })
+const emit = defineEmits<{ 'launch-status': [update: GuidedLaunchUpdate] }>()
 
 const {
   voicePhase,
@@ -16,9 +26,21 @@ const {
   toolEvents,
   errorMessage,
   runId,
+  prepare,
   toggleMicrophone,
   close,
 } = useVoiceSession()
+
+useGuidedLaunch({
+  active: () => props.active,
+  request: () => props.launchRequest,
+  scenarioId: 'VOICE_ASSISTANT',
+  start: async () => {
+    await prepare()
+    return { state: 'ready', message: '语音链路已就绪，请点击麦克风授权并开始提问' }
+  },
+  onUpdate: (update) => emit('launch-status', update),
+})
 
 // 共享统一轨迹：语音会话创建后订阅自己的 runId。
 watch(
@@ -32,8 +54,17 @@ watch(
 // 离开展台即挂断：发送 CLOSE_SESSION 并释放麦克风轨道。
 watch(
   () => props.active,
-  (active) => {
-    if (!active) close()
+  (active, wasActive) => {
+    if (!active) {
+      close()
+      if (wasActive && props.launchRequest?.scenarioId === 'VOICE_ASSISTANT') {
+        emit('launch-status', {
+          requestId: props.launchRequest.requestId,
+          state: 'failed',
+          message: '语音会话已关闭，请重新进入',
+        })
+      }
+    }
   },
 )
 
@@ -109,7 +140,7 @@ function retry(): Promise<void> {
             data-testid="voice-mic"
             @click="onMicClick"
           >
-            <span class="voice-mic-icon">🎙</span>
+            <span class="voice-mic-icon"><el-icon><Microphone /></el-icon></span>
             <span v-if="interruptible" class="voice-mic-label">点击打断并继续提问</span>
             <span v-else-if="micActive" class="voice-mic-label">点击结束输入</span>
             <span v-else class="voice-mic-label">点击开始提问</span>

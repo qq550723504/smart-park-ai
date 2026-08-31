@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick, ref } from 'vue'
 import VoiceAssistantPage from './VoiceAssistantPage.vue'
 import type { VoiceSessionBinding } from '../../composables/useVoiceSession'
 import type { ExecutionTrace } from '../../composables/useExecutionTrace'
+import type { ScenarioLaunchRequest } from '../../types/workbench'
 
 const toggleMicrophone = vi.fn(async () => undefined)
 const closeSession = vi.fn()
@@ -23,10 +24,10 @@ function makeTrace(): ExecutionTrace {
 
 let binding: Record<string, unknown>
 
-function mountPage(active = true) {
+function mountPage(active = true, launchRequest: ScenarioLaunchRequest | null = null) {
   const trace = makeTrace()
   const wrapper = mount(VoiceAssistantPage, {
-    props: { trace, active },
+    props: { trace, active, launchRequest },
     global: {
       stubs: { teleport: true },
     },
@@ -52,6 +53,7 @@ beforeEach(() => {
     errorMessage: ref(''),
     sessionId: ref(null),
     runId: ref(null),
+    prepare: vi.fn(async () => undefined),
     toggleMicrophone,
     close: closeSession,
   }
@@ -66,6 +68,8 @@ describe('VoiceAssistantPage', () => {
     const { wrapper } = mountPage()
     expect(text(wrapper, '[data-testid="voice-mic"]')).toContain('点击开始提问')
     expect(text(wrapper, '[data-testid="voice-phase"]')).toContain('点击麦克风开始提问')
+    expect(wrapper.find('.voice-mic-icon svg').exists()).toBe(true)
+    expect(wrapper.find('.voice-mic-icon').text()).not.toContain('🎙')
   })
 
   it('clicking the mic delegates to the composable without faking phase', async () => {
@@ -147,5 +151,43 @@ describe('VoiceAssistantPage', () => {
     await nextTick()
 
     expect(closeSession).toHaveBeenCalled()
+  })
+
+  it('prepares guided voice without toggling the microphone', async () => {
+    const prepare = vi.fn(async () => undefined)
+    binding.prepare = prepare
+    const { wrapper } = mountPage(true, {
+      requestId: 23,
+      mode: 'guided',
+      scenarioId: 'VOICE_ASSISTANT',
+      view: 'voice',
+    })
+    await flushPromises()
+    expect(prepare).toHaveBeenCalledTimes(1)
+    expect(toggleMicrophone).not.toHaveBeenCalled()
+    expect(wrapper.emitted('launch-status')?.at(-1)?.[0]).toMatchObject({ state: 'ready' })
+    wrapper.unmount()
+  })
+
+  it('invalidates guided readiness when the voice view is deactivated', async () => {
+    const prepare = vi.fn(async () => undefined)
+    binding.prepare = prepare
+    const { wrapper } = mountPage(true, {
+      requestId: 24,
+      mode: 'guided',
+      scenarioId: 'VOICE_ASSISTANT',
+      view: 'voice',
+    })
+    await flushPromises()
+
+    await wrapper.setProps({ active: false })
+    await nextTick()
+
+    expect(wrapper.emitted('launch-status')?.at(-1)?.[0]).toEqual({
+      requestId: 24,
+      state: 'failed',
+      message: '语音会话已关闭，请重新进入',
+    })
+    wrapper.unmount()
   })
 })

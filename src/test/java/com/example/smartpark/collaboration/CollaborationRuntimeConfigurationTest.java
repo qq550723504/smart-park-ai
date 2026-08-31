@@ -1,10 +1,13 @@
 package com.example.smartpark.collaboration;
 
+import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import com.example.smartpark.collaboration.expert.ExpertToolSet;
 import com.example.smartpark.collaboration.expert.EvidenceLedger;
 import com.example.smartpark.collaboration.model.CollaborationRun;
+import com.example.smartpark.collaboration.model.ExpertDomain;
 import com.example.smartpark.execution.ExecutionEventPublisher;
 import com.example.smartpark.execution.InMemoryExecutionEventPublisher;
+import com.example.smartpark.execution.model.ExecutionEventType;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -30,6 +33,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class CollaborationRuntimeConfigurationTest {
+
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withPropertyValues("smartpark.collaboration.max-parallel=2")
             .withUserConfiguration(AllDependencies.class);
@@ -58,30 +62,225 @@ class CollaborationRuntimeConfigurationTest {
                 });
     }
 
+
     @Test
-    void invokesOnlySelectedExpertForSingleDomainPlan() {
+    void deterministicRoutingDoesNotAddProviderSecurityDomainToEnergyQuestion() {
         RoutingChatModel model = AllDependencies.model();
         model.clear();
         runner.run(context -> {
             CollaborationRun run = context.getBean(ExpertCollaborationService.class)
                     .start("A2 夜间能耗升高的原因是什么");
             CollaborationRun completed = awaitTerminal(context.getBean(ExpertCollaborationService.class), run.runId());
-            assertThat(completed.status()).isEqualTo(CollaborationRun.RunStatus.COMPLETED);
+            assertThat(completed.status()).as(completed.error()).isEqualTo(CollaborationRun.RunStatus.COMPLETED);
+            assertThat(completed.plan().selectedDomains()).containsExactly(ExpertDomain.ENERGY);
             assertThat(model.expertPrompts()).containsExactly("ENERGY");
+            assertThat(model.supervisorPromptCount()).isZero();
+            assertThat(model.synthesisPromptCount()).isOne();
         });
     }
 
     @Test
-    void invokesAllThreeSelectedExpertsForCrossDomainPlan() {
+    void deterministicRoutingKeepsDeviceWhenProviderGroupsOnlyEnergyAndSecurity() {
         RoutingChatModel model = AllDependencies.model();
         model.clear();
         runner.run(context -> {
             CollaborationRun run = context.getBean(ExpertCollaborationService.class)
                     .start("A2 夜间能耗升高且门禁告警、冷机离线，是否有关联");
             CollaborationRun completed = awaitTerminal(context.getBean(ExpertCollaborationService.class), run.runId());
-            assertThat(completed.status()).isEqualTo(CollaborationRun.RunStatus.COMPLETED);
+            assertThat(completed.status()).as(completed.error()).isEqualTo(CollaborationRun.RunStatus.COMPLETED);
+            assertThat(completed.plan().selectedDomains())
+                    .containsExactlyInAnyOrder(ExpertDomain.ENERGY, ExpertDomain.DEVICE, ExpertDomain.SECURITY);
             assertThat(model.expertPrompts()).containsExactlyInAnyOrder("ENERGY", "DEVICE", "SECURITY");
+            assertThat(model.supervisorPromptCount()).isZero();
+            assertThat(model.synthesisPromptCount()).isOne();
         });
+    }
+
+    @Test
+    void expertPromptUsesAutomaticToolsWithoutForcingTheSummaryTurn() {
+        RoutingChatModel model = AllDependencies.model();
+        model.clear();
+        runner.run(context -> {
+            CollaborationRun run = context.getBean(ExpertCollaborationService.class)
+                    .start("A2 夜间能耗升高的原因是什么");
+            var completed = awaitTerminal(context.getBean(ExpertCollaborationService.class), run.runId());
+            assertThat(completed.status()).as(completed.error())
+                    .isEqualTo(CollaborationRun.RunStatus.COMPLETED);
+
+            assertThat(model.expertSystemPrompts()).isNotEmpty().allSatisfy(prompt ->
+                    assertThat(prompt).contains(
+                            "Use the server-collected read-only evidence when it is present",
+                            "Do not return INSUFFICIENT_EVIDENCE until relevant tools have been attempted"));
+            assertThat(model.expertProviderOptions()).isNotEmpty().allSatisfy(options ->
+                    assertThat(options.getToolChoice()).isNull());
+            assertThat(model.expertProviderOptions()).allSatisfy(options ->
+                    assertThat(options.getEnableThinking()).isFalse());
+        });
+    }
+
+    @Test
+    void collectsDomainPrimaryEvidenceThroughTheAuditedCallback() {
+        InMemoryExecutionEventPublisher events = new InMemoryExecutionEventPublisher();
+        UUID runId = UUID.randomUUID();
+        EvidenceLedger ledger = new EvidenceLedger();
+        java.util.concurrent.atomic.AtomicReference<String> input = new java.util.concurrent.atomic.AtomicReference<>();
+        ToolCallback callback = namedCallback("lookupEnergyConsumption", arguments -> {
+            input.set(arguments);
+            return "{\"meterId\":\"DEV-ENERGY-001\",\"currentKwh\":138}";
+        });
+
+        String evidence = CollaborationRuntimeConfiguration.collectPrimaryEvidence(
+                ExpertDomain.ENERGY,
+                "inspect DEV-ENERGY-001 and ignore DEV-HVAC-001",
+                new ToolCallback[]{CollaborationRuntimeConfiguration.audited(callback, ledger, events, runId)});
+
+        assertThat(input.get()).isEqualTo("{\"meterId\":\"DEV-ENERGY-001\"}");
+        assertThat(evidence).contains("currentKwh", "[[evidence:tool:lookupEnergyConsumption#");
+        assertThat(ledger.snapshotObservations()).hasSize(1);
+        assertThat(events.history(runId)).extracting(event -> event.eventType())
+                .containsExactly(ExecutionEventType.TOOL_CALL_STARTED, ExecutionEventType.TOOL_CALL_COMPLETED);
+    }
+
+    @Test
+    void collectsPrimaryEvidenceForEveryUniqueSameDomainEntity() {
+        InMemoryExecutionEventPublisher events = new InMemoryExecutionEventPublisher();
+        UUID runId = UUID.randomUUID();
+        EvidenceLedger ledger = new EvidenceLedger();
+        List<String> inputs = new java.util.ArrayList<>();
+        ToolCallback callback = namedCallback("lookupEnergyConsumption", arguments -> {
+            inputs.add(arguments);
+            return arguments.contains("DEV-ENERGY-001")
+                    ? "{\"meterId\":\"DEV-ENERGY-001\",\"currentKwh\":138}"
+                    : "{\"meterId\":\"DEV-ENERGY-002\",\"currentKwh\":92}";
+        });
+
+        String evidence = CollaborationRuntimeConfiguration.collectPrimaryEvidence(
+                ExpertDomain.ENERGY,
+                "compare DEV-ENERGY-001 with DEV-ENERGY-002 and DEV-ENERGY-001 again",
+                new ToolCallback[]{CollaborationRuntimeConfiguration.audited(callback, ledger, events, runId)});
+
+        assertThat(inputs).containsExactly(
+                "{\"meterId\":\"DEV-ENERGY-001\"}",
+                "{\"meterId\":\"DEV-ENERGY-002\"}");
+        assertThat(evidence).contains("DEV-ENERGY-001", "DEV-ENERGY-002", "currentKwh");
+        assertThat(ledger.snapshotObservations()).hasSize(2);
+        assertThat(events.history(runId)).extracting(event -> event.eventType())
+                .containsExactly(
+                        ExecutionEventType.TOOL_CALL_STARTED, ExecutionEventType.TOOL_CALL_COMPLETED,
+                        ExecutionEventType.TOOL_CALL_STARTED, ExecutionEventType.TOOL_CALL_COMPLETED);
+    }
+
+    @Test
+    void retainsSuccessfulPrimaryEvidenceWhenAnotherEntityReturnsAnErrorResult() {
+        EvidenceLedger ledger = new EvidenceLedger();
+        List<String> inputs = new java.util.ArrayList<>();
+        ToolCallback callback = namedCallback("lookupEnergyConsumption", arguments -> {
+            inputs.add(arguments);
+            return arguments.contains("DEV-ENERGY-001")
+                    ? "{\"error\":\"meter not found\"}"
+                    : "{\"meterId\":\"DEV-ENERGY-002\",\"currentKwh\":92}";
+        });
+
+        CollaborationRuntimeConfiguration.collectPrimaryEvidence(
+                ExpertDomain.ENERGY,
+                "compare DEV-ENERGY-001 with DEV-ENERGY-002",
+                new ToolCallback[]{CollaborationRuntimeConfiguration.audited(
+                        callback, ledger, new InMemoryExecutionEventPublisher(), UUID.randomUUID())});
+
+        var usableRefs = new com.example.smartpark.collaboration.expert.ExpertFindingValidator()
+                .usableEvidenceRefs(ledger.snapshotObservations());
+        assertThat(inputs).hasSize(2);
+        assertThat(ledger.snapshotObservations()).hasSize(2);
+        assertThat(usableRefs).hasSize(1);
+        assertThat(ledger.snapshotObservations())
+                .filteredOn(observation -> usableRefs.contains(observation.ref()))
+                .singleElement().satisfies(observation ->
+                        assertThat(observation.input()).contains("DEV-ENERGY-002"));
+
+        var modelFinding = new com.example.smartpark.collaboration.model.ExpertFinding(
+                ExpertDomain.ENERGY,
+                com.example.smartpark.collaboration.model.FindingStatus.INSUFFICIENT_EVIDENCE,
+                "provider output is not trusted", List.of(), 0, List.of());
+        var validator = new com.example.smartpark.collaboration.expert.ExpertFindingValidator();
+        var validated = validator.validateWithObservations(
+                CollaborationRuntimeConfiguration.bindPrimaryEvidence(modelFinding, usableRefs),
+                ledger.snapshotObservations(),
+                "compare DEV-ENERGY-001 with DEV-ENERGY-002");
+
+        assertThat(validated.status())
+                .isEqualTo(com.example.smartpark.collaboration.model.FindingStatus.SUPPORTED);
+        assertThat(validated.evidenceRefs()).containsExactlyElementsOf(usableRefs);
+        assertThat(validated.conclusion()).contains("DEV-ENERGY-002").doesNotContain("meter not found");
+    }
+
+    @Test
+    void continuesPrimaryEvidenceCollectionAfterOneEntityThrows() {
+        InMemoryExecutionEventPublisher events = new InMemoryExecutionEventPublisher();
+        UUID runId = UUID.randomUUID();
+        EvidenceLedger ledger = new EvidenceLedger();
+        List<String> inputs = new java.util.ArrayList<>();
+        ToolCallback callback = namedCallback("lookupEnergyConsumption", arguments -> {
+            inputs.add(arguments);
+            if (arguments.contains("DEV-ENERGY-001")) {
+                throw new IllegalStateException("meter unavailable");
+            }
+            return "{\"meterId\":\"DEV-ENERGY-002\",\"currentKwh\":92}";
+        });
+
+        String evidence = CollaborationRuntimeConfiguration.collectPrimaryEvidence(
+                ExpertDomain.ENERGY,
+                "compare DEV-ENERGY-001 with DEV-ENERGY-002",
+                new ToolCallback[]{CollaborationRuntimeConfiguration.audited(callback, ledger, events, runId)});
+
+        assertThat(inputs).containsExactly(
+                "{\"meterId\":\"DEV-ENERGY-001\"}",
+                "{\"meterId\":\"DEV-ENERGY-002\"}");
+        assertThat(evidence).contains("DEV-ENERGY-002").doesNotContain("DEV-ENERGY-001");
+        assertThat(ledger.snapshotObservations()).singleElement().satisfies(observation ->
+                assertThat(observation.input()).contains("DEV-ENERGY-002"));
+        assertThat(events.history(runId)).extracting(event -> event.eventType())
+                .containsExactly(
+                        ExecutionEventType.TOOL_CALL_STARTED, ExecutionEventType.TOOL_CALL_FAILED,
+                        ExecutionEventType.TOOL_CALL_STARTED, ExecutionEventType.TOOL_CALL_COMPLETED);
+    }
+
+    @Test
+    void skipsPrimaryEvidenceWhenAssignmentHasNoDomainEntity() {
+        ToolCallback callback = namedCallback("lookupSecurityEvent", arguments -> {
+            throw new AssertionError("callback must not be invoked without a security event ID");
+        });
+
+        assertThat(CollaborationRuntimeConfiguration.collectPrimaryEvidence(
+                ExpertDomain.SECURITY, "inspect the entrance", new ToolCallback[]{callback})).isEmpty();
+    }
+
+    @Test
+    void bindsServerOwnedPrimaryReferenceInsteadOfTrustingModelMarkerCopying() {
+        EvidenceLedger ledger = new EvidenceLedger();
+        ledger.record("tool:lookupDeviceStatus#abc",
+                "{\"deviceId\":\"DEV-HVAC-001\",\"status\":\"OFFLINE\"}",
+                "{\"deviceId\":\"DEV-HVAC-001\"}");
+        var modelFinding = new com.example.smartpark.collaboration.model.ExpertFinding(
+                ExpertDomain.DEVICE,
+                com.example.smartpark.collaboration.model.FindingStatus.INSUFFICIENT_EVIDENCE,
+                "provider copied [[evidence:...]] incorrectly",
+                List.of("[[evidence:tool:lookupDeviceStatus#abc]]"), 0, List.of());
+
+        var bound = CollaborationRuntimeConfiguration.bindPrimaryEvidence(
+                modelFinding, ledger.snapshot());
+
+        assertThat(bound.status())
+                .isEqualTo(com.example.smartpark.collaboration.model.FindingStatus.SUPPORTED);
+        assertThat(bound.evidenceRefs()).containsExactly("tool:lookupDeviceStatus#abc");
+        assertThat(bound.conclusion()).isEqualTo("Server-bound primary evidence.");
+        assertThat(bound.confidence()).isZero();
+
+        var validated = new com.example.smartpark.collaboration.expert.ExpertFindingValidator()
+                .validateWithObservations(bound, ledger.snapshotObservations(), "inspect DEV-HVAC-001");
+        assertThat(validated.status())
+                .isEqualTo(com.example.smartpark.collaboration.model.FindingStatus.SUPPORTED);
+        assertThat(validated.conclusion()).contains("DEV-HVAC-001", "OFFLINE");
+        assertThat(validated.confidence()).isZero();
     }
 
     @Test
@@ -169,19 +368,21 @@ class CollaborationRuntimeConfigurationTest {
     }
 
     static final class RoutingChatModel implements ChatModel {
-        private final List<String> systems = Collections.synchronizedList(new ArrayList<>());
+        private final List<Prompt> prompts = Collections.synchronizedList(new ArrayList<>());
 
         @Override
         public ChatResponse call(Prompt prompt) {
             String system = prompt.getSystemMessage().getText();
-            systems.add(system);
+            prompts.add(prompt);
             String json;
-            if (system.contains("collaboration supervisor")) {
+            if (system.contains("tool-free supervisor")) {
+                json = "{\"status\":\"INSUFFICIENT_EVIDENCE\",\"selectedDomains\":[],\"evidenceRefs\":[],\"confidence\":0,\"conclusion\":\"无法确认关联\",\"uncertainties\":[\"more evidence needed\"]}";
+            } else if (system.contains("collaboration supervisor")) {
                 String question = prompt.getUserMessage().getText();
                 boolean crossDomain = question.contains("门禁") || question.contains("冷机");
                 json = crossDomain
-                        ? plan(question, "ENERGY", "DEVICE", "SECURITY")
-                        : plan(question, "ENERGY");
+                        ? plan(question, "ENERGY", "SECURITY")
+                        : plan(question, "ENERGY", "SECURITY");
             } else if (system.contains("park expert")) {
                 String domain = system.substring(system.indexOf("the ") + 4, system.indexOf(" park expert"));
                 json = "{\"domain\":\"" + domain + "\",\"status\":\"INSUFFICIENT_EVIDENCE\",\"conclusion\":\"insufficient evidence\",\"evidenceRefs\":[],\"confidence\":0,\"nextChecks\":[\"collect evidence\"]}";
@@ -193,20 +394,72 @@ class CollaborationRuntimeConfigurationTest {
 
         private static String plan(String question, String... domains) {
             String selected = java.util.Arrays.stream(domains).map(d -> "\"" + d + "\"").collect(java.util.stream.Collectors.joining(","));
-            String assignments = java.util.Arrays.stream(domains).map(d -> "\"" + d + "\":\"analyze " + d.toLowerCase() + "\"").collect(java.util.stream.Collectors.joining(","));
-            return "{\"normalizedQuestion\":\"" + question + "\",\"selectedDomains\":[" + selected + "],\"assignments\":{" + assignments + "},\"selectionReason\":\"question requires selected domains\"}";
+            String assignments = java.util.Arrays.stream(domains)
+                    .map(d -> "{\"domain\":\"" + d + "\",\"assignment\":\"analyze "
+                            + d.toLowerCase() + " for " + question + "\"}")
+                    .collect(java.util.stream.Collectors.joining(","));
+            return "{\"normalizedQuestion\":\"" + question + "\",\"selectedDomains\":[" + selected + "],\"assignments\":[" + assignments + "],\"selectionReason\":\"question requires selected domains\"}";
         }
 
-        void clear() { systems.clear(); }
+        void clear() { prompts.clear(); }
 
         List<String> expertPrompts() {
-            return systems.stream().filter(value -> value.contains("park expert"))
+            return prompts.stream().map(prompt -> prompt.getSystemMessage().getText())
+                    .filter(value -> value.contains("park expert"))
                     .map(value -> value.substring(value.indexOf("the ") + 4, value.indexOf(" park expert"))).toList();
         }
+
+        List<String> expertSystemPrompts() {
+            return prompts.stream().map(prompt -> prompt.getSystemMessage().getText())
+                    .filter(value -> value.contains("park expert"))
+                    .toList();
+        }
+
+        List<DashScopeChatOptions> expertProviderOptions() {
+            return prompts.stream()
+                    .filter(prompt -> prompt.getSystemMessage().getText().contains("park expert"))
+                    .map(Prompt::getOptions)
+                    .map(DashScopeChatOptions.class::cast)
+                    .toList();
+        }
+
+        long supervisorPromptCount() {
+            return supervisorPrompts().stream()
+                    .filter(prompt -> !prompt.getSystemMessage().getText().contains("tool-free supervisor"))
+                    .count();
+        }
+
+        long synthesisPromptCount() {
+            return prompts.stream()
+                    .filter(prompt -> prompt.getSystemMessage().getText().contains("tool-free supervisor"))
+                    .count();
+        }
+
+        List<Prompt> supervisorPrompts() {
+            return prompts.stream()
+                    .filter(prompt -> prompt.getSystemMessage().getText().contains("collaboration supervisor"))
+                    .toList();
+        }
+
     }
 
     static final class ProbeTool {
         @Tool(name = "probe", description = "test probe")
         public String probe(String input) { return input; }
+    }
+
+    private static ToolCallback namedCallback(String name,
+                                              java.util.function.Function<String, String> action) {
+        return new ToolCallback() {
+            @Override public ToolDefinition getToolDefinition() {
+                return new ToolDefinition() {
+                    @Override public String name() { return name; }
+                    @Override public String description() { return "test callback"; }
+                    @Override public String inputSchema() { return "{}"; }
+                };
+            }
+
+            @Override public String call(String input) { return action.apply(input); }
+        };
     }
 }

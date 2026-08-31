@@ -36,6 +36,15 @@ public final class ExpertFindingValidator {
         return validateWithObservations(finding, observations, null);
     }
 
+    /** Returns only references backed by non-empty, non-error tool results. */
+    public Set<String> usableEvidenceRefs(Collection<EvidenceLedger.Observation> observations) {
+        java.util.LinkedHashSet<String> refs = Objects.requireNonNull(observations, "observations").stream()
+                .filter(ExpertFindingValidator::isUsableObservation)
+                .map(EvidenceLedger.Observation::ref)
+                .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+        return java.util.Collections.unmodifiableSet(refs);
+    }
+
     /** Validates that cited tool calls stayed within the exact entity scope assigned to the expert. */
     public ExpertFinding validateWithObservations(ExpertFinding finding,
                                                   Collection<EvidenceLedger.Observation> observations,

@@ -15,7 +15,8 @@ public record ShowcaseScenario(
         List<String> proofTypes,
         String humanBoundary,
         String unavailableReason,
-        Instant lastVerifiedAt) {
+        Instant lastVerifiedAt,
+        ShowcaseLaunchInput launchInput) {
 
     private static final String UNVERIFIED_REASON = "本次部署尚未完成在线验证";
 
@@ -25,6 +26,10 @@ public record ShowcaseScenario(
         requiredCapabilities = List.copyOf(Objects.requireNonNull(
                 requiredCapabilities, "requiredCapabilities"));
         proofTypes = List.copyOf(Objects.requireNonNull(proofTypes, "proofTypes"));
+        launchInput = Objects.requireNonNull(launchInput, "launchInput");
+        if (!launchInput.equals(ShowcaseLaunchInput.forScenario(id))) {
+            throw new IllegalArgumentException("launchInput must match the server-owned guided scenario input");
+        }
 
         if (live != (status == ShowcaseScenarioStatus.READY)) {
             throw new IllegalArgumentException("live must be true exactly when status is READY");
@@ -39,6 +44,23 @@ public record ShowcaseScenario(
             throw new IllegalArgumentException(
                     "non-ready scenarios require a fixed public reason and no verification receipt");
         }
+    }
+
+    public ShowcaseScenario(
+            ShowcaseScenarioId id,
+            ShowcaseScenarioStatus status,
+            boolean live,
+            String title,
+            String businessQuestion,
+            int expectedDurationSeconds,
+            List<String> requiredCapabilities,
+            List<String> proofTypes,
+            String humanBoundary,
+            String unavailableReason,
+            Instant lastVerifiedAt) {
+        this(id, status, live, title, businessQuestion, expectedDurationSeconds,
+                requiredCapabilities, proofTypes, humanBoundary, unavailableReason,
+                lastVerifiedAt, ShowcaseLaunchInput.forScenario(id));
     }
 
     private static boolean isAllowedUnavailableReason(

@@ -2,6 +2,8 @@ package com.example.smartpark.integration;
 
 import com.alibaba.cloud.ai.dashscope.audio.transcription.DashScopeAudioTranscriptionModel;
 import com.alibaba.cloud.ai.dashscope.audio.tts.DashScopeAudioSpeechModel;
+import com.alibaba.cloud.ai.autoconfigure.dashscope.DashScopeAudioSpeechProperties;
+import com.alibaba.cloud.ai.autoconfigure.dashscope.DashScopeAudioTranscriptionProperties;
 import com.example.smartpark.adapter.mock.MockParkFixture;
 import com.example.smartpark.tool.alert.AlertQueryTool;
 import com.example.smartpark.tool.energy.EnergyQueryTool;
@@ -53,6 +55,12 @@ class VoiceOnlineSmokeTest {
     @Autowired
     private DashScopeAudioSpeechModel speechModel;
 
+    @Autowired
+    private DashScopeAudioTranscriptionProperties transcriptionProperties;
+
+    @Autowired
+    private DashScopeAudioSpeechProperties speechProperties;
+
     private final MockParkFixture fixture = new MockParkFixture();
 
     @Test
@@ -97,7 +105,8 @@ class VoiceOnlineSmokeTest {
         record Chunk(int sequence, int size) {
         }
         var chunks = new CopyOnWriteArrayList<Chunk>();
-        StreamingTtsPort ttsPort = new DashScopeStreamingTtsAdapter(speechModel);
+        StreamingTtsPort ttsPort = new DashScopeStreamingTtsAdapter(
+                speechModel, speechProperties.getOptions());
         String turnId = "tts-turn-1";
         ttsPort.start("smoke", turnId, List.of(answer.text()), new StreamingTtsPort.Listener() {
             @Override
@@ -128,7 +137,8 @@ class VoiceOnlineSmokeTest {
 
     @Test
     void asrTerminalBehaviorWithSilenceStaysExplicit() {
-        StreamingAsrPort asrPort = new DashScopeStreamingAsrAdapter(transcriptionModel);
+        StreamingAsrPort asrPort = new DashScopeStreamingAsrAdapter(
+                transcriptionModel, transcriptionProperties.getOptions());
         var outcomes = new CopyOnWriteArrayList<String>();
 
         asrPort.start("smoke-asr", "turn-silence", new StreamingAsrPort.Listener() {

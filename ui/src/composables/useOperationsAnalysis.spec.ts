@@ -58,6 +58,28 @@ describe('useOperationsAnalysis', () => {
     expect(analysis.dto.value?.status).toBe('COMPLETED')
   })
 
+  it('keeps an accepted analysis running when trace setup is unavailable', async () => {
+    handler = (url, init) => {
+      if (init?.method === 'POST') return jsonResponse({ runId: RUN_ID }, 202)
+      return jsonResponse({ runId: RUN_ID, status: 'COMPLETED', createdAt: '' })
+    }
+    const accepted: string[] = []
+    const failures: Error[] = []
+    const analysis = useOperationsAnalysis({
+      trace: { events: ref([]), subscribe: () => { throw new Error('EventSource unavailable') } },
+      pollIntervalMs: 1,
+    })
+
+    await analysis.submit('上周能耗', {
+      onAccepted: (runId) => accepted.push(runId),
+      onFailed: (cause) => failures.push(cause),
+    })
+
+    expect(accepted).toEqual([RUN_ID])
+    expect(failures).toEqual([])
+    expect(analysis.phase.value).toBe('completed')
+  })
+
   it('surfaces clarification questions and resumes with structured selections', async () => {
     const trace = fakeTrace()
     let clarified = false
@@ -94,6 +116,45 @@ describe('useOperationsAnalysis', () => {
     await analysis.clarify()
     expect(analysis.phase.value).toBe('completed')
     expect(clarified).toBe(true)
+  })
+
+  it('keeps polling a clarified run when renewed trace setup is unavailable', async () => {
+    let clarified = false
+    let subscriptions = 0
+    const trace = {
+      events: ref<ExecutionEvent[]>([]),
+      subscribe() {
+        subscriptions += 1
+        if (subscriptions === 2) throw new Error('EventSource unavailable')
+      },
+    }
+    handler = (url, init) => {
+      if (url.includes('/clarifications')) {
+        clarified = true
+        return jsonResponse({ runId: RUN_ID, status: 'RUNNING', createdAt: '' })
+      }
+      if (init?.method === 'POST') return jsonResponse({ runId: RUN_ID }, 202)
+      if (/\/runs\/[0-9a-f-]+$/.test(url)) {
+        return jsonResponse({
+          runId: RUN_ID,
+          status: clarified ? 'COMPLETED' : 'NEEDS_CLARIFICATION',
+          clarificationQuestions: clarified ? undefined : ['请选择告警口径'],
+          createdAt: '',
+        })
+      }
+      return jsonResponse({}, 404)
+    }
+
+    const analysis = useOperationsAnalysis({ trace, pollIntervalMs: 1 })
+    await analysis.submit('告警情况')
+    analysis.selections.value = [{ term: '告警', metric: 'alert_count' }]
+
+    await analysis.clarify()
+
+    expect(subscriptions).toBe(2)
+    expect(analysis.phase.value).toBe('completed')
+    expect(analysis.dto.value?.status).toBe('COMPLETED')
+    expect(analysis.error.value).toBe('')
   })
 
   it('continues checking a paused run so clarification expiry reaches the UI', async () => {
@@ -189,5 +250,28 @@ describe('useOperationsAnalysis', () => {
     ]
     await nextTick()
     expect((analysis.chart.value as { payloadType: string }).payloadType).toBe('CHART')
+  })
+
+  it('keeps chart state bound to the current analysis run', async () => {
+    const trace = fakeTrace()
+    handler = (url, init) => {
+      if (init?.method === 'POST') return jsonResponse({ runId: 'run-b' }, 202)
+      return jsonResponse({ runId: 'run-b', status: 'COMPLETED', createdAt: '' })
+    }
+    const analysis = useOperationsAnalysis({ trace, pollIntervalMs: 1 })
+    await analysis.submit('B 的分析')
+    const { nextTick } = await import('vue')
+    const chart = (runId: string, title: string) => ({
+      eventId: `chart-${runId}`, runId, sequence: 1, timestamp: '', scenario: 'OPERATIONS_ANALYSIS',
+      actor: 'analytics', stage: 'RENDERING', eventType: 'CHART_SPECIFIED', status: 'RUNNING', safeSummary: title,
+      displayPayload: { payloadType: 'CHART', type: 'BAR', title, xField: 'building', yFields: ['energy_kwh'], seriesField: '-', unit: 'kWh' },
+    } as ExecutionEvent)
+
+    trace.events.value = [chart('run-b', 'B 图表')]
+    await nextTick()
+    trace.events.value = [chart('run-b', 'B 图表'), chart('run-a', 'A 旧图表')]
+    await nextTick()
+
+    expect((analysis.chart.value as { title: string }).title).toBe('B 图表')
   })
 })

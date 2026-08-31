@@ -7,6 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 COPY requirements.txt ./requirements.txt
 RUN python -m pip install --no-cache-dir --require-hashes -r requirements.txt \
+    && python -c "import jionlp" \
     && groupadd --system parser \
     && useradd --system --gid parser --home-dir /app --no-create-home parser
 

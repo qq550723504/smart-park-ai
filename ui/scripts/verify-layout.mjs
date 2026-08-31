@@ -4,8 +4,15 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
-const stylesPath = fileURLToPath(new URL('../src/styles.css', import.meta.url))
-const styles = readFileSync(stylesPath, 'utf8')
+const styleUrls = [
+  new URL('../src/styles/showcase-theme.css', import.meta.url),
+  new URL('../src/styles/workbench-primitives.css', import.meta.url),
+  new URL('../src/components/workbench/immersive-workbench.css', import.meta.url),
+  new URL('../src/components/customer-service.css', import.meta.url),
+]
+const styles = styleUrls
+  .map((url) => readFileSync(fileURLToPath(url), 'utf8'))
+  .join('\n')
 
 function findChrome() {
   const candidates = [
@@ -28,19 +35,33 @@ function findChrome() {
 }
 
 const fixture = `<!doctype html>
-<html><head><meta charset="utf-8"><style>${styles}</style></head>
+<html><head><meta charset="utf-8"><style>.el-select { width: 240px; }</style><style>${styles}</style></head>
 <body>
-  <div class="workspace">
-    <main class="main-content customer-main" style="min-height:400px">
-      <section class="customer-console">
-        <aside class="customer-sidebar" style="height:300px"></aside>
-        <section class="panel chat-panel" style="height:300px"></section>
+  <div class="immersive-workbench">
+    <header class="immersive-workbench__topbar">
+      <div class="immersive-workbench__brand">智慧园区智能运营中心</div>
+      <nav class="immersive-workbench__nav"></nav>
+      <div class="immersive-workbench__actions"><div class="el-select">角色</div><button type="button">返回展示首页</button></div>
+    </header>
+    <div class="immersive-workbench__workspace">
+      <section class="immersive-workbench__stage">
+        <main class="main-content customer-main" style="min-height:400px">
+          <section class="customer-console">
+            <aside class="customer-sidebar panel" style="height:300px"></aside>
+            <section class="panel chat-panel" style="height:300px"></section>
+          </section>
+        </main>
       </section>
-    </main>
-    <aside class="trace-rail panel global-rail" style="height:400px"></aside>
+      <details class="immersive-workbench__rail" open>
+        <summary>执行轨迹</summary>
+        <div class="immersive-workbench__rail-content">
+          <aside class="trace-rail panel global-rail" style="height:400px"></aside>
+        </div>
+      </details>
+    </div>
   </div>
   <script>
-    const selectors = ['.workspace', '.main-content', '.customer-console', '.customer-sidebar', '.chat-panel', '.global-rail']
+    const selectors = ['.immersive-workbench__workspace', '.immersive-workbench__stage', '.main-content', '.customer-console', '.customer-sidebar', '.chat-panel', '.immersive-workbench__rail', '.global-rail', '.immersive-workbench__actions', '.immersive-workbench__actions .el-select', '.immersive-workbench__actions button']
     const layout = Object.fromEntries(selectors.map((selector) => {
       const rect = document.querySelector(selector).getBoundingClientRect()
       return [selector, { x: rect.x, y: rect.y, width: rect.width, right: rect.right, bottom: rect.bottom }]
@@ -51,8 +72,12 @@ const fixture = `<!doctype html>
 
 const chromeUserDataDir = mkdtempSync(join(tmpdir(), 'smart-park-layout-'))
 
-function capture(chrome, width) {
-  const page = `data:text/html;base64,${Buffer.from(fixture).toString('base64')}`
+function capture(chrome, width, layoutWidth = width) {
+  const layoutFixture = fixture.replace(
+    '<div class="immersive-workbench">',
+    `<div class="immersive-workbench" style="width:${layoutWidth}px">`,
+  )
+  const page = `data:text/html;base64,${Buffer.from(layoutFixture).toString('base64')}`
   const output = execFileSync(chrome, [
     '--headless=new', '--disable-gpu', '--no-sandbox', '--hide-scrollbars',
     '--no-first-run', '--disable-extensions', `--user-data-dir=${chromeUserDataDir}`,
@@ -68,16 +93,25 @@ const chrome = findChrome()
 
 try {
   const wide = capture(chrome, 1465)
-  if (wide['.main-content'].width < 900 || wide['.chat-panel'].width < 500 || wide['.global-rail'].x - wide['.main-content'].right > 19) {
+  if (wide['.immersive-workbench__stage'].width < 900 || wide['.chat-panel'].width < 500 || wide['.immersive-workbench__rail'].x - wide['.immersive-workbench__stage'].right > 19) {
     throw new Error(`Wide layout did not fill the left workspace column: ${JSON.stringify(wide)}`)
   }
 
   const stacked = capture(chrome, 1100)
-  if (stacked['.global-rail'].y <= stacked['.main-content'].bottom) {
+  if (stacked['.immersive-workbench__rail'].y <= stacked['.immersive-workbench__stage'].bottom) {
     throw new Error(`Responsive layout did not stack the execution rail: ${JSON.stringify(stacked)}`)
   }
 
-  console.log('Layout smoke test passed: wide fill and <=1250px stacking verified')
+  // Headless Chrome clamps its viewport to 500px, so render a 320px shell
+  // within that mobile media-query viewport to exercise the actual layout.
+  const phone = capture(chrome, 500, 320)
+  if (phone['.immersive-workbench__actions'].right > 320
+    || phone['.immersive-workbench__actions .el-select'].right > 320
+    || phone['.immersive-workbench__actions button'].right > 320) {
+    throw new Error(`Phone action controls overflow at 320px: ${JSON.stringify(phone)}`)
+  }
+
+  console.log('Layout smoke test passed: wide fill, <=1250px stacking, and 320px actions verified')
 } finally {
   rmSync(chromeUserDataDir, { recursive: true, force: true })
 }

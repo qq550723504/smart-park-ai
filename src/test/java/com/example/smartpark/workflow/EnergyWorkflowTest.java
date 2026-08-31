@@ -23,16 +23,12 @@ class EnergyWorkflowTest {
         MockParkFixture fixture = new MockParkFixture();
         TestChatModel diagnosisModel = new TestChatModel("""
                 {
-                  "id":"diag-energy-workflow-1",
-                  "alertId":"ALT-ENERGY-001",
-                  "deviceId":"DEV-ENERGY-001",
                   "riskLevel":"HIGH",
                   "rootCause":"After-hours HVAC and lighting runtime exceeded the baseline.",
                   "summary":"Energy consumption is 38 percent above the building baseline.",
                   "evidence":["meter: current=138kWh baseline=100kWh","knowledge: inspect HVAC and lighting runtime"],
                   "recommendedAction":"Verify schedules and inspect HVAC and lighting runtime before corrective work.",
-                  "confidence":0.91,
-                  "diagnosedAt":"2026-08-23T01:45:00Z"
+                  "confidence":0.91
                 }
                 """);
         AlertWorkflow workflow = new AlertWorkflow(

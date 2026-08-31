@@ -28,6 +28,7 @@ class DashScopeStreamingAsrAdapterTest {
 
     private CapturingFacade facade;
     private DashScopeStreamingAsrAdapter adapter;
+    private DashScopeAudioTranscriptionOptions configuredOptions;
 
     @AfterEach
     void shutdownAdapter() {
@@ -38,7 +39,12 @@ class DashScopeStreamingAsrAdapterTest {
 
     private void newAdapter() {
         facade = new CapturingFacade();
-        adapter = new DashScopeStreamingAsrAdapter(facade);
+        configuredOptions = new DashScopeAudioTranscriptionOptions();
+        configuredOptions.setModel("paraformer-realtime-v2");
+        configuredOptions.setSourceLanguage("zh");
+        configuredOptions.setFormat("wav");
+        configuredOptions.setSampleRate(8_000);
+        adapter = new DashScopeStreamingAsrAdapter(facade, configuredOptions);
     }
 
     @Test
@@ -63,6 +69,11 @@ class DashScopeStreamingAsrAdapterTest {
         assertThat(inputTerminal).containsExactly("complete");
         assertThat(facade.capturedOptions.getSampleRate()).isEqualTo(16000);
         assertThat(facade.capturedOptions.getFormat()).isEqualToIgnoringCase("pcm");
+        assertThat(facade.capturedOptions.getModel()).isEqualTo("paraformer-realtime-v2");
+        assertThat(facade.capturedOptions.getSourceLanguage()).isEqualTo("zh");
+        assertThat(facade.capturedOptions).isNotSameAs(configuredOptions);
+        assertThat(configuredOptions.getSampleRate()).isEqualTo(8_000);
+        assertThat(configuredOptions.getFormat()).isEqualTo("wav");
     }
 
     @Test
