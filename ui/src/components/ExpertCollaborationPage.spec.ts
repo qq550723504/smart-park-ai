@@ -168,4 +168,31 @@ describe('ExpertCollaborationPage', () => {
     expect(wrapper.emitted('launch-status')?.at(-1)?.[0]).toMatchObject({ requestId: 21, state: 'started' })
     wrapper.unmount()
   })
+
+  it('restores the configured question before a guided collaboration launch', async () => {
+    let guidedQuestion = ''
+    globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        guidedQuestion = JSON.parse(String(init.body)).question
+        return jsonResponse({ runId: RUN_ID, statusUrl: '/status', eventsUrl: '/events' }, 202)
+      }
+      return jsonResponse({
+        runId: RUN_ID, question: guidedQuestion, status: 'COMPLETED', plan: null,
+        findings: [], synthesis: null, error: null, updatedAt: '2026-08-25T00:00:00Z',
+      })
+    }) as typeof fetch
+    const wrapper = mount(ExpertCollaborationPage, {
+      props: { trace: traceStub(), active: true },
+      global: { stubs: collaborationElementStubs },
+    })
+    await wrapper.find('input[aria-label="专家协作问题"]').setValue('手工输入的无关问题')
+
+    await wrapper.setProps({
+      launchRequest: { requestId: 22, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration' },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(guidedQuestion).toBe('电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联')
+    wrapper.unmount()
+  })
 })

@@ -63,6 +63,7 @@ onMounted(() => {
     })
 })
 const selectedAlertId = ref(demoAlerts[0].id)
+const defaultGuidedAlertId = demoAlerts[0].id
 const activeView = ref<WorkbenchView>(props.initialView)
 const hasVisitedWorkflow = ref(props.initialView === 'workflow')
 watch(() => props.initialView, (view) => { activeView.value = view })
@@ -195,6 +196,7 @@ useGuidedLaunch({
   request: () => props.launchRequest,
   scenarioId: 'ALERT_WORKFLOW',
   start: async () => {
+    selectedAlertId.value = defaultGuidedAlertId
     const started = await launch()
     if (!started) throw new Error(error.value || '告警工作流启动失败')
     return { state: 'started', message: '告警工作流已启动' }

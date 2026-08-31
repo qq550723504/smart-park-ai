@@ -216,6 +216,45 @@ describe('useVoiceSession', () => {
     expect(sockets).toHaveLength(2)
     expect(sockets[0]?.closed).toBe(true)
     expect(binding.connectionPhase.value).toBe('connected')
+    expect(binding.errorMessage.value).toBe('')
+  })
+
+  it('reuses a connected transport after microphone permission fails', async () => {
+    const sockets: FakeWebSocket[] = []
+    let sessionsCreated = 0
+    let microphoneAttempts = 0
+    const binding = useVoiceSession({
+      api: {
+        createSession: async () => {
+          sessionsCreated++
+          return {
+            sessionId: 'vs-microphone-retry',
+            runId: '00000000-0000-0000-0000-000000000222',
+            wsPath: '/ws/voice/sessions/vs-microphone-retry',
+          }
+        },
+      },
+      openWebSocket: (url) => {
+        const socket = new FakeWebSocket(url)
+        sockets.push(socket)
+        queueMicrotask(() => socket.open())
+        return socket
+      },
+      requestMicrophone: async () => {
+        microphoneAttempts++
+        if (microphoneAttempts === 1) throw new Error('microphone permission denied')
+        return { getTracks: () => [] } as unknown as MediaStream
+      },
+      createCapture: () => new FakeCapture(),
+    })
+
+    await binding.toggleMicrophone()
+    await binding.toggleMicrophone()
+
+    expect(sessionsCreated).toBe(1)
+    expect(sockets).toHaveLength(1)
+    expect(binding.connectionPhase.value).toBe('connected')
+    expect(binding.errorMessage.value).toBe('')
   })
 
   it('shares one pending handshake between prepare and an immediate microphone toggle', async () => {

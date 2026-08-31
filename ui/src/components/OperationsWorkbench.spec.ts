@@ -61,10 +61,15 @@ const guidedStatusStub = defineComponent({
   template: '<div data-testid="guided-status-scene" />',
 })
 
+const alertSelectorStub = defineComponent({
+  emits: ['select', 'start'],
+  template: '<button type="button" data-select-alternate-alert @click="$emit(\'select\', \'ALT-POWER-001\')">选择其他告警</button>',
+})
+
 const operatorStubs = {
   OperationsAnalysisPage: analysisStub,
   ExpertCollaborationPage: true,
-  AlertSelector: true,
+  AlertSelector: alertSelectorStub,
   WorkflowGraph: true,
   DemoConsole: true,
   EventTimeline: true,
@@ -398,6 +403,49 @@ describe('OperationsWorkbench', () => {
       await wrapper.setProps({ active: true })
       await settleCapabilities()
       expect(workflowStarts).toBe(1)
+      wrapper.unmount()
+    } finally {
+      globalThis.EventSource = originalEventSource
+    }
+  })
+
+  it('resets a previously selected alert before starting the guided workflow', async () => {
+    let guidedAlertId = ''
+    const originalEventSource = globalThis.EventSource
+    globalThis.EventSource = class {
+      onerror: ((event: Event) => void) | null = null
+      constructor(_url: string | URL) {}
+      addEventListener(): void {}
+      close(): void {}
+    } as unknown as typeof EventSource
+    globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        guidedAlertId = /\/api\/alerts\/([^/]+)\/workflows/.exec(String(url))?.[1] ?? ''
+        return new Response(JSON.stringify({
+          workflowId: 'wf-guided-default', alertId: guidedAlertId, status: 'RUNNING',
+          diagnosis: null, approval: null, workOrder: null, errors: [], eventSequence: 1, riskReasons: [],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({
+        knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }) as typeof fetch
+
+    try {
+      const wrapper = mount(OperationsWorkbench, {
+        props: { active: true, initialView: 'workflow' },
+        global: { stubs: operatorStubs },
+      })
+      await settleCapabilities()
+      await wrapper.get('[data-select-alternate-alert]').trigger('click')
+
+      await wrapper.setProps({
+        launchRequest: { requestId: 81, mode: 'guided', scenarioId: 'ALERT_WORKFLOW', view: 'workflow' },
+      })
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      expect(guidedAlertId).toBe('ALT-TEMP-001')
       wrapper.unmount()
     } finally {
       globalThis.EventSource = originalEventSource

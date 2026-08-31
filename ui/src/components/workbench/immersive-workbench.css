@@ -63,7 +63,8 @@
 @media (max-width: 767px) {
   .immersive-workbench__topbar { grid-template-columns: 1fr; padding: 14px 12px; }
   .immersive-workbench__nav { width: 100%; justify-content: flex-start; overflow-x: auto; white-space: nowrap; scrollbar-width: thin; }
-  .immersive-workbench__actions { width: 100%; justify-content: space-between; }
+  .immersive-workbench__actions { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr) auto; justify-content: initial; }
+  .immersive-workbench__actions .el-select { width: 100%; min-width: 0; }
   .immersive-workbench__workspace { padding: 12px; }
   .immersive-workbench__rail { max-height: none; }
   .immersive-workbench__evidence { padding: 0 12px 12px; }

@@ -158,9 +158,14 @@ export function useOperationsAnalysis(
       const { runId: startedRunId } = await startAnalysis(question.trim())
       if (generation !== operationGeneration) return
       runId.value = startedRunId
-      options.trace?.subscribe(startedRunId)
       accepted = true
       callbacks?.onAccepted?.(startedRunId)
+      try {
+        options.trace?.subscribe(startedRunId)
+      } catch {
+        // The backend has accepted the run; a local trace setup failure must
+        // not report it as failed or cause a retry to create a second run.
+      }
       const terminal = await pollToTerminal(startedRunId, generation)
       if (generation !== operationGeneration || !terminal) return
       applyTerminal(terminal)

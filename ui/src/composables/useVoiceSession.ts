@@ -132,6 +132,7 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
 
   async function openConnection(generation: number): Promise<boolean> {
     connectionPhase.value = 'connecting'
+    errorMessage.value = ''
     const created = await api.createSession()
     if (generation !== lifecycleGeneration) return false
     sessionId.value = created.sessionId
@@ -372,7 +373,9 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
     } catch (ex) {
       if (generation !== lifecycleGeneration) return
       errorMessage.value = ex instanceof Error ? ex.message : String(ex)
-      connectionPhase.value = 'failed'
+      // Permission/capture errors do not invalidate an already-connected
+      // transport; the next mic attempt can reuse that backend session.
+      if (connectionPhase.value !== 'connected') connectionPhase.value = 'failed'
     }
   }
 

@@ -58,6 +58,28 @@ describe('useOperationsAnalysis', () => {
     expect(analysis.dto.value?.status).toBe('COMPLETED')
   })
 
+  it('keeps an accepted analysis running when trace setup is unavailable', async () => {
+    handler = (url, init) => {
+      if (init?.method === 'POST') return jsonResponse({ runId: RUN_ID }, 202)
+      return jsonResponse({ runId: RUN_ID, status: 'COMPLETED', createdAt: '' })
+    }
+    const accepted: string[] = []
+    const failures: Error[] = []
+    const analysis = useOperationsAnalysis({
+      trace: { events: ref([]), subscribe: () => { throw new Error('EventSource unavailable') } },
+      pollIntervalMs: 1,
+    })
+
+    await analysis.submit('上周能耗', {
+      onAccepted: (runId) => accepted.push(runId),
+      onFailed: (cause) => failures.push(cause),
+    })
+
+    expect(accepted).toEqual([RUN_ID])
+    expect(failures).toEqual([])
+    expect(analysis.phase.value).toBe('completed')
+  })
+
   it('surfaces clarification questions and resumes with structured selections', async () => {
     const trace = fakeTrace()
     let clarified = false
