@@ -16,6 +16,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
 import tools.jackson.databind.ObjectMapper;
 
 import java.lang.reflect.Method;
@@ -77,14 +78,35 @@ class VoiceConfigurationReviewTest {
                 .withBean(StreamingTtsPort.class, () -> mock(StreamingTtsPort.class))
                 .withBean(VoiceAnswerAgent.class, () -> mock(VoiceAnswerAgent.class))
                 .withBean(ExecutionEventPublisher.class, () -> mock(ExecutionEventPublisher.class))
-                .withPropertyValues("smartpark.voice.enabled=true")
+                .withPropertyValues(
+                        "smartpark.voice.enabled=true",
+                        "smartpark.local-demo.enabled=true")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context).hasSingleBean(ObjectMapper.class);
                     assertThat(context).doesNotHaveBean(com.fasterxml.jackson.databind.ObjectMapper.class);
+                    assertThat(context).hasSingleBean(WebSocketConfigurer.class);
                     VoiceWebSocketHandler handler = context.getBean(VoiceWebSocketHandler.class);
                     assertThat(ReflectionTestUtils.getField(handler, "objectMapper"))
                             .isSameAs(context.getBean(ObjectMapper.class));
+                });
+    }
+
+    @Test
+    void enabledVoiceDoesNotExposeSessionOrWebSocketWithoutLocalDemoOptIn() {
+        new WebApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(JacksonAutoConfiguration.class))
+                .withUserConfiguration(VoiceSessionConfiguration.class, VoiceSessionController.class)
+                .withBean(StreamingAsrPort.class, () -> mock(StreamingAsrPort.class))
+                .withBean(StreamingTtsPort.class, () -> mock(StreamingTtsPort.class))
+                .withBean(VoiceAnswerAgent.class, () -> mock(VoiceAnswerAgent.class))
+                .withBean(ExecutionEventPublisher.class, () -> mock(ExecutionEventPublisher.class))
+                .withPropertyValues(
+                        "smartpark.voice.enabled=true",
+                        "spring.ai.dashscope.api-key=sk-test")
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(VoiceSessionController.class);
+                    assertThat(context).doesNotHaveBean(WebSocketConfigurer.class);
                 });
     }
 

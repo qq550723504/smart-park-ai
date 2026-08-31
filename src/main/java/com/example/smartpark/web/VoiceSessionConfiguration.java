@@ -93,6 +93,7 @@ public class VoiceSessionConfiguration {
     }
 
     @Bean
+    @ConditionalOnProperty(prefix = "smartpark.local-demo", name = "enabled", havingValue = "true")
     public WebSocketConfigurer voiceWebSocketConfigurer(
             VoiceWebSocketHandler handler, VoiceProperties properties) {
         return registry -> register(registry, handler, properties);

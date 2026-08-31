@@ -33,6 +33,7 @@ class ShowcaseComposeConfigurationTest {
             "SMARTPARK_KNOWLEDGE_MODE", "rag",
             "SMARTPARK_CUSTOMER_SERVICE_ANSWER_MODE", "dashscope",
             "SMARTPARK_VOICE_ENABLED", "true",
+            "SMARTPARK_LOCAL_DEMO_ENABLED", "true",
             "SMARTPARK_VOICE_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173",
             "SPRING_AI_DASHSCOPE_AUDIO_TRANSCRIPTION_OPTIONS_MODEL",
                     "${SPRING_AI_DASHSCOPE_AUDIO_TRANSCRIPTION_OPTIONS_MODEL:-paraformer-realtime-v2}",
@@ -45,6 +46,7 @@ class ShowcaseComposeConfigurationTest {
             SMARTPARK_KNOWLEDGE_MODE: rag
             SMARTPARK_CUSTOMER_SERVICE_ANSWER_MODE: dashscope
             SMARTPARK_VOICE_ENABLED: "true"
+            SMARTPARK_LOCAL_DEMO_ENABLED: "true"
             SMARTPARK_VOICE_ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
             SPRING_AI_DASHSCOPE_AUDIO_TRANSCRIPTION_OPTIONS_MODEL: ${SPRING_AI_DASHSCOPE_AUDIO_TRANSCRIPTION_OPTIONS_MODEL:-paraformer-realtime-v2}
             SPRING_AI_DASHSCOPE_AUDIO_SPEECH_OPTIONS_MODEL: ${SPRING_AI_DASHSCOPE_AUDIO_SPEECH_OPTIONS_MODEL:-cosyvoice-v2}
@@ -85,6 +87,7 @@ class ShowcaseComposeConfigurationTest {
         assertThat(defaultEnvironment.getOrDefault("SMARTPARK_ANALYTICS_DEMO_DATA_REFRESH_ENABLED", "false"))
                 .isEqualTo("false");
         assertThat(defaultEnvironment.getOrDefault("SMARTPARK_VOICE_ENABLED", "false")).isEqualTo("false");
+        assertThat(defaultEnvironment.getOrDefault("SMARTPARK_LOCAL_DEMO_ENABLED", "false")).isEqualTo("false");
         assertThat(defaultEnvironment.getOrDefault("SMARTPARK_KNOWLEDGE_MODE", "mock")).isEqualTo("mock");
         assertThat(defaultEnvironment.getOrDefault("SMARTPARK_CUSTOMER_SERVICE_ANSWER_MODE", "mock"))
                 .isEqualTo("mock");

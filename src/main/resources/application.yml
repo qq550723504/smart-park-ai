@@ -52,6 +52,8 @@ spring:
         streamable-http:
           mcp-endpoint: /mcp
 smartpark:
+  local-demo:
+    enabled: ${SMARTPARK_LOCAL_DEMO_ENABLED:false}
   analytics:
     enabled: ${SMARTPARK_ANALYTICS_ENABLED:false}
     # Re-anchors the time-windowed V1 demo fixtures (energy, alerts, device

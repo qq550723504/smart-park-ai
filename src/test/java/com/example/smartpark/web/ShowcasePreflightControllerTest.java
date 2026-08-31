@@ -12,9 +12,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.context.TestPropertySource;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -25,16 +27,26 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(ShowcasePreflightController.class)
 @Import(ShowcasePreflightControllerTest.PreflightFixture.class)
+@TestPropertySource(properties = "smartpark.local-demo.enabled=true")
 class ShowcasePreflightControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Test
+    void preflightEndpointIsAbsentWithoutExplicitLocalDemoOptIn() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(ShowcasePreflightController.class)
+                .withBean(ShowcasePreflightService.class, () -> mock(ShowcasePreflightService.class))
+                .run(context -> assertThat(context).doesNotHaveBean(ShowcasePreflightController.class));
+    }
 
     @Test
     void rejectsMissingOrNonAdminRole() throws Exception {

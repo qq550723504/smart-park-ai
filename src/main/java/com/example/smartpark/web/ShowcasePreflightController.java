@@ -6,11 +6,13 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 import java.util.Objects;
 
 @RestController
 @RequestMapping("/api/showcase")
+@ConditionalOnProperty(prefix = "smartpark.local-demo", name = "enabled", havingValue = "true")
 public final class ShowcasePreflightController {
 
     private final ShowcasePreflightService preflight;
