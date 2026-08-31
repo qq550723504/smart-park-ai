@@ -1,0 +1,7 @@
+services:
+  backend:
+    environment:
+      SMARTPARK_KNOWLEDGE_MODE: rag
+      SMARTPARK_CUSTOMER_SERVICE_ANSWER_MODE: dashscope
+      SMARTPARK_VOICE_ENABLED: "true"
+      SMARTPARK_VOICE_ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173

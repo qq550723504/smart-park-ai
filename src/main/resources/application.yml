@@ -75,6 +75,8 @@ smartpark:
     max-parallel: ${SMARTPARK_EXPERT_MAX_PARALLEL:3}
   customer:
     minimum-knowledge-score: ${SMARTPARK_CUSTOMER_MINIMUM_KNOWLEDGE_SCORE:0.70}
+  showcase:
+    preflight-timeout: ${SMARTPARK_SHOWCASE_PREFLIGHT_TIMEOUT:90s}
   mcp:
     enabled: ${SMARTPARK_MCP_ENABLED:false}
   voice:
