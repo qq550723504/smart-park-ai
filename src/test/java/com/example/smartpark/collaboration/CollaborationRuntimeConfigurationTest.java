@@ -201,6 +201,23 @@ class CollaborationRuntimeConfigurationTest {
     }
 
     @Test
+    void expertPromptRequiresAReadOnlyToolAttemptBeforeInsufficientEvidence() {
+        RoutingChatModel model = AllDependencies.model();
+        model.clear();
+        runner.run(context -> {
+            CollaborationRun run = context.getBean(ExpertCollaborationService.class)
+                    .start("A2 夜间能耗升高的原因是什么");
+            assertThat(awaitTerminal(context.getBean(ExpertCollaborationService.class), run.runId()).status())
+                    .isEqualTo(CollaborationRun.RunStatus.COMPLETED);
+
+            assertThat(model.expertSystemPrompts()).isNotEmpty().allSatisfy(prompt ->
+                    assertThat(prompt).contains(
+                            "must call at least one relevant read-only tool",
+                            "Do not return INSUFFICIENT_EVIDENCE until relevant tools have been attempted"));
+        });
+    }
+
+    @Test
     void publishesToolLifecycleEventsForTheCurrentCollaborationRun() {
         InMemoryExecutionEventPublisher events = new InMemoryExecutionEventPublisher();
         UUID runId = UUID.randomUUID();
@@ -322,6 +339,12 @@ class CollaborationRuntimeConfigurationTest {
             return prompts.stream().map(prompt -> prompt.getSystemMessage().getText())
                     .filter(value -> value.contains("park expert"))
                     .map(value -> value.substring(value.indexOf("the ") + 4, value.indexOf(" park expert"))).toList();
+        }
+
+        List<String> expertSystemPrompts() {
+            return prompts.stream().map(prompt -> prompt.getSystemMessage().getText())
+                    .filter(value -> value.contains("park expert"))
+                    .toList();
         }
 
         long supervisorPromptCount() {
