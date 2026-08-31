@@ -32,6 +32,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -46,6 +48,8 @@ import java.util.concurrent.TimeUnit;
 
 @Configuration
 public class CollaborationRuntimeConfiguration {
+
+    private static final Logger LOG = LoggerFactory.getLogger(CollaborationRuntimeConfiguration.class);
 
     private static final BeanOutputConverter<SupervisorPlanModelOutput> SUPERVISOR_OUTPUT_CONVERTER =
             new BeanOutputConverter<>(SupervisorPlanModelOutput.class);
@@ -123,7 +127,7 @@ public class CollaborationRuntimeConfiguration {
         ExpertCollaborationGraph graph = graphProvider.getIfAvailable();
         if (model == null || graph == null) return null;
         return new ExpertCollaborationService(
-                question -> planner.parseAndValidate(question, modelText(model,
+                question -> planner.parseAndValidate(question, supervisorModelText(model,
                         SUPERVISOR_SYSTEM_PROMPT + SUPERVISOR_OUTPUT_CONVERTER.getFormat(), question,
                         supervisorProviderOptions())),
                 graph,
@@ -171,9 +175,23 @@ public class CollaborationRuntimeConfiguration {
         return extract(model.call(new Prompt(new SystemMessage(system), new UserMessage(user))));
     }
 
-    private static String modelText(
+    static String supervisorModelText(
             ChatModel model, String system, String user, DashScopeChatOptions options) {
-        return extract(model.call(new Prompt(List.of(new SystemMessage(system), new UserMessage(user)), options)));
+        ChatResponse response;
+        try {
+            response = model.call(new Prompt(List.of(new SystemMessage(system), new UserMessage(user)), options));
+        }
+        catch (RuntimeException providerFailure) {
+            LOG.warn("SUPERVISOR_PROVIDER_CALL");
+            throw providerFailure;
+        }
+        try {
+            return extract(response);
+        }
+        catch (IllegalStateException emptyResponse) {
+            LOG.warn("SUPERVISOR_EMPTY_RESPONSE");
+            throw emptyResponse;
+        }
     }
 
     private static DashScopeChatOptions supervisorProviderOptions() {

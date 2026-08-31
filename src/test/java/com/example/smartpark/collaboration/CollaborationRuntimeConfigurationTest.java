@@ -8,6 +8,9 @@ import com.example.smartpark.collaboration.model.CollaborationRun;
 import com.example.smartpark.collaboration.model.ExpertDomain;
 import com.example.smartpark.execution.ExecutionEventPublisher;
 import com.example.smartpark.execution.InMemoryExecutionEventPublisher;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -32,8 +35,53 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowable;
+import org.slf4j.LoggerFactory;
 
 class CollaborationRuntimeConfigurationTest {
+
+    @Test
+    void supervisorProviderFailureLogsOnlyAllowlistedStage() {
+        Logger logger = (Logger) LoggerFactory.getLogger(CollaborationRuntimeConfiguration.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            Throwable failure = catchThrowable(() -> CollaborationRuntimeConfiguration.supervisorModelText(
+                    prompt -> { throw new IllegalStateException("PROVIDER_SENTINEL DEV-SECRET-42"); },
+                    "system", "question", DashScopeChatOptions.builder().build()));
+
+            assertThat(failure).isInstanceOf(IllegalStateException.class);
+            assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage)
+                    .containsExactly("SUPERVISOR_PROVIDER_CALL")
+                    .allSatisfy(message -> assertThat(message)
+                            .doesNotContain("PROVIDER_SENTINEL", "DEV-SECRET-42"));
+        }
+        finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+    }
+
+    @Test
+    void supervisorEmptyResponseLogsOnlyAllowlistedStage() {
+        Logger logger = (Logger) LoggerFactory.getLogger(CollaborationRuntimeConfiguration.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            Throwable failure = catchThrowable(() -> CollaborationRuntimeConfiguration.supervisorModelText(
+                    prompt -> null, "system", "question", DashScopeChatOptions.builder().build()));
+
+            assertThat(failure).isInstanceOf(IllegalStateException.class);
+            assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage)
+                    .containsExactly("SUPERVISOR_EMPTY_RESPONSE");
+        }
+        finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+    }
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withPropertyValues("smartpark.collaboration.max-parallel=2")
             .withUserConfiguration(AllDependencies.class);
