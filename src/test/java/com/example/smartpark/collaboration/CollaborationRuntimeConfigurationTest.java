@@ -60,6 +60,26 @@ class CollaborationRuntimeConfigurationTest {
     }
 
     @Test
+    void supervisorSystemPromptStatesTheProviderConfirmationContract() {
+        RoutingChatModel model = AllDependencies.model();
+        model.clear();
+        runner.run(context -> {
+            ExpertCollaborationService service = context.getBean(ExpertCollaborationService.class);
+            CollaborationRun started = service.start("A2 夜间能耗升高的原因是什么");
+            assertThat(awaitTerminal(service, started.runId()).status())
+                    .isEqualTo(CollaborationRun.RunStatus.COMPLETED);
+
+            assertThat(model.supervisorPrompts()).singleElement().satisfies(prompt ->
+                    assertThat(prompt).contains(
+                            "normalizedQuestion must exactly echo the normalized original question",
+                            "Every assignment must preserve every concrete identifier from the original question",
+                            "Explanatory assignment text is allowed",
+                            "selectedDomains are advisory",
+                            "server-owned deterministic routing is authoritative"));
+        });
+    }
+
+    @Test
     void deterministicRoutingDoesNotAddProviderSecurityDomainToEnergyQuestion() {
         RoutingChatModel model = AllDependencies.model();
         model.clear();
@@ -214,6 +234,12 @@ class CollaborationRuntimeConfigurationTest {
 
         long supervisorPromptCount() {
             return systems.stream().filter(value -> value.contains("collaboration supervisor")).count();
+        }
+
+        List<String> supervisorPrompts() {
+            return systems.stream()
+                    .filter(value -> value.contains("collaboration supervisor"))
+                    .toList();
         }
     }
 
