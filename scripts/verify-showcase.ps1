@@ -52,7 +52,9 @@ function Assert-ShowcaseReport {
         throw 'Showcase preflight scenario set is incomplete.'
     }
 
-    $iso8601Timestamp = '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?(?:Z|[+-]\d{2}:\d{2})$'
+    # java.time.Instant serializes nanosecond precision (up to 9 digits),
+    # while DateTimeOffset rounds it to the platform's 100 ns precision.
+    $iso8601Timestamp = '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$'
     foreach ($result in $results) {
         $scenarioId = [string](Get-ShowcasePropertyValue -InputObject $result -PropertyName 'scenarioId')
         $status = [string](Get-ShowcasePropertyValue -InputObject $result -PropertyName 'status')

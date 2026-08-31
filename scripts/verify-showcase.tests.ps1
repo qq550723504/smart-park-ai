@@ -42,6 +42,10 @@ $ready = [pscustomobject]@{
 
 Assert-ShowcaseReport -Report $ready
 
+$nanosecondTimestamp = Copy-Results $ready.results
+$nanosecondTimestamp[0].verifiedAt = '2026-08-31T10:00:00.895735667Z'
+Assert-ShowcaseReport -Report ([pscustomobject]@{ results = $nanosecondTimestamp })
+
 Assert-Rejected -Report ([pscustomobject]@{ results = @($ready.results | Select-Object -First 3) }) -CaseName 'missing id'
 Assert-Rejected -Report ([pscustomobject]@{
         results = @($ready.results[0], $ready.results[1], $ready.results[2], (New-ReadyResult 'UNEXPECTED_SCENARIO'))
