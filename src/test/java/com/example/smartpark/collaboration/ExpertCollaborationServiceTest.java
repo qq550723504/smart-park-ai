@@ -152,6 +152,8 @@ class ExpertCollaborationServiceTest {
 
             assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage)
                     .containsExactly("MALFORMED_JSON");
+            assertThat(appender.list).extracting(ILoggingEvent::getLoggerName)
+                    .containsOnly(SupervisorPlanner.class.getName());
             assertThat(appender.list.stream().map(ILoggingEvent::getFormattedMessage)
                     .collect(Collectors.joining("\n")))
                     .doesNotContain("QUESTION_SENTINEL", "MODEL_OUTPUT_SENTINEL", "DEV-SECRET-42",
@@ -263,7 +265,7 @@ class ExpertCollaborationServiceTest {
     }
 
     private static ListAppender<ILoggingEvent> captureCollaborationLogs() {
-        Logger logger = (Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
+        Logger logger = (Logger) LoggerFactory.getLogger(SupervisorPlanner.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
         logger.addAppender(appender);
@@ -271,7 +273,7 @@ class ExpertCollaborationServiceTest {
     }
 
     private static void releaseCollaborationLogs(ListAppender<ILoggingEvent> appender) {
-        Logger logger = (Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
+        Logger logger = (Logger) LoggerFactory.getLogger(SupervisorPlanner.class);
         logger.detachAppender(appender);
         appender.stop();
     }
