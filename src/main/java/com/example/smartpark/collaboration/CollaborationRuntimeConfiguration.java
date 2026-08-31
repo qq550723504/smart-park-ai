@@ -1,6 +1,5 @@
 package com.example.smartpark.collaboration;
 
-import com.alibaba.cloud.ai.dashscope.api.DashScopeResponseFormat;
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import com.example.smartpark.collaboration.expert.ExpertFindingParser;
 import com.example.smartpark.collaboration.expert.ExpertFindingValidator;
@@ -25,7 +24,6 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.context.annotation.Bean;
@@ -52,22 +50,6 @@ public class CollaborationRuntimeConfiguration {
 
     private static final Logger LOG = LoggerFactory.getLogger(CollaborationRuntimeConfiguration.class);
 
-    private static final BeanOutputConverter<SupervisorPlanModelOutput> SUPERVISOR_OUTPUT_CONVERTER =
-            new BeanOutputConverter<>(SupervisorPlanModelOutput.class);
-    private static final String SUPERVISOR_SYSTEM_PROMPT =
-            "You are the park collaboration supervisor. Return only JSON with normalizedQuestion, "
-                    + "selectedDomains, assignments, selectionReason. normalizedQuestion must exactly echo "
-                    + "the normalized original question after trimming surrounding whitespace; never paraphrase "
-                    + "it or replace an entity. The complete assignments list must preserve every concrete identifier from "
-                    + "the original question exactly. Each assignment may contain only the identifiers relevant to its domain "
-                    + "and must never add an identifier. Every assignment must be a non-empty string. assignments must contain "
-                    + "exactly one {domain, assignment} item for every selectedDomains entry and no duplicate "
-                    + "domains. Explanatory assignment text is allowed when it retains that exact entity scope. "
-                    + "selectedDomains are advisory; "
-                    + "server-owned deterministic routing is authoritative and may independently add or remove "
-                    + "expert domains. The only allowed domain literals are exactly ENERGY, DEVICE, SECURITY. "
-                    + "Never output entity types, device IDs, or event IDs such as power, equipment, "
-                    + "DEV-ENERGY-001, or SEC-ACCESS-001 as a domain.";
 
     @Bean
     SupervisorPlanner supervisorPlanner() {
@@ -129,9 +111,7 @@ public class CollaborationRuntimeConfiguration {
         ExpertCollaborationGraph graph = graphProvider.getIfAvailable();
         if (model == null || graph == null) return null;
         return new ExpertCollaborationService(
-                question -> planner.parseAndValidate(question, supervisorModelText(model,
-                        SUPERVISOR_SYSTEM_PROMPT + SUPERVISOR_OUTPUT_CONVERTER.getFormat(), question,
-                        supervisorProviderOptions())),
+                planner::planDeterministically,
                 graph,
                 synthesizer::synthesize,
                 new CollaborationRunStore(), events, runExecutor, properties.getRunTimeout(), Clock.systemUTC());
@@ -225,39 +205,6 @@ public class CollaborationRuntimeConfiguration {
         return extract(model.call(new Prompt(new SystemMessage(system), new UserMessage(user))));
     }
 
-    static String supervisorModelText(
-            ChatModel model, String system, String user, DashScopeChatOptions options) {
-        ChatResponse response;
-        try {
-            response = model.call(new Prompt(List.of(new SystemMessage(system), new UserMessage(user)), options));
-        }
-        catch (RuntimeException providerFailure) {
-            LOG.warn("SUPERVISOR_PROVIDER_CALL");
-            throw providerFailure;
-        }
-        try {
-            return extract(response);
-        }
-        catch (IllegalStateException emptyResponse) {
-            LOG.warn("SUPERVISOR_EMPTY_RESPONSE");
-            throw emptyResponse;
-        }
-    }
-
-    private static DashScopeChatOptions supervisorProviderOptions() {
-        DashScopeResponseFormat.JsonSchemaConfig schema = DashScopeResponseFormat.JsonSchemaConfig.builder()
-                .name("collaboration_supervisor_plan")
-                .description("Strict structured output for the collaboration supervisor plan")
-                .schema(SUPERVISOR_OUTPUT_CONVERTER.getJsonSchemaMap())
-                .strict(true)
-                .build();
-        return DashScopeChatOptions.builder()
-                .responseFormat(DashScopeResponseFormat.builder()
-                        .type(DashScopeResponseFormat.Type.JSON_SCHEMA)
-                        .jsonScheme(schema)
-                        .build())
-                .build();
-    }
 
 
     private static String modelTextWithTools(ChatModel model, String system, String user, ToolCallback[] callbacks) {
@@ -338,16 +285,6 @@ public class CollaborationRuntimeConfiguration {
         } catch (java.security.NoSuchAlgorithmException impossible) {
             throw new IllegalStateException(impossible);
         }
-    }
-
-    private record SupervisorPlanModelOutput(
-            String normalizedQuestion,
-            List<ExpertDomain> selectedDomains,
-            List<SupervisorAssignmentModelOutput> assignments,
-            String selectionReason) {
-    }
-
-    private record SupervisorAssignmentModelOutput(ExpertDomain domain, String assignment) {
     }
 
 }

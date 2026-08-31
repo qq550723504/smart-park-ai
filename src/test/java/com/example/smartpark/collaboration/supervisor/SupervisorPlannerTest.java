@@ -21,6 +21,18 @@ class SupervisorPlannerTest {
     private final SupervisorPlanner planner = new SupervisorPlanner();
 
     @Test
+    void buildsCanonicalPlanWithoutAProviderRoutingEcho() {
+        String question = "Compare DEV-ENERGY-001, DEV-HVAC-001, and SEC-ACCESS-001";
+
+        var plan = planner.planDeterministically(question);
+
+        assertThat(plan.selectedDomains()).containsExactlyInAnyOrder(
+                ExpertDomain.ENERGY, ExpertDomain.DEVICE, ExpertDomain.SECURITY);
+        assertThat(plan.assignments().values()).containsOnly(question);
+        assertThat(plan.selectionReason()).isEqualTo("server-owned deterministic routing");
+    }
+
+    @Test
     void logsOnlyMissingRequiredFieldCodeWithoutProviderPayload() {
         ListAppender<ILoggingEvent> appender = capturePlannerLogs();
         String question = "QUESTION_SENTINEL DEV-SECRET-42";

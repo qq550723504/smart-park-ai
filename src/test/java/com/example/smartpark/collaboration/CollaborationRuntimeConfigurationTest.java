@@ -1,6 +1,5 @@
 package com.example.smartpark.collaboration;
 
-import com.alibaba.cloud.ai.dashscope.api.DashScopeResponseFormat;
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import com.example.smartpark.collaboration.expert.ExpertToolSet;
 import com.example.smartpark.collaboration.expert.EvidenceLedger;
@@ -9,9 +8,6 @@ import com.example.smartpark.collaboration.model.ExpertDomain;
 import com.example.smartpark.execution.ExecutionEventPublisher;
 import com.example.smartpark.execution.InMemoryExecutionEventPublisher;
 import com.example.smartpark.execution.model.ExecutionEventType;
-import ch.qos.logback.classic.Logger;
-import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -30,59 +26,14 @@ import org.springframework.context.annotation.Import;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.catchThrowable;
-import org.slf4j.LoggerFactory;
 
 class CollaborationRuntimeConfigurationTest {
 
-    @Test
-    void supervisorProviderFailureLogsOnlyAllowlistedStage() {
-        Logger logger = (Logger) LoggerFactory.getLogger(CollaborationRuntimeConfiguration.class);
-        ListAppender<ILoggingEvent> appender = new ListAppender<>();
-        appender.start();
-        logger.addAppender(appender);
-        try {
-            Throwable failure = catchThrowable(() -> CollaborationRuntimeConfiguration.supervisorModelText(
-                    prompt -> { throw new IllegalStateException("PROVIDER_SENTINEL DEV-SECRET-42"); },
-                    "system", "question", DashScopeChatOptions.builder().build()));
-
-            assertThat(failure).isInstanceOf(IllegalStateException.class);
-            assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage)
-                    .containsExactly("SUPERVISOR_PROVIDER_CALL")
-                    .allSatisfy(message -> assertThat(message)
-                            .doesNotContain("PROVIDER_SENTINEL", "DEV-SECRET-42"));
-        }
-        finally {
-            logger.detachAppender(appender);
-            appender.stop();
-        }
-    }
-
-    @Test
-    void supervisorEmptyResponseLogsOnlyAllowlistedStage() {
-        Logger logger = (Logger) LoggerFactory.getLogger(CollaborationRuntimeConfiguration.class);
-        ListAppender<ILoggingEvent> appender = new ListAppender<>();
-        appender.start();
-        logger.addAppender(appender);
-        try {
-            Throwable failure = catchThrowable(() -> CollaborationRuntimeConfiguration.supervisorModelText(
-                    prompt -> null, "system", "question", DashScopeChatOptions.builder().build()));
-
-            assertThat(failure).isInstanceOf(IllegalStateException.class);
-            assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage)
-                    .containsExactly("SUPERVISOR_EMPTY_RESPONSE");
-        }
-        finally {
-            logger.detachAppender(appender);
-            appender.stop();
-        }
-    }
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withPropertyValues("smartpark.collaboration.max-parallel=2")
             .withUserConfiguration(AllDependencies.class);
@@ -111,65 +62,6 @@ class CollaborationRuntimeConfigurationTest {
                 });
     }
 
-    @Test
-    void supervisorSystemPromptStatesTheProviderConfirmationContract() {
-        RoutingChatModel model = AllDependencies.model();
-        model.clear();
-        runner.run(context -> {
-            ExpertCollaborationService service = context.getBean(ExpertCollaborationService.class);
-            CollaborationRun started = service.start("A2 夜间能耗升高的原因是什么");
-            assertThat(awaitTerminal(service, started.runId()).status())
-                    .isEqualTo(CollaborationRun.RunStatus.COMPLETED);
-
-            assertThat(model.supervisorPrompts()).singleElement().satisfies(prompt ->
-                    assertThat(prompt.getSystemMessage().getText()).contains(
-                            "normalizedQuestion must exactly echo the normalized original question",
-                            "complete assignments list must preserve every concrete identifier",
-                            "Each assignment may contain only the identifiers relevant to its domain",
-                            "assignments must contain exactly one {domain, assignment} item for every selectedDomains entry and no duplicate domains",
-                            "Explanatory assignment text is allowed",
-                            "selectedDomains are advisory",
-                            "server-owned deterministic routing is authoritative"));
-        });
-    }
-
-    @Test
-    void supervisorPreflightUsesStrictDashScopeSchemaWithTypedAssignmentItems() {
-        RoutingChatModel model = AllDependencies.model();
-        model.clear();
-        runner.run(context -> {
-            ExpertCollaborationService service = context.getBean(ExpertCollaborationService.class);
-            CollaborationRun started = service.start("A2 夜间能耗升高的原因是什么");
-            assertThat(awaitTerminal(service, started.runId()).status())
-                    .isEqualTo(CollaborationRun.RunStatus.COMPLETED);
-
-            assertThat(model.supervisorPrompts()).hasSize(1);
-            Prompt prompt = model.supervisorPrompts().get(0);
-            assertThat(prompt.getOptions()).isInstanceOf(DashScopeChatOptions.class);
-            DashScopeResponseFormat responseFormat = ((DashScopeChatOptions) prompt.getOptions())
-                    .getResponseFormat();
-            assertThat(responseFormat.getType()).isEqualTo(DashScopeResponseFormat.Type.JSON_SCHEMA);
-            assertThat(responseFormat.getJsonScheme().getStrict()).isTrue();
-            @SuppressWarnings("unchecked")
-            Map<String, Object> schema = (Map<String, Object>) responseFormat.getJsonScheme().getSchema();
-            @SuppressWarnings("unchecked")
-            Map<String, Object> properties = (Map<String, Object>) schema.get("properties");
-            @SuppressWarnings("unchecked")
-            Map<String, Object> assignments = (Map<String, Object>) properties.get("assignments");
-            assertThat(assignments).containsEntry("type", "array");
-            @SuppressWarnings("unchecked")
-            Map<String, Object> item = (Map<String, Object>) assignments.get("items");
-            assertThat(item).containsEntry("type", "object")
-                    .containsEntry("additionalProperties", false);
-            @SuppressWarnings("unchecked")
-            List<String> required = (List<String>) item.get("required");
-            assertThat(required).containsExactlyInAnyOrder("domain", "assignment");
-            @SuppressWarnings("unchecked")
-            Map<String, Object> itemProperties = (Map<String, Object>) item.get("properties");
-            assertThat(itemProperties).containsKeys("domain", "assignment");
-        });
-    }
-
 
     @Test
     void deterministicRoutingDoesNotAddProviderSecurityDomainToEnergyQuestion() {
@@ -182,7 +74,7 @@ class CollaborationRuntimeConfigurationTest {
             assertThat(completed.status()).isEqualTo(CollaborationRun.RunStatus.COMPLETED);
             assertThat(completed.plan().selectedDomains()).containsExactly(ExpertDomain.ENERGY);
             assertThat(model.expertPrompts()).containsExactly("ENERGY");
-            assertThat(model.supervisorPromptCount()).isOne();
+            assertThat(model.supervisorPromptCount()).isZero();
             assertThat(model.synthesisPromptCount()).isZero();
         });
     }
@@ -199,7 +91,7 @@ class CollaborationRuntimeConfigurationTest {
             assertThat(completed.plan().selectedDomains())
                     .containsExactlyInAnyOrder(ExpertDomain.ENERGY, ExpertDomain.DEVICE, ExpertDomain.SECURITY);
             assertThat(model.expertPrompts()).containsExactlyInAnyOrder("ENERGY", "DEVICE", "SECURITY");
-            assertThat(model.supervisorPromptCount()).isOne();
+            assertThat(model.supervisorPromptCount()).isZero();
         });
     }
 

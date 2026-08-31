@@ -55,6 +55,19 @@ public final class SupervisorPlanner {
         this.validator = validator;
     }
 
+    public SupervisorPlan planDeterministically(String question) {
+        String normalizedQuestion = normalize(question);
+        Set<ExpertDomain> requiredDomains = validator.expectedDomains(normalizedQuestion);
+        if (requiredDomains.isEmpty()) {
+            throw new SupervisorPlanValidator.SupervisorPlanValidationException(
+                    "question is ambiguous or outside expert collaboration scope");
+        }
+        EnumMap<ExpertDomain, String> assignments = new EnumMap<>(ExpertDomain.class);
+        requiredDomains.forEach(domain -> assignments.put(domain, normalizedQuestion));
+        return validator.validate(new SupervisorPlan(normalizedQuestion, requiredDomains, assignments,
+                "server-owned deterministic routing"));
+    }
+
     public SupervisorPlan parseAndValidate(String question, String modelJson) {
         String normalizedQuestion = normalize(question);
         JsonNode root = parseObject(modelJson);
