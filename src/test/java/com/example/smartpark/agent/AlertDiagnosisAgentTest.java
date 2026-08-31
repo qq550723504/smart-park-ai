@@ -1,5 +1,7 @@
 package com.example.smartpark.agent;
 
+import com.alibaba.cloud.ai.dashscope.api.DashScopeResponseFormat;
+import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import com.example.smartpark.model.alert.Alert;
 import com.example.smartpark.model.alert.AlertClassification;
 import com.example.smartpark.model.alert.ParkContext;
@@ -14,24 +16,80 @@ import com.example.smartpark.tool.energy.EnergyQueryTool;
 import com.example.smartpark.tool.knowledge.ParkKnowledgeTool;
 import com.example.smartpark.tool.security.SecurityQueryTool;
 import com.example.smartpark.tool.workorder.WorkOrderTool;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AlertDiagnosisAgentTest {
+
+    @Test
+    void providerShapedSemanticDiagnosisGetsServerOwnedIdentity() {
+        String providerResponse = """
+                {
+                  "riskLevel":"LOW",
+                  "rootCause":"Restricted airflow from a clogged filter",
+                  "summary":"The HVAC unit likely needs filter inspection.",
+                  "evidence":["history: repeated temperature warnings","knowledge: check filters first"],
+                  "recommendedAction":"Inspect and replace the HVAC filter, then verify airflow.",
+                  "confidence":0.88
+                }
+                """;
+        TestChatModel model = new TestChatModel(providerResponse, providerResponse);
+        AlertDiagnosisAgent agent = agent(model);
+        Instant startedAt = Instant.now();
+
+        Diagnosis result = agent.diagnose(sampleAlert(), sampleContext(), sampleKnowledge());
+
+        assertThat(result.id()).isNotBlank();
+        assertThat(result.alertId()).isEqualTo("ALT-TEMP-001");
+        assertThat(result.deviceId()).isEqualTo("DEV-HVAC-001");
+        assertThat(result.diagnosedAt()).isBetween(startedAt, Instant.now());
+        assertThat(result.rootCause()).contains("filter");
+        assertThat(model.callCount()).isEqualTo(1);
+    }
+
+    @Test
+    void diagnosisRequestUsesStrictProviderSchemaForOnlyModelOwnedFields() {
+        TestChatModel model = new TestChatModel("""
+                {
+                  "riskLevel":"LOW",
+                  "rootCause":"Restricted airflow from a clogged filter",
+                  "summary":"The HVAC unit likely needs filter inspection.",
+                  "evidence":["history: repeated temperature warnings"],
+                  "recommendedAction":"Inspect and replace the HVAC filter.",
+                  "confidence":0.88
+                }
+                """);
+        AlertDiagnosisAgent agent = agent(model);
+
+        agent.diagnose(sampleAlert(), sampleContext(), sampleKnowledge());
+
+        assertThat(model.lastPrompt().getOptions()).isInstanceOf(DashScopeChatOptions.class);
+        DashScopeResponseFormat responseFormat = ((DashScopeChatOptions) model.lastPrompt().getOptions())
+                .getResponseFormat();
+        assertThat(responseFormat.getType()).isEqualTo(DashScopeResponseFormat.Type.JSON_SCHEMA);
+        assertThat(responseFormat.getJsonScheme().getStrict()).isTrue();
+        assertThat(responseFormat.getJsonScheme().getName()).isEqualTo("alert_diagnosis");
+        assertThat(responseFormat.getJsonScheme().getSchema()).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> schema = (Map<String, Object>) responseFormat.getJsonScheme().getSchema();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> properties = (Map<String, Object>) schema.get("properties");
+        assertThat(properties.keySet()).containsExactlyInAnyOrder(
+                "riskLevel", "rootCause", "summary", "evidence", "recommendedAction", "confidence");
+        assertThat(properties).doesNotContainKeys("id", "alertId", "deviceId", "diagnosedAt");
+        assertThat(properties.get("confidence")).asString().contains("type=number");
+    }
 
     @Test
     void diagnosisExposesReadOnlyEnergyConsumptionLookup() {
@@ -151,7 +209,8 @@ class AlertDiagnosisAgentTest {
 
         Diagnosis result = agent.diagnose(sampleAlert(), sampleContext(), sampleKnowledge());
 
-        assertThat(result.id()).isEqualTo("diag-retry");
+        assertThat(result.id()).isNotBlank().isNotEqualTo("diag-retry");
+        assertThat(result.alertId()).isEqualTo("ALT-TEMP-001");
         assertThat(model.callCount()).isEqualTo(2);
         assertThat(model.lastPrompt().getSystemMessage().getText())
                 .contains("exactly one JSON object")
@@ -280,72 +339,72 @@ class AlertDiagnosisAgentTest {
                 new ParkKnowledgeTool(new MockParkFixture().knowledge()));
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> agent.diagnose(sampleAlert(), sampleContext(), sampleKnowledge()))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("riskLevel");
+                .isInstanceOf(IllegalStateException.class);
     }
 
     @Test
-    void invalidDiagnosisTimestampFailsClosed() {
+    void emptyDiagnosisEvidenceFailsClosedAfterOneBoundedRetry() {
+        String content = """
+                {"riskLevel":"LOW","rootCause":"cause","summary":"summary","evidence":[],"recommendedAction":"action","confidence":0.5}
+                """;
+        TestChatModel model = new TestChatModel(content, content);
+
+        assertThatThrownBy(() -> agent(model).diagnose(sampleAlert(), sampleContext(), sampleKnowledge()))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(model.callCount()).isEqualTo(2);
+    }
+
+    @Test
+    void modelSuppliedIdentityAndTimestampCannotOverrideServerOwnedValues() {
         String content = """
                 {
-                  "id":"diag-6",
-                  "alertId":"ALT-TEMP-001",
-                  "deviceId":"DEV-HVAC-001",
+                  "id":"provider-controlled-id",
+                  "alertId":"provider-controlled-alert",
+                  "deviceId":"provider-controlled-device",
                   "riskLevel":"LOW",
                   "rootCause":"Restricted airflow from a clogged filter",
                   "summary":"The HVAC unit likely needs filter inspection.",
                   "evidence":["history: repeated temperature warnings"],
                   "recommendedAction":"Inspect and replace the HVAC filter, then verify airflow.",
                   "confidence":0.9,
-                  "diagnosedAt":"yesterday"
+                  "diagnosedAt":"2000-01-01T00:00:00Z"
                 }
                 """;
-        TestChatModel model = new TestChatModel(content, content);
+        TestChatModel model = new TestChatModel(content);
+        Instant startedAt = Instant.now();
 
-        AlertDiagnosisAgent agent = new AlertDiagnosisAgent(
-                model,
-                new DeviceQueryTool(new MockParkFixture().devices()),
-                new AlertQueryTool(new MockParkFixture().alerts()),
-                new WorkOrderTool(new MockParkFixture().workOrders()),
-                new ParkKnowledgeTool(new MockParkFixture().knowledge()));
+        Diagnosis result = agent(model).diagnose(sampleAlert(), sampleContext(), sampleKnowledge());
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> agent.diagnose(sampleAlert(), sampleContext(), sampleKnowledge()))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("diagnosedAt");
+        assertThat(result.id()).isNotEqualTo("provider-controlled-id");
+        assertThat(result.alertId()).isEqualTo("ALT-TEMP-001");
+        assertThat(result.deviceId()).isEqualTo("DEV-HVAC-001");
+        assertThat(result.diagnosedAt()).isBetween(startedAt, Instant.now());
     }
 
     @ParameterizedTest
-    @MethodSource("nonFiniteConfidences")
-    void nonFiniteConfidenceIsRejectedAtTheStructuredOutputBoundary(double confidence) {
-        JsonNode output = JsonNodeFactory.instance.objectNode().put("confidence", confidence);
+    @MethodSource("invalidConfidences")
+    void invalidConfidenceIsRejectedAtTheStructuredOutputBoundary(String confidence) {
+        String content = """
+                {"riskLevel":"LOW","rootCause":"cause","summary":"summary","evidence":["evidence"],"recommendedAction":"action","confidence":%s}
+                """.formatted(confidence);
+        TestChatModel model = new TestChatModel(content, content);
 
-        assertThatThrownBy(() -> invokeRequireConfidence(output))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("confidence");
+        assertThatThrownBy(() -> agent(model).diagnose(sampleAlert(), sampleContext(), sampleKnowledge()))
+                .isInstanceOf(IllegalStateException.class);
     }
 
-    private static double invokeRequireConfidence(JsonNode output) {
-        try {
-            Method method = AlertDiagnosisAgent.class.getDeclaredMethod(
-                    "requireConfidence",
-                    JsonNode.class,
-                    String.class);
-            method.setAccessible(true);
-            return (double) method.invoke(null, output, "diagnosis");
-        }
-        catch (InvocationTargetException exception) {
-            if (exception.getCause() instanceof RuntimeException runtimeException) {
-                throw runtimeException;
-            }
-            throw new AssertionError(exception.getCause());
-        }
-        catch (ReflectiveOperationException exception) {
-            throw new AssertionError(exception);
-        }
+    private static Stream<String> invalidConfidences() {
+        return Stream.of("-0.1", "1.1", "\"NaN\"", "\"Infinity\"", "\"-Infinity\"");
     }
 
-    private static Stream<Double> nonFiniteConfidences() {
-        return Stream.of(Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY);
+    private static AlertDiagnosisAgent agent(TestChatModel model) {
+        MockParkFixture parkSystem = new MockParkFixture();
+        return new AlertDiagnosisAgent(
+                model,
+                new DeviceQueryTool(parkSystem.devices()),
+                new AlertQueryTool(parkSystem.alerts()),
+                new WorkOrderTool(parkSystem.workOrders()),
+                new ParkKnowledgeTool(parkSystem.knowledge()));
     }
 
     private static Alert sampleAlert() {

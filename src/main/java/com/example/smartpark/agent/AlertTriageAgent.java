@@ -3,7 +3,7 @@ package com.example.smartpark.agent;
 import com.example.smartpark.model.alert.Alert;
 import com.example.smartpark.model.alert.AlertClassification;
 import com.example.smartpark.model.common.RiskLevel;
-import com.fasterxml.jackson.databind.JsonNode;
+import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -12,16 +12,15 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
-import java.util.Iterator;
-import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 
 @Component
 @ConditionalOnProperty(name = "spring.ai.dashscope.enabled", havingValue = "true", matchIfMissing = true)
 public class AlertTriageAgent {
 
-    private static final Set<String> EXPECTED_FIELDS = Set.of("category", "priority", "riskLevel", "confidence");
+    private static final BeanOutputConverter<TriageModelOutput> OUTPUT_CONVERTER =
+            AlertStructuredOutputSupport.converter(TriageModelOutput.class);
 
     private final ChatModel chatModel;
 
@@ -32,40 +31,27 @@ public class AlertTriageAgent {
     public AlertClassificationResult classify(Alert alert) {
         Objects.requireNonNull(alert, "alert");
         Prompt prompt = new Prompt(
-                new SystemMessage(PromptCatalog.triageSystemPrompt()),
-                new UserMessage(PromptCatalog.triageUserPrompt(alert)));
+                List.of(
+                        new SystemMessage(PromptCatalog.triageSystemPrompt() + OUTPUT_CONVERTER.getFormat()),
+                        new UserMessage(PromptCatalog.triageUserPrompt(alert))),
+                AlertStructuredOutputSupport.providerOptions("alert_triage", OUTPUT_CONVERTER));
         try {
             return classifyResponse(extractText(chatModel.call(prompt), "triage"));
         }
         catch (ModelOutputException firstFailure) {
             Prompt retry = new Prompt(
-                    new SystemMessage(PromptCatalog.triageSystemPrompt() + PromptCatalog.strictRetryInstruction()),
-                    new UserMessage(PromptCatalog.triageUserPrompt(alert)));
+                    List.of(
+                            new SystemMessage(PromptCatalog.triageSystemPrompt()
+                                    + OUTPUT_CONVERTER.getFormat()
+                                    + PromptCatalog.strictRetryInstruction()),
+                            new UserMessage(PromptCatalog.triageUserPrompt(alert))),
+                    AlertStructuredOutputSupport.providerOptions("alert_triage", OUTPUT_CONVERTER));
             return classifyResponse(extractText(chatModel.call(retry), "triage"));
         }
     }
 
     private AlertClassificationResult classifyResponse(String text) {
-        JsonNode root = ModelJsonSupport.parseObject(text, "triage");
-        validateFields(root, EXPECTED_FIELDS, "triage");
-
-        String category = requireText(root, "category", "triage");
-        String priority = requireText(root, "priority", "triage");
-        String riskLevel = requireText(root, "riskLevel", "triage");
-        JsonNode confidenceNode = root.get("confidence");
-        if (confidenceNode == null || !confidenceNode.isNumber()) {
-            throw new ModelOutputException("triage output must contain a numeric confidence");
-        }
-        double confidence = confidenceNode.doubleValue();
-        if (confidence < 0.0 || confidence > 1.0) {
-            throw new ModelOutputException("triage output field 'confidence' must be between 0 and 1");
-        }
-
-        return new AlertClassificationResult(
-                parseEnum(AlertClassification.class, category, "category", "triage"),
-                parseEnum(AlertPriority.class, priority, "priority", "triage"),
-                parseEnum(RiskLevel.class, riskLevel, "riskLevel", "triage"),
-                confidence);
+        return AlertStructuredOutputSupport.convert(OUTPUT_CONVERTER, text, "triage").toResult();
     }
 
     private static String extractText(ChatResponse response, String context) {
@@ -77,32 +63,6 @@ public class AlertTriageAgent {
             throw new ModelOutputException(context + " response text was blank");
         }
         return text;
-    }
-
-    private static void validateFields(JsonNode root, Set<String> expectedFields, String context) {
-        Set<String> actualFields = new LinkedHashSet<>();
-        Iterator<String> fieldNames = root.fieldNames();
-        fieldNames.forEachRemaining(actualFields::add);
-        if (!actualFields.equals(expectedFields)) {
-            throw new ModelOutputException(context + " response fields did not match expected shape: " + actualFields);
-        }
-    }
-
-    private static String requireText(JsonNode root, String fieldName, String context) {
-        JsonNode value = root.get(fieldName);
-        if (value == null || !value.isTextual() || value.textValue().isBlank()) {
-            throw new ModelOutputException(context + " output field '" + fieldName + "' must be a non-empty string");
-        }
-        return value.textValue().trim();
-    }
-
-    private static <E extends Enum<E>> E parseEnum(Class<E> enumType, String value, String fieldName, String context) {
-        try {
-            return Enum.valueOf(enumType, value);
-        }
-        catch (IllegalArgumentException ex) {
-            throw new ModelOutputException(context + " output field '" + fieldName + "' must be one of " + java.util.List.of(enumType.getEnumConstants()), ex);
-        }
     }
 
     public enum AlertPriority {
@@ -124,6 +84,26 @@ public class AlertTriageAgent {
             if (confidence < 0.0 || confidence > 1.0) {
                 throw new IllegalArgumentException("confidence must be between 0 and 1");
             }
+        }
+    }
+
+    private record TriageModelOutput(
+            AlertClassification category,
+            AlertPriority priority,
+            RiskLevel riskLevel,
+            double confidence) {
+
+        private TriageModelOutput {
+            Objects.requireNonNull(category, "category");
+            Objects.requireNonNull(priority, "priority");
+            Objects.requireNonNull(riskLevel, "riskLevel");
+            if (!Double.isFinite(confidence) || confidence < 0.0 || confidence > 1.0) {
+                throw new IllegalArgumentException("confidence must be between 0 and 1");
+            }
+        }
+
+        private AlertClassificationResult toResult() {
+            return new AlertClassificationResult(category, priority, riskLevel, confidence);
         }
     }
 }

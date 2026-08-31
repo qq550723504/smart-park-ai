@@ -19,13 +19,8 @@ final class PromptCatalog {
     static String triageSystemPrompt() {
         return """
                 You are the smart-park alert triage agent.
-                Return JSON only and make it match these fields exactly:
-                {
-                  "category": "%s",
-                  "priority": "LOW | MEDIUM | HIGH",
-                  "riskLevel": "%s",
-                  "confidence": "number from 0 to 1"
-                }
+                Classify with category (%s), priority (LOW | MEDIUM | HIGH), riskLevel (%s),
+                and a numeric confidence from 0 to 1.
                 Use the supplied alert only.
                 Do not guess missing facts.
                 If the evidence is insufficient, choose the most conservative valid classification and lower confidence instead of inventing data.
@@ -62,19 +57,10 @@ final class PromptCatalog {
         List<String> toolNames = List.copyOf(Objects.requireNonNull(availableToolNames, "availableToolNames"));
         return """
                 You are the smart-park diagnosis agent.
-                Return JSON only and make it match these fields exactly:
-                {
-                  "id": "non-empty diagnosis id",
-                  "alertId": "non-empty alert id",
-                  "deviceId": "non-empty device id",
-                  "riskLevel": "%s",
-                  "rootCause": "non-empty root-cause hypothesis",
-                  "summary": "non-empty diagnosis summary",
-                  "evidence": ["one or more evidence statements"],
-                  "recommendedAction": "non-empty recommended action",
-                  "confidence": "number from 0 to 1 for this diagnosis",
-                  "diagnosedAt": "ISO-8601 instant"
-                }
+                Diagnose with riskLevel (%s), a non-empty rootCause, summary, one or more evidence
+                statements, a non-empty recommendedAction, and a numeric confidence from 0 to 1.
+                Diagnosis identity, alert identity, device identity, and diagnosis time are server-owned;
+                do not invent or return them.
                 Every conclusion must be backed by evidence.
                 Missing tool data or missing knowledge is evidence insufficiency, not permission to guess.
                 Available read-only tools: %s

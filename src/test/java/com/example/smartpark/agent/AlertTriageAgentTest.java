@@ -1,5 +1,7 @@
 package com.example.smartpark.agent;
 
+import com.alibaba.cloud.ai.dashscope.api.DashScopeResponseFormat;
+import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import com.example.smartpark.model.alert.Alert;
 import com.example.smartpark.model.alert.AlertClassification;
 import com.example.smartpark.model.common.RiskLevel;
@@ -9,11 +11,35 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AlertTriageAgentTest {
+
+    @Test
+    void triageRequestUsesStrictProviderSchemaWithNumericConfidence() {
+        TestChatModel model = new TestChatModel("""
+                {"category":"TEMPERATURE","priority":"MEDIUM","riskLevel":"LOW","confidence":0.92}
+                """);
+
+        new AlertTriageAgent(model).classify(sampleAlert());
+
+        assertThat(model.lastPrompt().getOptions()).isInstanceOf(DashScopeChatOptions.class);
+        DashScopeResponseFormat responseFormat = ((DashScopeChatOptions) model.lastPrompt().getOptions())
+                .getResponseFormat();
+        assertThat(responseFormat.getType()).isEqualTo(DashScopeResponseFormat.Type.JSON_SCHEMA);
+        assertThat(responseFormat.getJsonScheme().getStrict()).isTrue();
+        assertThat(responseFormat.getJsonScheme().getName()).isEqualTo("alert_triage");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> schema = (Map<String, Object>) responseFormat.getJsonScheme().getSchema();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> properties = (Map<String, Object>) schema.get("properties");
+        assertThat(properties.keySet()).containsExactlyInAnyOrder(
+                "category", "priority", "riskLevel", "confidence");
+        assertThat(properties.get("confidence")).asString().contains("type=number");
+    }
 
     @Test
     void triageConvertsTheModelResponseIntoAlertClassification() {
@@ -92,8 +118,7 @@ class AlertTriageAgentTest {
         TestChatModel model = new TestChatModel(content, content);
 
         assertThatThrownBy(() -> new AlertTriageAgent(model).classify(sampleAlert()))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("confidence");
+                .isInstanceOf(IllegalStateException.class);
     }
 
     private static Alert sampleAlert() {
