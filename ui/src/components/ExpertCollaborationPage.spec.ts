@@ -53,6 +53,69 @@ beforeEach(() => {
 })
 
 describe('ExpertCollaborationPage', () => {
+  it('preserves the supervisor conclusion when it is not one of the localized status labels', async () => {
+    globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        return jsonResponse({ runId: RUN_ID, statusUrl: '/status', eventsUrl: '/events' }, 202)
+      }
+      return jsonResponse({
+        runId: RUN_ID, question: 'q', status: 'COMPLETED', plan: null, findings: [],
+        synthesis: { status: 'SUPPORTED', conclusion: 'ENERGY and DEVICE are aligned', evidenceRefs: [], confidence: 0.9, uncertainties: [] },
+        error: null, updatedAt: '2026-08-25T00:00:00Z',
+      })
+    }) as unknown as typeof fetch
+
+    const wrapper = mount(ExpertCollaborationPage, {
+      props: { trace: traceStub() },
+      global: { stubs: collaborationElementStubs },
+    })
+    await wrapper.find('form').trigger('submit')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(wrapper.find('.synthesis-panel').text()).toContain('ENERGY and DEVICE are aligned')
+    wrapper.unmount()
+  })
+
+  it('renders Chinese customer-facing wording for supervisor uncertainty', async () => {
+    globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        return jsonResponse({ runId: RUN_ID, statusUrl: '/status', eventsUrl: '/events' }, 202)
+      }
+      return jsonResponse({
+        runId: RUN_ID, question: 'q', status: 'COMPLETED',
+        plan: {
+          normalizedQuestion: 'q', selectedDomains: ['ENERGY', 'DEVICE', 'SECURITY'],
+          assignments: { ENERGY: 'energy', DEVICE: 'device', SECURITY: 'security' }, selectionReason: 'three domains',
+        },
+        findings: [
+          { domain: 'ENERGY', status: 'SUPPORTED', conclusion: 'energy supported', evidenceRefs: ['energy:1'], confidence: 0.9, nextChecks: [] },
+          { domain: 'DEVICE', status: 'SUPPORTED', conclusion: 'device supported', evidenceRefs: ['device:1'], confidence: 0.8, nextChecks: [] },
+          { domain: 'SECURITY', status: 'INSUFFICIENT_EVIDENCE', conclusion: 'security uncertain', evidenceRefs: [], confidence: 0.0, nextChecks: ['review redacted summary'] },
+        ],
+        synthesis: {
+          status: 'INSUFFICIENT_EVIDENCE', conclusion: '无法确认', evidenceRefs: [], confidence: 0,
+          uncertainties: ['SECURITY finding has confidence 0.0 and provides no temporal, spatial, or causal link to ENERGY or DEVICE findings; all findings are isolated mock data with no cross-domain correlation evidence'],
+        },
+        error: null, updatedAt: '2026-08-25T00:00:00Z',
+      })
+    }) as unknown as typeof fetch
+
+    const wrapper = mount(ExpertCollaborationPage, {
+      props: { trace: traceStub() },
+      global: { stubs: collaborationElementStubs },
+    })
+    await wrapper.find('form').trigger('submit')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    const synthesis = wrapper.find('.synthesis-panel').text()
+    expect(synthesis).toContain('无法确认')
+    expect(synthesis).toContain('安防专家')
+    expect(synthesis).toContain('当前证据不足')
+    expect(synthesis).not.toContain('SECURITY finding has confidence')
+    expect(synthesis).not.toContain('temporal, spatial, or causal')
+    wrapper.unmount()
+  })
+
   it('renders only selected experts and displays findings, synthesis, and real handoffs', async () => {
     const handoff: ExecutionEvent = {
       eventId: 'event-1', runId: RUN_ID, sequence: 1, timestamp: '2026-08-25T08:00:00Z',
@@ -75,9 +138,9 @@ describe('ExpertCollaborationPage', () => {
     expect(wrapper.find('[data-testid="expert-card-ENERGY"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="expert-card-SECURITY"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="expert-card-DEVICE"]').exists()).toBe(false)
-    expect(wrapper.text()).toContain('energy supported')
-    expect(wrapper.text()).toContain('security uncertain')
-    expect(wrapper.text()).toContain('needs review')
+    expect(wrapper.text()).toContain('能耗专家已返回核查结果')
+    expect(wrapper.text()).toContain('安防专家当前证据不足')
+    expect(wrapper.text()).toContain('当前证据不足，暂无法确认关联')
     expect(wrapper.text()).toContain('EnergyExpert')
     expect(wrapper.text()).toContain('Energy expert completed')
     expect(wrapper.text()).toContain('50%证据覆盖')

@@ -6,6 +6,7 @@ import ExpertCard from './ExpertCard.vue'
 import { useExpertCollaboration } from '../composables/useExpertCollaboration'
 import { useGuidedLaunch } from '../composables/useGuidedLaunch'
 import type { ExpertDomain } from '../types/collaboration'
+import { formatSynthesis } from '../utils/collaborationPresentation'
 import type { ExecutionTrace } from '../composables/useExecutionTrace'
 import type { GuidedLaunchUpdate, ScenarioLaunchRequest } from '../types/workbench'
 
@@ -30,6 +31,7 @@ const evidenceCoverage = computed(() => {
   return Math.round((backedDomains / domains.value.length) * 100)
 })
 const handoffs = computed(() => props.trace.events.value.filter((event) => event.eventType === 'EXPERT_HANDOFF'))
+const synthesisDisplay = computed(() => run.value?.synthesis ? formatSynthesis(run.value.synthesis) : null)
 
 watch(
   [() => props.active, () => run.value?.runId],
@@ -77,7 +79,7 @@ function timeLabel(timestamp: string) { return new Date(timestamp).toLocaleTimeS
 
         <section class="expert-section"><div class="section-heading"><div><span class="eyebrow">动态专家卡</span><h2>本次参与的专家</h2></div><span class="count-badge">{{ domains.length }} 个分支</span></div><div v-if="domains.length" class="expert-grid"><ExpertCard v-for="domain in domains" :key="domain" :domain="domain" :plan="run?.plan ?? null" :finding="findingFor(domain)" /></div><div v-else class="collaboration-empty">提交问题后，系统会根据问题内容动态选择专家。</div></section>
 
-        <section v-if="run?.synthesis" class="panel synthesis-panel"><div class="section-heading"><div><span class="eyebrow">主管汇总</span><h2>协作结论</h2></div><span class="synthesis-confidence">工具证据覆盖 {{ evidenceCoverage }}%</span></div><p>{{ run.synthesis.conclusion }}</p><div class="evidence-list"><span v-for="ref in run.synthesis.evidenceRefs" :key="ref">{{ ref }}</span></div><p v-if="run.synthesis.uncertainties.length" class="uncertainty">不确定性：{{ run.synthesis.uncertainties.join('、') }}</p></section>
+        <section v-if="run?.synthesis" class="panel synthesis-panel"><div class="section-heading"><div><span class="eyebrow">主管汇总</span><h2>协作结论</h2></div><span class="synthesis-confidence">工具证据覆盖 {{ evidenceCoverage }}%</span></div><p>{{ synthesisDisplay?.conclusion }}</p><div v-if="synthesisDisplay?.evidence.length" class="evidence-list"><span v-for="(evidence, index) in synthesisDisplay.evidence" :key="`${evidence}-${index}`">{{ evidence }}</span></div><p v-for="uncertainty in synthesisDisplay?.uncertainties ?? []" :key="uncertainty" class="uncertainty">不确定性：{{ uncertainty }}</p></section>
       </div>
 
       <aside class="panel handoff-panel"><div class="section-heading"><div><span class="eyebrow">交接轨迹</span><h2>专家之间如何协作</h2></div><span class="live-indicator"><i></i>实时</span></div><ol v-if="handoffs.length" class="handoff-list"><li v-for="event in handoffs" :key="event.eventId"><span class="handoff-node"></span><div><div class="handoff-meta"><strong>{{ event.actor }}</strong><time>{{ timeLabel(event.timestamp) }}</time></div><p>{{ event.safeSummary }}</p><span v-if="event.displayPayload?.payloadType === 'EXPERT_HANDOFF'" class="handoff-detail">{{ domainLabels[event.displayPayload.domain as ExpertDomain] ?? event.displayPayload.domain }} · {{ event.displayPayload.direction }} · {{ event.displayPayload.findingStatus }}</span></div></li></ol><div v-else class="collaboration-empty">启动协作后，主管分派与专家回传会按时间记录在这里。</div></aside>
