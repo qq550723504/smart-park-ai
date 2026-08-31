@@ -199,7 +199,9 @@ class CollaborationRuntimeConfigurationTest {
 
         private static String plan(String question, String... domains) {
             String selected = java.util.Arrays.stream(domains).map(d -> "\"" + d + "\"").collect(java.util.stream.Collectors.joining(","));
-            String assignments = java.util.Arrays.stream(domains).map(d -> "\"" + d + "\":\"analyze " + d.toLowerCase() + "\"").collect(java.util.stream.Collectors.joining(","));
+            String assignments = java.util.Arrays.stream(domains)
+                    .map(d -> "\"" + d + "\":\"analyze " + d.toLowerCase() + " for " + question + "\"")
+                    .collect(java.util.stream.Collectors.joining(","));
             return "{\"normalizedQuestion\":\"" + question + "\",\"selectedDomains\":[" + selected + "],\"assignments\":{" + assignments + "},\"selectionReason\":\"question requires selected domains\"}";
         }
 

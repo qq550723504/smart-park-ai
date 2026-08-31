@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -20,6 +21,8 @@ public final class SupervisorPlanner {
     private static final Pattern DEVICE_ID = Pattern.compile("DEV-[A-Z0-9-]+", Pattern.CASE_INSENSITIVE);
     private static final Pattern NON_ENERGY_DEVICE_ID = Pattern.compile("DEV-(?!ENERGY-)[A-Z0-9-]+", Pattern.CASE_INSENSITIVE);
     private static final Pattern SECURITY_EVENT_ID = Pattern.compile("SEC-[A-Z0-9-]+", Pattern.CASE_INSENSITIVE);
+    private static final Pattern CONCRETE_ENTITY_IDENTIFIER = Pattern.compile(
+            "(?i)(?<![A-Z0-9_-])(?:[A-Z][A-Z0-9]{0,15}(?:-[A-Z0-9]+)+|[A-Z]{1,8}\\d+)(?![A-Z0-9_-])");
     private static final Map<String, ExpertDomain> DOMAIN_ALIASES = Map.ofEntries(
             Map.entry("energy", ExpertDomain.ENERGY),
             Map.entry("energetics", ExpertDomain.ENERGY),
@@ -55,7 +58,10 @@ public final class SupervisorPlanner {
         if (!root.has("normalizedQuestion") || !root.has("selectionReason") || selected == null || assignments == null) {
             throw new ModelOutputException("planner response is missing required fields");
         }
-        requireText(root, "normalizedQuestion");
+        String providerQuestion = requireText(root, "normalizedQuestion");
+        if (!normalize(providerQuestion).equals(normalizedQuestion)) {
+            throw new ModelOutputException("normalizedQuestion must exactly match the normalized input question");
+        }
         EnumSet<ExpertDomain> modelDomains = EnumSet.noneOf(ExpertDomain.class);
         if (!selected.isArray()) throw new ModelOutputException("selectedDomains must be an array");
         for (JsonNode value : selected) {
@@ -66,7 +72,10 @@ public final class SupervisorPlanner {
         Iterator<Map.Entry<String, JsonNode>> fields = assignments.fields();
         while (fields.hasNext()) {
             Map.Entry<String, JsonNode> field = fields.next();
-            modelAssignments.put(parseDomain(field.getKey(), field.getKey(), normalizedQuestion), field.getValue().asText());
+            ExpertDomain domain = parseDomain(field.getKey(), field.getKey(), normalizedQuestion);
+            String assignment = requireTextValue(field.getValue(), "assignment for " + field.getKey());
+            requireExactEntityScope(normalizedQuestion, assignment, domain);
+            modelAssignments.put(domain, assignment);
         }
         if (!modelAssignments.keySet().equals(modelDomains)) {
             throw new ModelOutputException("assignments must exactly cover selectedDomains");
@@ -106,9 +115,37 @@ public final class SupervisorPlanner {
     }
 
     private static String requireText(JsonNode root, String field) {
-        JsonNode value = root.get(field);
-        if (value == null || !value.isTextual() || value.asText().isBlank()) throw new ModelOutputException(field + " must be a non-empty string");
+        return requireTextValue(root.get(field), field);
+    }
+
+    private static String requireTextValue(JsonNode value, String description) {
+        if (value == null || !value.isTextual() || value.asText().isBlank()) {
+            throw new ModelOutputException(description + " must be a non-empty string");
+        }
         return value.asText().trim();
+    }
+
+    private static void requireExactEntityScope(String question, String assignment, ExpertDomain domain) {
+        Set<String> requiredIdentifiers = entityIdentifiers(question);
+        Set<String> assignmentIdentifiers = entityIdentifiers(assignment);
+        if (assignmentIdentifiers.equals(requiredIdentifiers)) return;
+
+        Set<String> missing = new LinkedHashSet<>(requiredIdentifiers);
+        missing.removeAll(assignmentIdentifiers);
+        Set<String> unexpected = new LinkedHashSet<>(assignmentIdentifiers);
+        unexpected.removeAll(requiredIdentifiers);
+        throw new ModelOutputException("assignment for " + domain
+                + " must preserve the exact input entity scope; missing=" + missing
+                + ", unexpected=" + unexpected);
+    }
+
+    private static Set<String> entityIdentifiers(String text) {
+        Set<String> identifiers = new LinkedHashSet<>();
+        var matcher = CONCRETE_ENTITY_IDENTIFIER.matcher(text);
+        while (matcher.find()) {
+            identifiers.add(matcher.group().toUpperCase(Locale.ROOT));
+        }
+        return Set.copyOf(identifiers);
     }
 
     private static ExpertDomain parseDomain(String raw, Object original, String question) {

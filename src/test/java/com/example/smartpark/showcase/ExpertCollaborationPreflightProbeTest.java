@@ -62,6 +62,60 @@ class ExpertCollaborationPreflightProbeTest {
                 .isEqualTo(ShowcaseProbeResult.FAILED);
     }
 
+    @Test
+    void collaborationRejectsMissingDomainFinding() {
+        ExpertCollaborationService service = mock(ExpertCollaborationService.class);
+        UUID runId = UUID.randomUUID();
+        when(service.start(anyString())).thenReturn(run(runId, CollaborationRun.RunStatus.RUNNING, List.of()));
+        List<ExpertFinding> findings = List.of(
+                supported(ExpertDomain.ENERGY),
+                supported(ExpertDomain.DEVICE));
+        when(service.get(runId)).thenReturn(completed(runId, findings,
+                new Synthesis(FindingStatus.SUPPORTED, "ENERGY evidence；DEVICE evidence",
+                        findings.stream().flatMap(finding -> finding.evidenceRefs().stream()).toList(),
+                        .8, List.of())));
+
+        assertThat(new ExpertCollaborationPreflightProbe(service).probe())
+                .isEqualTo(ShowcaseProbeResult.FAILED);
+    }
+
+    @Test
+    void collaborationRejectsNonSupportedDomainFinding() {
+        ExpertCollaborationService service = mock(ExpertCollaborationService.class);
+        UUID runId = UUID.randomUUID();
+        when(service.start(anyString())).thenReturn(run(runId, CollaborationRun.RunStatus.RUNNING, List.of()));
+        List<ExpertFinding> findings = List.of(
+                supported(ExpertDomain.ENERGY),
+                new ExpertFinding(ExpertDomain.DEVICE, FindingStatus.INSUFFICIENT_EVIDENCE,
+                        "no device evidence", List.of(), 0, List.of("retry")),
+                supported(ExpertDomain.SECURITY));
+        List<String> supportedEvidence = List.of("tool:energy#fixture", "tool:security#fixture");
+        when(service.get(runId)).thenReturn(completed(runId, findings,
+                new Synthesis(FindingStatus.SUPPORTED, "ENERGY evidence；SECURITY evidence",
+                        supportedEvidence, .8, List.of("device evidence missing"))));
+
+        assertThat(new ExpertCollaborationPreflightProbe(service).probe())
+                .isEqualTo(ShowcaseProbeResult.FAILED);
+    }
+
+    @Test
+    void collaborationRejectsSynthesisEvidenceMismatch() {
+        ExpertCollaborationService service = mock(ExpertCollaborationService.class);
+        UUID runId = UUID.randomUUID();
+        when(service.start(anyString())).thenReturn(run(runId, CollaborationRun.RunStatus.RUNNING, List.of()));
+        List<ExpertFinding> findings = List.of(
+                supported(ExpertDomain.ENERGY),
+                supported(ExpertDomain.DEVICE),
+                supported(ExpertDomain.SECURITY));
+        when(service.get(runId)).thenReturn(completed(runId, findings,
+                new Synthesis(FindingStatus.SUPPORTED,
+                        "ENERGY evidence；DEVICE evidence；SECURITY evidence",
+                        List.of("tool:energy#fixture", "tool:device#fixture"), .8, List.of())));
+
+        assertThat(new ExpertCollaborationPreflightProbe(service).probe())
+                .isEqualTo(ShowcaseProbeResult.FAILED);
+    }
+
     @ParameterizedTest
     @EnumSource(value = CollaborationRun.RunStatus.class,
             names = {"FAILED", "NEEDS_CLARIFICATION"})
