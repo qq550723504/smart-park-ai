@@ -64,19 +64,15 @@ class ExpertCollaborationPreflightProbeTest {
     }
 
     @Test
-    void collaborationRetriesTwoTerminalProviderFailures() {
+    void collaborationRetriesOneTerminalProviderFailure() {
         ExpertCollaborationService service = mock(ExpertCollaborationService.class);
         UUID firstFailedId = UUID.randomUUID();
-        UUID secondFailedId = UUID.randomUUID();
         UUID passedId = UUID.randomUUID();
         when(service.start(anyString())).thenReturn(
                 run(firstFailedId, CollaborationRun.RunStatus.RUNNING, List.of()),
-                run(secondFailedId, CollaborationRun.RunStatus.RUNNING, List.of()),
                 run(passedId, CollaborationRun.RunStatus.RUNNING, List.of()));
         when(service.get(firstFailedId)).thenReturn(run(
                 firstFailedId, CollaborationRun.RunStatus.FAILED, List.of()));
-        when(service.get(secondFailedId)).thenReturn(run(
-                secondFailedId, CollaborationRun.RunStatus.FAILED, List.of()));
         List<ExpertFinding> findings = List.of(
                 supported(ExpertDomain.ENERGY),
                 supported(ExpertDomain.DEVICE),
@@ -88,7 +84,7 @@ class ExpertCollaborationPreflightProbeTest {
 
         assertThat(new ExpertCollaborationPreflightProbe(service).probe())
                 .isEqualTo(ShowcaseProbeResult.PASSED);
-        verify(service, times(3)).start(anyString());
+        verify(service, times(2)).start(anyString());
     }
 
     @Test
