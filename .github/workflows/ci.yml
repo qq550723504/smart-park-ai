@@ -29,6 +29,19 @@ jobs:
           cache: maven
       - name: Run backend tests
         run: ./mvnw -B test
+      - name: Smoke hardened time-parser container
+        run: |
+          image=analytics-time-parser-ci:${{ github.sha }}
+          docker build --tag "$image" ./time-parser
+          docker run --rm \
+            --read-only \
+            --network none \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+            --entrypoint python \
+            "$image" \
+            -c 'import app, os; health = app.health(); assert os.getuid() != 0, os.getuid(); assert health.status == "UP", health; assert health.provider == "jionlp", health; assert health.version == "1.5.29", health'
       - name: Test showcase verifier
         run: pwsh -NoProfile -File ./scripts/verify-showcase.tests.ps1
 
