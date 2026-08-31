@@ -40,6 +40,7 @@ import java.time.Duration;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -151,12 +152,14 @@ public class CollaborationRuntimeConfiguration {
                 EvidenceLedger observed = new EvidenceLedger();
                 ToolCallback[] callbacks = audited(toolSet.callbacks(), observed, events, runId);
                 String primaryEvidence = collectPrimaryEvidence(domain, assignment, callbacks);
+                Set<String> primaryEvidenceRefs = observed.snapshot();
                 String userPrompt = primaryEvidence.isEmpty() ? assignment
                         : assignment + "\n\nServer-collected read-only evidence:\n" + primaryEvidence;
                 String response = modelTextWithTools(model,
-                        "You are the " + domain.name() + " park expert. Analyze only your assigned domain. Use the server-collected read-only evidence when it is present. You may call additional relevant read-only tools when needed. Do not return INSUFFICIENT_EVIDENCE until relevant tools have been attempted. Return only JSON with domain, status, conclusion, evidenceRefs, confidence, nextChecks. The domain must be exactly " + domain.name() + ". The status must be exactly one of SUPPORTED, INSUFFICIENT_EVIDENCE, FAILED; never use workflow states such as IN_PROGRESS or custom labels such as NO_ASSOCIATION_FOUND. Put a negative result in conclusion and keep the business status as SUPPORTED only when the cited tool result supports it. Cite evidence references ONLY by copying the [[evidence:...]] markers returned with each successful tool result; never invent or reuse a marker from another call.",
+                        "You are the " + domain.name() + " park expert. Analyze only your assigned domain. Use the server-collected read-only evidence when it is present. A usable observation is SUPPORTED for this domain even when it cannot by itself prove a cross-domain correlation; the supervisor decides correlation. You may call additional relevant read-only tools when needed. Do not return INSUFFICIENT_EVIDENCE until relevant tools have been attempted. Return only JSON with domain, status, conclusion, evidenceRefs, confidence, nextChecks. The domain must be exactly " + domain.name() + ". The status must be exactly one of SUPPORTED, INSUFFICIENT_EVIDENCE, FAILED; never use workflow states such as IN_PROGRESS or custom labels such as NO_ASSOCIATION_FOUND. Put a negative result in conclusion and keep the business status as SUPPORTED only when the cited tool result supports it. Evidence references are bound by the server; include a marker when possible, but never invent or reuse one from another call.",
                         userPrompt, callbacks);
-                ExpertFinding finding = new ExpertFindingParser().parse(response, domain);
+                ExpertFinding finding = bindPrimaryEvidence(
+                        new ExpertFindingParser().parse(response, domain), primaryEvidenceRefs);
                 return new ExpertFindingValidator().validateWithObservations(
                         finding, observed.snapshotObservations(), assignment);
             }
@@ -211,6 +214,14 @@ public class CollaborationRuntimeConfiguration {
 
     private record PrimaryEvidenceSpec(String toolName, String argumentName,
                                        java.util.regex.Pattern entityPattern) { }
+
+    static ExpertFinding bindPrimaryEvidence(ExpertFinding modelFinding, Set<String> primaryEvidenceRefs) {
+        if (primaryEvidenceRefs == null || primaryEvidenceRefs.isEmpty()) return modelFinding;
+        return new ExpertFinding(modelFinding.domain(),
+                com.example.smartpark.collaboration.model.FindingStatus.SUPPORTED,
+                modelFinding.conclusion(), primaryEvidenceRefs.stream().sorted().toList(),
+                modelFinding.confidence(), modelFinding.nextChecks());
+    }
 
     private static String modelText(ChatModel model, String system, String user) {
         return extract(model.call(new Prompt(new SystemMessage(system), new UserMessage(user))));

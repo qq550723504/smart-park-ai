@@ -256,6 +256,26 @@ class CollaborationRuntimeConfigurationTest {
     }
 
     @Test
+    void bindsServerOwnedPrimaryReferenceInsteadOfTrustingModelMarkerCopying() {
+        EvidenceLedger ledger = new EvidenceLedger();
+        ledger.record("tool:lookupDeviceStatus#abc",
+                "{\"deviceId\":\"DEV-HVAC-001\",\"status\":\"OFFLINE\"}",
+                "{\"deviceId\":\"DEV-HVAC-001\"}");
+        var modelFinding = new com.example.smartpark.collaboration.model.ExpertFinding(
+                ExpertDomain.DEVICE,
+                com.example.smartpark.collaboration.model.FindingStatus.INSUFFICIENT_EVIDENCE,
+                "provider copied [[evidence:...]] incorrectly",
+                List.of("[[evidence:tool:lookupDeviceStatus#abc]]"), 0, List.of());
+
+        var bound = CollaborationRuntimeConfiguration.bindPrimaryEvidence(
+                modelFinding, ledger.snapshot());
+
+        assertThat(bound.status())
+                .isEqualTo(com.example.smartpark.collaboration.model.FindingStatus.SUPPORTED);
+        assertThat(bound.evidenceRefs()).containsExactly("tool:lookupDeviceStatus#abc");
+    }
+
+    @Test
     void publishesToolLifecycleEventsForTheCurrentCollaborationRun() {
         InMemoryExecutionEventPublisher events = new InMemoryExecutionEventPublisher();
         UUID runId = UUID.randomUUID();
