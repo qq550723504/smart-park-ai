@@ -7,6 +7,11 @@ import org.yaml.snakeyaml.constructor.SafeConstructor;
 import org.yaml.snakeyaml.events.AliasEvent;
 import org.yaml.snakeyaml.events.Event;
 import org.yaml.snakeyaml.events.NodeEvent;
+import org.yaml.snakeyaml.nodes.MappingNode;
+import org.yaml.snakeyaml.nodes.Node;
+import org.yaml.snakeyaml.nodes.NodeTuple;
+import org.yaml.snakeyaml.nodes.SequenceNode;
+import org.yaml.snakeyaml.nodes.Tag;
 
 import java.io.IOException;
 import java.io.StringReader;
@@ -66,10 +71,14 @@ class ShowcaseComposeConfigurationTest {
         Map<String, Object> defaultEnvironment = backendEnvironment(parseYaml(Path.of("compose.yaml")));
         Map<String, Object> application = parseYaml(Path.of("src/main/resources/application.yml"));
 
-        assertThat(defaultEnvironment).contains(
-                Map.entry("SPRING_AI_DASHSCOPE_ENABLED", "false"),
-                Map.entry("SMARTPARK_ANALYTICS_ENABLED", "false"));
-        assertThat(defaultEnvironment).doesNotContainKey("SMARTPARK_VOICE_ENABLED");
+        assertThat(defaultEnvironment.get("SPRING_AI_DASHSCOPE_ENABLED")).isEqualTo("false");
+        assertThat(defaultEnvironment.getOrDefault("SMARTPARK_ANALYTICS_ENABLED", "false")).isEqualTo("false");
+        assertThat(defaultEnvironment.getOrDefault("SMARTPARK_ANALYTICS_DEMO_DATA_REFRESH_ENABLED", "false"))
+                .isEqualTo("false");
+        assertThat(defaultEnvironment.getOrDefault("SMARTPARK_VOICE_ENABLED", "false")).isEqualTo("false");
+        assertThat(defaultEnvironment.getOrDefault("SMARTPARK_KNOWLEDGE_MODE", "mock")).isEqualTo("mock");
+        assertThat(defaultEnvironment.getOrDefault("SMARTPARK_CUSTOMER_SERVICE_ANSWER_MODE", "mock"))
+                .isEqualTo("mock");
         assertThat(mapAt(mapAt(application, "smartpark"), "showcase").get("preflight-timeout"))
                 .isEqualTo("${SMARTPARK_SHOWCASE_PREFLIGHT_TIMEOUT:90s}");
     }
@@ -110,7 +119,7 @@ class ShowcaseComposeConfigurationTest {
     }
 
     @Test
-    void showcaseContractRejectsMisnestedValuesAliasesAnchorsAndDuplicateKeys() {
+    void showcaseContractRejectsMisnestedValuesAliasesAnchorsMergesAndDuplicateKeys() {
         String misnested = """
                 services:
                   backend:
@@ -125,6 +134,15 @@ class ShowcaseComposeConfigurationTest {
                 %s
                 """.formatted(indent(REQUIRED_SHOWCASE_ENVIRONMENT_YAML, 6));
         String alias = "services: *backend\n";
+        String inlineMerge = """
+                services:
+                  backend:
+                    environment:
+                      <<: {SMARTPARK_KNOWLEDGE_MODE: rag}
+                      SMARTPARK_CUSTOMER_SERVICE_ANSWER_MODE: dashscope
+                      SMARTPARK_VOICE_ENABLED: "true"
+                      SMARTPARK_VOICE_ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+                """;
         String duplicateKey = """
                 services:
                   backend:
@@ -137,6 +155,7 @@ class ShowcaseComposeConfigurationTest {
                 .isInstanceOf(AssertionError.class);
         assertThatIllegalArgumentException().isThrownBy(() -> parseYaml(anchor));
         assertThatIllegalArgumentException().isThrownBy(() -> parseYaml(alias));
+        assertThatIllegalArgumentException().isThrownBy(() -> parseYaml(inlineMerge));
         assertThatThrownBy(() -> parseYaml(duplicateKey)).isInstanceOf(RuntimeException.class);
     }
 
@@ -159,7 +178,7 @@ class ShowcaseComposeConfigurationTest {
     }
 
     private static Map<String, Object> parseYaml(String source) {
-        rejectAliasesAndAnchors(source);
+        rejectAliasesAnchorsAndMerges(source);
 
         Yaml yaml = new Yaml(new SafeConstructor(strictLoaderOptions()));
         List<Object> documents = new ArrayList<>();
@@ -168,13 +187,35 @@ class ShowcaseComposeConfigurationTest {
         return asStringObjectMap(documents.get(0), "YAML document");
     }
 
-    private static void rejectAliasesAndAnchors(String source) {
+    private static void rejectAliasesAnchorsAndMerges(String source) {
         for (Event event : new Yaml(strictLoaderOptions()).parse(new StringReader(source))) {
             if (event instanceof AliasEvent) {
                 throw new IllegalArgumentException("YAML aliases are not permitted in Compose contracts");
             }
             if (event instanceof NodeEvent nodeEvent && nodeEvent.getAnchor() != null) {
                 throw new IllegalArgumentException("YAML anchors are not permitted in Compose contracts");
+            }
+        }
+        for (Node document : new Yaml(strictLoaderOptions()).composeAll(new StringReader(source))) {
+            rejectMergeNodes(document);
+        }
+    }
+
+    private static void rejectMergeNodes(Node node) {
+        if (Tag.MERGE.equals(node.getTag())) {
+            throw new IllegalArgumentException("YAML merge keys are not permitted in Compose contracts");
+        }
+        if (node instanceof MappingNode mappingNode) {
+            if (mappingNode.isMerged()) {
+                throw new IllegalArgumentException("YAML merged mappings are not permitted in Compose contracts");
+            }
+            for (NodeTuple tuple : mappingNode.getValue()) {
+                rejectMergeNodes(tuple.getKeyNode());
+                rejectMergeNodes(tuple.getValueNode());
+            }
+        } else if (node instanceof SequenceNode sequenceNode) {
+            for (Node value : sequenceNode.getValue()) {
+                rejectMergeNodes(value);
             }
         }
     }
