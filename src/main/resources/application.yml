@@ -22,6 +22,16 @@ spring:
         completions-path: ${SPRING_AI_DASHSCOPE_CHAT_COMPLETIONS_PATH:/api/v1/services/aigc/text-generation/generation}
         options:
           model: qwen-plus
+      audio:
+        transcription:
+          options:
+            model: ${SPRING_AI_DASHSCOPE_AUDIO_TRANSCRIPTION_OPTIONS_MODEL:paraformer-realtime-v2}
+            format: pcm
+            sample-rate: 16000
+        speech:
+          options:
+            model: ${SPRING_AI_DASHSCOPE_AUDIO_SPEECH_OPTIONS_MODEL:cosyvoice-v2}
+            voice: ${SPRING_AI_DASHSCOPE_AUDIO_SPEECH_OPTIONS_VOICE:longxiaochun_v2}
     mcp:
       server:
         enabled: ${smartpark.mcp.enabled}

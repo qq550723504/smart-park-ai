@@ -33,13 +33,22 @@ class ShowcaseComposeConfigurationTest {
             "SMARTPARK_KNOWLEDGE_MODE", "rag",
             "SMARTPARK_CUSTOMER_SERVICE_ANSWER_MODE", "dashscope",
             "SMARTPARK_VOICE_ENABLED", "true",
-            "SMARTPARK_VOICE_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173");
+            "SMARTPARK_VOICE_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173",
+            "SPRING_AI_DASHSCOPE_AUDIO_TRANSCRIPTION_OPTIONS_MODEL",
+                    "${SPRING_AI_DASHSCOPE_AUDIO_TRANSCRIPTION_OPTIONS_MODEL:-paraformer-realtime-v2}",
+            "SPRING_AI_DASHSCOPE_AUDIO_SPEECH_OPTIONS_MODEL",
+                    "${SPRING_AI_DASHSCOPE_AUDIO_SPEECH_OPTIONS_MODEL:-cosyvoice-v2}",
+            "SPRING_AI_DASHSCOPE_AUDIO_SPEECH_OPTIONS_VOICE",
+                    "${SPRING_AI_DASHSCOPE_AUDIO_SPEECH_OPTIONS_VOICE:-longxiaochun_v2}");
 
     private static final String REQUIRED_SHOWCASE_ENVIRONMENT_YAML = """
             SMARTPARK_KNOWLEDGE_MODE: rag
             SMARTPARK_CUSTOMER_SERVICE_ANSWER_MODE: dashscope
             SMARTPARK_VOICE_ENABLED: "true"
             SMARTPARK_VOICE_ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+            SPRING_AI_DASHSCOPE_AUDIO_TRANSCRIPTION_OPTIONS_MODEL: ${SPRING_AI_DASHSCOPE_AUDIO_TRANSCRIPTION_OPTIONS_MODEL:-paraformer-realtime-v2}
+            SPRING_AI_DASHSCOPE_AUDIO_SPEECH_OPTIONS_MODEL: ${SPRING_AI_DASHSCOPE_AUDIO_SPEECH_OPTIONS_MODEL:-cosyvoice-v2}
+            SPRING_AI_DASHSCOPE_AUDIO_SPEECH_OPTIONS_VOICE: ${SPRING_AI_DASHSCOPE_AUDIO_SPEECH_OPTIONS_VOICE:-longxiaochun_v2}
             """;
 
     @Test
@@ -81,6 +90,18 @@ class ShowcaseComposeConfigurationTest {
                 .isEqualTo("mock");
         assertThat(mapAt(mapAt(application, "smartpark"), "showcase").get("preflight-timeout"))
                 .isEqualTo("${SMARTPARK_SHOWCASE_PREFLIGHT_TIMEOUT:90s}");
+
+        Map<String, Object> audio = mapAt(mapAt(mapAt(application, "spring"), "ai"),
+                "dashscope");
+        Map<String, Object> transcriptionOptions = mapAt(mapAt(mapAt(audio, "audio"),
+                "transcription"), "options");
+        Map<String, Object> speechOptions = mapAt(mapAt(mapAt(audio, "audio"),
+                "speech"), "options");
+        assertThat(transcriptionOptions).containsEntry("model",
+                "${SPRING_AI_DASHSCOPE_AUDIO_TRANSCRIPTION_OPTIONS_MODEL:paraformer-realtime-v2}");
+        assertThat(speechOptions).contains(
+                Map.entry("model", "${SPRING_AI_DASHSCOPE_AUDIO_SPEECH_OPTIONS_MODEL:cosyvoice-v2}"),
+                Map.entry("voice", "${SPRING_AI_DASHSCOPE_AUDIO_SPEECH_OPTIONS_VOICE:longxiaochun_v2}"));
     }
 
     @Test

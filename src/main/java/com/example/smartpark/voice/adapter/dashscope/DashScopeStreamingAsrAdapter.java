@@ -7,6 +7,7 @@ import com.example.smartpark.voice.model.VoiceErrorCode;
 import com.example.smartpark.voice.port.StreamingAsrPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.model.ModelOptionsUtils;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.stereotype.Component;
 import reactor.core.Disposable;
@@ -48,13 +49,19 @@ public final class DashScopeStreamingAsrAdapter implements StreamingAsrPort, Dis
     });
     private final Map<String, TurnState> activeTurnsBySession = new ConcurrentHashMap<>();
 
-    public DashScopeStreamingAsrAdapter(DashScopeAudioTranscriptionModel transcriptionModel) {
-        this(transcriptionModel::streamRecognition);
+    public DashScopeStreamingAsrAdapter(
+            DashScopeAudioTranscriptionModel transcriptionModel,
+            DashScopeAudioTranscriptionOptions configuredOptions) {
+        this(transcriptionModel::streamRecognition, configuredOptions);
     }
 
-    DashScopeStreamingAsrAdapter(AsrSdkFacade facade) {
+    DashScopeStreamingAsrAdapter(AsrSdkFacade facade,
+                                 DashScopeAudioTranscriptionOptions configuredOptions) {
         this.facade = Objects.requireNonNull(facade, "facade");
-        this.options = new DashScopeAudioTranscriptionOptions();
+        this.options = ModelOptionsUtils.mapToClass(
+                ModelOptionsUtils.objectToMap(
+                        Objects.requireNonNull(configuredOptions, "configuredOptions")),
+                DashScopeAudioTranscriptionOptions.class);
         // Exactly the one accepted capture format; anything else is rejected upstream.
         this.options.setFormat("pcm");
         this.options.setSampleRate(16_000);

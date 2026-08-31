@@ -1,5 +1,8 @@
 package com.example.smartpark.showcase;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.example.smartpark.voice.VoiceAnswerAgent;
 import com.example.smartpark.voice.model.ToolCallRecord;
 import com.example.smartpark.voice.model.VoiceAnswer;
@@ -12,6 +15,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.stubbing.Answer;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
@@ -68,6 +72,52 @@ class VoiceAssistantPreflightProbeTest {
         assertThat(tts.cancelAttempts).isOne();
         verify(agent).answer(eq(asr.sessionId), eq(asr.turnId), eq(QUESTION),
                 any(VoiceAnswerAgent.Listener.class), any(BooleanSupplier.class));
+    }
+
+    @Test
+    void observesPassedProviderChainWithOnlyStageOutcomeAndCounters() {
+        ListAppender<ILoggingEvent> appender = captureProbeLogs();
+        try {
+            ScriptedAsrPort asr = new ScriptedAsrPort(AsrBehavior.CLOSED);
+            ScriptedTtsPort tts = new ScriptedTtsPort(
+                    TtsBehavior.COMPLETED, new byte[] {1, 2});
+
+            ShowcaseProbeResult result = new VoiceAssistantPreflightProbe(
+                    asr, successfulAgent(validAnswer()), tts).probe();
+
+            assertThat(result).isEqualTo(ShowcaseProbeResult.PASSED);
+            assertThat(appender.list)
+                    .extracting(ILoggingEvent::getFormattedMessage)
+                    .containsExactly("voice preflight stage=TTS outcome=PASSED "
+                            + "asrFinalCount=0 ttsAudioChunkCount=1")
+                    .allSatisfy(message -> assertThat(message)
+                            .doesNotContain(QUESTION, validAnswer().text(),
+                                    "paraformer-realtime-v2", "cosyvoice-v2",
+                                    "longxiaochun_v2", "sk-sensitive"));
+        }
+        finally {
+            releaseProbeLogs(appender);
+        }
+    }
+
+    @Test
+    void observesFailedAsrBoundaryWithoutProviderOrTranscriptDetail() {
+        ListAppender<ILoggingEvent> appender = captureProbeLogs();
+        try {
+            ShowcaseProbeResult result = new VoiceAssistantPreflightProbe(
+                    new ScriptedAsrPort(AsrBehavior.ERROR_THEN_CLOSED),
+                    mock(VoiceAnswerAgent.class),
+                    new ScriptedTtsPort(TtsBehavior.COMPLETED, new byte[] {1})).probe();
+
+            assertThat(result).isEqualTo(ShowcaseProbeResult.FAILED);
+            assertThat(appender.list)
+                    .extracting(ILoggingEvent::getFormattedMessage)
+                    .containsExactly("voice preflight stage=ASR outcome=FAILED "
+                            + "asrFinalCount=0 ttsAudioChunkCount=0");
+        }
+        finally {
+            releaseProbeLogs(appender);
+        }
     }
 
     @Test
@@ -388,6 +438,20 @@ class VoiceAssistantPreflightProbeTest {
                 new VoiceAnswer(" ", List.of("DEV-ENERGY-001"), List.of(call)),
                 new VoiceAnswer("当前用电正常", List.of(), List.of(call)),
                 new VoiceAnswer("当前用电正常", List.of("DEV-ENERGY-001"), List.of()));
+    }
+
+    private static ListAppender<ILoggingEvent> captureProbeLogs() {
+        Logger logger = (Logger) LoggerFactory.getLogger(VoiceAssistantPreflightProbe.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        return appender;
+    }
+
+    private static void releaseProbeLogs(ListAppender<ILoggingEvent> appender) {
+        Logger logger = (Logger) LoggerFactory.getLogger(VoiceAssistantPreflightProbe.class);
+        logger.detachAppender(appender);
+        appender.stop();
     }
 
     private static VoiceAnswer validAnswer() {
