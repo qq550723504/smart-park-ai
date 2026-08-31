@@ -110,11 +110,18 @@ const traceStatusLabels = {
 function statusLabelForTrace(status: keyof typeof traceStatusLabels): string {
   return traceStatusLabels[status]
 }
+const executionEvidenceByView: Record<WorkbenchView, Pick<WorkbenchEvidenceItem, 'value' | 'tone'>> = {
+  workflow: { value: '受控写入 · 审批后创建工单', tone: 'warning' },
+  customer: { value: '受控写入 · 可创建客服工单', tone: 'warning' },
+  voice: { value: '只读查询 · 实时语音会话', tone: 'verified' },
+  collaboration: { value: '只读查询 · 多专家汇总', tone: 'verified' },
+  analytics: { value: '真实只读数据', tone: 'verified' },
+}
 const evidenceItems = computed<WorkbenchEvidenceItem[]>(() => [
   { label: '场景', value: navItems.value.find((item) => item.value === activeView.value)?.label ?? '告警工作流' },
   { label: '执行轨迹', value: trace.status.value === 'streaming' ? '实时同步' : statusLabelForTrace(trace.status.value), tone: trace.status.value === 'failed' ? 'danger' : 'verified' },
   { label: '知识检索', ...knowledgeEvidence.value },
-  { label: '数据模式', value: '真实只读数据', tone: 'verified' },
+  { label: '执行模式', ...executionEvidenceByView[activeView.value] },
 ])
 watch(
   () => workflow.value?.workflowId,
@@ -312,7 +319,7 @@ function confidence(value?: number) {
 
       <section v-if="needsApproval" class="approval-panel panel">
         <div class="approval-accent"></div><div class="approval-copy"><span class="eyebrow">人工参与</span><h2>需要人工审批</h2><p>风险闸门已暂停工作流。确认现场情况后，决定是否创建处置工单。</p><div class="approval-facts"><span v-for="reason in (workflow?.riskReasons ?? [])" :key="reason" class="risk-reason">{{ reason }}</span></div></div>
-        <div class="approval-form"><el-input v-model="reviewer" placeholder="审批人姓名" /><el-input v-model="comment" type="textarea" :rows="2" placeholder="审批意见" /><div class="approval-actions"><el-button :loading="approving" @click="decide('REJECT')">拒绝处置</el-button><el-button type="primary" :loading="approving" @click="decide('APPROVE')">批准并创建工单</el-button></div></div>
+        <div class="approval-form"><el-input v-model="reviewer" aria-label="审批人姓名" placeholder="审批人姓名" /><el-input v-model="comment" aria-label="审批意见" type="textarea" :rows="2" placeholder="审批意见" /><div class="approval-actions"><el-button :loading="approving" @click="decide('REJECT')">拒绝处置</el-button><el-button type="primary" :loading="approving" @click="decide('APPROVE')">批准并创建工单</el-button></div></div>
       </section>
 
       <section v-if="isTerminal && workflow" class="result-panel panel">

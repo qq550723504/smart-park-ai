@@ -87,6 +87,8 @@ const props = defineProps<{
 type ChartSpec = Extract<DisplayPayload, { payloadType: 'CHART' }>
 const container = ref<HTMLElement | null>(null)
 let instance: echarts.ECharts | null = null
+let resizeObserver: ResizeObserver | null = null
+let observedContainer: HTMLElement | null = null
 
 const spec = computed<ChartSpec | null>(() =>
   props.chart?.payloadType === 'CHART' ? props.chart : null,
@@ -98,17 +100,36 @@ const kpiValue = computed(() => {
   return index < 0 || !props.rows[0] ? '' : String(props.rows[0][index] ?? '-')
 })
 
+function disconnectResizeObserver(): void {
+  resizeObserver?.disconnect()
+  resizeObserver = null
+  observedContainer = null
+}
+
+function observeContainer(target: HTMLElement): void {
+  if (observedContainer === target && resizeObserver) return
+  disconnectResizeObserver()
+  if (typeof ResizeObserver !== 'function') return
+  observedContainer = target
+  resizeObserver = new ResizeObserver(() => {
+    if (instance && observedContainer === container.value) instance.resize()
+  })
+  resizeObserver.observe(target)
+}
+
 /** Renders only backend ChartSpec + real result rows; never invents data. */
 function render(): void {
   const current = spec.value
   if (!container.value) return
   if (!current || current.type === 'TABLE' || current.type === 'KPI') {
+    disconnectResizeObserver()
     instance?.dispose()
     instance = null
     container.value.style.display = 'none'
     return
   }
   container.value.style.display = 'block'
+  observeContainer(container.value)
   try {
     instance = instance ?? echarts.init(container.value)
     instance.setOption(withDarkTheme(buildOption(current)), true)
@@ -284,8 +305,13 @@ function cellValue(raw: unknown): number {
 }
 
 watch(() => [props.chart, props.columns, props.rows], render)
+watch(container, render)
 onMounted(render)
-onBeforeUnmount(() => instance?.dispose())
+onBeforeUnmount(() => {
+  disconnectResizeObserver()
+  instance?.dispose()
+  instance = null
+})
 </script>
 
 <template>

@@ -218,6 +218,52 @@ describe('useVoiceSession', () => {
     expect(binding.connectionPhase.value).toBe('connected')
   })
 
+  it('shares one pending handshake between prepare and an immediate microphone toggle', async () => {
+    const pendingSession = deferred<{ sessionId: string; runId: string; wsPath: string }>()
+    const sockets: FakeWebSocket[] = []
+    const capture = new FakeCapture()
+    let sessionsCreated = 0
+    let microphoneRequests = 0
+    const binding = useVoiceSession({
+      api: {
+        createSession: () => {
+          sessionsCreated++
+          return pendingSession.promise
+        },
+      },
+      openWebSocket: (url) => {
+        const socket = new FakeWebSocket(url)
+        sockets.push(socket)
+        return socket
+      },
+      requestMicrophone: async () => {
+        microphoneRequests++
+        return { getTracks: () => [] } as unknown as MediaStream
+      },
+      createCapture: () => capture,
+    })
+
+    const preparing = binding.prepare()
+    const toggling = binding.toggleMicrophone()
+    pendingSession.resolve({
+      sessionId: 'vs-single-flight',
+      runId: '00000000-0000-0000-0000-000000000111',
+      wsPath: '/ws/voice/sessions/vs-single-flight',
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(microphoneRequests).toBe(0)
+    sockets.forEach((socket) => socket.open())
+    await Promise.all([preparing, toggling])
+
+    expect(sessionsCreated).toBe(1)
+    expect(sockets).toHaveLength(1)
+    expect(microphoneRequests).toBe(1)
+    expect(capture.started).toBe(1)
+    expect(binding.connectionPhase.value).toBe('connected')
+  })
+
   it('commit sends COMMIT_INPUT and partial/final frames feed the transcript', async () => {
     const h = makeHarness()
     await h.binding.toggleMicrophone()

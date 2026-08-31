@@ -45,9 +45,6 @@ const orderedScenarios = computed(() => {
       || priority.indexOf(a.id) - priority.indexOf(b.id))
 })
 
-const visibleScenarios = computed(() => orderedScenarios.value.slice(0, 3))
-const omittedScenarios = computed(() => orderedScenarios.value.slice(3))
-
 const selectedScenario = computed(() => {
   if (!selectedId.value) {
     return null
@@ -279,7 +276,7 @@ watch(() => props.active, (active) => {
       <div v-if="!loading" class="showcase-home__rows" aria-label="演示场景列表">
         <p class="showcase-home__more">可体验任务</p>
         <button
-          v-for="scenario in visibleScenarios"
+          v-for="scenario in orderedScenarios"
           :key="scenario.id"
           type="button"
           class="showcase-home__row"
@@ -302,16 +299,6 @@ watch(() => props.active, (active) => {
             </span>
           </span>
         </button>
-        <p
-          v-for="scenario in omittedScenarios"
-          :key="scenario.id"
-          class="showcase-home__omitted"
-          data-omitted-scenario
-        >
-          <span>{{ scenario.title }}</span>
-          <span v-if="isSelectable(scenario)">READY · live</span>
-          <span v-else>{{ scenario.status }} · {{ safeUnavailableReason(scenario) }}</span>
-        </p>
       </div>
     </aside>
 

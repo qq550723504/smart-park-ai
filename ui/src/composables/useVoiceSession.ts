@@ -111,6 +111,7 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
   let suppressAudio = false
   let intentionalClose = false
   let lifecycleGeneration = 0
+  let connectionAttempt: { generation: number; promise: Promise<boolean> } | null = null
 
   function messageId(prefix: string): string {
     return `${prefix}-${Date.now()}-${++controlSequence}`
@@ -129,8 +130,7 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
     toolEvents.value = []
   }
 
-  async function ensureConnected(generation: number): Promise<boolean> {
-    if (socket) return true
+  async function openConnection(generation: number): Promise<boolean> {
     connectionPhase.value = 'connecting'
     const created = await api.createSession()
     if (generation !== lifecycleGeneration) return false
@@ -179,6 +179,19 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
       throw new Error(errorMessage.value || '语音连接未就绪')
     }
     return true
+  }
+
+  function ensureConnected(generation: number): Promise<boolean> {
+    if (generation !== lifecycleGeneration) return Promise.resolve(false)
+    if (socket && connectionPhase.value === 'connected') return Promise.resolve(true)
+    if (connectionAttempt?.generation === generation) return connectionAttempt.promise
+
+    let ownedPromise!: Promise<boolean>
+    ownedPromise = openConnection(generation).finally(() => {
+      if (connectionAttempt?.promise === ownedPromise) connectionAttempt = null
+    })
+    connectionAttempt = { generation, promise: ownedPromise }
+    return ownedPromise
   }
 
   function waitUntil(condition: () => boolean): Promise<void> {
@@ -359,6 +372,7 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
 
   function close(): void {
     lifecycleGeneration++
+    connectionAttempt = null
     intentionalClose = true
     if (socket && sessionId.value) {
       const frame = buildControlFrame(

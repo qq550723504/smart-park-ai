@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick, onMounted, onUnmounted } from 'vue'
+import { ElInput } from 'element-plus'
 import OperationsWorkbench from './OperationsWorkbench.vue'
 import ImmersiveWorkbenchShell from './workbench/ImmersiveWorkbenchShell.vue'
 
@@ -226,7 +227,31 @@ describe('OperationsWorkbench', () => {
     expect(wrapper.get('[data-evidence-item="场景"] strong').text()).toBe('告警工作流')
     expect(wrapper.get('[data-evidence-item="执行轨迹"] strong').text()).toBe('空闲')
     expect(wrapper.get('[data-evidence-item="知识检索"] strong').text()).toBe('Mock')
-    expect(wrapper.get('[data-evidence-item="数据模式"] strong').text()).toBe('真实只读数据')
+    expect(wrapper.get('[data-evidence-item="执行模式"] strong').text()).toBe('受控写入 · 审批后创建工单')
+  })
+
+  it('discloses scene-accurate execution semantics and verification tone', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow' },
+      global: { stubs: operatorStubs },
+    })
+
+    await settleCapabilities()
+
+    const expectedModes = [
+      ['workflow', '受控写入 · 审批后创建工单', 'warning'],
+      ['customer', '受控写入 · 可创建客服工单', 'warning'],
+      ['voice', '只读查询 · 实时语音会话', 'verified'],
+      ['collaboration', '只读查询 · 多专家汇总', 'verified'],
+      ['analytics', '真实只读数据', 'verified'],
+    ] as const
+
+    for (const [view, value, tone] of expectedModes) {
+      await wrapper.get(`[data-workbench-view="${view}"]`).trigger('click')
+      const evidence = wrapper.get('[data-evidence-item="执行模式"]')
+      expect(evidence.get('strong').text()).toBe(value)
+      expect(evidence.attributes('data-tone')).toBe(tone)
+    }
   })
 
   it('keeps knowledge evidence in a loading state until capabilities resolve', async () => {
@@ -281,7 +306,7 @@ describe('OperationsWorkbench', () => {
     expect(wrapper.get('[data-testid="customer-role"]').text()).toBe('CUSTOMER_AGENT')
   })
 
-  it('opens the narrow-screen execution rail when the current workflow needs approval', async () => {
+  it('opens the narrow-screen execution rail and keeps approval fields accessibly named', async () => {
     const originalEventSource = globalThis.EventSource
     globalThis.EventSource = class {
       onerror: ((event: Event) => void) | null = null
@@ -308,12 +333,20 @@ describe('OperationsWorkbench', () => {
           initialView: 'workflow',
           launchRequest: { requestId: 60, mode: 'guided', scenarioId: 'ALERT_WORKFLOW', view: 'workflow' },
         },
-        global: { stubs: operatorStubs },
+        global: { stubs: { ...operatorStubs, 'el-input': ElInput } },
       })
       await settleCapabilities()
       await settleCapabilities()
 
       expect(wrapper.get('[data-workbench-rail]').attributes('open')).toBeDefined()
+      const reviewerInput = wrapper.get('.approval-form input')
+      const commentInput = wrapper.get('.approval-form textarea')
+      await reviewerInput.setValue('王敏')
+      await commentInput.setValue('确认现场处置条件')
+      expect(reviewerInput.attributes('aria-label')).toBe('审批人姓名')
+      expect(commentInput.attributes('aria-label')).toBe('审批意见')
+      expect((reviewerInput.element as HTMLInputElement).value).toBe('王敏')
+      expect((commentInput.element as HTMLTextAreaElement).value).toBe('确认现场处置条件')
       wrapper.unmount()
     } finally {
       globalThis.EventSource = originalEventSource

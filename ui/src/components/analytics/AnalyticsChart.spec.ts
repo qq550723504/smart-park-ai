@@ -1,15 +1,31 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import AnalyticsChart, { withDarkTheme } from './AnalyticsChart.vue'
 import type { DisplayPayload } from '../../types/execution'
 
-const { setOption, dispose, init } = vi.hoisted(() => {
+const { setOption, dispose, resize, init } = vi.hoisted(() => {
   const setOption = vi.fn()
   const dispose = vi.fn()
-  return { setOption, dispose, init: vi.fn(() => ({ setOption, dispose })) }
+  const resize = vi.fn()
+  return { setOption, dispose, resize, init: vi.fn(() => ({ setOption, dispose, resize })) }
 })
 
 vi.mock('echarts', () => ({ init }))
+
+const observers: MockResizeObserver[] = []
+
+class MockResizeObserver {
+  readonly observe = vi.fn()
+  readonly disconnect = vi.fn()
+
+  constructor(private readonly callback: ResizeObserverCallback) {
+    observers.push(this)
+  }
+
+  notify(): void {
+    this.callback([], this as unknown as ResizeObserver)
+  }
+}
 
 function chart(overrides: Partial<Extract<DisplayPayload, { payloadType: 'CHART' }>>): DisplayPayload {
   return {
@@ -30,6 +46,81 @@ function chart(overrides: Partial<Extract<DisplayPayload, { payloadType: 'CHART'
 }
 
 describe('AnalyticsChart', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    observers.length = 0
+    vi.stubGlobal('ResizeObserver', MockResizeObserver)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('resizes the live chart from its container observer and disconnects on teardown', () => {
+    const wrapper = mount(AnalyticsChart, {
+      props: {
+        chart: chart({ type: 'LINE', xField: 'building', yFields: ['energy_kwh'], seriesField: '-' }),
+        columns: ['building', 'energy_kwh'],
+        rows: [['A1', 100]],
+      },
+    })
+
+    expect(observers).toHaveLength(1)
+    expect(observers[0].observe).toHaveBeenCalledOnce()
+    expect(observers[0].observe).toHaveBeenCalledWith(wrapper.get('.analytics-chart').element)
+
+    observers[0].notify()
+    expect(resize).toHaveBeenCalledOnce()
+
+    wrapper.unmount()
+    expect(observers[0].disconnect).toHaveBeenCalledOnce()
+    observers[0].notify()
+    expect(resize).toHaveBeenCalledOnce()
+  })
+
+  it('reconnects the observer when Vue replaces the chart container', async () => {
+    const line = chart({ type: 'LINE', xField: 'building', yFields: ['energy_kwh'], seriesField: '-' })
+    const wrapper = mount(AnalyticsChart, {
+      props: {
+        chart: line,
+        columns: ['building', 'energy_kwh'],
+        rows: [['A1', 100]],
+      },
+    })
+    const firstContainer = wrapper.get('.analytics-chart').element
+
+    await wrapper.setProps({ chart: chart({ type: 'KPI', yFields: ['energy_kwh'] }) })
+    expect(observers[0].disconnect).toHaveBeenCalledOnce()
+
+    await wrapper.setProps({ chart: line })
+    const replacementContainer = wrapper.get('.analytics-chart').element
+    expect(replacementContainer).not.toBe(firstContainer)
+    expect(observers).toHaveLength(2)
+    expect(observers[1].observe).toHaveBeenCalledWith(replacementContainer)
+
+    observers[1].notify()
+    expect(resize).toHaveBeenCalledOnce()
+    wrapper.unmount()
+    expect(observers[1].disconnect).toHaveBeenCalledOnce()
+  })
+
+  it('still initializes charts when ResizeObserver is unavailable', () => {
+    vi.stubGlobal('ResizeObserver', undefined)
+    let wrapper: ReturnType<typeof mount> | undefined
+
+    expect(() => {
+      wrapper = mount(AnalyticsChart, {
+        props: {
+          chart: chart({ type: 'LINE', xField: 'building', yFields: ['energy_kwh'], seriesField: '-' }),
+          columns: ['building', 'energy_kwh'],
+          rows: [['A1', 100]],
+        },
+      })
+    }).not.toThrow()
+    expect(init).toHaveBeenCalled()
+    wrapper?.unmount()
+  })
+
   it('renders heatmap options from real two-dimensional result rows', () => {
     const wrapper = mount(AnalyticsChart, {
       props: {

@@ -110,7 +110,7 @@ onMounted(loadTickets)
         <small>{{ conversation.retrievals.at(-1)?.documentIds.join(' · ') || '未命中文档' }}</small>
       </div>
       <form class="chat-composer" @submit.prevent="ask()">
-        <el-input v-model="question" maxlength="500" :disabled="Boolean(conversation?.humanHandoff)" :placeholder="conversation?.humanHandoff ? '当前会话已转人工' : '输入园区服务问题'" />
+        <el-input v-model="question" aria-label="园区服务问题" maxlength="500" :disabled="Boolean(conversation?.humanHandoff)" :placeholder="conversation?.humanHandoff ? '当前会话已转人工' : '输入园区服务问题'" />
         <el-button type="primary" native-type="submit" :loading="loading" :disabled="!question.trim()">发送</el-button>
       </form>
     </section>
