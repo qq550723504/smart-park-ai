@@ -43,7 +43,7 @@ class ExpertCollaborationPreflightProbeTest {
 
         assertThat(new ExpertCollaborationPreflightProbe(service).probe())
                 .isEqualTo(ShowcaseProbeResult.PASSED);
-        verify(service).start("请基于证据判断 DEV-ENERGY-001 夜间能耗升高、DEV-HVAC-001 冷机离线及 SEC-ACCESS-001 门禁告警是否有关联");
+        verify(service).start("电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联");
     }
 
     @Test

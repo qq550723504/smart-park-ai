@@ -2,7 +2,7 @@
 import { nextTick, ref } from 'vue'
 import OperationsWorkbench from './components/OperationsWorkbench.vue'
 import ShowcaseHome from './components/showcase/ShowcaseHome.vue'
-import type { GuidedWorkbenchView, ScenarioLaunchRequest, ShowcaseScenarioId, WorkbenchView } from './types/workbench'
+import type { GuidedWorkbenchView, ScenarioLaunchRequest, ShowcaseLaunchInput, ShowcaseScenarioId, WorkbenchView } from './types/workbench'
 
 const surface = ref<'showcase' | 'workbench'>('showcase')
 const requestedView = ref<WorkbenchView>('workflow')
@@ -37,13 +37,17 @@ async function showWorkbench(view: WorkbenchView) {
   }
 }
 
-function startScenario(id: ShowcaseScenarioId) {
+function startScenario(id: ShowcaseScenarioId, launchInput?: ShowcaseLaunchInput) {
   const view = scenarioView[id]
+  const previousInput = requestedLaunch.value?.scenarioId === id
+    ? requestedLaunch.value.launchInput
+    : undefined
   requestedLaunch.value = {
     requestId: ++nextLaunchRequestId,
     mode: 'guided',
     scenarioId: id,
     view,
+    launchInput: launchInput ?? previousInput ?? { alertId: null, question: null },
   }
   void showWorkbench(view)
 }

@@ -129,7 +129,11 @@ describe('App surface coordinator', () => {
   it('creates a guided one-shot request for a showcase scenario', async () => {
     const wrapper = mountApp()
 
-    wrapper.getComponent(ShowcaseHome).vm.$emit('start-scenario', 'EXPERT_COLLABORATION')
+    const launchInput = {
+      alertId: null,
+      question: '电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联',
+    }
+    wrapper.getComponent(ShowcaseHome).vm.$emit('start-scenario', 'EXPERT_COLLABORATION', launchInput)
     await nextTick()
 
     expect(wrapper.getComponent(OperationsWorkbench).props('launchRequest')).toMatchObject({
@@ -137,6 +141,7 @@ describe('App surface coordinator', () => {
       mode: 'guided',
       scenarioId: 'EXPERT_COLLABORATION',
       view: 'collaboration',
+      launchInput,
     })
   })
 
@@ -169,14 +174,19 @@ describe('App surface coordinator', () => {
 
   it('retries a failed guided launch with a fresh request id', async () => {
     const wrapper = mountApp()
-    wrapper.getComponent(ShowcaseHome).vm.$emit('start-scenario', 'OPERATIONS_ANALYSIS')
+    const launchInput = { alertId: null, question: '过去5天各楼宇能耗' }
+    wrapper.getComponent(ShowcaseHome).vm.$emit('start-scenario', 'OPERATIONS_ANALYSIS', launchInput)
     await nextTick()
     const first = wrapper.getComponent(OperationsWorkbench).props('launchRequest') as ScenarioLaunchRequest
-    wrapper.getComponent(OperationsWorkbench).vm.$emit('retry-guided-launch', 'OPERATIONS_ANALYSIS')
+    wrapper.getComponent(OperationsWorkbench).vm.$emit(
+      'retry-guided-launch', 'OPERATIONS_ANALYSIS', launchInput,
+    )
     await nextTick()
     const retried = wrapper.getComponent(OperationsWorkbench).props('launchRequest') as ScenarioLaunchRequest
     expect(retried.requestId).toBeGreaterThan(first.requestId)
     expect(retried.scenarioId).toBe('OPERATIONS_ANALYSIS')
+    expect(retried.launchInput).toEqual(first.launchInput)
+    expect(retried.launchInput).toEqual(launchInput)
   })
 
   it('starts on the showcase home without mounting the workbench', () => {

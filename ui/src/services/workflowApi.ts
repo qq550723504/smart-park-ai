@@ -1,5 +1,5 @@
 import type { AuditEntry, CustomerConversationResponse, CustomerServiceResponse, DemoRole, FeedbackRating, KnowledgeMetadata, OperationsMetrics, WorkflowEvent, WorkflowObservability, WorkflowResponse } from '../types/workflow'
-import type { ShowcaseScenarioId } from '../types/workbench'
+import type { ShowcaseLaunchInput, ShowcaseScenarioId } from '../types/workbench'
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -33,6 +33,7 @@ export interface ShowcaseScenario {
   humanBoundary: string
   unavailableReason: string | null
   lastVerifiedAt: string | null
+  launchInput: ShowcaseLaunchInput
 }
 
 export interface ShowcaseScenarioCatalog {

@@ -101,6 +101,16 @@ class ShowcaseScenarioCatalogTest {
     }
 
     @Test
+    void publishesTheExactGuidedInputsUsedByPreflight() {
+        assertThat(scenario(ShowcaseScenarioId.ALERT_WORKFLOW).launchInput().alertId())
+                .isEqualTo("ALT-POWER-001");
+        assertThat(scenario(ShowcaseScenarioId.EXPERT_COLLABORATION).launchInput().question())
+                .isEqualTo("电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联");
+        assertThat(scenario(ShowcaseScenarioId.OPERATIONS_ANALYSIS).launchInput().question())
+                .isEqualTo("过去5天各楼宇能耗");
+    }
+
+    @Test
     void expiresAReceiptUsingTheConfiguredVerificationTtl() {
         properties.setVerificationTtl(Duration.ofMinutes(1));
         registry.recordSuccess(ShowcaseScenarioId.OPERATIONS_ANALYSIS, NOW.minus(Duration.ofMinutes(1)));

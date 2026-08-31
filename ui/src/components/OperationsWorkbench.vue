@@ -18,7 +18,7 @@ import { useGuidedLaunch } from '../composables/useGuidedLaunch'
 import { getOperationsCapabilities, submitFeedback } from '../services/workflowApi'
 import { customerIntentLabel, workflowNodeLabel } from '../utils/labels'
 import { alertWorkflowRunId } from '../utils/runId'
-import type { GuidedLaunchUpdate, ScenarioLaunchRequest, ShowcaseScenarioId, WorkbenchEvidenceItem, WorkbenchNavItem, WorkbenchView } from '../types/workbench'
+import type { GuidedLaunchUpdate, ScenarioLaunchRequest, ShowcaseLaunchInput, ShowcaseScenarioId, WorkbenchEvidenceItem, WorkbenchNavItem, WorkbenchView } from '../types/workbench'
 import '../styles/workbench-primitives.css'
 import '../styles/workflow.css'
 
@@ -29,7 +29,7 @@ const props = withDefaults(defineProps<{ initialView?: WorkbenchView; launchRequ
 })
 const emit = defineEmits<{
   'back-to-showcase': []
-  'retry-guided-launch': [scenarioId: ShowcaseScenarioId]
+  'retry-guided-launch': [scenarioId: ShowcaseScenarioId, launchInput: ShowcaseLaunchInput]
 }>()
 
 const capabilities = ref<{ knowledgeMode: string; customerAnswerMode: string; vectorStore: string; analyticsEnabled: boolean; collaborationEnabled: boolean; voiceEnabled: boolean } | null>(null)
@@ -63,7 +63,6 @@ onMounted(() => {
     })
 })
 const selectedAlertId = ref(demoAlerts[0].id)
-const defaultGuidedAlertId = demoAlerts[0].id
 const activeView = ref<WorkbenchView>(props.initialView)
 const hasVisitedWorkflow = ref(props.initialView === 'workflow')
 watch(() => props.initialView, (view) => { activeView.value = view })
@@ -95,7 +94,8 @@ function retryGuidedLaunch(): void {
   const request = props.launchRequest
   const update = currentGuidedLaunchUpdate.value
   if (request && update?.requestId === request.requestId && update.state === 'failed') {
-    emit('retry-guided-launch', request.scenarioId)
+    emit('retry-guided-launch', request.scenarioId,
+      request.launchInput ?? { alertId: null, question: null })
   }
 }
 
@@ -195,8 +195,12 @@ useGuidedLaunch({
   active: () => props.active,
   request: () => props.launchRequest,
   scenarioId: 'ALERT_WORKFLOW',
-  start: async () => {
-    selectedAlertId.value = defaultGuidedAlertId
+  start: async (request) => {
+    const alertId = request.launchInput?.alertId
+    if (!alertId || !demoAlerts.some((alert) => alert.id === alertId)) {
+      throw new Error('告警演示配置无效')
+    }
+    selectedAlertId.value = alertId
     const started = await launch()
     if (!started) throw new Error(error.value || '告警工作流启动失败')
     return { state: 'started', message: '告警工作流已启动' }

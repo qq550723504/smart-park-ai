@@ -17,7 +17,7 @@ import type { ShowcaseScenario, ShowcaseScenarioCatalog } from '../../services/w
 import './showcase-home.css'
 
 const emit = defineEmits<{
-  'start-scenario': [id: ShowcaseScenario['id']]
+  'start-scenario': [id: ShowcaseScenario['id'], launchInput: ShowcaseScenario['launchInput']]
   'enter-workbench': []
 }>()
 
@@ -141,7 +141,7 @@ async function startScenario() {
   const verifiedCatalog = await refreshCatalog()
   const verifiedScenario = verifiedCatalog?.scenarios.find((scenario) => scenario.id === intendedScenarioId)
   if (props.active && verifiedScenario && isSelectable(verifiedScenario)) {
-    emit('start-scenario', intendedScenarioId)
+    emit('start-scenario', intendedScenarioId, verifiedScenario.launchInput)
   }
 }
 

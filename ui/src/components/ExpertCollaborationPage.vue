@@ -15,8 +15,7 @@ const props = withDefaults(defineProps<{
   launchRequest?: ScenarioLaunchRequest | null
 }>(), { active: true, launchRequest: null })
 const emit = defineEmits<{ 'launch-status': [update: GuidedLaunchUpdate] }>()
-const defaultGuidedQuestion = '电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联'
-const question = ref(defaultGuidedQuestion)
+const question = ref('电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联')
 const presets = [
   '电表 DEV-ENERGY-001 当前能耗是否高于基线',
   '设备 DEV-HVAC-001 当前状态如何，是否存在关联告警',
@@ -42,8 +41,10 @@ useGuidedLaunch({
   active: () => props.active,
   request: () => props.launchRequest,
   scenarioId: 'EXPERT_COLLABORATION',
-  start: async () => {
-    question.value = defaultGuidedQuestion
+  start: async (request) => {
+    const guidedQuestion = request.launchInput?.question?.trim()
+    if (!guidedQuestion) throw new Error('专家协作演示配置无效')
+    question.value = guidedQuestion
     await start(question.value)
     return { state: 'started', message: '专家协作已启动' }
   },

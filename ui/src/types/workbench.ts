@@ -7,11 +7,17 @@ export type ShowcaseScenarioId =
 export type WorkbenchView = 'workflow' | 'customer' | 'voice' | 'collaboration' | 'analytics'
 export type GuidedWorkbenchView = Exclude<WorkbenchView, 'customer'>
 
+export interface ShowcaseLaunchInput {
+  alertId: string | null
+  question: string | null
+}
+
 export interface ScenarioLaunchRequest {
   requestId: number
   mode: 'guided'
   scenarioId: ShowcaseScenarioId
   view: GuidedWorkbenchView
+  launchInput?: ShowcaseLaunchInput
 }
 
 export type GuidedLaunchState = 'preparing' | 'started' | 'ready' | 'failed'

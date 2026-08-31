@@ -15,6 +15,12 @@ const unmounts = {
   workflow: 0,
 }
 
+const alertLaunchInput = { alertId: 'ALT-POWER-001', question: null }
+const collaborationLaunchInput = {
+  alertId: null,
+  question: '电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联',
+}
+
 const analysisStub = defineComponent({
   setup() {
     onMounted(() => { mounts.analysis += 1 })
@@ -336,7 +342,10 @@ describe('OperationsWorkbench', () => {
       const wrapper = mount(OperationsWorkbench, {
         props: {
           initialView: 'workflow',
-          launchRequest: { requestId: 60, mode: 'guided', scenarioId: 'ALERT_WORKFLOW', view: 'workflow' },
+          launchRequest: {
+            requestId: 60, mode: 'guided', scenarioId: 'ALERT_WORKFLOW', view: 'workflow',
+            launchInput: alertLaunchInput,
+          },
         },
         global: { stubs: { ...operatorStubs, 'el-input': ElInput } },
       })
@@ -393,7 +402,10 @@ describe('OperationsWorkbench', () => {
         props: {
           active: true,
           initialView: 'workflow',
-          launchRequest: { requestId: 20, mode: 'guided', scenarioId: 'ALERT_WORKFLOW', view: 'workflow' },
+          launchRequest: {
+            requestId: 20, mode: 'guided', scenarioId: 'ALERT_WORKFLOW', view: 'workflow',
+            launchInput: alertLaunchInput,
+          },
         },
         global: { stubs: operatorStubs },
       })
@@ -441,11 +453,14 @@ describe('OperationsWorkbench', () => {
       await wrapper.get('[data-select-alternate-alert]').trigger('click')
 
       await wrapper.setProps({
-        launchRequest: { requestId: 81, mode: 'guided', scenarioId: 'ALERT_WORKFLOW', view: 'workflow' },
+        launchRequest: {
+          requestId: 81, mode: 'guided', scenarioId: 'ALERT_WORKFLOW', view: 'workflow',
+          launchInput: { alertId: 'ALT-POWER-001', question: null },
+        },
       })
       await new Promise((resolve) => setTimeout(resolve, 10))
 
-      expect(guidedAlertId).toBe('ALT-TEMP-001')
+      expect(guidedAlertId).toBe('ALT-POWER-001')
       wrapper.unmount()
     } finally {
       globalThis.EventSource = originalEventSource
@@ -481,13 +496,19 @@ describe('OperationsWorkbench', () => {
         props: {
           active: true,
           initialView: 'workflow',
-          launchRequest: { requestId: 51, mode: 'guided', scenarioId: 'ALERT_WORKFLOW', view: 'workflow' },
+          launchRequest: {
+            requestId: 51, mode: 'guided', scenarioId: 'ALERT_WORKFLOW', view: 'workflow',
+            launchInput: alertLaunchInput,
+          },
         },
         global: { stubs: operatorStubs },
       })
       await settleCapabilities()
       await wrapper.setProps({
-        launchRequest: { requestId: 52, mode: 'guided', scenarioId: 'ALERT_WORKFLOW', view: 'workflow' },
+        launchRequest: {
+          requestId: 52, mode: 'guided', scenarioId: 'ALERT_WORKFLOW', view: 'workflow',
+          launchInput: alertLaunchInput,
+        },
       })
       await settleCapabilities()
 
@@ -505,7 +526,10 @@ describe('OperationsWorkbench', () => {
       props: {
         active: true,
         initialView: 'collaboration',
-        launchRequest: { requestId: 41, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration' },
+        launchRequest: {
+          requestId: 41, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration',
+          launchInput: collaborationLaunchInput,
+        },
       },
       global: { stubs: { ...operatorStubs, ExpertCollaborationPage: guidedStatusStub } },
     })
@@ -529,7 +553,10 @@ describe('OperationsWorkbench', () => {
       props: {
         active: true,
         initialView: 'collaboration',
-        launchRequest: { requestId: 71, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration' },
+        launchRequest: {
+          requestId: 71, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration',
+          launchInput: collaborationLaunchInput,
+        },
       },
       global: { stubs: { ...operatorStubs, ExpertCollaborationPage: guidedStatusStub } },
     })
@@ -540,7 +567,10 @@ describe('OperationsWorkbench', () => {
     expect(wrapper.get('[role="status"]').text()).toBe('请求 A 失败重新开始')
 
     await wrapper.setProps({
-      launchRequest: { requestId: 72, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration' },
+      launchRequest: {
+        requestId: 72, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration',
+        launchInput: collaborationLaunchInput,
+      },
     })
 
     expect(wrapper.find('[role="status"]').exists()).toBe(false)
@@ -552,7 +582,10 @@ describe('OperationsWorkbench', () => {
       props: {
         active: true,
         initialView: 'collaboration',
-        launchRequest: { requestId: 73, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration' },
+        launchRequest: {
+          requestId: 73, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration',
+          launchInput: collaborationLaunchInput,
+        },
       },
       global: { stubs: { ...operatorStubs, ExpertCollaborationPage: guidedStatusStub } },
     })
@@ -571,7 +604,10 @@ describe('OperationsWorkbench', () => {
       props: {
         active: true,
         initialView: 'collaboration',
-        launchRequest: { requestId: 42, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration' },
+        launchRequest: {
+          requestId: 42, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration',
+          launchInput: collaborationLaunchInput,
+        },
       },
       global: { stubs: { ...operatorStubs, ExpertCollaborationPage: guidedStatusStub } },
     })
@@ -587,7 +623,9 @@ describe('OperationsWorkbench', () => {
     expect(retry.exists()).toBe(true)
     await retry.trigger('click')
 
-    expect(wrapper.emitted('retry-guided-launch')?.[0]).toEqual(['EXPERT_COLLABORATION'])
+    expect(wrapper.emitted('retry-guided-launch')?.[0]).toEqual([
+      'EXPERT_COLLABORATION', collaborationLaunchInput,
+    ])
     wrapper.unmount()
   })
 
@@ -595,14 +633,20 @@ describe('OperationsWorkbench', () => {
     const wrapper = mount(OperationsWorkbench, {
       props: {
         initialView: 'collaboration',
-        launchRequest: { requestId: 43, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration' },
+        launchRequest: {
+          requestId: 43, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration',
+          launchInput: collaborationLaunchInput,
+        },
       },
       global: { stubs: { ...operatorStubs, ExpertCollaborationPage: guidedStatusStub } },
     })
     await settleCapabilities()
 
     await wrapper.setProps({
-      launchRequest: { requestId: 44, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration' },
+      launchRequest: {
+        requestId: 44, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration',
+        launchInput: collaborationLaunchInput,
+      },
     })
     wrapper.getComponent(ImmersiveWorkbenchShell).vm.$emit('retry-guided-launch')
     await nextTick()
@@ -613,6 +657,8 @@ describe('OperationsWorkbench', () => {
     await nextTick()
     await wrapper.get('[data-workbench-action="retry-guided-launch"]').trigger('click')
 
-    expect(wrapper.emitted('retry-guided-launch')?.[0]).toEqual(['EXPERT_COLLABORATION'])
+    expect(wrapper.emitted('retry-guided-launch')?.[0]).toEqual([
+      'EXPERT_COLLABORATION', collaborationLaunchInput,
+    ])
   })
 })

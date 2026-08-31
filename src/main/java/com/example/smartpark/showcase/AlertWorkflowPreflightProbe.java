@@ -12,8 +12,6 @@ import org.springframework.stereotype.Component;
 public final class AlertWorkflowPreflightProbe implements ShowcasePreflightProbe {
 
     private static final Logger log = LoggerFactory.getLogger(AlertWorkflowPreflightProbe.class);
-    private static final String ALERT_ID = "ALT-POWER-001";
-
     private final AlertPreflightWorkflowFactory factory;
 
     public AlertWorkflowPreflightProbe(AlertPreflightWorkflowFactory factory) {
@@ -27,7 +25,8 @@ public final class AlertWorkflowPreflightProbe implements ShowcasePreflightProbe
 
     @Override
     public ShowcaseProbeResult probe() {
-        WorkflowSnapshot snapshot = factory.create().start(ALERT_ID);
+        WorkflowSnapshot snapshot = factory.create().start(
+                ShowcaseLaunchInput.forScenario(scenarioId()).alertId());
         boolean waitingApproval = snapshot.status() == WorkflowStatus.WAITING_APPROVAL;
         boolean diagnosisPresent = snapshot.diagnosis() != null;
         boolean errorsEmpty = snapshot.errors().isEmpty();

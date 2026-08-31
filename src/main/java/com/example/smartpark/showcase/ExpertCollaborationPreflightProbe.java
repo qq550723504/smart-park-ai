@@ -17,8 +17,6 @@ public final class ExpertCollaborationPreflightProbe implements ShowcasePrefligh
 
     private static final int MAX_ATTEMPTS = 2;
 
-    private static final String QUESTION =
-            "请基于证据判断 DEV-ENERGY-001 夜间能耗升高、DEV-HVAC-001 冷机离线及 SEC-ACCESS-001 门禁告警是否有关联";
     private static final Set<ExpertDomain> REQUIRED_DOMAINS = Set.of(
             ExpertDomain.ENERGY, ExpertDomain.DEVICE, ExpertDomain.SECURITY);
 
@@ -37,7 +35,8 @@ public final class ExpertCollaborationPreflightProbe implements ShowcasePrefligh
     @Override
     public ShowcaseProbeResult probe() {
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-            CollaborationRun started = service.start(QUESTION);
+            CollaborationRun started = service.start(
+                    ShowcaseLaunchInput.forScenario(scenarioId()).question());
             ShowcaseProbeResult result = awaiter.await(
                     () -> service.get(started.runId()), this::terminalResult);
             if (result == ShowcaseProbeResult.PASSED || Thread.currentThread().isInterrupted()) {

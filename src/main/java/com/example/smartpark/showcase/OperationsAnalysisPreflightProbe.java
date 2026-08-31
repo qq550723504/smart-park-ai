@@ -10,8 +10,6 @@ import org.springframework.stereotype.Component;
         havingValue = "true")
 public final class OperationsAnalysisPreflightProbe implements ShowcasePreflightProbe {
 
-    private static final String QUESTION = "过去5天各楼宇能耗";
-
     private final OperationsAnalysisService service;
     private final ShowcaseProbeAwaiter awaiter = new ShowcaseProbeAwaiter();
 
@@ -26,7 +24,8 @@ public final class OperationsAnalysisPreflightProbe implements ShowcasePreflight
 
     @Override
     public ShowcaseProbeResult probe() {
-        AnalysisRunStore.RunRecord started = service.start(QUESTION);
+        AnalysisRunStore.RunRecord started = service.start(
+                ShowcaseLaunchInput.forScenario(scenarioId()).question());
         return awaiter.await(() -> service.get(started.runId()), this::terminalResult);
     }
 

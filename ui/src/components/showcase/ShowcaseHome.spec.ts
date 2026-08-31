@@ -29,6 +29,15 @@ function scenario(
     OPERATIONS_ANALYSIS: '过去几天哪座楼能耗偏离基线？',
     VOICE_ASSISTANT: '通过语音询问园区问题并获得在线回答',
   }
+  const launchInputs = {
+    ALERT_WORKFLOW: { alertId: 'ALT-POWER-001', question: null },
+    EXPERT_COLLABORATION: {
+      alertId: null,
+      question: '电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联',
+    },
+    OPERATIONS_ANALYSIS: { alertId: null, question: '过去5天各楼宇能耗' },
+    VOICE_ASSISTANT: { alertId: null, question: null },
+  } as const
 
   return {
     id,
@@ -40,6 +49,7 @@ function scenario(
     requiredCapabilities: ['在线模型', '领域工具'],
     proofTypes: ['专家分工', '工具证据'],
     humanBoundary: '证据不足时保留人工复核',
+    launchInput: launchInputs[id],
     unavailableReason,
     lastVerifiedAt: status === 'READY' && live ? verifiedAt : null,
     ...overrides,
@@ -84,7 +94,13 @@ describe('ShowcaseHome truthful catalog selection', () => {
 
     expect(wrapper.get('[data-selected-scenario]').text()).toContain('跨域专家协作')
     await wrapper.get('[data-start-showcase]').trigger('click')
-    expect(wrapper.emitted('start-scenario')).toEqual([['EXPERT_COLLABORATION']])
+    expect(wrapper.emitted('start-scenario')).toEqual([[
+      'EXPERT_COLLABORATION',
+      {
+        alertId: null,
+        question: '电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联',
+      },
+    ]])
   })
 
   it('revalidates immediately before start and fails closed when readiness expired', async () => {
@@ -226,7 +242,9 @@ describe('ShowcaseHome truthful catalog selection', () => {
     await flushPromises()
 
     expect(getShowcaseScenarios).toHaveBeenCalledTimes(2)
-    expect(wrapper.emitted('start-scenario')).toEqual([['VOICE_ASSISTANT']])
+    expect(wrapper.emitted('start-scenario')).toEqual([
+      ['VOICE_ASSISTANT', { alertId: null, question: null }],
+    ])
   })
 
   it('renders server-provided selected scenario facts truthfully', async () => {

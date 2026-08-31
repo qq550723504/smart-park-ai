@@ -27,6 +27,7 @@ import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -67,10 +68,19 @@ class ShowcaseScenarioControllerTest {
                 .andExpect(jsonPath("$.scenarios[0].live").value(false))
                 .andExpect(jsonPath("$.scenarios[0].unavailableReason")
                         .value("本次部署尚未完成在线验证"))
+                .andExpect(jsonPath("$.scenarios[0].launchInput.alertId").value("ALT-POWER-001"))
+                .andExpect(jsonPath("$.scenarios[0].launchInput.question").value(nullValue()))
+                .andExpect(jsonPath("$.scenarios[1].launchInput.alertId").value(nullValue()))
+                .andExpect(jsonPath("$.scenarios[1].launchInput.question").value(
+                        "电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联"))
                 .andExpect(jsonPath("$.scenarios[2].id").value("OPERATIONS_ANALYSIS"))
                 .andExpect(jsonPath("$.scenarios[2].live").value(true))
                 .andExpect(jsonPath("$.scenarios[2].lastVerifiedAt")
                         .value("2026-08-30T09:59:59Z"))
+                .andExpect(jsonPath("$.scenarios[2].launchInput.alertId").value(nullValue()))
+                .andExpect(jsonPath("$.scenarios[2].launchInput.question").value("过去5天各楼宇能耗"))
+                .andExpect(jsonPath("$.scenarios[3].launchInput.alertId").value(nullValue()))
+                .andExpect(jsonPath("$.scenarios[3].launchInput.question").value(nullValue()))
                 .andReturn();
 
         String responseBody = result.getResponse().getContentAsString().toLowerCase(Locale.ROOT);

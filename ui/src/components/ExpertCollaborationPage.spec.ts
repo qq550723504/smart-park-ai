@@ -156,7 +156,16 @@ describe('ExpertCollaborationPage', () => {
   })
 
   it('starts the default collaboration once for a matching guided request', async () => {
-    const request = { requestId: 21, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration' } as const
+    const request = {
+      requestId: 21,
+      mode: 'guided',
+      scenarioId: 'EXPERT_COLLABORATION',
+      view: 'collaboration',
+      launchInput: {
+        alertId: null,
+        question: '电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联',
+      },
+    } as const
     const wrapper = mount(ExpertCollaborationPage, {
       props: { trace: traceStub(), active: true, launchRequest: request },
       global: { stubs: collaborationElementStubs },
@@ -191,11 +200,14 @@ describe('ExpertCollaborationPage', () => {
     await wrapper.find('input[aria-label="专家协作问题"]').setValue('手工输入的无关问题')
 
     await wrapper.setProps({
-      launchRequest: { requestId: 22, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration' },
+      launchRequest: {
+        requestId: 22, mode: 'guided', scenarioId: 'EXPERT_COLLABORATION', view: 'collaboration',
+        launchInput: { alertId: null, question: '目录下发的专家协作问题' },
+      },
     })
     await new Promise((resolve) => setTimeout(resolve, 10))
 
-    expect(guidedQuestion).toBe('电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联')
+    expect(guidedQuestion).toBe('目录下发的专家协作问题')
     wrapper.unmount()
   })
 })

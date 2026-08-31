@@ -196,11 +196,14 @@ describe('OperationsAnalysisPage', () => {
       props: {
         active: true,
         pollIntervalMs: 1,
-        launchRequest: { requestId: 22, mode: 'guided', scenarioId: 'OPERATIONS_ANALYSIS', view: 'analytics' },
+        launchRequest: {
+          requestId: 22, mode: 'guided', scenarioId: 'OPERATIONS_ANALYSIS', view: 'analytics',
+          launchInput: { alertId: null, question: '目录下发的运营问题' },
+        },
       },
     })
     await flush(2)
-    expect(submittedQuestion).toBe('过去5天各楼宇能耗')
+    expect(submittedQuestion).toBe('目录下发的运营问题')
     expect(wrapper.emitted('launch-status')?.at(-1)?.[0]).toMatchObject({ requestId: 22, state: 'started' })
     wrapper.unmount()
   })
@@ -223,14 +226,20 @@ describe('OperationsAnalysisPage', () => {
         active: true,
         pollIntervalMs: 1,
         trace,
-        launchRequest: { requestId: 71, mode: 'guided', scenarioId: 'OPERATIONS_ANALYSIS', view: 'analytics' },
+        launchRequest: {
+          requestId: 71, mode: 'guided', scenarioId: 'OPERATIONS_ANALYSIS', view: 'analytics',
+          launchInput: { alertId: null, question: '过去5天各楼宇能耗' },
+        },
       },
     })
     await flush(1)
     expect(posts).toBe(1)
 
     await wrapper.setProps({
-      launchRequest: { requestId: 72, mode: 'guided', scenarioId: 'OPERATIONS_ANALYSIS', view: 'analytics' },
+      launchRequest: {
+        requestId: 72, mode: 'guided', scenarioId: 'OPERATIONS_ANALYSIS', view: 'analytics',
+        launchInput: { alertId: null, question: '过去5天各楼宇能耗' },
+      },
     })
     await flush(1)
     expect(posts).toBe(2)
@@ -271,7 +280,10 @@ describe('OperationsAnalysisPage', () => {
       props: {
         active: true,
         pollIntervalMs: 1,
-        launchRequest: { requestId: 81, mode: 'guided', scenarioId: 'OPERATIONS_ANALYSIS', view: 'analytics' },
+        launchRequest: {
+          requestId: 81, mode: 'guided', scenarioId: 'OPERATIONS_ANALYSIS', view: 'analytics',
+          launchInput: { alertId: null, question: '过去5天各楼宇能耗' },
+        },
       },
     })
     await flush(1)

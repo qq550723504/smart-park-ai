@@ -43,7 +43,6 @@ const analysis = useOperationsAnalysis({
   ...(props.pollIntervalMs != null ? { pollIntervalMs: props.pollIntervalMs } : {}),
 })
 const chosenMetrics = ref<string[]>([])
-const DEFAULT_GUIDED_QUESTION = '过去5天各楼宇能耗'
 let cancelGuidedAnalysisStart: (() => void) | null = null
 
 onScopeDispose(() => {
@@ -96,8 +95,10 @@ useGuidedLaunch({
   active: () => props.active,
   request: () => props.launchRequest,
   scenarioId: 'OPERATIONS_ANALYSIS',
-  start: async () => {
-    question.value = DEFAULT_GUIDED_QUESTION
+  start: async (request) => {
+    const guidedQuestion = request.launchInput?.question?.trim()
+    if (!guidedQuestion) throw new Error('运营分析演示配置无效')
+    question.value = guidedQuestion
     await startGuidedAnalysis()
     return { state: 'started', message: '运营分析已启动' }
   },
