@@ -54,8 +54,10 @@ public class CollaborationRuntimeConfiguration {
                     + "selectedDomains, assignments, selectionReason. normalizedQuestion must exactly echo "
                     + "the normalized original question after trimming surrounding whitespace; never paraphrase "
                     + "it or replace an entity. Every assignment must preserve every concrete identifier from "
-                    + "the original question exactly and must be a non-empty string. Explanatory assignment text "
-                    + "is allowed when it retains that exact entity scope. selectedDomains are advisory; "
+                    + "the original question exactly and must be a non-empty string. assignments must contain "
+                    + "exactly one {domain, assignment} item for every selectedDomains entry and no duplicate "
+                    + "domains. Explanatory assignment text is allowed when it retains that exact entity scope. "
+                    + "selectedDomains are advisory; "
                     + "server-owned deterministic routing is authoritative and may independently add or remove "
                     + "expert domains. The only allowed domain literals are exactly ENERGY, DEVICE, SECURITY. "
                     + "Never output entity types, device IDs, or event IDs such as power, equipment, "
@@ -269,7 +271,10 @@ public class CollaborationRuntimeConfiguration {
     private record SupervisorPlanModelOutput(
             String normalizedQuestion,
             List<ExpertDomain> selectedDomains,
-            Map<ExpertDomain, String> assignments,
+            List<SupervisorAssignmentModelOutput> assignments,
             String selectionReason) {
+    }
+
+    private record SupervisorAssignmentModelOutput(ExpertDomain domain, String assignment) {
     }
 }

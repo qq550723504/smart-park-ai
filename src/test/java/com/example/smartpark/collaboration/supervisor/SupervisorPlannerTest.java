@@ -59,9 +59,22 @@ class SupervisorPlannerTest {
 
     @Test void parsesAndValidatesAPlan() {
         var plan = planner.parseAndValidate("设备离线", """
-                {"normalizedQuestion":"设备离线","selectedDomains":["DEVICE"],"assignments":{"DEVICE":"查设备状态"},"selectionReason":"设备状态问题"}
+                {"normalizedQuestion":"设备离线","selectedDomains":["DEVICE"],
+                 "assignments":[{"domain":"DEVICE","assignment":"查设备状态"}],"selectionReason":"设备状态问题"}
                 """);
         assertThat(plan.selectedDomains()).containsExactly(ExpertDomain.DEVICE);
+    }
+
+    @Test
+    void parsesTypedProviderAssignmentItemsWithoutChangingServerOwnedRouting() {
+        var plan = planner.parseAndValidate("is device D1 offline?", """
+                {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
+                 "assignments":[{"domain":"DEVICE","assignment":"inspect device D1"}],
+                 "selectionReason":"device status"}
+                """);
+
+        assertThat(plan.selectedDomains()).containsExactly(ExpertDomain.DEVICE);
+        assertThat(plan.assignments()).containsEntry(ExpertDomain.DEVICE, "is device D1 offline?");
     }
 
     @Test void rejectsIllegalDomain() {
@@ -73,7 +86,7 @@ class SupervisorPlannerTest {
     void derivesEveryExecutableAssignmentFromTheOriginalQuestion() {
         var plan = planner.parseAndValidate("is device D1 offline?", """
                 {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
-                 "assignments":{"DEVICE":"inspect device D1 and explain its status"},"selectionReason":"device status"}
+                 "assignments":[{"domain":"DEVICE","assignment":"inspect device D1 and explain its status"}],"selectionReason":"device status"}
                 """);
 
         assertThat(plan.assignments().get(ExpertDomain.DEVICE))
@@ -85,7 +98,7 @@ class SupervisorPlannerTest {
     void rejectsProviderNormalizedQuestionThatDoesNotMatchTheInput() {
         assertThatThrownBy(() -> planner.parseAndValidate("is device D1 offline?", """
                 {"normalizedQuestion":"is device D2 offline?","selectedDomains":["DEVICE"],
-                 "assignments":{"DEVICE":"inspect device D1"},"selectionReason":"device status"}
+                 "assignments":[{"domain":"DEVICE","assignment":"inspect device D1"}],"selectionReason":"device status"}
                 """))
                 .isInstanceOf(com.example.smartpark.agent.ModelOutputException.class)
                 .hasMessageContaining("normalizedQuestion");
@@ -96,7 +109,7 @@ class SupervisorPlannerTest {
     void rejectsNullOrBlankProviderAssignments(String assignmentJson) {
         String response = """
                 {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
-                 "assignments":{"DEVICE":%s},"selectionReason":"device status"}
+                 "assignments":[{"domain":"DEVICE","assignment":%s}],"selectionReason":"device status"}
                 """.formatted(assignmentJson);
 
         assertThatThrownBy(() -> planner.parseAndValidate("is device D1 offline?", response))
@@ -108,7 +121,7 @@ class SupervisorPlannerTest {
     void rejectsProviderAssignmentThatReplacesAnInputEntityIdentifier() {
         assertThatThrownBy(() -> planner.parseAndValidate("is device D1 offline?", """
                 {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
-                 "assignments":{"DEVICE":"inspect device D2"},"selectionReason":"device status"}
+                 "assignments":[{"domain":"DEVICE","assignment":"inspect device D2"}],"selectionReason":"device status"}
                 """))
                 .isInstanceOf(com.example.smartpark.agent.ModelOutputException.class)
                 .hasMessageContaining("D1");
@@ -119,8 +132,8 @@ class SupervisorPlannerTest {
         var plan = planner.parseAndValidate("电表 DEV-ENERGY-001 与设备 DEV-POWER-001 是否关联", """
                 {"normalizedQuestion":"电表 DEV-ENERGY-001 与设备 DEV-POWER-001 是否关联",
                  "selectedDomains":["energy","power"],
-                 "assignments":{"energy":"分析 DEV-ENERGY-001 与 DEV-POWER-001 的能耗关系",
-                                "power":"分析 DEV-ENERGY-001 与 DEV-POWER-001 的设备关系"},
+                 "assignments":[{"domain":"energy","assignment":"分析 DEV-ENERGY-001 与 DEV-POWER-001 的能耗关系"},
+                                {"domain":"power","assignment":"分析 DEV-ENERGY-001 与 DEV-POWER-001 的设备关系"}],
                  "selectionReason":"同时涉及能耗和设备"}
                 """);
 
@@ -133,8 +146,8 @@ class SupervisorPlannerTest {
         var plan = planner.parseAndValidate("电表 DEV-ENERGY-001 与安防事件 SEC-ACCESS-001 是否关联", """
                 {"normalizedQuestion":"电表 DEV-ENERGY-001 与安防事件 SEC-ACCESS-001 是否关联",
                  "selectedDomains":["DEV-ENERGY-001","SEC-ACCESS-001"],
-                 "assignments":{"DEV-ENERGY-001":"分析 DEV-ENERGY-001 与 SEC-ACCESS-001 的能耗关系",
-                                "SEC-ACCESS-001":"分析 DEV-ENERGY-001 与 SEC-ACCESS-001 的安防关系"},
+                 "assignments":[{"domain":"DEV-ENERGY-001","assignment":"分析 DEV-ENERGY-001 与 SEC-ACCESS-001 的能耗关系"},
+                                {"domain":"SEC-ACCESS-001","assignment":"分析 DEV-ENERGY-001 与 SEC-ACCESS-001 的安防关系"}],
                  "selectionReason":"涉及能耗和安防"}
                 """);
 
@@ -147,7 +160,7 @@ class SupervisorPlannerTest {
         var energyPlan = planner.parseAndValidate("power consumption for meter MTR-2", """
                 {"normalizedQuestion":"power consumption for meter MTR-2",
                  "selectedDomains":["power"],
-                 "assignments":{"power":"查询 MTR-2 的能耗"},
+                 "assignments":[{"domain":"power","assignment":"查询 MTR-2 的能耗"}],
                  "selectionReason":"能耗问题"}
                 """);
 
@@ -159,7 +172,7 @@ class SupervisorPlannerTest {
         var energyPlan = planner.parseAndValidate("power consumption for DEV-ENERGY-001", """
                 {"normalizedQuestion":"power consumption for DEV-ENERGY-001",
                  "selectedDomains":["power"],
-                 "assignments":{"power":"查询 DEV-ENERGY-001 的能耗"},
+                 "assignments":[{"domain":"power","assignment":"查询 DEV-ENERGY-001 的能耗"}],
                  "selectionReason":"能耗问题"}
                 """);
 
@@ -187,39 +200,64 @@ class SupervisorPlannerTest {
                 Arguments.of("{}", "EMPTY_OBJECT"),
                 Arguments.of("""
                         {"normalizedQuestion":7,"selectedDomains":["DEVICE"],
-                         "assignments":{"DEVICE":"inspect D1"},"selectionReason":"device status"}
+                         "assignments":[{"domain":"DEVICE","assignment":"inspect D1"}],"selectionReason":"device status"}
                         """, "NORMALIZED_QUESTION_TYPE"),
                 Arguments.of("""
                         {"normalizedQuestion":"is device D2 offline?","selectedDomains":["DEVICE"],
-                         "assignments":{"DEVICE":"inspect D1"},"selectionReason":"device status"}
+                         "assignments":[{"domain":"DEVICE","assignment":"inspect D1"}],"selectionReason":"device status"}
                         """, "QUESTION_MISMATCH"),
                 Arguments.of("""
                         {"normalizedQuestion":"is device D1 offline?","selectedDomains":{},
-                         "assignments":{"DEVICE":"inspect D1"},"selectionReason":"device status"}
+                         "assignments":[{"domain":"DEVICE","assignment":"inspect D1"}],"selectionReason":"device status"}
                         """, "SELECTED_DOMAINS_TYPE"),
                 Arguments.of("""
+                        {"normalizedQuestion":"is device D1 offline?","selectedDomains":[7],
+                         "assignments":[{"domain":"DEVICE","assignment":"inspect D1"}],"selectionReason":"device status"}
+                        """, "SELECTED_DOMAIN_TYPE"),
+                Arguments.of("""
                         {"normalizedQuestion":"is device D1 offline?","selectedDomains":["UNKNOWN"],
-                         "assignments":{"UNKNOWN":"inspect D1"},"selectionReason":"device status"}
+                         "assignments":[{"domain":"UNKNOWN","assignment":"inspect D1"}],"selectionReason":"device status"}
                         """, "DOMAIN"),
                 Arguments.of("""
                         {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
-                         "assignments":[],"selectionReason":"device status"}
+                         "assignments":{},"selectionReason":"device status"}
                         """, "ASSIGNMENTS_TYPE"),
                 Arguments.of("""
                         {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
-                         "assignments":{"DEVICE":null},"selectionReason":"device status"}
+                         "assignments":["DEVICE"],"selectionReason":"device status"}
+                        """, "ASSIGNMENT_ENTRY_TYPE"),
+                Arguments.of("""
+                        {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
+                         "assignments":[{"domain":7,"assignment":"inspect D1"}],"selectionReason":"device status"}
+                        """, "ASSIGNMENT_DOMAIN_TYPE"),
+                Arguments.of("""
+                        {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
+                         "assignments":[{"domain":"DEVICE","assignment":null}],"selectionReason":"device status"}
                         """, "ASSIGNMENT_TYPE"),
                 Arguments.of("""
                         {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
-                         "assignments":{"DEVICE":"inspect D2"},"selectionReason":"device status"}
+                         "assignments":[{"domain":"DEVICE","assignment":"inspect D2"}],"selectionReason":"device status"}
                         """, "ASSIGNMENT_SCOPE"),
                 Arguments.of("""
                         {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
-                         "assignments":{},"selectionReason":"device status"}
+                         "assignments":[],"selectionReason":"device status"}
                         """, "COVERAGE"),
                 Arguments.of("""
                         {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
-                         "assignments":{"DEVICE":"inspect D1"},"selectionReason":false}
+                         "assignments":[{"domain":"DEVICE","assignment":"inspect D1"},
+                                        {"domain":"DEVICE","assignment":"inspect D1"}],"selectionReason":"device status"}
+                        """, "COVERAGE"),
+                Arguments.of("""
+                        {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
+                         "assignments":[{"domain":"DEVICE","assignment":"inspect D1","unexpected":true}],"selectionReason":"device status"}
+                        """, "UNKNOWN_FIELD"),
+                Arguments.of("""
+                        {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
+                         "assignments":[{"domain":"DEVICE","assignment":"inspect D1"}],"unexpected":true,"selectionReason":"device status"}
+                        """, "UNKNOWN_FIELD"),
+                Arguments.of("""
+                        {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
+                         "assignments":[{"domain":"DEVICE","assignment":"inspect D1"}],"selectionReason":false}
                         """, "SELECTION_REASON_TYPE"));
     }
 }

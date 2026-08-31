@@ -76,6 +76,7 @@ class CollaborationRuntimeConfigurationTest {
                     assertThat(prompt.getSystemMessage().getText()).contains(
                             "normalizedQuestion must exactly echo the normalized original question",
                             "Every assignment must preserve every concrete identifier from the original question",
+                            "assignments must contain exactly one {domain, assignment} item for every selectedDomains entry and no duplicate domains",
                             "Explanatory assignment text is allowed",
                             "selectedDomains are advisory",
                             "server-owned deterministic routing is authoritative"));
@@ -83,7 +84,7 @@ class CollaborationRuntimeConfigurationTest {
     }
 
     @Test
-    void supervisorPreflightUsesStrictDashScopeSchemaWithObjectAssignments() {
+    void supervisorPreflightUsesStrictDashScopeSchemaWithTypedAssignmentItems() {
         RoutingChatModel model = AllDependencies.model();
         model.clear();
         runner.run(context -> {
@@ -105,7 +106,13 @@ class CollaborationRuntimeConfigurationTest {
             Map<String, Object> properties = (Map<String, Object>) schema.get("properties");
             @SuppressWarnings("unchecked")
             Map<String, Object> assignments = (Map<String, Object>) properties.get("assignments");
-            assertThat(assignments).containsEntry("type", "object");
+            assertThat(assignments).containsEntry("type", "array");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> item = (Map<String, Object>) assignments.get("items");
+            assertThat(item).containsEntry("type", "object");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> itemProperties = (Map<String, Object>) item.get("properties");
+            assertThat(itemProperties).containsKeys("domain", "assignment");
         });
     }
 
@@ -250,9 +257,10 @@ class CollaborationRuntimeConfigurationTest {
         private static String plan(String question, String... domains) {
             String selected = java.util.Arrays.stream(domains).map(d -> "\"" + d + "\"").collect(java.util.stream.Collectors.joining(","));
             String assignments = java.util.Arrays.stream(domains)
-                    .map(d -> "\"" + d + "\":\"analyze " + d.toLowerCase() + " for " + question + "\"")
+                    .map(d -> "{\"domain\":\"" + d + "\",\"assignment\":\"analyze "
+                            + d.toLowerCase() + " for " + question + "\"}")
                     .collect(java.util.stream.Collectors.joining(","));
-            return "{\"normalizedQuestion\":\"" + question + "\",\"selectedDomains\":[" + selected + "],\"assignments\":{" + assignments + "},\"selectionReason\":\"question requires selected domains\"}";
+            return "{\"normalizedQuestion\":\"" + question + "\",\"selectedDomains\":[" + selected + "],\"assignments\":[" + assignments + "],\"selectionReason\":\"question requires selected domains\"}";
         }
 
         void clear() { prompts.clear(); }
