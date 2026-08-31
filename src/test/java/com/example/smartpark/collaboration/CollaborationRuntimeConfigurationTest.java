@@ -214,6 +214,8 @@ class CollaborationRuntimeConfigurationTest {
                     assertThat(prompt).contains(
                             "must call at least one relevant read-only tool",
                             "Do not return INSUFFICIENT_EVIDENCE until relevant tools have been attempted"));
+            assertThat(model.expertProviderOptions()).isNotEmpty().allSatisfy(options ->
+                    assertThat(options.getToolChoice()).isEqualTo("required"));
         });
     }
 
@@ -344,6 +346,14 @@ class CollaborationRuntimeConfigurationTest {
         List<String> expertSystemPrompts() {
             return prompts.stream().map(prompt -> prompt.getSystemMessage().getText())
                     .filter(value -> value.contains("park expert"))
+                    .toList();
+        }
+
+        List<DashScopeChatOptions> expertProviderOptions() {
+            return prompts.stream()
+                    .filter(prompt -> prompt.getSystemMessage().getText().contains("park expert"))
+                    .map(Prompt::getOptions)
+                    .map(DashScopeChatOptions.class::cast)
                     .toList();
         }
 
