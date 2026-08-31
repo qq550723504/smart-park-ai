@@ -198,7 +198,10 @@ public class CollaborationRuntimeConfiguration {
         return new ExpertFinding(modelFinding.domain(),
                 com.example.smartpark.collaboration.model.FindingStatus.SUPPORTED,
                 "Server-bound primary evidence.", primaryEvidenceRefs.stream().sorted().toList(),
-                modelFinding.confidence(), modelFinding.nextChecks());
+                // The public conclusion is an exact rendering of this
+                // invocation's validated tool result. This is provenance
+                // certainty, not a claim that cross-domain causality is proven.
+                1.0, modelFinding.nextChecks());
     }
 
     private static String modelText(ChatModel model, String system, String user) {
