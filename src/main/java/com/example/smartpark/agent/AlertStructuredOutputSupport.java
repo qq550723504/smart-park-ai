@@ -2,9 +2,32 @@ package com.example.smartpark.agent;
 
 import com.alibaba.cloud.ai.dashscope.api.DashScopeResponseFormat;
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.MapperFeature;
+import com.fasterxml.jackson.databind.ObjectReader;
+import com.fasterxml.jackson.databind.cfg.CoercionAction;
+import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.databind.type.LogicalType;
 import org.springframework.ai.converter.BeanOutputConverter;
 
 final class AlertStructuredOutputSupport {
+
+    private static final JsonMapper STRICT_MAPPER = JsonMapper.builder()
+            .disable(MapperFeature.ALLOW_COERCION_OF_SCALARS)
+            .withCoercionConfig(LogicalType.Textual, coercion -> coercion
+                    .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
+                    .setCoercion(CoercionInputShape.Float, CoercionAction.Fail)
+                    .setCoercion(CoercionInputShape.Boolean, CoercionAction.Fail))
+            .enable(
+                    DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES,
+                    DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES,
+                    DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES,
+                    DeserializationFeature.FAIL_ON_NULL_CREATOR_PROPERTIES,
+                    DeserializationFeature.FAIL_ON_NUMBERS_FOR_ENUMS,
+                    DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            .build();
 
     private AlertStructuredOutputSupport() {
     }
@@ -28,22 +51,30 @@ final class AlertStructuredOutputSupport {
                 .build();
     }
 
-    static <T> T convert(BeanOutputConverter<T> converter, String text, String context) {
+    static ObjectReader reader(Class<?> outputType) {
+        return STRICT_MAPPER.readerFor(outputType);
+    }
+
+    static <T> T convert(ObjectReader reader, String text, String context) {
         if (text == null || text.isBlank()) {
-            throw new ModelOutputException(context + " response text was blank");
+            throw invalidOutput(context);
         }
         try {
-            T converted = converter.convert(text);
+            T converted = reader.readValue(text);
             if (converted == null) {
-                throw new ModelOutputException(context + " structured output was empty");
+                throw invalidOutput(context);
             }
             return converted;
         }
         catch (ModelOutputException exception) {
             throw exception;
         }
-        catch (RuntimeException exception) {
-            throw new ModelOutputException(context + " structured output was invalid", exception);
+        catch (JsonProcessingException | RuntimeException exception) {
+            throw invalidOutput(context);
         }
+    }
+
+    private static ModelOutputException invalidOutput(String context) {
+        return new ModelOutputException(context + " structured output was invalid");
     }
 }

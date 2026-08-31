@@ -6,12 +6,14 @@ import com.example.smartpark.model.alert.Alert;
 import com.example.smartpark.model.alert.AlertClassification;
 import com.example.smartpark.model.common.RiskLevel;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -85,16 +87,19 @@ class AlertTriageAgentTest {
     }
 
     @Test
-    void acceptsJsonWrappedInMarkdownWithoutRelaxingFieldValidation() {
-        TestChatModel model = new TestChatModel("""
+    void rejectsJsonWrappedInMarkdownAfterOneBoundedRetry() {
+        String content = """
                 ```json
                 {"category":"TEMPERATURE","priority":"MEDIUM","riskLevel":"LOW","confidence":0.92}
                 ```
-                """);
+                """;
+        TestChatModel model = new TestChatModel(content, content);
 
-        AlertTriageAgent.AlertClassificationResult result = new AlertTriageAgent(model).classify(sampleAlert());
-
-        assertThat(result.category()).isEqualTo(AlertClassification.TEMPERATURE);
+        assertThatThrownBy(() -> new AlertTriageAgent(model).classify(sampleAlert()))
+                .isInstanceOf(ModelOutputException.class)
+                .hasMessage("triage structured output was invalid")
+                .hasNoCause();
+        assertThat(model.callCount()).isEqualTo(2);
     }
 
     @ParameterizedTest
@@ -119,6 +124,26 @@ class AlertTriageAgentTest {
 
         assertThatThrownBy(() -> new AlertTriageAgent(model).classify(sampleAlert()))
                 .isInstanceOf(IllegalStateException.class);
+    }
+
+    @ParameterizedTest
+    @MethodSource("strictlyInvalidTriageOutputs")
+    void triageStrictReaderRejectsMissingNullUnknownAndQuotedConfidence(String content) {
+        TestChatModel model = new TestChatModel(content, content);
+
+        assertThatThrownBy(() -> new AlertTriageAgent(model).classify(sampleAlert()))
+                .isInstanceOf(ModelOutputException.class)
+                .hasMessage("triage structured output was invalid")
+                .hasNoCause();
+        assertThat(model.callCount()).isEqualTo(2);
+    }
+
+    private static Stream<String> strictlyInvalidTriageOutputs() {
+        return Stream.of(
+                "{\"category\":\"TEMPERATURE\",\"priority\":\"MEDIUM\",\"riskLevel\":\"LOW\"}",
+                "{\"category\":\"TEMPERATURE\",\"priority\":\"MEDIUM\",\"riskLevel\":\"LOW\",\"confidence\":null}",
+                "{\"category\":\"TEMPERATURE\",\"priority\":\"MEDIUM\",\"riskLevel\":\"LOW\",\"confidence\":0.92,\"unexpected\":true}",
+                "{\"category\":\"TEMPERATURE\",\"priority\":\"MEDIUM\",\"riskLevel\":\"LOW\",\"confidence\":\"0.92\"}");
     }
 
     private static Alert sampleAlert() {

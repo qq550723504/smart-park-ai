@@ -3,6 +3,7 @@ package com.example.smartpark.agent;
 import com.example.smartpark.model.alert.Alert;
 import com.example.smartpark.model.alert.AlertClassification;
 import com.example.smartpark.model.common.RiskLevel;
+import com.fasterxml.jackson.databind.ObjectReader;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -21,6 +22,8 @@ public class AlertTriageAgent {
 
     private static final BeanOutputConverter<TriageModelOutput> OUTPUT_CONVERTER =
             AlertStructuredOutputSupport.converter(TriageModelOutput.class);
+    private static final ObjectReader OUTPUT_READER =
+            AlertStructuredOutputSupport.reader(TriageModelOutput.class);
 
     private final ChatModel chatModel;
 
@@ -51,7 +54,8 @@ public class AlertTriageAgent {
     }
 
     private AlertClassificationResult classifyResponse(String text) {
-        return AlertStructuredOutputSupport.convert(OUTPUT_CONVERTER, text, "triage").toResult();
+        TriageModelOutput output = AlertStructuredOutputSupport.convert(OUTPUT_READER, text, "triage");
+        return output.toResult();
     }
 
     private static String extractText(ChatResponse response, String context) {

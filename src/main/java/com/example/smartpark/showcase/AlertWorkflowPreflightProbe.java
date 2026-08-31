@@ -32,17 +32,19 @@ public final class AlertWorkflowPreflightProbe implements ShowcasePreflightProbe
         boolean diagnosisPresent = snapshot.diagnosis() != null;
         boolean errorsEmpty = snapshot.errors().isEmpty();
         boolean workOrderAbsent = snapshot.workOrder() == null;
-        if (waitingApproval && diagnosisPresent && errorsEmpty && workOrderAbsent) {
+        boolean approvalAbsent = snapshot.approval().isEmpty();
+        if (waitingApproval && diagnosisPresent && errorsEmpty && workOrderAbsent && approvalAbsent) {
             return ShowcaseProbeResult.PASSED;
         }
         log.warn("alert preflight failed: stage={}, code={}, waitingApproval={}, diagnosisPresent={}, "
-                        + "errorsEmpty={}, workOrderAbsent={}",
+                        + "errorsEmpty={}, workOrderAbsent={}, approvalAbsent={}",
                 FailureStage.APPROVAL_BOUNDARY,
                 FailureCode.INVARIANT_MISMATCH,
                 waitingApproval,
                 diagnosisPresent,
                 errorsEmpty,
-                workOrderAbsent);
+                workOrderAbsent,
+                approvalAbsent);
         return ShowcaseProbeResult.FAILED;
     }
 

@@ -1,5 +1,8 @@
 package com.example.smartpark.agent;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.alibaba.cloud.ai.dashscope.api.DashScopeResponseFormat;
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import com.example.smartpark.model.alert.Alert;
@@ -19,6 +22,7 @@ import com.example.smartpark.tool.workorder.WorkOrderTool;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 
@@ -29,6 +33,7 @@ import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 class AlertDiagnosisAgentTest {
 
@@ -97,16 +102,12 @@ class AlertDiagnosisAgentTest {
         AlertDiagnosisAgent agent = new AlertDiagnosisAgent(
                 new TestChatModel("""
                         {
-                          "id":"diag-energy-1",
-                          "alertId":"ALT-ENERGY-001",
-                          "deviceId":"DEV-ENERGY-001",
                           "riskLevel":"HIGH",
                           "rootCause":"Unexpected after-hours load",
                           "summary":"The building consumed more energy than its baseline.",
                           "evidence":["meter: current consumption is above baseline"],
                           "recommendedAction":"Inspect after-hours HVAC schedules.",
-                          "confidence":0.9,
-                          "diagnosedAt":"2026-08-23T01:45:00Z"
+                          "confidence":0.9
                         }
                         """),
                 new DeviceQueryTool(parkSystem.devices()),
@@ -130,16 +131,12 @@ class AlertDiagnosisAgentTest {
         AlertDiagnosisAgent agent = new AlertDiagnosisAgent(
                 new TestChatModel("""
                         {
-                          "id":"diag-security-1",
-                          "alertId":"ALT-ACCESS-001",
-                          "deviceId":"DEV-ACCESS-001",
                           "riskLevel":"HIGH",
                           "rootCause":"Repeated denied access",
                           "summary":"An authorized operator should review the redacted event.",
                           "evidence":["security-event: redacted summary only"],
                           "recommendedAction":"Review without retrieving raw identity or media.",
-                          "confidence":0.9,
-                          "diagnosedAt":"2026-08-23T01:46:00Z"
+                          "confidence":0.9
                         }
                         """),
                 new DeviceQueryTool(parkSystem.devices()),
@@ -162,16 +159,12 @@ class AlertDiagnosisAgentTest {
     void diagnosisPromptIncludesParkContextAndKnowledgeContent() {
         TestChatModel model = new TestChatModel("""
                 {
-                  "id":"diag-1",
-                  "alertId":"ALT-TEMP-001",
-                  "deviceId":"DEV-HVAC-001",
                   "riskLevel":"LOW",
                   "rootCause":"Restricted airflow from a clogged filter",
                   "summary":"The HVAC unit likely needs filter inspection.",
                   "evidence":["history: repeated temperature warnings","knowledge: check filters first"],
                   "recommendedAction":"Inspect and replace the HVAC filter, then verify airflow.",
-                  "confidence":0.88,
-                  "diagnosedAt":"2026-08-23T01:30:00Z"
+                  "confidence":0.88
                 }
                 """);
 
@@ -197,7 +190,7 @@ class AlertDiagnosisAgentTest {
         TestChatModel model = new TestChatModel(
                 "not-json",
                 """
-                {"id":"diag-retry","alertId":"ALT-TEMP-001","deviceId":"DEV-HVAC-001","riskLevel":"LOW","rootCause":"Restricted airflow from a clogged filter","summary":"The HVAC unit likely needs filter inspection.","evidence":["history: repeated temperature warnings"],"recommendedAction":"Inspect and replace the HVAC filter.","confidence":0.88,"diagnosedAt":"2026-08-23T01:30:00Z"}
+                {"riskLevel":"LOW","rootCause":"Restricted airflow from a clogged filter","summary":"The HVAC unit likely needs filter inspection.","evidence":["history: repeated temperature warnings"],"recommendedAction":"Inspect and replace the HVAC filter.","confidence":0.88}
                 """);
 
         AlertDiagnosisAgent agent = new AlertDiagnosisAgent(
@@ -209,7 +202,7 @@ class AlertDiagnosisAgentTest {
 
         Diagnosis result = agent.diagnose(sampleAlert(), sampleContext(), sampleKnowledge());
 
-        assertThat(result.id()).isNotBlank().isNotEqualTo("diag-retry");
+        assertThat(result.id()).isNotBlank();
         assertThat(result.alertId()).isEqualTo("ALT-TEMP-001");
         assertThat(model.callCount()).isEqualTo(2);
         assertThat(model.lastPrompt().getSystemMessage().getText())
@@ -221,16 +214,12 @@ class AlertDiagnosisAgentTest {
     void emptyKnowledgeProducesEvidenceInsufficiencyInsteadOfFabricatedEvidence() {
         TestChatModel model = new TestChatModel("""
                 {
-                  "id":"diag-2",
-                  "alertId":"ALT-TEMP-001",
-                  "deviceId":"DEV-HVAC-001",
                   "riskLevel":"LOW",
                   "rootCause":"Insufficient evidence to determine the root cause",
                   "summary":"No supporting knowledge documents were available for a confident diagnosis.",
                   "evidence":["INSUFFICIENT_EVIDENCE: no knowledge documents matched the request"],
                   "recommendedAction":"Collect additional telemetry and consult a technician before acting.",
-                  "confidence":0.31,
-                  "diagnosedAt":"2026-08-23T01:35:00Z"
+                  "confidence":0.31
                 }
                 """);
 
@@ -253,16 +242,12 @@ class AlertDiagnosisAgentTest {
         AlertDiagnosisAgent agent = new AlertDiagnosisAgent(
                 new TestChatModel("""
                         {
-                          "id":"diag-3",
-                          "alertId":"ALT-TEMP-001",
-                          "deviceId":"DEV-HVAC-001",
                           "riskLevel":"LOW",
                           "rootCause":"n/a",
                           "summary":"n/a",
                           "evidence":["INSUFFICIENT_EVIDENCE"],
                           "recommendedAction":"n/a",
-                          "confidence":0.2,
-                          "diagnosedAt":"2026-08-23T01:40:00Z"
+                          "confidence":0.2
                         }
                         """),
                 new DeviceQueryTool(parkSystem.devices()),
@@ -283,16 +268,12 @@ class AlertDiagnosisAgentTest {
     void diagnosisSuppliesReadOnlyToolCallbacksToTheModelRequest() {
         TestChatModel model = new TestChatModel("""
                 {
-                  "id":"diag-4",
-                  "alertId":"ALT-TEMP-001",
-                  "deviceId":"DEV-HVAC-001",
                   "riskLevel":"LOW",
                   "rootCause":"Restricted airflow from a clogged filter",
                   "summary":"The HVAC unit likely needs filter inspection.",
                   "evidence":["history: repeated temperature warnings","knowledge: check filters first"],
                   "recommendedAction":"Inspect and replace the HVAC filter, then verify airflow.",
-                  "confidence":0.91,
-                  "diagnosedAt":"2026-08-23T01:45:00Z"
+                  "confidence":0.91
                 }
                 """);
         MockParkFixture parkSystem = new MockParkFixture();
@@ -317,16 +298,12 @@ class AlertDiagnosisAgentTest {
     void invalidDiagnosisRiskLevelFailsClosed() {
         String content = """
                 {
-                  "id":"diag-5",
-                  "alertId":"ALT-TEMP-001",
-                  "deviceId":"DEV-HVAC-001",
                   "riskLevel":"SEVERE",
                   "rootCause":"Restricted airflow from a clogged filter",
                   "summary":"The HVAC unit likely needs filter inspection.",
                   "evidence":["history: repeated temperature warnings"],
                   "recommendedAction":"Inspect and replace the HVAC filter, then verify airflow.",
-                  "confidence":0.9,
-                  "diagnosedAt":"2026-08-23T01:50:00Z"
+                  "confidence":0.9
                 }
                 """;
         TestChatModel model = new TestChatModel(content, content);
@@ -354,31 +331,46 @@ class AlertDiagnosisAgentTest {
         assertThat(model.callCount()).isEqualTo(2);
     }
 
+    @ParameterizedTest
+    @MethodSource("strictlyInvalidDiagnosisOutputs")
+    void strictReaderRejectsShapeDriftAndScalarCoercionAfterOneBoundedRetry(String content) {
+        TestChatModel model = new TestChatModel(content, content);
+
+        Throwable failure = catchThrowable(
+                () -> agent(model).diagnose(sampleAlert(), sampleContext(), sampleKnowledge()));
+
+        assertThat(failure)
+                .isInstanceOf(ModelOutputException.class)
+                .hasMessage("diagnosis structured output was invalid")
+                .hasNoCause();
+        assertThat(model.callCount()).isEqualTo(2);
+    }
+
     @Test
-    void modelSuppliedIdentityAndTimestampCannotOverrideServerOwnedValues() {
-        String content = """
-                {
-                  "id":"provider-controlled-id",
-                  "alertId":"provider-controlled-alert",
-                  "deviceId":"provider-controlled-device",
-                  "riskLevel":"LOW",
-                  "rootCause":"Restricted airflow from a clogged filter",
-                  "summary":"The HVAC unit likely needs filter inspection.",
-                  "evidence":["history: repeated temperature warnings"],
-                  "recommendedAction":"Inspect and replace the HVAC filter, then verify airflow.",
-                  "confidence":0.9,
-                  "diagnosedAt":"2000-01-01T00:00:00Z"
-                }
-                """;
-        TestChatModel model = new TestChatModel(content);
-        Instant startedAt = Instant.now();
+    void rejectedProviderResponseNeverAppearsInLogsOrExceptionDetails() {
+        String sentinel = "RAW_PROVIDER_SENTINEL_6f7a9d";
+        TestChatModel model = new TestChatModel(sentinel, sentinel);
+        Logger rootLogger = (Logger) LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        rootLogger.addAppender(appender);
+        try {
+            Throwable failure = catchThrowable(
+                    () -> agent(model).diagnose(sampleAlert(), sampleContext(), sampleKnowledge()));
 
-        Diagnosis result = agent(model).diagnose(sampleAlert(), sampleContext(), sampleKnowledge());
-
-        assertThat(result.id()).isNotEqualTo("provider-controlled-id");
-        assertThat(result.alertId()).isEqualTo("ALT-TEMP-001");
-        assertThat(result.deviceId()).isEqualTo("DEV-HVAC-001");
-        assertThat(result.diagnosedAt()).isBetween(startedAt, Instant.now());
+            assertThat(failure)
+                    .isInstanceOf(ModelOutputException.class)
+                    .hasMessage("diagnosis structured output was invalid")
+                    .hasNoCause();
+            assertThat(appender.list)
+                    .extracting(ILoggingEvent::getFormattedMessage)
+                    .noneMatch(message -> message.contains(sentinel));
+            assertThat(model.callCount()).isEqualTo(2);
+        }
+        finally {
+            rootLogger.detachAppender(appender);
+            appender.stop();
+        }
     }
 
     @ParameterizedTest
@@ -395,6 +387,16 @@ class AlertDiagnosisAgentTest {
 
     private static Stream<String> invalidConfidences() {
         return Stream.of("-0.1", "1.1", "\"NaN\"", "\"Infinity\"", "\"-Infinity\"");
+    }
+
+    private static Stream<String> strictlyInvalidDiagnosisOutputs() {
+        return Stream.of(
+                "{\"riskLevel\":\"LOW\",\"rootCause\":\"cause\",\"summary\":\"summary\",\"evidence\":[\"evidence\"],\"recommendedAction\":\"action\"}",
+                "{\"riskLevel\":\"LOW\",\"rootCause\":\"cause\",\"summary\":\"summary\",\"evidence\":[\"evidence\"],\"recommendedAction\":\"action\",\"confidence\":null}",
+                "{\"riskLevel\":\"LOW\",\"rootCause\":\"cause\",\"summary\":\"summary\",\"evidence\":[\"evidence\"],\"recommendedAction\":\"action\",\"confidence\":0.5,\"unexpected\":true}",
+                "{\"riskLevel\":\"LOW\",\"rootCause\":\"cause\",\"summary\":\"summary\",\"evidence\":[\"evidence\"],\"recommendedAction\":\"action\",\"confidence\":\"0.5\"}",
+                "{\"riskLevel\":\"LOW\",\"rootCause\":123,\"summary\":\"summary\",\"evidence\":[\"evidence\"],\"recommendedAction\":\"action\",\"confidence\":0.5}",
+                "{\"riskLevel\":\"LOW\",\"rootCause\":\"cause\",\"summary\":\"summary\",\"evidence\":[123],\"recommendedAction\":\"action\",\"confidence\":0.5}");
     }
 
     private static AlertDiagnosisAgent agent(TestChatModel model) {

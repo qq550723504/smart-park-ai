@@ -11,6 +11,7 @@ import com.example.smartpark.tool.energy.EnergyQueryTool;
 import com.example.smartpark.tool.security.SecurityQueryTool;
 import com.example.smartpark.tool.knowledge.ParkKnowledgeTool;
 import com.example.smartpark.tool.workorder.WorkOrderTool;
+import com.fasterxml.jackson.databind.ObjectReader;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -40,6 +41,8 @@ public class AlertDiagnosisAgent {
 
     private static final BeanOutputConverter<DiagnosisModelOutput> OUTPUT_CONVERTER =
             AlertStructuredOutputSupport.converter(DiagnosisModelOutput.class);
+    private static final ObjectReader OUTPUT_READER =
+            AlertStructuredOutputSupport.reader(DiagnosisModelOutput.class);
 
     private final ChatClient chatClient;
     private final ToolCallback[] toolCallbacks;
@@ -130,7 +133,7 @@ public class AlertDiagnosisAgent {
                 .toolCallbacks(auditedToolCallbacks(toolAuditor))
                 .call()
                 .content();
-        return AlertStructuredOutputSupport.convert(OUTPUT_CONVERTER, content, "diagnosis");
+        return AlertStructuredOutputSupport.convert(OUTPUT_READER, content, "diagnosis");
     }
 
     private Diagnosis createDiagnosis(

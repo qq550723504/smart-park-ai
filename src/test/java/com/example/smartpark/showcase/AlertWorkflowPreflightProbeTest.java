@@ -7,6 +7,7 @@ import com.example.smartpark.adapter.mock.MockParkFixture;
 import com.example.smartpark.agent.AlertDiagnosisAgent;
 import com.example.smartpark.agent.AlertTriageAgent;
 import com.example.smartpark.agent.TestChatModel;
+import com.example.smartpark.model.common.ApprovalDecision;
 import com.example.smartpark.model.common.Diagnosis;
 import com.example.smartpark.model.common.RiskLevel;
 import com.example.smartpark.model.common.WorkOrder;
@@ -114,6 +115,13 @@ class AlertWorkflowPreflightProbeTest {
                 .isEqualTo(ShowcaseProbeResult.FAILED);
         assertThat(runWith(snapshot(WorkflowStatus.WAITING_APPROVAL, diagnosis, List.of(), workOrder)))
                 .isEqualTo(ShowcaseProbeResult.FAILED);
+        assertThat(runWith(snapshot(
+                WorkflowStatus.WAITING_APPROVAL,
+                diagnosis,
+                Optional.of(approval()),
+                List.of(),
+                null)))
+                .isEqualTo(ShowcaseProbeResult.FAILED);
     }
 
     @Test
@@ -137,7 +145,8 @@ class AlertWorkflowPreflightProbeTest {
             ShowcaseProbeResult result = runWith(snapshot(
                     WorkflowStatus.WAITING_APPROVAL,
                     sensitiveDiagnosis,
-                    List.of("exception-message-secret"),
+                    Optional.of(approval()),
+                    List.of(),
                     null));
 
             assertThat(result).isEqualTo(ShowcaseProbeResult.FAILED);
@@ -145,7 +154,7 @@ class AlertWorkflowPreflightProbeTest {
             String message = appender.list.get(0).getFormattedMessage();
             assertThat(message).isEqualTo("alert preflight failed: stage=APPROVAL_BOUNDARY, "
                     + "code=INVARIANT_MISMATCH, waitingApproval=true, diagnosisPresent=true, "
-                    + "errorsEmpty=false, workOrderAbsent=true");
+                    + "errorsEmpty=true, workOrderAbsent=true, approvalAbsent=false");
             assertThat(message).doesNotContain(
                     "raw-model-secret",
                     "prompt-secret",
@@ -182,15 +191,33 @@ class AlertWorkflowPreflightProbeTest {
             Diagnosis diagnosis,
             List<String> errors,
             WorkOrder workOrder) {
+        return snapshot(status, diagnosis, Optional.empty(), errors, workOrder);
+    }
+
+    private WorkflowSnapshot snapshot(
+            WorkflowStatus status,
+            Diagnosis diagnosis,
+            Optional<ApprovalDecision> approval,
+            List<String> errors,
+            WorkOrder workOrder) {
         return new WorkflowSnapshot(
                 "preflight-wf",
                 "ALT-POWER-001",
                 status,
                 Map.of(),
                 diagnosis,
-                Optional.empty(),
+                approval,
                 workOrder,
                 errors,
                 1);
+    }
+
+    private static ApprovalDecision approval() {
+        return new ApprovalDecision(
+                ApprovalDecision.Decision.APPROVED,
+                "preflight-reviewer",
+                "must remain absent",
+                "preflight-approval",
+                Instant.parse("2026-08-31T00:00:00Z"));
     }
 }
