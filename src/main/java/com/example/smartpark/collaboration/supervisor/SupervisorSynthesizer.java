@@ -27,6 +27,45 @@ public final class SupervisorSynthesizer {
         this.validator = Objects.requireNonNull(validator, "validator");
     }
 
+    /**
+     * Builds the only valid runtime synthesis directly from validated expert
+     * findings. A provider call cannot add evidence or author the public
+     * conclusion, so asking it to echo these selections only adds failure modes.
+     */
+    public Synthesis synthesize(SupervisorPlan plan, List<ExpertFinding> findings) {
+        Objects.requireNonNull(plan, "plan");
+        List<ExpertFinding> safeFindings = List.copyOf(findings);
+        if (!safeFindings.stream().map(ExpertFinding::domain).allMatch(plan.selectedDomains()::contains)) {
+            throw new IllegalArgumentException("findings contain an unselected domain");
+        }
+        Set<ExpertDomain> selectedDomains = safeFindings.stream()
+                .filter(finding -> finding.status() == FindingStatus.SUPPORTED)
+                .map(ExpertFinding::domain)
+                .collect(Collectors.toUnmodifiableSet());
+        FindingStatus status = selectedDomains.isEmpty()
+                ? FindingStatus.INSUFFICIENT_EVIDENCE : FindingStatus.SUPPORTED;
+        List<String> evidenceRefs = safeFindings.stream()
+                .filter(finding -> selectedDomains.contains(finding.domain()))
+                .flatMap(finding -> finding.evidenceRefs().stream())
+                .distinct()
+                .toList();
+        double confidence = status == FindingStatus.SUPPORTED
+                ? safeFindings.stream()
+                .filter(finding -> selectedDomains.contains(finding.domain()))
+                .mapToDouble(ExpertFinding::confidence)
+                .min().orElse(0.0)
+                : 0.0;
+        List<String> uncertainties = safeFindings.stream()
+                .filter(finding -> finding.status() != FindingStatus.SUPPORTED)
+                .sorted(Comparator.comparing(ExpertFinding::domain))
+                .map(finding -> finding.domain() + ": " + finding.conclusion())
+                .toList();
+        Synthesis synthesis = new Synthesis(status,
+                deterministicConclusion(status, selectedDomains, safeFindings),
+                evidenceRefs, confidence, uncertainties);
+        return validator.validate(synthesis, safeFindings, selectedDomains);
+    }
+
     public Synthesis parseAndValidate(String modelJson, SupervisorPlan plan, List<ExpertFinding> findings) {
         Objects.requireNonNull(plan, "plan");
         List<ExpertFinding> safeFindings = List.copyOf(findings);

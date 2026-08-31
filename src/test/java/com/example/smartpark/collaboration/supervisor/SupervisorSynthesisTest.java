@@ -17,6 +17,20 @@ class SupervisorSynthesisTest {
     private final SupervisorSynthesizer synthesizer = new SupervisorSynthesizer();
 
     @Test
+    void synthesizesAllValidatedSupportedFindingsWithoutAProviderEcho() {
+        ExpertFinding device = new ExpertFinding(ExpertDomain.DEVICE, FindingStatus.SUPPORTED,
+                "device D-2 is offline", List.of("device:D-2"), .7, List.of());
+
+        var result = synthesizer.synthesize(plan(), List.of(device, supported()));
+
+        assertThat(result.status()).isEqualTo(FindingStatus.SUPPORTED);
+        assertThat(result.conclusion())
+                .isEqualTo("MTR-2 consumption is 18.5 above baseline；device D-2 is offline");
+        assertThat(result.evidenceRefs()).containsExactlyInAnyOrder("energy:MTR-2", "device:D-2");
+        assertThat(result.confidence()).isEqualTo(.7);
+    }
+
+    @Test
     void buildsConclusionVerbatimFromSelectedSupportedFinding() {
         var result = synthesizer.parseAndValidate("""
                 {"status":"SUPPORTED","selectedDomains":["ENERGY"],"evidenceRefs":["energy:MTR-2"],"confidence":0.8,"uncertainties":[]}

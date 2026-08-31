@@ -170,30 +170,6 @@ class CollaborationRuntimeConfigurationTest {
         });
     }
 
-    @Test
-    void synthesisUsesStrictDashScopeSchema() {
-        RoutingChatModel model = AllDependencies.model();
-        model.clear();
-        runner.run(context -> {
-            ExpertCollaborationService service = context.getBean(ExpertCollaborationService.class);
-            CollaborationRun started = service.start("A2 夜间能耗升高的原因是什么");
-            assertThat(awaitTerminal(service, started.runId()).status())
-                    .isEqualTo(CollaborationRun.RunStatus.COMPLETED);
-
-            Prompt prompt = model.synthesisPrompts().get(0);
-            assertThat(prompt.getOptions()).isInstanceOf(DashScopeChatOptions.class);
-            DashScopeResponseFormat responseFormat = ((DashScopeChatOptions) prompt.getOptions())
-                    .getResponseFormat();
-            assertThat(responseFormat.getType()).isEqualTo(DashScopeResponseFormat.Type.JSON_SCHEMA);
-            assertThat(responseFormat.getJsonScheme().getStrict()).isTrue();
-            @SuppressWarnings("unchecked")
-            Map<String, Object> schema = (Map<String, Object>) responseFormat.getJsonScheme().getSchema();
-            @SuppressWarnings("unchecked")
-            Map<String, Object> properties = (Map<String, Object>) schema.get("properties");
-            assertThat(properties).containsKeys(
-                    "status", "selectedDomains", "evidenceRefs", "confidence", "uncertainties");
-        });
-    }
 
     @Test
     void deterministicRoutingDoesNotAddProviderSecurityDomainToEnergyQuestion() {
@@ -207,6 +183,7 @@ class CollaborationRuntimeConfigurationTest {
             assertThat(completed.plan().selectedDomains()).containsExactly(ExpertDomain.ENERGY);
             assertThat(model.expertPrompts()).containsExactly("ENERGY");
             assertThat(model.supervisorPromptCount()).isOne();
+            assertThat(model.synthesisPromptCount()).isZero();
         });
     }
 
@@ -449,17 +426,18 @@ class CollaborationRuntimeConfigurationTest {
             return supervisorPrompts().size();
         }
 
+        long synthesisPromptCount() {
+            return prompts.stream()
+                    .filter(prompt -> prompt.getSystemMessage().getText().contains("tool-free supervisor"))
+                    .count();
+        }
+
         List<Prompt> supervisorPrompts() {
             return prompts.stream()
                     .filter(prompt -> prompt.getSystemMessage().getText().contains("collaboration supervisor"))
                     .toList();
         }
 
-        List<Prompt> synthesisPrompts() {
-            return prompts.stream()
-                    .filter(prompt -> prompt.getSystemMessage().getText().contains("tool-free supervisor"))
-                    .toList();
-        }
     }
 
     static final class ProbeTool {
