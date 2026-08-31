@@ -208,6 +208,45 @@ describe('OperationsAnalysisPage', () => {
     wrapper.unmount()
   })
 
+  it('reuses an accepted analysis when returning from the showcase instead of posting a duplicate run', async () => {
+    let posts = 0
+    handler = (_url, init) => {
+      if (init?.method === 'POST') {
+        posts += 1
+        return jsonResponse({ runId: 'active-run' }, 202)
+      }
+      return jsonResponse({ runId: 'active-run', status: 'RUNNING', createdAt: '' })
+    }
+    const wrapper = mount(OperationsAnalysisPage, {
+      props: {
+        active: true,
+        pollIntervalMs: 1,
+        launchRequest: {
+          requestId: 30, mode: 'guided', scenarioId: 'OPERATIONS_ANALYSIS', view: 'analytics',
+          launchInput: { alertId: null, question: '过去5天各楼宇能耗' },
+        },
+      },
+    })
+    await flush(2)
+    expect(posts).toBe(1)
+
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({
+      launchRequest: {
+        requestId: 31, mode: 'guided', scenarioId: 'OPERATIONS_ANALYSIS', view: 'analytics',
+        launchInput: { alertId: null, question: '过去5天各楼宇能耗' },
+      },
+    })
+    await wrapper.setProps({ active: true })
+    await flush(2)
+
+    expect(posts).toBe(1)
+    expect(wrapper.emitted('launch-status')?.at(-1)?.[0]).toMatchObject({
+      requestId: 31, state: 'started', message: '已保留当前运营分析，请继续查看',
+    })
+    wrapper.unmount()
+  })
+
   it('waits for the newer guided request before reporting the accepted run', async () => {
     const firstPost = deferred<Response>()
     const secondPost = deferred<Response>()

@@ -109,10 +109,12 @@ watch(
     reviewer.value = ''
     comment.value = ''
     guidedLaunchUpdate.value = null
-    // A generic workflow entry starts a clean alert surface. An analytics
-    // run is the exception: its shared trace must remain available while the
-    // operator navigates back to it for clarification.
-    if (previousRequest.scenarioId !== 'OPERATIONS_ANALYSIS') trace.reset()
+    // A generic workflow entry starts a clean alert surface. Preserve only an
+    // active or clarification-pending analytics trace; terminal traces are
+    // evidence from the previous run and must not leak into the idle view.
+    if (previousRequest.scenarioId !== 'OPERATIONS_ANALYSIS' || trace.status.value !== 'streaming') {
+      trace.reset()
+    }
   },
 )
 const traceStatusLabels = {

@@ -22,11 +22,17 @@ const collaborationLaunchInput = {
 }
 
 const analysisStub = defineComponent({
+  props: { trace: { type: Object, required: true } },
   setup() {
     onMounted(() => { mounts.analysis += 1 })
     onUnmounted(() => { unmounts.analysis += 1 })
     return () => null
   },
+})
+
+const traceRailStub = defineComponent({
+  props: { status: { type: String, required: true } },
+  template: '<div data-testid="trace-status">{{ status }}</div>',
 })
 
 const workflowStub = defineComponent({
@@ -597,6 +603,35 @@ describe('OperationsWorkbench', () => {
 
     expect(wrapper.find('[role="status"]').exists()).toBe(false)
     expect(wrapper.find('[data-workbench-action="retry-guided-launch"]').exists()).toBe(false)
+  })
+
+  it('resets terminal analytics traces but preserves active analytics traces on manual entry', async () => {
+    const mountWorkbench = async (status: 'streaming' | 'completed') => {
+      const wrapper = mount(OperationsWorkbench, {
+        props: {
+          initialView: 'analytics',
+          launchRequest: {
+            requestId: 74, mode: 'guided', scenarioId: 'OPERATIONS_ANALYSIS', view: 'analytics',
+            launchInput: { alertId: null, question: '过去5天各楼宇能耗' },
+          },
+        },
+        global: { stubs: { ...operatorStubs, ExecutionTraceRail: traceRailStub } },
+      })
+      await settleCapabilities()
+      const analysis = wrapper.getComponent(analysisStub)
+      ;(analysis.props('trace') as { status: { value: string } }).status.value = status
+      await nextTick()
+      await wrapper.setProps({ launchRequest: null })
+      return wrapper
+    }
+
+    const terminal = await mountWorkbench('completed')
+    expect(terminal.get('[data-testid="trace-status"]').text()).toBe('idle')
+    terminal.unmount()
+
+    const active = await mountWorkbench('streaming')
+    expect(active.get('[data-testid="trace-status"]').text()).toBe('streaming')
+    active.unmount()
   })
 
   it('offers a retry for the current failed guided launch', async () => {

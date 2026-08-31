@@ -44,9 +44,14 @@ const analysis = useOperationsAnalysis({
 })
 const chosenMetrics = ref<string[]>([])
 let cancelGuidedAnalysisStart: (() => void) | null = null
+let returnedFromShowcase = !props.active
 
 onScopeDispose(() => {
   cancelGuidedAnalysisStart?.()
+})
+
+watch(() => props.active, (active) => {
+  if (!active) returnedFromShowcase = true
 })
 
 function launchAnalysis(callbacks?: AnalysisStartCallbacks): void {
@@ -98,6 +103,13 @@ useGuidedLaunch({
   start: async (request) => {
     const guidedQuestion = request.launchInput?.question?.trim()
     if (!guidedQuestion) throw new Error('运营分析演示配置无效')
+    const preservingExistingRun = returnedFromShowcase
+      && analysis.runId.value
+      && (analysis.phase.value === 'running' || analysis.phase.value === 'clarification')
+    returnedFromShowcase = false
+    if (preservingExistingRun) {
+      return { state: 'started', message: '已保留当前运营分析，请继续查看' }
+    }
     question.value = guidedQuestion
     await startGuidedAnalysis()
     return { state: 'started', message: '运营分析已启动' }

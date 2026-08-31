@@ -68,6 +68,19 @@ class OperationsAnalysisPreflightProbeTest {
         verify(service).abort(runId);
     }
 
+    @Test
+    void analyticsAbortsARunningRunWhenThePreflightThreadIsInterrupted() {
+        OperationsAnalysisService service = mock(OperationsAnalysisService.class);
+        UUID runId = UUID.randomUUID();
+        when(service.start("过去5天各楼宇能耗")).thenReturn(run(runId, "RUNNING", 0));
+        when(service.get(runId)).thenReturn(run(runId, "RUNNING", 0));
+
+        Thread.currentThread().interrupt();
+        assertThat(new OperationsAnalysisPreflightProbe(service).probe())
+                .isEqualTo(ShowcaseProbeResult.FAILED);
+        verify(service).abort(runId);
+    }
+
     private static AnalysisRunStore.RunRecord run(UUID runId, String status, int rowCount) {
         return new AnalysisRunStore.RunRecord(runId, "question", status, null, null,
                 null, rowCount, false, 0, null, null, null, null, null);
