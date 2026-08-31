@@ -5,6 +5,7 @@ import ExpertCollaborationPage from './ExpertCollaborationPage.vue'
 import type { ExecutionEvent } from '../types/execution'
 import type { ExecutionTrace } from '../composables/useExecutionTrace'
 import type { CollaborationRun } from '../types/collaboration'
+import { formatSynthesis } from '../utils/collaborationPresentation'
 
 const RUN_ID = '11111111-2222-3333-4444-555555555555'
 let polls = 0
@@ -53,6 +54,15 @@ beforeEach(() => {
 })
 
 describe('ExpertCollaborationPage', () => {
+  it('does not turn a supported negative relationship conclusion into a positive one', () => {
+    const display = formatSynthesis({
+      status: 'SUPPORTED', conclusion: '无关联', evidenceRefs: [], confidence: 0.9, uncertainties: [],
+    })
+
+    expect(display.conclusion).toBe('无关联')
+    expect(display.conclusion).not.toContain('已确认存在关联')
+  })
+
   it('preserves the supervisor conclusion when it is not one of the localized status labels', async () => {
     globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === 'POST') {

@@ -55,6 +55,36 @@ describe('ExpertCard', () => {
     wrapper.unmount()
   })
 
+  it('projects recognized values from nested tool results into customer-facing details', () => {
+    const wrapper = mount(ExpertCard, {
+      props: {
+        domain: 'ENERGY',
+        plan: {
+          normalizedQuestion: 'q',
+          selectedDomains: ['ENERGY'],
+          assignments: { ENERGY: '检查电表 MTR-2 的能耗' },
+          selectionReason: 'energy',
+        },
+        finding: {
+          domain: 'ENERGY',
+          status: 'SUPPORTED',
+          conclusion: '工具结果: {"meterId":"MTR-2","reading":{"currentKwh":138.2,"baselineKwh":120,"varianceRatio":0.1517}}',
+          evidenceRefs: [],
+          confidence: 0.92,
+          nextChecks: [],
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('当前能耗')
+    expect(wrapper.text()).toContain('138.2 kWh')
+    expect(wrapper.text()).toContain('基线能耗')
+    expect(wrapper.text()).toContain('120 kWh')
+    expect(wrapper.text()).toContain('偏差率')
+    expect(wrapper.text()).toContain('15.17%')
+    wrapper.unmount()
+  })
+
   it('renders structured tool evidence as a Chinese customer-facing summary', () => {
     const wrapper = mount(ExpertCard, {
       props: {

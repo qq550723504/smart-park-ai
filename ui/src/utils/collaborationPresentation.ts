@@ -119,6 +119,23 @@ function formatValue(key: string, value: unknown): string {
   return String(value ?? '')
 }
 
+function collectKnownFields(value: unknown, fields: Array<[string, unknown]> = []): Array<[string, unknown]> {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectKnownFields(item, fields))
+    return fields
+  }
+  if (!value || typeof value !== 'object') return fields
+
+  Object.entries(value).forEach(([key, nestedValue]) => {
+    if (fieldLabels[key] && (typeof nestedValue !== 'object' || nestedValue === null)) {
+      fields.push([key, nestedValue])
+    } else {
+      collectKnownFields(nestedValue, fields)
+    }
+  })
+  return fields
+}
+
 function summaryFor(domain: ExpertDomain, finding: ExpertFinding, details: Array<{ label: string; value: string }>, hasStructuredObject: boolean): string {
   if (finding.status === 'INSUFFICIENT_EVIDENCE') return `${domainLabels[domain]}当前证据不足，暂无法确认该领域结论。`
   if (finding.status === 'FAILED') return `${domainLabels[domain]}本轮分析未完成，请稍后重试。`
@@ -144,12 +161,10 @@ export function formatNextCheck(check: string): string {
 export function formatFinding(finding: ExpertFinding): FindingDisplay {
   const objects = extractObjects(finding.conclusion)
   const source = objects[0]
-  const details = source
-    ? Object.entries(source)
-        .filter(([key, value]) => fieldLabels[key] && value !== null && value !== '')
-        .map(([key, value]) => ({ label: fieldLabels[key], value: formatValue(key, value) }))
-        .filter((detail) => detail.value !== '')
-    : []
+  const details = collectKnownFields(source)
+    .filter(([, value]) => value !== null && value !== '')
+    .map(([key, value]) => ({ label: fieldLabels[key], value: formatValue(key, value) }))
+    .filter((detail) => detail.value !== '')
 
   return {
     summary: summaryFor(finding.domain, finding, details, Boolean(source)),
@@ -176,10 +191,14 @@ export function formatSynthesis(synthesis: Synthesis): SynthesisDisplay {
       ? '专家分析未完成'
       : '当前证据不足，暂无法确认关联'
   const rawConclusion = synthesis.conclusion.trim()
+  const isNegativeRelationship = /无关联|不存在关联|未发现关联|没有关联/.test(rawConclusion)
+    || /\b(?:no|without)\s+(?:relationship|correlation|link)\b|\bunrelated\b|\bnot related\b/i.test(rawConclusion)
   return {
-    conclusion: rawConclusion && rawConclusion !== localizedConclusion
-      ? `${localizedConclusion}：${rawConclusion}`
-      : localizedConclusion,
+    conclusion: isNegativeRelationship
+      ? (/[^\u0000-\u007F]/.test(rawConclusion) ? rawConclusion : `未发现关联：${rawConclusion}`)
+      : rawConclusion && rawConclusion !== localizedConclusion
+        ? `${localizedConclusion}：${rawConclusion}`
+        : localizedConclusion,
     uncertainties: synthesis.uncertainties.map(formatUncertaintyText),
     evidence: synthesis.evidenceRefs.map(formatEvidenceRef),
   }
