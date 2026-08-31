@@ -87,10 +87,11 @@ public final class SupervisorPlanner {
             }
         }
         EnumMap<ExpertDomain, String> modelAssignments = new EnumMap<>(ExpertDomain.class);
+        Set<String> assignmentIdentifiers = new LinkedHashSet<>();
         if (assignments.isArray()) {
-            parseTypedAssignments(assignments, normalizedQuestion, modelAssignments);
+            parseTypedAssignments(assignments, normalizedQuestion, modelAssignments, assignmentIdentifiers);
         } else if (assignments.isObject()) {
-            parseLegacyAssignments(assignments, normalizedQuestion, modelAssignments);
+            parseLegacyAssignments(assignments, normalizedQuestion, modelAssignments, assignmentIdentifiers);
         } else {
             throw reject(PlannerRejection.ASSIGNMENTS_TYPE,
                     "assignments must be an array or an object");
@@ -98,6 +99,7 @@ public final class SupervisorPlanner {
         if (!modelAssignments.keySet().equals(modelDomains)) {
             throw reject(PlannerRejection.COVERAGE, "assignments must exactly cover selectedDomains");
         }
+        requireCompleteEntityScope(normalizedQuestion, assignmentIdentifiers);
 
         // The provider response is mandatory structured confirmation and its
         // explanation is retained, but routing has exactly one authority: the
@@ -184,7 +186,8 @@ public final class SupervisorPlanner {
     }
 
     private static void parseTypedAssignments(
-            JsonNode assignments, String question, EnumMap<ExpertDomain, String> normalizedAssignments) {
+            JsonNode assignments, String question, EnumMap<ExpertDomain, String> normalizedAssignments,
+            Set<String> assignmentIdentifiers) {
         for (JsonNode value : assignments) {
             if (!value.isObject()) {
                 throw reject(PlannerRejection.ASSIGNMENT_ENTRY_TYPE,
@@ -199,42 +202,50 @@ public final class SupervisorPlanner {
             addAssignment(normalizedAssignments,
                     parseDomain(domainValue.textValue(), domainValue, question),
                     requireTextValue(value.get("assignment"), "assignment", PlannerRejection.ASSIGNMENT_TYPE),
-                    question);
+                    question, assignmentIdentifiers);
         }
     }
 
     private static void parseLegacyAssignments(
-            JsonNode assignments, String question, EnumMap<ExpertDomain, String> normalizedAssignments) {
+            JsonNode assignments, String question, EnumMap<ExpertDomain, String> normalizedAssignments,
+            Set<String> assignmentIdentifiers) {
         Iterator<Map.Entry<String, JsonNode>> fields = assignments.fields();
         while (fields.hasNext()) {
             Map.Entry<String, JsonNode> field = fields.next();
             addAssignment(normalizedAssignments,
                     parseDomain(field.getKey(), field.getKey(), question),
                     requireTextValue(field.getValue(), "assignment", PlannerRejection.ASSIGNMENT_TYPE),
-                    question);
+                    question, assignmentIdentifiers);
         }
     }
 
     private static void addAssignment(
-            EnumMap<ExpertDomain, String> assignments, ExpertDomain domain, String assignment, String question) {
-        requireExactEntityScope(question, assignment, domain);
+            EnumMap<ExpertDomain, String> assignments, ExpertDomain domain, String assignment, String question,
+            Set<String> assignmentIdentifiers) {
+        Set<String> identifiers = entityIdentifiers(assignment);
+        requireNoUnexpectedEntityScope(question, identifiers, domain);
+        assignmentIdentifiers.addAll(identifiers);
         if (assignments.put(domain, assignment) != null) {
             throw reject(PlannerRejection.COVERAGE, "assignments must not contain duplicate domains");
         }
     }
 
-    private static void requireExactEntityScope(String question, String assignment, ExpertDomain domain) {
+    private static void requireNoUnexpectedEntityScope(
+            String question, Set<String> assignmentIdentifiers, ExpertDomain domain) {
         Set<String> requiredIdentifiers = entityIdentifiers(question);
-        Set<String> assignmentIdentifiers = entityIdentifiers(assignment);
-        if (assignmentIdentifiers.equals(requiredIdentifiers)) return;
-
-        Set<String> missing = new LinkedHashSet<>(requiredIdentifiers);
-        missing.removeAll(assignmentIdentifiers);
         Set<String> unexpected = new LinkedHashSet<>(assignmentIdentifiers);
         unexpected.removeAll(requiredIdentifiers);
-        throw reject(PlannerRejection.ASSIGNMENT_SCOPE, "assignment for " + domain
-                + " must preserve the exact input entity scope; missing=" + missing
-                + ", unexpected=" + unexpected);
+        if (!unexpected.isEmpty()) {
+            throw reject(PlannerRejection.ASSIGNMENT_SCOPE,
+                    "assignment for " + domain + " contains identifiers outside the input scope");
+        }
+    }
+
+    private static void requireCompleteEntityScope(String question, Set<String> assignmentIdentifiers) {
+        if (!assignmentIdentifiers.equals(entityIdentifiers(question))) {
+            throw reject(PlannerRejection.ASSIGNMENT_SCOPE,
+                    "assignments must collectively preserve the complete input entity scope");
+        }
     }
 
     private static Set<String> entityIdentifiers(String text) {

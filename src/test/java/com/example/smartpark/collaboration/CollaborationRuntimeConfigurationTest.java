@@ -123,7 +123,8 @@ class CollaborationRuntimeConfigurationTest {
             assertThat(model.supervisorPrompts()).singleElement().satisfies(prompt ->
                     assertThat(prompt.getSystemMessage().getText()).contains(
                             "normalizedQuestion must exactly echo the normalized original question",
-                            "Every assignment must preserve every concrete identifier from the original question",
+                            "complete assignments list must preserve every concrete identifier",
+                            "Each assignment may contain only the identifiers relevant to its domain",
                             "assignments must contain exactly one {domain, assignment} item for every selectedDomains entry and no duplicate domains",
                             "Explanatory assignment text is allowed",
                             "selectedDomains are advisory",

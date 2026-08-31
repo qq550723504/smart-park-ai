@@ -78,6 +78,23 @@ class SupervisorPlannerTest {
     }
 
     @Test
+    void typedAssignmentsMayPartitionIdentifiersByDomainWhenTheirUnionIsComplete() {
+        String question = "Compare DEV-ENERGY-001, DEV-HVAC-001, and SEC-ACCESS-001";
+        var plan = planner.parseAndValidate(question, """
+                {"normalizedQuestion":"Compare DEV-ENERGY-001, DEV-HVAC-001, and SEC-ACCESS-001",
+                 "selectedDomains":["ENERGY","DEVICE","SECURITY"],
+                 "assignments":[
+                   {"domain":"ENERGY","assignment":"inspect DEV-ENERGY-001"},
+                   {"domain":"DEVICE","assignment":"inspect DEV-HVAC-001"},
+                   {"domain":"SECURITY","assignment":"inspect SEC-ACCESS-001"}],
+                 "selectionReason":"cross-domain comparison"}
+                """);
+
+        assertThat(plan.selectedDomains()).containsExactlyInAnyOrder(
+                ExpertDomain.ENERGY, ExpertDomain.DEVICE, ExpertDomain.SECURITY);
+    }
+
+    @Test
     void parsesLegacyObjectAssignmentsWithoutChangingServerOwnedRouting() {
         var plan = planner.parseAndValidate("is device D1 offline?", """
                 {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
@@ -136,7 +153,7 @@ class SupervisorPlannerTest {
                  "assignments":[{"domain":"DEVICE","assignment":"inspect device D2"}],"selectionReason":"device status"}
                 """))
                 .isInstanceOf(com.example.smartpark.agent.ModelOutputException.class)
-                .hasMessageContaining("D1");
+                .hasMessageContaining("outside the input scope");
     }
 
     @Test
