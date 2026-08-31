@@ -14,8 +14,11 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public final class SupervisorPlanner {
+    private static final Logger log = LoggerFactory.getLogger(SupervisorPlanner.class);
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Pattern ENERGY_DEVICE_ID = Pattern.compile("DEV-ENERGY-[A-Z0-9-]+", Pattern.CASE_INSENSITIVE);
     private static final Pattern DEVICE_ID = Pattern.compile("DEV-[A-Z0-9-]+", Pattern.CASE_INSENSITIVE);
@@ -52,33 +55,41 @@ public final class SupervisorPlanner {
     public SupervisorPlan parseAndValidate(String question, String modelJson) {
         String normalizedQuestion = normalize(question);
         JsonNode root = parseObject(modelJson);
-        if (!root.fieldNames().hasNext()) throw new ModelOutputException("planner response must not be empty");
+        if (!root.fieldNames().hasNext()) {
+            throw reject(PlannerRejection.EMPTY_OBJECT, "planner response must not be empty");
+        }
         JsonNode selected = root.get("selectedDomains");
         JsonNode assignments = root.get("assignments");
         if (!root.has("normalizedQuestion") || !root.has("selectionReason") || selected == null || assignments == null) {
-            throw new ModelOutputException("planner response is missing required fields");
+            throw reject(PlannerRejection.MISSING_REQUIRED_FIELD, "planner response is missing required fields");
         }
-        String providerQuestion = requireText(root, "normalizedQuestion");
+        String providerQuestion = requireText(root, "normalizedQuestion", PlannerRejection.NORMALIZED_QUESTION_TYPE);
         if (!normalize(providerQuestion).equals(normalizedQuestion)) {
-            throw new ModelOutputException("normalizedQuestion must exactly match the normalized input question");
+            throw reject(PlannerRejection.QUESTION_MISMATCH,
+                    "normalizedQuestion must exactly match the normalized input question");
         }
         EnumSet<ExpertDomain> modelDomains = EnumSet.noneOf(ExpertDomain.class);
-        if (!selected.isArray()) throw new ModelOutputException("selectedDomains must be an array");
+        if (!selected.isArray()) {
+            throw reject(PlannerRejection.SELECTED_DOMAINS_TYPE, "selectedDomains must be an array");
+        }
         for (JsonNode value : selected) {
             modelDomains.add(parseDomain(value.asText(), value, normalizedQuestion));
         }
-        if (!assignments.isObject()) throw new ModelOutputException("assignments must be an object");
+        if (!assignments.isObject()) {
+            throw reject(PlannerRejection.ASSIGNMENTS_TYPE, "assignments must be an object");
+        }
         EnumMap<ExpertDomain, String> modelAssignments = new EnumMap<>(ExpertDomain.class);
         Iterator<Map.Entry<String, JsonNode>> fields = assignments.fields();
         while (fields.hasNext()) {
             Map.Entry<String, JsonNode> field = fields.next();
             ExpertDomain domain = parseDomain(field.getKey(), field.getKey(), normalizedQuestion);
-            String assignment = requireTextValue(field.getValue(), "assignment for " + field.getKey());
+            String assignment = requireTextValue(field.getValue(), "assignment for " + field.getKey(),
+                    PlannerRejection.ASSIGNMENT_TYPE);
             requireExactEntityScope(normalizedQuestion, assignment, domain);
             modelAssignments.put(domain, assignment);
         }
         if (!modelAssignments.keySet().equals(modelDomains)) {
-            throw new ModelOutputException("assignments must exactly cover selectedDomains");
+            throw reject(PlannerRejection.COVERAGE, "assignments must exactly cover selectedDomains");
         }
 
         // The provider response is mandatory structured confirmation and its
@@ -94,18 +105,20 @@ public final class SupervisorPlanner {
         requiredDomains.forEach(domain -> canonicalAssignments.put(domain, normalizedQuestion));
         SupervisorPlan plan = new SupervisorPlan(
                 normalizedQuestion, requiredDomains, canonicalAssignments,
-                requireText(root, "selectionReason"));
+                requireText(root, "selectionReason", PlannerRejection.SELECTION_REASON_TYPE));
         return validator.validate(plan);
     }
 
     private static JsonNode parseObject(String text) {
         try {
             JsonNode node = JSON.readTree(text);
-            if (node == null || !node.isObject()) throw new ModelOutputException("planner response must be a JSON object");
+            if (node == null || !node.isObject()) {
+                throw reject(PlannerRejection.NON_OBJECT, "planner response must be a JSON object");
+            }
             return node;
         } catch (Exception ex) {
             if (ex instanceof ModelOutputException e) throw e;
-            throw new ModelOutputException("planner response was not valid JSON", ex);
+            throw reject(PlannerRejection.MALFORMED_JSON, "planner response was not valid JSON", ex);
         }
     }
 
@@ -114,13 +127,39 @@ public final class SupervisorPlanner {
         return text.trim();
     }
 
-    private static String requireText(JsonNode root, String field) {
-        return requireTextValue(root.get(field), field);
+    private static String requireText(JsonNode root, String field, PlannerRejection rejection) {
+        return requireTextValue(root.get(field), field, rejection);
     }
 
-    private static String requireTextValue(JsonNode value, String description) {
+    private static ModelOutputException reject(PlannerRejection rejection, String message) {
+        log.warn(rejection.name());
+        return new ModelOutputException(message);
+    }
+
+    private static ModelOutputException reject(PlannerRejection rejection, String message, Exception cause) {
+        log.warn(rejection.name());
+        return new ModelOutputException(message, cause);
+    }
+
+    private enum PlannerRejection {
+        MALFORMED_JSON,
+        NON_OBJECT,
+        EMPTY_OBJECT,
+        MISSING_REQUIRED_FIELD,
+        NORMALIZED_QUESTION_TYPE,
+        QUESTION_MISMATCH,
+        SELECTED_DOMAINS_TYPE,
+        DOMAIN,
+        ASSIGNMENTS_TYPE,
+        ASSIGNMENT_TYPE,
+        ASSIGNMENT_SCOPE,
+        COVERAGE,
+        SELECTION_REASON_TYPE
+    }
+
+    private static String requireTextValue(JsonNode value, String description, PlannerRejection rejection) {
         if (value == null || !value.isTextual() || value.asText().isBlank()) {
-            throw new ModelOutputException(description + " must be a non-empty string");
+            throw reject(rejection, description + " must be a non-empty string");
         }
         return value.asText().trim();
     }
@@ -134,7 +173,7 @@ public final class SupervisorPlanner {
         missing.removeAll(assignmentIdentifiers);
         Set<String> unexpected = new LinkedHashSet<>(assignmentIdentifiers);
         unexpected.removeAll(requiredIdentifiers);
-        throw new ModelOutputException("assignment for " + domain
+        throw reject(PlannerRejection.ASSIGNMENT_SCOPE, "assignment for " + domain
                 + " must preserve the exact input entity scope; missing=" + missing
                 + ", unexpected=" + unexpected);
     }
@@ -167,12 +206,12 @@ public final class SupervisorPlanner {
                 return ExpertDomain.DEVICE;
             }
             if (questionText.contains("dev-energy-")) return ExpertDomain.ENERGY;
-            throw new ModelOutputException("ambiguous expert domain: " + original);
+            throw reject(PlannerRejection.DOMAIN, "ambiguous expert domain: " + original);
         }
         if (ENERGY_DEVICE_ID.matcher(normalized).matches()) return ExpertDomain.ENERGY;
         if (SECURITY_EVENT_ID.matcher(normalized).matches()) return ExpertDomain.SECURITY;
         if (DEVICE_ID.matcher(normalized).matches()) return ExpertDomain.DEVICE;
         try { return ExpertDomain.valueOf(normalized.toUpperCase(Locale.ROOT)); }
-        catch (Exception ex) { throw new ModelOutputException("unknown expert domain: " + original); }
+        catch (Exception ex) { throw reject(PlannerRejection.DOMAIN, "unknown expert domain: " + original); }
     }
 }

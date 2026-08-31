@@ -1,9 +1,14 @@
 package com.example.smartpark.collaboration;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.example.smartpark.collaboration.model.*;
+import com.example.smartpark.collaboration.supervisor.SupervisorPlanner;
 import com.example.smartpark.execution.InMemoryExecutionEventPublisher;
 import com.example.smartpark.execution.model.ExecutionEventType;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -17,6 +22,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -133,6 +139,28 @@ class ExpertCollaborationServiceTest {
                 .containsExactly(ExecutionEventType.RUN_STARTED, ExecutionEventType.NODE_STARTED, ExecutionEventType.FAILED);
     }
 
+    @Test void logsOnlyPlannerRejectionCodeWithoutProviderOrRunData() throws Exception {
+        ListAppender<ILoggingEvent> appender = captureCollaborationLogs();
+        String question = "QUESTION_SENTINEL DEV-SECRET-42";
+        try {
+            var publisher = new InMemoryExecutionEventPublisher();
+            var service = service(publisher, input -> new SupervisorPlanner().parseAndValidate(input,
+                    "{MODEL_OUTPUT_SENTINEL"), (plan, findings) -> null);
+
+            var run = service.start(question);
+            waitFor(() -> service.get(run.runId()).status() == CollaborationRun.RunStatus.FAILED);
+
+            assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage)
+                    .containsExactly("MALFORMED_JSON");
+            assertThat(appender.list.stream().map(ILoggingEvent::getFormattedMessage)
+                    .collect(Collectors.joining("\n")))
+                    .doesNotContain("QUESTION_SENTINEL", "MODEL_OUTPUT_SENTINEL", "DEV-SECRET-42",
+                            run.runId().toString(), "ModelOutputException", "JsonProcessingException");
+        } finally {
+            releaseCollaborationLogs(appender);
+        }
+    }
+
     @Test void preservesCompletedFindingsWhenSynthesisFails() throws Exception {
         var publisher = new InMemoryExecutionEventPublisher();
         var service = service(publisher, (q) -> plan(), (p, f) -> {
@@ -232,5 +260,19 @@ class ExpertCollaborationServiceTest {
     private static void waitForEvent(InMemoryExecutionEventPublisher publisher, java.util.UUID runId,
             ExecutionEventType eventType) throws Exception {
         waitFor(() -> publisher.history(runId).stream().anyMatch(event -> event.eventType() == eventType));
+    }
+
+    private static ListAppender<ILoggingEvent> captureCollaborationLogs() {
+        Logger logger = (Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        return appender;
+    }
+
+    private static void releaseCollaborationLogs(ListAppender<ILoggingEvent> appender) {
+        Logger logger = (Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
+        logger.detachAppender(appender);
+        appender.stop();
     }
 }

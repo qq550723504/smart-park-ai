@@ -13,12 +13,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public final class ExpertCollaborationService {
-
-    private static final Logger log = LoggerFactory.getLogger(ExpertCollaborationService.class);
 
     /** Mirrors the analytics question bound: protects heap and model token budget. */
     private static final int MAX_QUESTION_LENGTH = 500;
@@ -100,8 +96,6 @@ public final class ExpertCollaborationService {
             Synthesis synthesis = synthesizer.synthesize(plan, findings);
             completeIfRunning(id, question, plan, findings, synthesis);
         } catch (Exception ex) {
-            log.warn("Expert collaboration run failed: runId={}, exceptionType={}",
-                    id, ex.getClass().getName());
             failIfRunning(id, "expert collaboration failed");
         }
     }

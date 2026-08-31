@@ -1,15 +1,61 @@
 package com.example.smartpark.collaboration.supervisor;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.example.smartpark.collaboration.model.ExpertDomain;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.slf4j.LoggerFactory;
+
+import java.util.stream.Stream;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SupervisorPlannerTest {
     private final SupervisorPlanner planner = new SupervisorPlanner();
+
+    @Test
+    void logsOnlyMissingRequiredFieldCodeWithoutProviderPayload() {
+        ListAppender<ILoggingEvent> appender = capturePlannerLogs();
+        String question = "QUESTION_SENTINEL DEV-SECRET-42";
+        String modelOutput = """
+                {"normalizedQuestion":"QUESTION_SENTINEL DEV-SECRET-42", "selectedDomains":["ENERGY"],
+                 "assignments":{"ENERGY":"ASSIGNMENT_SENTINEL DEV-SECRET-42"}}
+                """;
+        try {
+            assertThatThrownBy(() -> planner.parseAndValidate(question, modelOutput))
+                    .isInstanceOf(com.example.smartpark.agent.ModelOutputException.class);
+
+            assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage)
+                    .containsExactly("MISSING_REQUIRED_FIELD");
+            assertThat(appender.list.stream().map(ILoggingEvent::getFormattedMessage)
+                    .collect(Collectors.joining("\n")))
+                    .doesNotContain("QUESTION_SENTINEL", "ASSIGNMENT_SENTINEL", "DEV-SECRET-42");
+        } finally {
+            releasePlannerLogs(appender);
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("providerRejections")
+    void logsTheBoundedCodeForEveryProviderRejection(String modelOutput, String rejectionCode) {
+        ListAppender<ILoggingEvent> appender = capturePlannerLogs();
+        try {
+            assertThatThrownBy(() -> planner.parseAndValidate("is device D1 offline?", modelOutput))
+                    .isInstanceOf(com.example.smartpark.agent.ModelOutputException.class);
+
+            assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage)
+                    .containsExactly(rejectionCode);
+        } finally {
+            releasePlannerLogs(appender);
+        }
+    }
 
     @Test void parsesAndValidatesAPlan() {
         var plan = planner.parseAndValidate("设备离线", """
@@ -118,5 +164,62 @@ class SupervisorPlannerTest {
                 """);
 
         assertThat(energyPlan.selectedDomains()).containsExactly(ExpertDomain.ENERGY);
+    }
+
+    private static ListAppender<ILoggingEvent> capturePlannerLogs() {
+        Logger logger = (Logger) LoggerFactory.getLogger(SupervisorPlanner.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        return appender;
+    }
+
+    private static void releasePlannerLogs(ListAppender<ILoggingEvent> appender) {
+        Logger logger = (Logger) LoggerFactory.getLogger(SupervisorPlanner.class);
+        logger.detachAppender(appender);
+        appender.stop();
+    }
+
+    private static Stream<Arguments> providerRejections() {
+        return Stream.of(
+                Arguments.of("{MODEL_OUTPUT_SENTINEL", "MALFORMED_JSON"),
+                Arguments.of("[]", "NON_OBJECT"),
+                Arguments.of("{}", "EMPTY_OBJECT"),
+                Arguments.of("""
+                        {"normalizedQuestion":7,"selectedDomains":["DEVICE"],
+                         "assignments":{"DEVICE":"inspect D1"},"selectionReason":"device status"}
+                        """, "NORMALIZED_QUESTION_TYPE"),
+                Arguments.of("""
+                        {"normalizedQuestion":"is device D2 offline?","selectedDomains":["DEVICE"],
+                         "assignments":{"DEVICE":"inspect D1"},"selectionReason":"device status"}
+                        """, "QUESTION_MISMATCH"),
+                Arguments.of("""
+                        {"normalizedQuestion":"is device D1 offline?","selectedDomains":{},
+                         "assignments":{"DEVICE":"inspect D1"},"selectionReason":"device status"}
+                        """, "SELECTED_DOMAINS_TYPE"),
+                Arguments.of("""
+                        {"normalizedQuestion":"is device D1 offline?","selectedDomains":["UNKNOWN"],
+                         "assignments":{"UNKNOWN":"inspect D1"},"selectionReason":"device status"}
+                        """, "DOMAIN"),
+                Arguments.of("""
+                        {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
+                         "assignments":[],"selectionReason":"device status"}
+                        """, "ASSIGNMENTS_TYPE"),
+                Arguments.of("""
+                        {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
+                         "assignments":{"DEVICE":null},"selectionReason":"device status"}
+                        """, "ASSIGNMENT_TYPE"),
+                Arguments.of("""
+                        {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
+                         "assignments":{"DEVICE":"inspect D2"},"selectionReason":"device status"}
+                        """, "ASSIGNMENT_SCOPE"),
+                Arguments.of("""
+                        {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
+                         "assignments":{},"selectionReason":"device status"}
+                        """, "COVERAGE"),
+                Arguments.of("""
+                        {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
+                         "assignments":{"DEVICE":"inspect D1"},"selectionReason":false}
+                        """, "SELECTION_REASON_TYPE"));
     }
 }
