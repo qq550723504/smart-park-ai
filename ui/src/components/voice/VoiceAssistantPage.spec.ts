@@ -168,4 +168,26 @@ describe('VoiceAssistantPage', () => {
     expect(wrapper.emitted('launch-status')?.at(-1)?.[0]).toMatchObject({ state: 'ready' })
     wrapper.unmount()
   })
+
+  it('invalidates guided readiness when the voice view is deactivated', async () => {
+    const prepare = vi.fn(async () => undefined)
+    binding.prepare = prepare
+    const { wrapper } = mountPage(true, {
+      requestId: 24,
+      mode: 'guided',
+      scenarioId: 'VOICE_ASSISTANT',
+      view: 'voice',
+    })
+    await flushPromises()
+
+    await wrapper.setProps({ active: false })
+    await nextTick()
+
+    expect(wrapper.emitted('launch-status')?.at(-1)?.[0]).toEqual({
+      requestId: 24,
+      state: 'failed',
+      message: '语音会话已关闭，请重新进入',
+    })
+    wrapper.unmount()
+  })
 })

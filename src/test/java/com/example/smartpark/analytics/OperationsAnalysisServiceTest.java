@@ -79,6 +79,19 @@ class OperationsAnalysisServiceTest {
     }
 
     @Test
+    void abortReleasesAClarificationRunForTheNextAnalysis() {
+        OperationsAnalysisService service = service(
+                (runId, question, pinned) -> clarifying(runId), directExecutor());
+
+        var paused = service.start("预检问题");
+        var aborted = service.abort(paused.runId());
+
+        assertThat(aborted.status()).isEqualTo("FAILED");
+        assertThat(aborted.failureStage()).isEqualTo("PREFLIGHT_ABORTED");
+        assertThat(service.start("新的分析问题").status()).isEqualTo("NEEDS_CLARIFICATION");
+    }
+
+    @Test
     void runsGraphOnTheConfiguredExecutorWithoutNestedSubmissionDeadlock() {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {

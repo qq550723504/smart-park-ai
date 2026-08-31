@@ -26,7 +26,13 @@ public final class OperationsAnalysisPreflightProbe implements ShowcasePreflight
     public ShowcaseProbeResult probe() {
         AnalysisRunStore.RunRecord started = service.start(
                 ShowcaseLaunchInput.forScenario(scenarioId()).question());
-        return awaiter.await(() -> service.get(started.runId()), this::terminalResult);
+        return awaiter.await(() -> service.get(started.runId()), run -> {
+            if (run != null && "NEEDS_CLARIFICATION".equals(run.status())) {
+                service.abort(run.runId());
+                return ShowcaseProbeResult.FAILED;
+            }
+            return terminalResult(run);
+        });
     }
 
     private ShowcaseProbeResult terminalResult(AnalysisRunStore.RunRecord run) {

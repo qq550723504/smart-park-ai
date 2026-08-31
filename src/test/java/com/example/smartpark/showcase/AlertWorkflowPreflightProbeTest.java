@@ -9,6 +9,8 @@ import com.example.smartpark.agent.AlertTriageAgent;
 import com.example.smartpark.agent.TestChatModel;
 import com.example.smartpark.model.common.ApprovalDecision;
 import com.example.smartpark.model.common.Diagnosis;
+import com.example.smartpark.model.common.KnowledgeDomain;
+import com.example.smartpark.model.common.KnowledgeDocument;
 import com.example.smartpark.model.common.RiskLevel;
 import com.example.smartpark.model.common.WorkOrder;
 import com.example.smartpark.model.common.WorkflowStatus;
@@ -84,7 +86,10 @@ class AlertWorkflowPreflightProbeTest {
                 "preflight-wf",
                 "ALT-POWER-001",
                 WorkflowStatus.WAITING_APPROVAL,
-                Map.of(),
+                Map.of("retrievedDocuments", List.of(new KnowledgeDocument(
+                        "KD-PREFLIGHT-001", KnowledgeDomain.ALERT_OPERATIONS,
+                        "Alert operations", "Inspect the main panel before remediation.",
+                        List.of("operations"), Instant.parse("2026-08-31T00:00:00Z")))),
                 diagnosis,
                 Optional.empty(),
                 null,
@@ -96,6 +101,23 @@ class AlertWorkflowPreflightProbeTest {
         assertThat(probe.scenarioId()).isEqualTo(ShowcaseScenarioId.ALERT_WORKFLOW);
         assertThat(probe.probe()).isEqualTo(ShowcaseProbeResult.PASSED);
         verify(workflow).start("ALT-POWER-001");
+    }
+
+    @Test
+    void rejectsTheApprovalBoundaryWhenKnowledgeRetrievalIsEmpty() {
+        Diagnosis diagnosis = mock(Diagnosis.class);
+
+        assertThat(runWith(new WorkflowSnapshot(
+                "preflight-wf",
+                "ALT-POWER-001",
+                WorkflowStatus.WAITING_APPROVAL,
+                Map.of("retrievedDocuments", List.of()),
+                diagnosis,
+                Optional.empty(),
+                null,
+                List.of(),
+                1)))
+                .isEqualTo(ShowcaseProbeResult.FAILED);
     }
 
     @Test
@@ -154,7 +176,8 @@ class AlertWorkflowPreflightProbeTest {
             String message = appender.list.get(0).getFormattedMessage();
             assertThat(message).isEqualTo("alert preflight failed: stage=WORKFLOW_INVARIANT, "
                     + "code=INVARIANT_MISMATCH, waitingApproval=true, diagnosisPresent=true, "
-                    + "errorsEmpty=true, workOrderAbsent=true, approvalAbsent=false");
+                    + "knowledgePresent=false, knowledgeCount=0, errorsEmpty=true, "
+                    + "workOrderAbsent=true, approvalAbsent=false");
             assertThat(message).doesNotContain(
                     "raw-model-secret",
                     "prompt-secret",

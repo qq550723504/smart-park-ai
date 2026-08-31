@@ -54,8 +54,17 @@ watch(
 // 离开展台即挂断：发送 CLOSE_SESSION 并释放麦克风轨道。
 watch(
   () => props.active,
-  (active) => {
-    if (!active) close()
+  (active, wasActive) => {
+    if (!active) {
+      close()
+      if (wasActive && props.launchRequest?.scenarioId === 'VOICE_ASSISTANT') {
+        emit('launch-status', {
+          requestId: props.launchRequest.requestId,
+          state: 'failed',
+          message: '语音会话已关闭，请重新进入',
+        })
+      }
+    }
   },
 )
 

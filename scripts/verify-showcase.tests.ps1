@@ -54,6 +54,13 @@ Assert-Rejected -Report ([pscustomobject]@{
         results = @($ready.results[0], $ready.results[1], $ready.results[2], $ready.results[0])
     }) -CaseName 'duplicate id'
 
+if ((Get-SafeShowcaseFailureMessage 'Showcase scenario is not ready: ALERT_WORKFLOW') -ne 'Showcase scenario is not ready: ALERT_WORKFLOW') {
+    throw 'Verifier did not preserve the safe failing scenario message.'
+}
+if ((Get-SafeShowcaseFailureMessage 'provider secret details') -ne 'Showcase verification failed.') {
+    throw 'Verifier exposed an unsafe failure message.'
+}
+
 $lowercaseIds = Copy-Results $ready.results
 $lowercaseIds | ForEach-Object { $_.scenarioId = $_.scenarioId.ToLowerInvariant() }
 Assert-Rejected -Report ([pscustomobject]@{ results = $lowercaseIds }) -CaseName 'lowercase ids'

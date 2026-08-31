@@ -10,6 +10,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class OperationsAnalysisPreflightProbeTest {
@@ -53,6 +54,18 @@ class OperationsAnalysisPreflightProbeTest {
 
         assertThat(new OperationsAnalysisPreflightProbe(service).probe())
                 .isEqualTo(ShowcaseProbeResult.FAILED);
+    }
+
+    @Test
+    void analyticsAbortsAClarificationRunUsedByPreflight() {
+        OperationsAnalysisService service = mock(OperationsAnalysisService.class);
+        UUID runId = UUID.randomUUID();
+        when(service.start("过去5天各楼宇能耗")).thenReturn(run(runId, "RUNNING", 0));
+        when(service.get(runId)).thenReturn(run(runId, "NEEDS_CLARIFICATION", 0));
+
+        assertThat(new OperationsAnalysisPreflightProbe(service).probe())
+                .isEqualTo(ShowcaseProbeResult.FAILED);
+        verify(service).abort(runId);
     }
 
     private static AnalysisRunStore.RunRecord run(UUID runId, String status, int rowCount) {

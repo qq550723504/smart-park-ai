@@ -146,6 +146,30 @@ public class OperationsAnalysisService {
         return store.get(runId);
     }
 
+    /** Terminates an active run that was created by a preflight or other owner. */
+    public AnalysisRunStore.RunRecord abort(UUID runId) {
+        if (runId == null) return null;
+        synchronized (lifecycleLock) {
+            AnalysisRunStore.RunRecord current = store.get(runId);
+            if (current == null || !runId.equals(activeRunId)
+                    || "COMPLETED".equals(current.status()) || "FAILED".equals(current.status())) {
+                return current;
+            }
+            Instant now = Instant.now(clock);
+            Instant createdAt = current.createdAt() == null ? now : current.createdAt();
+            AnalysisRunStore.RunRecord aborted = new AnalysisRunStore.RunRecord(
+                    current.runId(), current.question(), "FAILED", List.of(), List.of(), "", 0, false,
+                    Math.max(0, java.time.Duration.between(createdAt, now).toMillis()),
+                    "PREFLIGHT_ABORTED", createdAt, now, List.of(), List.of(), current.timeResolution());
+            store.put(aborted);
+            pendingClarifications.remove(runId);
+            admittingClarifications.remove(runId);
+            releaseActiveLocked(runId);
+            publishTerminalLocked(aborted);
+            return aborted;
+        }
+    }
+
     public AnalysisRunStore.RunRecord submitClarification(UUID runId, List<MetricSelection> selections) {
         List<MetricSelection> safeSelections = validateSelections(selections);
         AnalysisRunStore.RunRecord current;

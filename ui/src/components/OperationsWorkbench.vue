@@ -77,7 +77,7 @@ watch(activeView, async (view) => {
 const role = ref<DemoRole>('ADMIN')
 const reviewer = ref('')
 const comment = ref('')
-const { workflow, events, loading, approving, error, isTerminal, start, approve } = useWorkflow()
+const { workflow, events, loading, approving, error, isTerminal, start, approve, reset: resetWorkflow } = useWorkflow()
 const guidedLaunchUpdate = ref<GuidedLaunchUpdate | null>(null)
 const currentGuidedLaunchUpdate = computed(() => {
   const request = props.launchRequest
@@ -101,6 +101,20 @@ function retryGuidedLaunch(): void {
 
 // 统一执行轨迹：告警工作流通过确定性 runId 同时出现在右侧轨迹栏。
 const trace = useExecutionTrace()
+watch(
+  () => props.launchRequest,
+  (request, previousRequest) => {
+    if (request || !previousRequest) return
+    resetWorkflow()
+    reviewer.value = ''
+    comment.value = ''
+    guidedLaunchUpdate.value = null
+    // A generic workflow entry starts a clean alert surface. An analytics
+    // run is the exception: its shared trace must remain available while the
+    // operator navigates back to it for clarification.
+    if (previousRequest.scenarioId !== 'OPERATIONS_ANALYSIS') trace.reset()
+  },
+)
 const traceStatusLabels = {
   idle: '空闲',
   streaming: '执行中',

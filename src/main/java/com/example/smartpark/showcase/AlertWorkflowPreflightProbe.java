@@ -1,6 +1,7 @@
 package com.example.smartpark.showcase;
 
 import com.example.smartpark.model.common.WorkflowStatus;
+import com.example.smartpark.workflow.AlertWorkflowState;
 import com.example.smartpark.workflow.WorkflowSnapshot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,15 +33,21 @@ public final class AlertWorkflowPreflightProbe implements ShowcasePreflightProbe
         boolean errorsEmpty = snapshot.errors().isEmpty();
         boolean workOrderAbsent = snapshot.workOrder() == null;
         boolean approvalAbsent = snapshot.approval().isEmpty();
-        if (waitingApproval && diagnosisPresent && errorsEmpty && workOrderAbsent && approvalAbsent) {
+        Object knowledgeValue = snapshot.statePayload().get(AlertWorkflowState.RETRIEVED_DOCUMENTS);
+        int knowledgeCount = knowledgeValue instanceof java.util.List<?> documents ? documents.size() : 0;
+        boolean knowledgePresent = knowledgeCount > 0;
+        if (waitingApproval && diagnosisPresent && knowledgePresent && errorsEmpty
+                && workOrderAbsent && approvalAbsent) {
             return ShowcaseProbeResult.PASSED;
         }
         log.warn("alert preflight failed: stage={}, code={}, waitingApproval={}, diagnosisPresent={}, "
-                        + "errorsEmpty={}, workOrderAbsent={}, approvalAbsent={}",
+                        + "knowledgePresent={}, knowledgeCount={}, errorsEmpty={}, workOrderAbsent={}, approvalAbsent={}",
                 FailureStage.WORKFLOW_INVARIANT,
                 FailureCode.INVARIANT_MISMATCH,
                 waitingApproval,
                 diagnosisPresent,
+                knowledgePresent,
+                knowledgeCount,
                 errorsEmpty,
                 workOrderAbsent,
                 approvalAbsent);

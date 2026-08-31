@@ -80,6 +80,17 @@ class RagKnowledgeAdapterTest {
     }
 
     @Test
+    void fallsBackToExactMetadataMatchesWhenTheEmbeddingThresholdReturnsNothing() {
+        RagKnowledgeAdapter adapter = new RagKnowledgeAdapter(
+                stores(new KeywordEmbeddingModel()),
+                List.of(document("KD-POWER-001", "Power emergency runbook", "parking guide")));
+
+        assertThat(adapter.search(KnowledgeDomain.CUSTOMER_SERVICE, "power"))
+                .extracting(KnowledgeDocument::id)
+                .containsExactly("KD-POWER-001");
+    }
+
+    @Test
     void excludesDocumentsBelowTheConfiguredSimilarityThreshold() {
         RagKnowledgeAdapter adapter = new RagKnowledgeAdapter(
                 stores(new ThresholdEmbeddingModel()),

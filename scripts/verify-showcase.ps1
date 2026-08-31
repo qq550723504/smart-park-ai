@@ -21,6 +21,19 @@ function Get-ShowcasePropertyValue {
     return $property.Value
 }
 
+function Get-SafeShowcaseFailureMessage {
+    param(
+        [string] $Message
+    )
+
+    $scenarioPattern = 'ALERT_WORKFLOW|EXPERT_COLLABORATION|OPERATIONS_ANALYSIS|VOICE_ASSISTANT'
+    if (($Message -match "^Showcase scenario is not ready: ($scenarioPattern)$") -or ($Message -match "^Showcase scenario has no valid verification time: ($scenarioPattern)$")) {
+        return $Message
+    }
+
+    return 'Showcase verification failed.'
+}
+
 function Assert-ShowcaseReport {
     param(
         [Parameter(Mandatory)]
@@ -77,7 +90,7 @@ if ($MyInvocation.InvocationName -ne '.') {
         Assert-ShowcaseReport -Report $report
         $report.results | Select-Object scenarioId, status, verifiedAt | Format-Table -AutoSize
     } catch {
-        Write-Error 'Showcase verification failed.'
+        Write-Error (Get-SafeShowcaseFailureMessage $_.Exception.Message)
         exit 1
     }
 }

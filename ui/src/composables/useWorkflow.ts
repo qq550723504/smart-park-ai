@@ -19,6 +19,17 @@ export function useWorkflow() {
     eventSource = null
   }
 
+  function reset(): void {
+    operationGeneration++
+    closeStream()
+    workflow.value = null
+    events.value = []
+    loading.value = false
+    approving.value = false
+    error.value = ''
+    approvalKey = null
+  }
+
   function mergeWorkflow(next: WorkflowResponse) {
     workflow.value = next
   }
@@ -112,9 +123,6 @@ export function useWorkflow() {
     }
   }
 
-  onScopeDispose(() => {
-    operationGeneration++
-    closeStream()
-  })
-  return { workflow, events, loading, approving, error, isTerminal, start, approve, refresh, closeStream }
+  onScopeDispose(reset)
+  return { workflow, events, loading, approving, error, isTerminal, start, approve, refresh, closeStream, reset }
 }

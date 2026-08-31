@@ -105,4 +105,24 @@ describe('useWorkflow', () => {
       globalThis.EventSource = originalEventSource
     }
   })
+
+  it('resets workflow state and closes its stream without affecting other sessions', async () => {
+    const close = vi.fn()
+    vi.mocked(startWorkflow).mockResolvedValue(workflow('wf-reset'))
+    vi.spyOn(workflowApi, 'subscribeToWorkflow').mockReturnValue({ close } as unknown as EventSource)
+    const scope = effectScope()
+    let binding!: ReturnType<typeof useWorkflow>
+    scope.run(() => { binding = useWorkflow() })
+
+    await binding.start('A')
+    binding.reset()
+
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(binding.workflow.value).toBeNull()
+    expect(binding.events.value).toEqual([])
+    expect(binding.loading.value).toBe(false)
+    expect(binding.approving.value).toBe(false)
+    expect(binding.error.value).toBe('')
+    scope.stop()
+  })
 })
