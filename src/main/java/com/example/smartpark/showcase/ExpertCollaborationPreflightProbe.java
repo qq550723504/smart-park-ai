@@ -15,7 +15,7 @@ import java.util.stream.Collectors;
         havingValue = "true", matchIfMissing = true)
 public final class ExpertCollaborationPreflightProbe implements ShowcasePreflightProbe {
 
-    private static final int MAX_ATTEMPTS = 2;
+    private static final int MAX_ATTEMPTS = 3;
 
     private static final String QUESTION =
             "请基于证据判断 DEV-ENERGY-001 夜间能耗升高、DEV-HVAC-001 冷机离线及 SEC-ACCESS-001 门禁告警是否有关联";
