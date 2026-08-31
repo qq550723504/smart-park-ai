@@ -29,6 +29,8 @@ jobs:
           cache: maven
       - name: Run backend tests
         run: ./mvnw -B test
+      - name: Test showcase verifier
+        run: pwsh -NoProfile -File ./scripts/verify-showcase.tests.ps1
 
   frontend:
     name: Frontend build

@@ -20,7 +20,7 @@
 | 运营演示 | 角色边界、指标、审计、反馈和一次性故障注入 |
 | 专家协作 | Supervisor 动态分派领域专家，并行分析、展示证据和汇总结论；需满足在线能力开关 |
 | 运营分析 | 自然语言转真实只读 PostgreSQL 分析，展示查询结果、图表和结论；需显式启用分析链路 |
-| 实时语音 | P1 后续场景；当前 UI 已预留入口但仍禁用，暂不可体验 |
+| 实时语音 | 选择性启用的全场景演示模式；需完成在线预检后再进行浏览器端人工语音验收 |
 
 ## 快速开始
 
@@ -163,7 +163,7 @@ docker compose down
 
 analytics 使用独立 PostgreSQL 数据库；运行时查询角色固定为只读的 `smartpark_analytics_ro`，管理员角色只用于迁移和演示数据刷新。不要把真实值写进 README、源码或 Git 历史。
 
-在本地未跟踪且已被 `.gitignore` 排除的 `.env` 中填写以下三个必需变量，仅供本地演示，绝不提交；然后显式加载 analytics 覆盖文件和 profile：
+在本地未跟踪且已被 `.gitignore` 排除的 `.env` 中填写以下三个必需变量，仅供本地演示，绝不提交；不要在本文档、源码或 Git 历史中填写示例密钥值：
 
 | 变量 | 用途 |
 | --- | --- |
@@ -172,7 +172,7 @@ analytics 使用独立 PostgreSQL 数据库；运行时查询角色固定为只�
 | `SMARTPARK_ANALYTICS_DB_RO_PASSWORD` | `smartpark_analytics_ro` 的只读运行时密码 |
 
 ```powershell
-docker compose -f compose.yaml -f compose.analytics.yaml --profile analytics up --build
+docker compose --env-file .env -f compose.yaml -f compose.analytics.yaml --profile analytics up --build
 ```
 
 analytics overlay 会把 PostgreSQL 数据目录切换到独立命名卷 `analytics-postgres-analytics-data`，因此从默认栈切换到 analytics 栈时不需要手动修复旧卷上的认证方式。`docker compose down` 同样只会停止容器而保留该卷；如需重置 analytics 本地演示数据库，请先用不加载 analytics 凭据的基础 Compose 文件停止并删除容器，再显式删除 analytics 卷：
@@ -190,6 +190,28 @@ docker volume rm "${projectName}_analytics-postgres-analytics-data"
 上面的命令只删除 `analytics-postgres-analytics-data`，不会删除默认栈的 `analytics-postgres-data`，也不会读取 `compose.analytics.yaml` 中的必需凭据变量。如果启动时使用了 `docker compose -p <project-name>`，请把 `$projectName` 替换为同一个项目名。
 
 analytics 覆盖配置会将 PostgreSQL 改为密码认证并显式开启 `SMARTPARK_ANALYTICS_DEMO_DATA_REFRESH_ENABLED=true`，让持久化本地演示库中的 V1 时间窗口夹具按小时重新锚定到当前时间。这个自动刷新只适用于本地演示，不适用于真实数据或生产环境；默认栈中的 `SMARTPARK_ANALYTICS_DEMO_DATA_REFRESH_ENABLED=false` 保持不变。默认栈中为便于无凭据离线演示而使用的 `trust` 认证仅限本地演示，不能作为生产部署建议。
+
+### 选择性启用全场景演示
+
+在上述同一个、已忽略的 `.env` 已包含三个必需变量后，叠加完整演示覆盖层：
+
+```powershell
+docker compose --env-file .env `
+  -f compose.yaml `
+  -f compose.analytics.yaml `
+  -f compose.showcase.yaml `
+  --profile analytics up --build
+```
+
+容器就绪后，以管理员演示角色执行预检：
+
+```powershell
+.\scripts\verify-showcase.ps1
+```
+
+验证器会向 `POST /api/showcase/preflight` 请求四个且仅四个演示场景，并且只在全部返回 `READY` 和有效 `verifiedAt` 时成功；成功输出只包含 `scenarioId`、`status` 和 `verifiedAt`。`READY` 收据仅在当前进程内有效 15 分钟，应用重启或收据过期后必须重新运行预检。
+
+告警预检从不批准或创建工单；它只验证流程是否安全地停在人工审批边界。服务端语音预检也不能替代浏览器麦克风权限确认和一次人工真实说话的完整往返验收。
 
 ## 运行模式与配置
 
