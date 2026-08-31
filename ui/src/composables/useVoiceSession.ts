@@ -110,6 +110,7 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
   let stream: MediaStream | null = null
   let suppressAudio = false
   let intentionalClose = false
+  let cancellingTurn = false
   let lifecycleGeneration = 0
   let connectionAttempt: { generation: number; promise: Promise<boolean> } | null = null
 
@@ -133,6 +134,7 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
   async function openConnection(generation: number): Promise<boolean> {
     connectionPhase.value = 'connecting'
     errorMessage.value = ''
+    cancellingTurn = false
     const created = await api.createSession()
     if (generation !== lifecycleGeneration) return false
     sessionId.value = created.sessionId
@@ -233,6 +235,7 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
     switch (frame.type) {
       case 'SESSION_STATE':
         voicePhase.value = frame.state
+        if (frame.state === 'IDLE' || frame.state === 'ERROR') cancellingTurn = false
         if (frame.state === 'LISTENING') {
           suppressAudio = false
           ensurePlayer().beginTurnReset()
@@ -305,6 +308,7 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
         // START_INPUT is already queued on this ordered WebSocket. Cancel the
         // server turn so a capture-start failure cannot leave it LISTENING and
         // turn the next mic click into an empty COMMIT_INPUT.
+        cancellingTurn = true
         sendControl('INTERRUPT_OUTPUT')
       }
       if (capture === currentCapture) capture = null
@@ -354,6 +358,7 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
     try {
       const connected = await ensureConnected(generation)
       if (!connected || generation !== lifecycleGeneration) return
+      if (cancellingTurn) return
       const phase = voicePhase.value as string | null
       switch (phase as VoiceSessionState | null) {
         case 'LISTENING':
@@ -415,6 +420,7 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
     connectionPhase.value = 'idle'
     voicePhase.value = null
     suppressAudio = false
+    cancellingTurn = false
     player?.cancel()
     player?.beginTurnReset()
   }

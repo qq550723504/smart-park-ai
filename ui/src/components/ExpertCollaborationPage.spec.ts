@@ -4,7 +4,6 @@ import { ref } from 'vue'
 import ExpertCollaborationPage from './ExpertCollaborationPage.vue'
 import type { ExecutionEvent } from '../types/execution'
 import type { ExecutionTrace } from '../composables/useExecutionTrace'
-import { __resetSharedCollaborationState } from '../composables/useExpertCollaboration'
 import type { CollaborationRun } from '../types/collaboration'
 
 const RUN_ID = '11111111-2222-3333-4444-555555555555'
@@ -29,7 +28,6 @@ function traceStub(events: ExecutionEvent[] = [], subscribe = vi.fn()): Executio
 }
 
 beforeEach(() => {
-  __resetSharedCollaborationState()
   polls = 0
   collaborationPosts = 0
   globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {

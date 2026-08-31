@@ -269,10 +269,19 @@ describe('useVoiceSession', () => {
 
     await h.binding.toggleMicrophone()
     h.serverSendsState('LISTENING')
+
+    // The reset acknowledgement has not arrived yet. A rapid retry must not
+    // commit the empty server-side turn.
+    await h.binding.toggleMicrophone()
+    let controlTypes = h.fakeWs.sent
+      .filter((sent): sent is string => typeof sent === 'string')
+      .map((sent) => (JSON.parse(sent) as { type: string }).type)
+    expect(controlTypes).toEqual(['START_INPUT', 'INTERRUPT_OUTPUT'])
+
     h.serverSendsState('IDLE')
     await h.binding.toggleMicrophone()
 
-    const controlTypes = h.fakeWs.sent
+    controlTypes = h.fakeWs.sent
       .filter((sent): sent is string => typeof sent === 'string')
       .map((sent) => (JSON.parse(sent) as { type: string }).type)
     expect(controlTypes).toEqual(['START_INPUT', 'INTERRUPT_OUTPUT', 'START_INPUT'])
