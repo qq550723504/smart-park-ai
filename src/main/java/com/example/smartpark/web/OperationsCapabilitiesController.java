@@ -22,11 +22,12 @@ public class OperationsCapabilitiesController {
             @Value("${smartpark.customer-service.answer-mode:mock}") String customerAnswerMode,
             @Value("${smartpark.analytics.enabled:false}") boolean analyticsEnabled,
             @Value("${smartpark.voice.enabled:false}") boolean voiceEnabled,
+            @Value("${smartpark.local-demo.enabled:false}") boolean localDemoEnabled,
             ObjectProvider<ExpertCollaborationService> collaborationService) {
         this.knowledgeMode = safeMode(knowledgeMode, "mock", "rag");
         this.customerAnswerMode = safeMode(customerAnswerMode, "mock", "dashscope");
         this.analyticsEnabled = analyticsEnabled;
-        this.voiceEnabled = voiceEnabled;
+        this.voiceEnabled = voiceEnabled && localDemoEnabled;
         this.collaborationService = collaborationService;
     }
 

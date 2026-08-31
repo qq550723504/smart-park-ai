@@ -335,6 +335,48 @@ describe('useVoiceSession', () => {
     expect(binding.connectionPhase.value).toBe('connected')
   })
 
+  it('coalesces concurrent microphone toggles across the full capture startup', async () => {
+    const pendingSession = deferred<{ sessionId: string; runId: string; wsPath: string }>()
+    const socket = new FakeWebSocket('')
+    const capture = new FakeCapture()
+    let sessionsCreated = 0
+    let microphoneRequests = 0
+    const binding = useVoiceSession({
+      api: {
+        createSession: () => {
+          sessionsCreated++
+          return pendingSession.promise
+        },
+      },
+      openWebSocket: () => socket,
+      requestMicrophone: async () => {
+        microphoneRequests++
+        return { getTracks: () => [] } as unknown as MediaStream
+      },
+      createCapture: () => capture,
+    })
+
+    const firstToggle = binding.toggleMicrophone()
+    const secondToggle = binding.toggleMicrophone()
+    pendingSession.resolve({
+      sessionId: 'vs-toggle-single-flight',
+      runId: '00000000-0000-0000-0000-000000000333',
+      wsPath: '/ws/voice/sessions/vs-toggle-single-flight',
+    })
+    await Promise.resolve()
+    socket.open()
+    await Promise.all([firstToggle, secondToggle])
+
+    const startControls = socket.sent
+      .filter((sent): sent is string => typeof sent === 'string')
+      .map((sent) => JSON.parse(sent) as { type: string })
+      .filter((frame) => frame.type === 'START_INPUT')
+    expect(sessionsCreated).toBe(1)
+    expect(microphoneRequests).toBe(1)
+    expect(capture.started).toBe(1)
+    expect(startControls).toHaveLength(1)
+  })
+
   it('retires a timed-out handshake before late open and creates one fresh retry connection', async () => {
     vi.useFakeTimers()
     const sockets: FakeWebSocket[] = []

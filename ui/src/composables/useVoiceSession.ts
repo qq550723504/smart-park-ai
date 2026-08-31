@@ -113,6 +113,7 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
   let cancellingTurn = false
   let lifecycleGeneration = 0
   let connectionAttempt: { generation: number; promise: Promise<boolean> } | null = null
+  let microphoneToggleAttempt: { generation: number; promise: Promise<void> } | null = null
 
   function messageId(prefix: string): string {
     return `${prefix}-${Date.now()}-${++controlSequence}`
@@ -353,13 +354,15 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
    * IDLE/ERROR → begin listening; LISTENING → commit;
    * any output stage → interrupt current output first, then listen again.
    */
-  async function toggleMicrophone(): Promise<void> {
-    const generation = lifecycleGeneration
+  async function performMicrophoneToggle(generation: number): Promise<void> {
     try {
       const connected = await ensureConnected(generation)
       if (!connected || generation !== lifecycleGeneration) return
       if (cancellingTurn) return
       const phase = voicePhase.value as string | null
+      // Capture startup has completed locally but the server acknowledgement
+      // has not arrived yet. A second click must not send another START_INPUT.
+      if (capture && phase !== 'LISTENING') return
       switch (phase as VoiceSessionState | null) {
         case 'LISTENING':
           await stopInput()
@@ -390,9 +393,23 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
     }
   }
 
+  function toggleMicrophone(): Promise<void> {
+    const generation = lifecycleGeneration
+    if (microphoneToggleAttempt?.generation === generation) {
+      return microphoneToggleAttempt.promise
+    }
+    let ownedPromise!: Promise<void>
+    ownedPromise = performMicrophoneToggle(generation).finally(() => {
+      if (microphoneToggleAttempt?.promise === ownedPromise) microphoneToggleAttempt = null
+    })
+    microphoneToggleAttempt = { generation, promise: ownedPromise }
+    return ownedPromise
+  }
+
   function close(): void {
     lifecycleGeneration++
     connectionAttempt = null
+    microphoneToggleAttempt = null
     intentionalClose = true
     if (socket && sessionId.value) {
       const frame = buildControlFrame(
