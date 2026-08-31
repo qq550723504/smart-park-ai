@@ -8,10 +8,16 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -124,6 +130,38 @@ class ShowcasePreflightServiceTest {
                 .hasMessage("smartpark.showcase.preflight-timeout must be positive");
     }
 
+    @Test
+    void preservesPositiveSubMillisecondTimeoutWithNanosecondPrecision() {
+        var timeoutExecutor = new TimeoutCapturingExecutor();
+        var service = new ShowcasePreflightService(new InMemoryScenarioVerificationRegistry(),
+                Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofNanos(1), timeoutExecutor,
+                List.of(probe(ShowcaseScenarioId.ALERT_WORKFLOW, ShowcaseProbeResult.PASSED)));
+
+        ShowcasePreflightReport report = service.run();
+
+        assertThat(report.results()).extracting(ShowcasePreflightResult::status)
+                .containsExactly(ShowcasePreflightStatus.READY);
+        assertThat(timeoutExecutor.timeout()).isEqualTo(1);
+        assertThat(timeoutExecutor.unit()).isEqualTo(TimeUnit.NANOSECONDS);
+    }
+
+    @Test
+    void masksCancelledProbeClearsReceiptAndContinuesLaterProbes() {
+        var registry = new InMemoryScenarioVerificationRegistry();
+        registry.recordSuccess(ShowcaseScenarioId.ALERT_WORKFLOW, NOW.minusSeconds(1));
+        var service = new ShowcasePreflightService(registry, Clock.fixed(NOW, ZoneOffset.UTC),
+                Duration.ofSeconds(1), new CancellingFirstTaskExecutor(), List.of(
+                probe(ShowcaseScenarioId.ALERT_WORKFLOW, ShowcaseProbeResult.PASSED),
+                probe(ShowcaseScenarioId.VOICE_ASSISTANT, ShowcaseProbeResult.PASSED)));
+
+        ShowcasePreflightReport report = service.run();
+
+        assertThat(report.results()).extracting(ShowcasePreflightResult::status)
+                .containsExactly(ShowcasePreflightStatus.NOT_READY, ShowcasePreflightStatus.READY);
+        assertThat(registry.lastSuccessfulAt(ShowcaseScenarioId.ALERT_WORKFLOW,
+                NOW, Duration.ofMinutes(15))).isEmpty();
+    }
+
     private ShowcasePreflightService service(
             ScenarioVerificationRegistry registry,
             Duration timeout,
@@ -144,5 +182,70 @@ class ShowcasePreflightServiceTest {
                 return result;
             }
         };
+    }
+
+    private static final class TimeoutCapturingExecutor extends AbstractExecutorService {
+
+        private final AtomicLong timeout = new AtomicLong(-1);
+        private final AtomicReference<TimeUnit> unit = new AtomicReference<>();
+
+        @Override
+        public <T> Future<T> submit(Callable<T> task) {
+            try {
+                return new Future<>() {
+                    private final T value = task.call();
+
+                    @Override public boolean cancel(boolean mayInterruptIfRunning) { return false; }
+                    @Override public boolean isCancelled() { return false; }
+                    @Override public boolean isDone() { return true; }
+                    @Override public T get() { return value; }
+
+                    @Override
+                    public T get(long timeout, TimeUnit unit) {
+                        TimeoutCapturingExecutor.this.timeout.set(timeout);
+                        TimeoutCapturingExecutor.this.unit.set(unit);
+                        return value;
+                    }
+                };
+            } catch (Exception exception) {
+                throw new AssertionError(exception);
+            }
+        }
+
+        long timeout() {
+            return timeout.get();
+        }
+
+        TimeUnit unit() {
+            return unit.get();
+        }
+
+        @Override public void shutdown() { }
+        @Override public List<Runnable> shutdownNow() { return List.of(); }
+        @Override public boolean isShutdown() { return false; }
+        @Override public boolean isTerminated() { return false; }
+        @Override public boolean awaitTermination(long timeout, TimeUnit unit) { return true; }
+        @Override public void execute(Runnable command) { command.run(); }
+    }
+
+    private static final class CancellingFirstTaskExecutor extends AbstractExecutorService {
+
+        private boolean firstTask = true;
+
+        @Override
+        public void execute(Runnable command) {
+            if (firstTask) {
+                firstTask = false;
+                ((Future<?>) command).cancel(false);
+                return;
+            }
+            command.run();
+        }
+
+        @Override public void shutdown() { }
+        @Override public List<Runnable> shutdownNow() { return List.of(); }
+        @Override public boolean isShutdown() { return false; }
+        @Override public boolean isTerminated() { return false; }
+        @Override public boolean awaitTermination(long timeout, TimeUnit unit) { return true; }
     }
 }

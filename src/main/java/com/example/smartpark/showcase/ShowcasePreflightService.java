@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -64,13 +65,13 @@ public class ShowcasePreflightService {
         Class<? extends Exception> failureType = null;
         try {
             future = executor.submit(probe::probe);
-            ShowcaseProbeResult result = future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            ShowcaseProbeResult result = future.get(timeout.toNanos(), TimeUnit.NANOSECONDS);
             if (result == ShowcaseProbeResult.PASSED) {
                 Instant verifiedAt = clock.instant();
                 registry.recordSuccess(id, verifiedAt);
                 return new ShowcasePreflightResult(id, ShowcasePreflightStatus.READY, null, verifiedAt);
             }
-        } catch (TimeoutException | ExecutionException | RejectedExecutionException exception) {
+        } catch (TimeoutException | ExecutionException | RejectedExecutionException | CancellationException exception) {
             failureType = exception.getClass();
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
