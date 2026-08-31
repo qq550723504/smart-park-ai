@@ -146,6 +146,21 @@ class ShowcasePreflightServiceTest {
     }
 
     @Test
+    void saturatesOverflowingPositiveTimeoutAndRunsSuccessfulProbe() {
+        var timeoutExecutor = new TimeoutCapturingExecutor();
+        var service = new ShowcasePreflightService(new InMemoryScenarioVerificationRegistry(),
+                Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofSeconds(Long.MAX_VALUE), timeoutExecutor,
+                List.of(probe(ShowcaseScenarioId.ALERT_WORKFLOW, ShowcaseProbeResult.PASSED)));
+
+        ShowcasePreflightReport report = service.run();
+
+        assertThat(report.results()).extracting(ShowcasePreflightResult::status)
+                .containsExactly(ShowcasePreflightStatus.READY);
+        assertThat(timeoutExecutor.timeout()).isEqualTo(Long.MAX_VALUE);
+        assertThat(timeoutExecutor.unit()).isEqualTo(TimeUnit.NANOSECONDS);
+    }
+
+    @Test
     void masksCancelledProbeClearsReceiptAndContinuesLaterProbes() {
         var registry = new InMemoryScenarioVerificationRegistry();
         registry.recordSuccess(ShowcaseScenarioId.ALERT_WORKFLOW, NOW.minusSeconds(1));

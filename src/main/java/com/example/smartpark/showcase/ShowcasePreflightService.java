@@ -22,6 +22,7 @@ public class ShowcasePreflightService {
 
     private static final Logger log = LoggerFactory.getLogger(ShowcasePreflightService.class);
     private static final String FAILURE_REASON = "在线验证未通过";
+    private static final Duration MAX_NANO_TIMEOUT = Duration.ofNanos(Long.MAX_VALUE);
 
     private final ScenarioVerificationRegistry registry;
     private final Clock clock;
@@ -65,7 +66,7 @@ public class ShowcasePreflightService {
         Class<? extends Exception> failureType = null;
         try {
             future = executor.submit(probe::probe);
-            ShowcaseProbeResult result = future.get(timeout.toNanos(), TimeUnit.NANOSECONDS);
+            ShowcaseProbeResult result = future.get(timeoutNanos(), TimeUnit.NANOSECONDS);
             if (result == ShowcaseProbeResult.PASSED) {
                 Instant verifiedAt = clock.instant();
                 registry.recordSuccess(id, verifiedAt);
@@ -89,5 +90,9 @@ public class ShowcasePreflightService {
                     id, elapsedMillis, failureType.getName());
         }
         return new ShowcasePreflightResult(id, ShowcasePreflightStatus.NOT_READY, FAILURE_REASON, null);
+    }
+
+    private long timeoutNanos() {
+        return timeout.compareTo(MAX_NANO_TIMEOUT) > 0 ? Long.MAX_VALUE : timeout.toNanos();
     }
 }
