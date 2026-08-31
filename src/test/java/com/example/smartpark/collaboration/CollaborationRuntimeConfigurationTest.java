@@ -109,7 +109,11 @@ class CollaborationRuntimeConfigurationTest {
             assertThat(assignments).containsEntry("type", "array");
             @SuppressWarnings("unchecked")
             Map<String, Object> item = (Map<String, Object>) assignments.get("items");
-            assertThat(item).containsEntry("type", "object");
+            assertThat(item).containsEntry("type", "object")
+                    .containsEntry("additionalProperties", false);
+            @SuppressWarnings("unchecked")
+            List<String> required = (List<String>) item.get("required");
+            assertThat(required).containsExactlyInAnyOrder("domain", "assignment");
             @SuppressWarnings("unchecked")
             Map<String, Object> itemProperties = (Map<String, Object>) item.get("properties");
             assertThat(itemProperties).containsKeys("domain", "assignment");

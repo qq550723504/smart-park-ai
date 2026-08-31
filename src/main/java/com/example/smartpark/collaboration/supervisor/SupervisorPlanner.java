@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.EnumMap;
 import java.util.EnumSet;
+import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
@@ -85,29 +86,14 @@ public final class SupervisorPlanner {
                         "selectedDomains must not contain duplicate domains");
             }
         }
-        if (!assignments.isArray()) {
-            throw reject(PlannerRejection.ASSIGNMENTS_TYPE, "assignments must be an array");
-        }
         EnumMap<ExpertDomain, String> modelAssignments = new EnumMap<>(ExpertDomain.class);
-        for (JsonNode value : assignments) {
-            if (!value.isObject()) {
-                throw reject(PlannerRejection.ASSIGNMENT_ENTRY_TYPE,
-                        "assignments entries must be objects");
-            }
-            rejectUnknownFields(value, ASSIGNMENT_FIELDS);
-            JsonNode domainValue = value.get("domain");
-            if (domainValue == null || !domainValue.isTextual()) {
-                throw reject(PlannerRejection.ASSIGNMENT_DOMAIN_TYPE,
-                        "assignment domain must be a string");
-            }
-            ExpertDomain domain = parseDomain(domainValue.textValue(), domainValue, normalizedQuestion);
-            String assignment = requireTextValue(value.get("assignment"), "assignment",
-                    PlannerRejection.ASSIGNMENT_TYPE);
-            requireExactEntityScope(normalizedQuestion, assignment, domain);
-            if (modelAssignments.put(domain, assignment) != null) {
-                throw reject(PlannerRejection.COVERAGE,
-                        "assignments must not contain duplicate domains");
-            }
+        if (assignments.isArray()) {
+            parseTypedAssignments(assignments, normalizedQuestion, modelAssignments);
+        } else if (assignments.isObject()) {
+            parseLegacyAssignments(assignments, normalizedQuestion, modelAssignments);
+        } else {
+            throw reject(PlannerRejection.ASSIGNMENTS_TYPE,
+                    "assignments must be an array or an object");
         }
         if (!modelAssignments.keySet().equals(modelDomains)) {
             throw reject(PlannerRejection.COVERAGE, "assignments must exactly cover selectedDomains");
@@ -195,6 +181,46 @@ public final class SupervisorPlanner {
                 throw reject(PlannerRejection.UNKNOWN_FIELD, "planner response contains an unknown field");
             }
         });
+    }
+
+    private static void parseTypedAssignments(
+            JsonNode assignments, String question, EnumMap<ExpertDomain, String> normalizedAssignments) {
+        for (JsonNode value : assignments) {
+            if (!value.isObject()) {
+                throw reject(PlannerRejection.ASSIGNMENT_ENTRY_TYPE,
+                        "assignments entries must be objects");
+            }
+            rejectUnknownFields(value, ASSIGNMENT_FIELDS);
+            JsonNode domainValue = value.get("domain");
+            if (domainValue == null || !domainValue.isTextual()) {
+                throw reject(PlannerRejection.ASSIGNMENT_DOMAIN_TYPE,
+                        "assignment domain must be a string");
+            }
+            addAssignment(normalizedAssignments,
+                    parseDomain(domainValue.textValue(), domainValue, question),
+                    requireTextValue(value.get("assignment"), "assignment", PlannerRejection.ASSIGNMENT_TYPE),
+                    question);
+        }
+    }
+
+    private static void parseLegacyAssignments(
+            JsonNode assignments, String question, EnumMap<ExpertDomain, String> normalizedAssignments) {
+        Iterator<Map.Entry<String, JsonNode>> fields = assignments.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> field = fields.next();
+            addAssignment(normalizedAssignments,
+                    parseDomain(field.getKey(), field.getKey(), question),
+                    requireTextValue(field.getValue(), "assignment", PlannerRejection.ASSIGNMENT_TYPE),
+                    question);
+        }
+    }
+
+    private static void addAssignment(
+            EnumMap<ExpertDomain, String> assignments, ExpertDomain domain, String assignment, String question) {
+        requireExactEntityScope(question, assignment, domain);
+        if (assignments.put(domain, assignment) != null) {
+            throw reject(PlannerRejection.COVERAGE, "assignments must not contain duplicate domains");
+        }
     }
 
     private static void requireExactEntityScope(String question, String assignment, ExpertDomain domain) {

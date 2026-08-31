@@ -77,6 +77,18 @@ class SupervisorPlannerTest {
         assertThat(plan.assignments()).containsEntry(ExpertDomain.DEVICE, "is device D1 offline?");
     }
 
+    @Test
+    void parsesLegacyObjectAssignmentsWithoutChangingServerOwnedRouting() {
+        var plan = planner.parseAndValidate("is device D1 offline?", """
+                {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
+                 "assignments":{"DEVICE":"inspect device D1"},
+                 "selectionReason":"device status"}
+                """);
+
+        assertThat(plan.selectedDomains()).containsExactly(ExpertDomain.DEVICE);
+        assertThat(plan.assignments()).containsEntry(ExpertDomain.DEVICE, "is device D1 offline?");
+    }
+
     @Test void rejectsIllegalDomain() {
         assertThatThrownBy(() -> planner.parseAndValidate("设备离线", "{\"normalizedQuestion\":\"设备离线\",\"selectedDomains\":[\"UNKNOWN\"],\"assignments\":{},\"selectionReason\":\"x\"}"))
                 .isInstanceOf(IllegalStateException.class);
@@ -220,8 +232,24 @@ class SupervisorPlannerTest {
                         """, "DOMAIN"),
                 Arguments.of("""
                         {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
-                         "assignments":{},"selectionReason":"device status"}
+                         "assignments":false,"selectionReason":"device status"}
                         """, "ASSIGNMENTS_TYPE"),
+                Arguments.of("""
+                        {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
+                         "assignments":{"DEVICE":null},"selectionReason":"device status"}
+                        """, "ASSIGNMENT_TYPE"),
+                Arguments.of("""
+                        {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
+                         "assignments":{"UNKNOWN":"inspect D1"},"selectionReason":"device status"}
+                        """, "DOMAIN"),
+                Arguments.of("""
+                        {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
+                         "assignments":{"DEVICE":"inspect D1","device":"inspect D1"},"selectionReason":"device status"}
+                        """, "COVERAGE"),
+                Arguments.of("""
+                        {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
+                         "assignments":{},"selectionReason":"device status"}
+                        """, "COVERAGE"),
                 Arguments.of("""
                         {"normalizedQuestion":"is device D1 offline?","selectedDomains":["DEVICE"],
                          "assignments":["DEVICE"],"selectionReason":"device status"}
