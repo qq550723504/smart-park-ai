@@ -9,6 +9,13 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.time.Clock;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(ShowcaseProperties.class)
@@ -36,5 +43,29 @@ public class ShowcaseConfiguration {
     @Qualifier("showcaseClock")
     Clock showcaseClock() {
         return Clock.systemUTC();
+    }
+
+    @Bean(name = "showcasePreflightExecutor", destroyMethod = "shutdownNow")
+    ExecutorService showcasePreflightExecutor() {
+        AtomicInteger sequence = new AtomicInteger();
+        ThreadFactory threads = task -> {
+            Thread thread = new Thread(task, "showcase-preflight-" + sequence.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        };
+        return new ThreadPoolExecutor(0, ShowcaseScenarioId.values().length,
+                60, TimeUnit.SECONDS, new SynchronousQueue<>(), threads,
+                new ThreadPoolExecutor.AbortPolicy());
+    }
+
+    @Bean
+    ShowcasePreflightService showcasePreflightService(
+            ScenarioVerificationRegistry registry,
+            @Qualifier("showcaseClock") Clock clock,
+            ShowcaseProperties properties,
+            @Qualifier("showcasePreflightExecutor") ExecutorService executor,
+            List<ShowcasePreflightProbe> probes) {
+        return new ShowcasePreflightService(
+                registry, clock, properties.getPreflightTimeout(), executor, probes);
     }
 }

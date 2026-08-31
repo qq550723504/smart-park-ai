@@ -175,6 +175,7 @@ class ShowcaseScenarioCatalogTest {
                     assertThat(context).hasSingleBean(ShowcaseProperties.class);
                     assertThat(context).hasSingleBean(ScenarioVerificationRegistry.class);
                     assertThat(context).hasSingleBean(ShowcaseScenarioCatalog.class);
+                    assertThat(context).hasSingleBean(ShowcasePreflightService.class);
                     assertThat(context.getBean("showcaseClock", Clock.class).getZone())
                             .isEqualTo(java.time.ZoneOffset.UTC);
                     assertThat(context.getBean(ShowcaseScenarioCatalog.class).scenarios(NOW))
