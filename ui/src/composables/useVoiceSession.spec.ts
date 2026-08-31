@@ -9,6 +9,7 @@ import type { GuidedLaunchUpdate, ScenarioLaunchRequest } from '../types/workben
 class FakeWebSocket implements WebSocketLike {
   sent: Array<string | ArrayBuffer> = []
   closed = false
+  binaryType: BinaryType = 'blob'
   onopen: (() => void) | null = null
   onmessage: ((event: { data: unknown }) => void) | null = null
   onerror: (() => void) | null = null
@@ -219,6 +220,14 @@ describe('useVoiceSession', () => {
     expect(harness.fakeCapture.started).toBe(0)
     expect(harness.microphoneRequests()).toBe(0)
     expect(harness.binding.connectionPhase.value).toBe('connected')
+  })
+
+  it('configures the socket to deliver binary audio as ArrayBuffers', async () => {
+    const harness = makeHarness()
+
+    await harness.binding.prepare()
+
+    expect(harness.fakeWs.binaryType).toBe('arraybuffer')
   })
 
   it('creates a fresh connection when preparation follows a transport failure', async () => {

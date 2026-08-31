@@ -49,10 +49,6 @@ public final class SynthesisValidator {
             throw new IllegalArgumentException(
                     "synthesis selected findings must include all SUPPORTED findings");
         }
-        if (synthesis.status() != FindingStatus.SUPPORTED && !supportedDomains.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "synthesis must be SUPPORTED when any SUPPORTED finding exists");
-        }
         for (ExpertDomain domain : safeSelection) {
             ExpertFinding finding = byDomain.get(domain);
             if (finding == null || finding.status() != FindingStatus.SUPPORTED) {

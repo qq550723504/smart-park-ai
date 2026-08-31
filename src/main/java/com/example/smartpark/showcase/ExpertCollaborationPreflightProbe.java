@@ -39,9 +39,11 @@ public final class ExpertCollaborationPreflightProbe implements ShowcasePrefligh
                     ShowcaseLaunchInput.forScenario(scenarioId()).question());
             ShowcaseProbeResult result = awaiter.await(
                     () -> service.get(started.runId()), this::terminalResult);
-            if (result == ShowcaseProbeResult.PASSED || Thread.currentThread().isInterrupted()) {
+            if (result == ShowcaseProbeResult.PASSED) {
                 return result;
             }
+            service.abort(started.runId());
+            if (Thread.currentThread().isInterrupted()) return result;
         }
         return ShowcaseProbeResult.FAILED;
     }

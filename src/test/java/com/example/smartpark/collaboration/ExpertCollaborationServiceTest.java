@@ -231,6 +231,30 @@ class ExpertCollaborationServiceTest {
         assertThat(service.get(run.runId()).status()).isEqualTo(CollaborationRun.RunStatus.FAILED);
     }
 
+    @Test void abortCancelsAnActiveRunAndInterruptsItsWorker() throws Exception {
+        var publisher = new InMemoryExecutionEventPublisher();
+        CountDownLatch plannerStarted = new CountDownLatch(1);
+        AtomicBoolean interrupted = new AtomicBoolean();
+        var service = service(publisher, question -> {
+            plannerStarted.countDown();
+            try {
+                new CountDownLatch(1).await();
+            } catch (InterruptedException cancellation) {
+                interrupted.set(true);
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("planner interrupted", cancellation);
+            }
+            return plan();
+        }, (plan, findings) -> null, Duration.ofSeconds(2));
+
+        var run = service.start("energy consumption");
+        assertThat(plannerStarted.await(1, TimeUnit.SECONDS)).isTrue();
+
+        assertThat(service.abort(run.runId()).status()).isEqualTo(CollaborationRun.RunStatus.FAILED);
+        waitFor(interrupted::get);
+        assertThat(service.get(run.runId()).error()).isEqualTo("collaboration run cancelled");
+    }
+
 
     private static ExpertCollaborationService service(InMemoryExecutionEventPublisher publisher,
             ExpertCollaborationService.Planner planner, ExpertCollaborationService.Synthesizer synthesizer) {

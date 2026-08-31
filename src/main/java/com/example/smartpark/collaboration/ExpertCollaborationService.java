@@ -27,6 +27,7 @@ public final class ExpertCollaborationService {
     private final ExecutorService runExecutor;
     private final Duration runTimeout;
     private final Clock clock;
+    private final ConcurrentMap<UUID, FutureTask<Void>> activeTasks = new ConcurrentHashMap<>();
 
     public ExpertCollaborationService(Planner planner, ExpertCollaborationGraph graph, Synthesizer synthesizer,
             CollaborationRunStore store, ExecutionEventPublisher events, ExecutorService runExecutor,
@@ -43,16 +44,22 @@ public final class ExpertCollaborationService {
         UUID id = UUID.randomUUID();
         CountDownLatch admitted = new CountDownLatch(1);
         FutureTask<Void> task = new FutureTask<>(() -> {
-            admitted.await();
-            execute(id, question.trim());
-            return null;
+            try {
+                admitted.await();
+                execute(id, question.trim());
+                return null;
+            } finally {
+                activeTasks.remove(id);
+            }
         });
         try {
             // Admission is decided by the bounded executor before the run is
             // made externally visible. The gate prevents an accepted worker
             // from observing an ID before its store/event registration commits.
+            activeTasks.put(id, task);
             runExecutor.execute(task);
         } catch (RejectedExecutionException rejected) {
+            activeTasks.remove(id, task);
             task.cancel(false);
             throw rejected;
         }
@@ -63,6 +70,7 @@ public final class ExpertCollaborationService {
             publish(id, "Supervisor", ExecutionStage.INITIALIZATION, ExecutionEventType.RUN_STARTED,
                     ExecutionStatus.RUNNING, "Expert collaboration started");
         } catch (RuntimeException registrationFailure) {
+            activeTasks.remove(id, task);
             task.cancel(true);
             admitted.countDown();
             throw registrationFailure;
@@ -74,6 +82,17 @@ public final class ExpertCollaborationService {
     }
 
     public CollaborationRun get(UUID id) { return store.get(id); }
+
+    /** Cancels a run owned by a caller such as showcase preflight. */
+    public synchronized CollaborationRun abort(UUID id) {
+        CollaborationRun current = store.get(id);
+        if (current.status() != CollaborationRun.RunStatus.RUNNING) return current;
+        if (failIfRunning(id, "collaboration run cancelled")) {
+            FutureTask<Void> task = activeTasks.get(id);
+            if (task != null) task.cancel(true);
+        }
+        return store.get(id);
+    }
 
     private void execute(UUID id, String question) {
         try {

@@ -16,6 +16,9 @@ import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -23,6 +26,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.timeout;
 
 class ExpertCollaborationPreflightProbeTest {
 
@@ -174,6 +178,28 @@ class ExpertCollaborationPreflightProbeTest {
             assertThat(Thread.currentThread().isInterrupted()).isTrue();
         } finally {
             Thread.interrupted();
+        }
+    }
+
+    @Test
+    void abortsOwnedCollaborationWhenPreflightAwaitIsInterrupted() throws Exception {
+        ExpertCollaborationService service = mock(ExpertCollaborationService.class);
+        UUID runId = UUID.randomUUID();
+        CountDownLatch polled = new CountDownLatch(1);
+        when(service.start(anyString())).thenReturn(run(runId, CollaborationRun.RunStatus.RUNNING, List.of()));
+        when(service.get(runId)).thenAnswer(invocation -> {
+            polled.countDown();
+            return run(runId, CollaborationRun.RunStatus.RUNNING, List.of());
+        });
+
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            var future = executor.submit(() -> new ExpertCollaborationPreflightProbe(service).probe());
+            assertThat(polled.await(1, TimeUnit.SECONDS)).isTrue();
+            future.cancel(true);
+            verify(service, timeout(1_000)).abort(runId);
+        } finally {
+            executor.shutdownNow();
         }
     }
 

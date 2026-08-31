@@ -11,6 +11,7 @@ import { PcmPlayer, type AudioBufferLike, type AudioContextLike, type PlaybackSo
 import { VoicePcmCapture, browserPcmCaptureDeps, type PcmCaptureDeps } from '../audio/pcm-capture'
 
 export interface WebSocketLike {
+  binaryType: BinaryType
   send(data: string | ArrayBuffer): void
   close(): void
   onopen: (() => void) | null
@@ -172,6 +173,7 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
     const currentSocket = openWebSocket(
       `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${created.wsPath}`,
     )
+    currentSocket.binaryType = 'arraybuffer'
     socket = currentSocket
     currentSocket.onopen = () => {
       if (generation !== lifecycleGeneration || socket !== currentSocket) {

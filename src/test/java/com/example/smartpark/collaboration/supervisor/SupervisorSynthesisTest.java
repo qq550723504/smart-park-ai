@@ -40,6 +40,25 @@ class SupervisorSynthesisTest {
     }
 
     @Test
+    void acceptsUnableToConfirmWhenSupportedObservationsDoNotEstablishCorrelation() {
+        ChatModel model = prompt -> new ChatResponse(List.of(new Generation(new AssistantMessage("""
+                {"status":"INSUFFICIENT_EVIDENCE","selectedDomains":[],"evidenceRefs":[],"confidence":0,
+                 "conclusion":"无法确认关联","uncertainties":[]}
+                """))));
+
+        var result = synthesizer.synthesize(model, crossDomainPlan(), List.of(
+                supported(),
+                new ExpertFinding(ExpertDomain.DEVICE, FindingStatus.SUPPORTED,
+                        "device D-2 is offline", List.of("device:D-2"), .7, List.of()),
+                new ExpertFinding(ExpertDomain.SECURITY, FindingStatus.SUPPORTED,
+                        "security event SEC-1 is active", List.of("security:SEC-1"), .7, List.of())));
+
+        assertThat(result.status()).isEqualTo(FindingStatus.INSUFFICIENT_EVIDENCE);
+        assertThat(result.conclusion()).isEqualTo("无法确认关联");
+        assertThat(result.evidenceRefs()).isEmpty();
+    }
+
+    @Test
     void synthesizesAllValidatedSupportedFindingsWithoutAProviderEcho() {
         ExpertFinding device = new ExpertFinding(ExpertDomain.DEVICE, FindingStatus.SUPPORTED,
                 "device D-2 is offline", List.of("device:D-2"), .7, List.of());
