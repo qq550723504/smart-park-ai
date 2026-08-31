@@ -3,6 +3,7 @@ package com.example.smartpark.collaboration;
 import com.example.smartpark.collaboration.expert.ExpertToolSet;
 import com.example.smartpark.collaboration.expert.EvidenceLedger;
 import com.example.smartpark.collaboration.model.CollaborationRun;
+import com.example.smartpark.collaboration.model.ExpertDomain;
 import com.example.smartpark.execution.ExecutionEventPublisher;
 import com.example.smartpark.execution.InMemoryExecutionEventPublisher;
 import org.junit.jupiter.api.Test;
@@ -59,7 +60,7 @@ class CollaborationRuntimeConfigurationTest {
     }
 
     @Test
-    void invokesOnlySelectedExpertForSingleDomainPlan() {
+    void deterministicRoutingDoesNotAddProviderSecurityDomainToEnergyQuestion() {
         RoutingChatModel model = AllDependencies.model();
         model.clear();
         runner.run(context -> {
@@ -67,12 +68,14 @@ class CollaborationRuntimeConfigurationTest {
                     .start("A2 夜间能耗升高的原因是什么");
             CollaborationRun completed = awaitTerminal(context.getBean(ExpertCollaborationService.class), run.runId());
             assertThat(completed.status()).isEqualTo(CollaborationRun.RunStatus.COMPLETED);
+            assertThat(completed.plan().selectedDomains()).containsExactly(ExpertDomain.ENERGY);
             assertThat(model.expertPrompts()).containsExactly("ENERGY");
+            assertThat(model.supervisorPromptCount()).isOne();
         });
     }
 
     @Test
-    void invokesAllThreeSelectedExpertsForCrossDomainPlan() {
+    void deterministicRoutingKeepsDeviceWhenProviderGroupsOnlyEnergyAndSecurity() {
         RoutingChatModel model = AllDependencies.model();
         model.clear();
         runner.run(context -> {
@@ -80,7 +83,10 @@ class CollaborationRuntimeConfigurationTest {
                     .start("A2 夜间能耗升高且门禁告警、冷机离线，是否有关联");
             CollaborationRun completed = awaitTerminal(context.getBean(ExpertCollaborationService.class), run.runId());
             assertThat(completed.status()).isEqualTo(CollaborationRun.RunStatus.COMPLETED);
+            assertThat(completed.plan().selectedDomains())
+                    .containsExactlyInAnyOrder(ExpertDomain.ENERGY, ExpertDomain.DEVICE, ExpertDomain.SECURITY);
             assertThat(model.expertPrompts()).containsExactlyInAnyOrder("ENERGY", "DEVICE", "SECURITY");
+            assertThat(model.supervisorPromptCount()).isOne();
         });
     }
 
@@ -180,8 +186,8 @@ class CollaborationRuntimeConfigurationTest {
                 String question = prompt.getUserMessage().getText();
                 boolean crossDomain = question.contains("门禁") || question.contains("冷机");
                 json = crossDomain
-                        ? plan(question, "ENERGY", "DEVICE", "SECURITY")
-                        : plan(question, "ENERGY");
+                        ? plan(question, "ENERGY", "SECURITY")
+                        : plan(question, "ENERGY", "SECURITY");
             } else if (system.contains("park expert")) {
                 String domain = system.substring(system.indexOf("the ") + 4, system.indexOf(" park expert"));
                 json = "{\"domain\":\"" + domain + "\",\"status\":\"INSUFFICIENT_EVIDENCE\",\"conclusion\":\"insufficient evidence\",\"evidenceRefs\":[],\"confidence\":0,\"nextChecks\":[\"collect evidence\"]}";
@@ -202,6 +208,10 @@ class CollaborationRuntimeConfigurationTest {
         List<String> expertPrompts() {
             return systems.stream().filter(value -> value.contains("park expert"))
                     .map(value -> value.substring(value.indexOf("the ") + 4, value.indexOf(" park expert"))).toList();
+        }
+
+        long supervisorPromptCount() {
+            return systems.stream().filter(value -> value.contains("collaboration supervisor")).count();
         }
     }
 

@@ -11,6 +11,7 @@ import java.util.EnumSet;
 import java.util.Iterator;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 public final class SupervisorPlanner {
@@ -55,29 +56,35 @@ public final class SupervisorPlanner {
             throw new ModelOutputException("planner response is missing required fields");
         }
         requireText(root, "normalizedQuestion");
-        EnumSet<ExpertDomain> domains = EnumSet.noneOf(ExpertDomain.class);
+        EnumSet<ExpertDomain> modelDomains = EnumSet.noneOf(ExpertDomain.class);
         if (!selected.isArray()) throw new ModelOutputException("selectedDomains must be an array");
         for (JsonNode value : selected) {
-            domains.add(parseDomain(value.asText(), value, normalizedQuestion));
+            modelDomains.add(parseDomain(value.asText(), value, normalizedQuestion));
         }
         if (!assignments.isObject()) throw new ModelOutputException("assignments must be an object");
-        EnumMap<ExpertDomain, String> assignmentMap = new EnumMap<>(ExpertDomain.class);
+        EnumMap<ExpertDomain, String> modelAssignments = new EnumMap<>(ExpertDomain.class);
         Iterator<Map.Entry<String, JsonNode>> fields = assignments.fields();
         while (fields.hasNext()) {
             Map.Entry<String, JsonNode> field = fields.next();
-            assignmentMap.put(parseDomain(field.getKey(), field.getKey(), normalizedQuestion), field.getValue().asText());
+            modelAssignments.put(parseDomain(field.getKey(), field.getKey(), normalizedQuestion), field.getValue().asText());
         }
-        if (!assignmentMap.keySet().equals(domains)) {
+        if (!modelAssignments.keySet().equals(modelDomains)) {
             throw new ModelOutputException("assignments must exactly cover selectedDomains");
         }
-        // The model may choose domains and explain that choice, but it does not
-        // own entity scope. Every expert receives the exact user question so a
-        // generated assignment cannot replace D1 with D2 or drop another
-        // concrete identifier.
+
+        // The provider response is mandatory structured confirmation and its
+        // explanation is retained, but routing has exactly one authority: the
+        // server-owned deterministic classifier. Provider grouping may differ
+        // without dropping or adding an expert branch in the executable plan.
+        Set<ExpertDomain> requiredDomains = validator.expectedDomains(normalizedQuestion);
+        if (requiredDomains.isEmpty()) {
+            throw new SupervisorPlanValidator.SupervisorPlanValidationException(
+                    "question is ambiguous or outside expert collaboration scope");
+        }
         EnumMap<ExpertDomain, String> canonicalAssignments = new EnumMap<>(ExpertDomain.class);
-        domains.forEach(domain -> canonicalAssignments.put(domain, normalizedQuestion));
+        requiredDomains.forEach(domain -> canonicalAssignments.put(domain, normalizedQuestion));
         SupervisorPlan plan = new SupervisorPlan(
-                normalizedQuestion, domains, canonicalAssignments,
+                normalizedQuestion, requiredDomains, canonicalAssignments,
                 requireText(root, "selectionReason"));
         return validator.validate(plan);
     }

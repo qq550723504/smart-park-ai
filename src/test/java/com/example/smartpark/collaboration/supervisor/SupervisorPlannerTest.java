@@ -16,11 +16,9 @@ class SupervisorPlannerTest {
         assertThat(plan.selectedDomains()).containsExactly(ExpertDomain.DEVICE);
     }
 
-    @Test void rejectsIllegalDomainAndMissingTaskCoverage() {
+    @Test void rejectsIllegalDomain() {
         assertThatThrownBy(() -> planner.parseAndValidate("设备离线", "{\"normalizedQuestion\":\"设备离线\",\"selectedDomains\":[\"UNKNOWN\"],\"assignments\":{},\"selectionReason\":\"x\"}"))
                 .isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> planner.parseAndValidate("能耗和设备", "{\"normalizedQuestion\":\"能耗和设备\",\"selectedDomains\":[\"ENERGY\"],\"assignments\":{\"ENERGY\":\"查能耗\"},\"selectionReason\":\"x\"}"))
-                .isInstanceOf(SupervisorPlanValidator.SupervisorPlanValidationException.class);
     }
 
     @Test

@@ -2,12 +2,18 @@ package com.example.smartpark.showcase;
 
 import com.example.smartpark.collaboration.ExpertCollaborationService;
 import com.example.smartpark.collaboration.model.CollaborationRun;
+import com.example.smartpark.collaboration.model.ExpertDomain;
 import com.example.smartpark.collaboration.model.ExpertFinding;
+import com.example.smartpark.collaboration.model.FindingStatus;
+import com.example.smartpark.collaboration.model.SupervisorPlan;
+import com.example.smartpark.collaboration.model.Synthesis;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 import java.time.Instant;
+import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.UUID;
 
@@ -20,16 +26,40 @@ import static org.mockito.Mockito.when;
 class ExpertCollaborationPreflightProbeTest {
 
     @Test
-    void collaborationPassesOnlyWithCompletedNonEmptyFindings() {
+    void collaborationPassesOnlyWithEvidenceBackedThreeDomainResult() {
         ExpertCollaborationService service = mock(ExpertCollaborationService.class);
         UUID runId = UUID.randomUUID();
         when(service.start(anyString())).thenReturn(run(runId, CollaborationRun.RunStatus.RUNNING, List.of()));
-        when(service.get(runId)).thenReturn(run(runId, CollaborationRun.RunStatus.COMPLETED,
-                List.of(mock(ExpertFinding.class))));
+        List<ExpertFinding> findings = List.of(
+                supported(ExpertDomain.ENERGY),
+                supported(ExpertDomain.DEVICE),
+                supported(ExpertDomain.SECURITY));
+        when(service.get(runId)).thenReturn(completed(runId, findings,
+                new Synthesis(FindingStatus.SUPPORTED,
+                        "ENERGY evidence；DEVICE evidence；SECURITY evidence",
+                        findings.stream().flatMap(finding -> finding.evidenceRefs().stream()).toList(),
+                        .8, List.of())));
 
         assertThat(new ExpertCollaborationPreflightProbe(service).probe())
                 .isEqualTo(ShowcaseProbeResult.PASSED);
-        verify(service).start("A2 夜间能耗升高且门禁告警、冷机离线，是否有关联");
+        verify(service).start("请基于证据判断 DEV-ENERGY-001 夜间能耗升高、DEV-HVAC-001 冷机离线及 SEC-ACCESS-001 门禁告警是否有关联");
+    }
+
+    @Test
+    void collaborationRejectsCompletedRunWithFindingsButNoEvidence() {
+        ExpertCollaborationService service = mock(ExpertCollaborationService.class);
+        UUID runId = UUID.randomUUID();
+        when(service.start(anyString())).thenReturn(run(runId, CollaborationRun.RunStatus.RUNNING, List.of()));
+        List<ExpertFinding> findings = java.util.Arrays.stream(ExpertDomain.values())
+                .map(domain -> new ExpertFinding(domain, FindingStatus.INSUFFICIENT_EVIDENCE,
+                        "no evidence", List.of(), 0, List.of("retry")))
+                .toList();
+        when(service.get(runId)).thenReturn(completed(runId, findings,
+                new Synthesis(FindingStatus.INSUFFICIENT_EVIDENCE, "no verified conclusion",
+                        List.of(), 0, List.of("missing evidence"))));
+
+        assertThat(new ExpertCollaborationPreflightProbe(service).probe())
+                .isEqualTo(ShowcaseProbeResult.FAILED);
     }
 
     @ParameterizedTest
@@ -71,5 +101,23 @@ class ExpertCollaborationPreflightProbeTest {
     private static CollaborationRun run(UUID runId, CollaborationRun.RunStatus status,
                                         List<ExpertFinding> findings) {
         return new CollaborationRun(runId, "question", status, null, findings, null, null, Instant.EPOCH);
+    }
+
+    private static CollaborationRun completed(UUID runId, List<ExpertFinding> findings,
+                                              Synthesis synthesis) {
+        String question = "question";
+        EnumMap<ExpertDomain, String> assignments = new EnumMap<>(ExpertDomain.class);
+        for (ExpertDomain domain : ExpertDomain.values()) {
+            assignments.put(domain, question);
+        }
+        SupervisorPlan plan = new SupervisorPlan(question, EnumSet.allOf(ExpertDomain.class),
+                assignments, "all fixture domains are required");
+        return new CollaborationRun(runId, question, CollaborationRun.RunStatus.COMPLETED,
+                plan, findings, synthesis, null, Instant.EPOCH);
+    }
+
+    private static ExpertFinding supported(ExpertDomain domain) {
+        return new ExpertFinding(domain, FindingStatus.SUPPORTED, domain + " evidence",
+                List.of("tool:" + domain.name().toLowerCase() + "#fixture"), .8, List.of());
     }
 }
