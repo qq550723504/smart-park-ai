@@ -92,6 +92,43 @@ class OperationsAnalysisServiceTest {
     }
 
     @Test
+    void abortCancelsTheWorkerSoTheNextAnalysisCanStartImmediately() throws Exception {
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(1), new ThreadPoolExecutor.AbortPolicy());
+        CountDownLatch firstStarted = new CountDownLatch(1);
+        CountDownLatch secondStarted = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
+        try {
+            OperationsAnalysisService service = service((runId, question, pinned) -> {
+                if (calls.incrementAndGet() == 1) {
+                    firstStarted.countDown();
+                    try {
+                        new CountDownLatch(1).await();
+                    } catch (InterruptedException cancelled) {
+                        Thread.currentThread().interrupt();
+                        return completed(runId);
+                    }
+                }
+                secondStarted.countDown();
+                return completed(runId);
+            }, executor, Duration.ofSeconds(10));
+
+            var first = service.start("预检分析");
+            assertThat(firstStarted.await(1, TimeUnit.SECONDS)).isTrue();
+
+            var aborted = service.abort(first.runId());
+            assertThat(aborted.failureStage()).isEqualTo("PREFLIGHT_ABORTED");
+
+            var second = service.start("新的分析");
+            assertThat(secondStarted.await(1, TimeUnit.SECONDS)).isTrue();
+            awaitTerminal(() -> "COMPLETED".equals(service.get(second.runId()).status()));
+        } finally {
+            executor.shutdownNow();
+            executor.awaitTermination(2, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
     void runsGraphOnTheConfiguredExecutorWithoutNestedSubmissionDeadlock() {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {

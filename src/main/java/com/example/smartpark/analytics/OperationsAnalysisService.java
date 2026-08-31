@@ -58,6 +58,9 @@ public class OperationsAnalysisService {
     private final ExecutionEventPublisher events;
     private final Object lifecycleLock = new Object();
     private UUID activeRunId;
+    /** Activity handles are guarded by lifecycleLock so abort can cancel queued work too. */
+    private final Map<UUID, FutureTask<OperationsAnalysisGraph.AnalysisRunResult>> activeTasks =
+            new java.util.HashMap<>();
 
     /** Pending ambiguity per run: one candidate metric set per clarification question. */
     private final Map<UUID, PendingClarification> pendingClarifications = new java.util.HashMap<>();
@@ -164,8 +167,10 @@ public class OperationsAnalysisService {
             store.put(aborted);
             pendingClarifications.remove(runId);
             admittingClarifications.remove(runId);
+            FutureTask<OperationsAnalysisGraph.AnalysisRunResult> task = activeTasks.remove(runId);
             releaseActiveLocked(runId);
             publishTerminalLocked(aborted);
+            if (task != null) task.cancel(true);
             return aborted;
         }
     }
@@ -349,9 +354,11 @@ public class OperationsAnalysisService {
                 }
             }
         };
+        trackTask(runId, task);
         try {
             executor.execute(task);
         } catch (RuntimeException rejected) {
+            untrackTask(runId, task);
             task.cancel(false);
             rollback.run();
             throw rejected;
@@ -413,9 +420,11 @@ public class OperationsAnalysisService {
                 if (taskStarted.get()) completeTask(runId, question, startedAt, this);
             }
         };
+        trackTask(runId, task);
         try {
             executor.execute(task);
         } catch (RuntimeException rejected) {
+            untrackTask(runId, task);
             task.cancel(false);
             rollback.run();
             closeRejectedTrace(runId);
@@ -444,6 +453,10 @@ public class OperationsAnalysisService {
                               FutureTask<OperationsAnalysisGraph.AnalysisRunResult> task) {
         long durationMs = System.currentTimeMillis() - startedAt;
         if (task.isCancelled()) {
+            synchronized (lifecycleLock) {
+                AnalysisRunStore.RunRecord current = store.get(runId);
+                if (current == null || !"RUNNING".equals(current.status())) return;
+            }
             terminate(runId, question, "ANALYSIS_TIMEOUT", durationMs);
             return;
         }
@@ -456,6 +469,18 @@ public class OperationsAnalysisService {
             persistFailure(runId, question, "ANALYSIS_INTERRUPTED", durationMs);
         } catch (java.util.concurrent.CancellationException cancelled) {
             terminate(runId, question, "ANALYSIS_TIMEOUT", durationMs);
+        }
+    }
+
+    private void trackTask(UUID runId, FutureTask<OperationsAnalysisGraph.AnalysisRunResult> task) {
+        synchronized (lifecycleLock) {
+            activeTasks.put(runId, task);
+        }
+    }
+
+    private void untrackTask(UUID runId, FutureTask<OperationsAnalysisGraph.AnalysisRunResult> task) {
+        synchronized (lifecycleLock) {
+            activeTasks.remove(runId, task);
         }
     }
 
