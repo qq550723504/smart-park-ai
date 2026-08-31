@@ -301,6 +301,12 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
         }
       })
     } catch (error) {
+      if (generation === lifecycleGeneration && capture === currentCapture) {
+        // START_INPUT is already queued on this ordered WebSocket. Cancel the
+        // server turn so a capture-start failure cannot leave it LISTENING and
+        // turn the next mic click into an empty COMMIT_INPUT.
+        sendControl('INTERRUPT_OUTPUT')
+      }
       if (capture === currentCapture) capture = null
       if (stream === requestedStream) stream = null
       await currentCapture.stop().catch(() => undefined)

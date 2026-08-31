@@ -238,6 +238,21 @@ describe('App surface coordinator', () => {
     expect(lifecycle).toEqual({ mounts: 1, unmounts: 0 })
   })
 
+  it('creates a fresh idle workbench session for explicit manual entry', async () => {
+    const lifecycle = { mounts: 0, unmounts: 0 }
+    const wrapper = mountApp(createLifecycleTrackedWorkbench(lifecycle))
+
+    wrapper.getComponent(ShowcaseHome).vm.$emit('start-scenario', 'ALERT_WORKFLOW')
+    await nextTick()
+    await wrapper.get('[data-testid="back-to-showcase"]').trigger('click')
+    wrapper.getComponent(ShowcaseHome).vm.$emit('enter-workbench')
+    await nextTick()
+
+    expect(wrapper.getComponent(OperationsWorkbench).props('launchRequest')).toBeNull()
+    expect(wrapper.getComponent(OperationsWorkbench).props('initialView')).toBe('workflow')
+    expect(lifecycle).toEqual({ mounts: 2, unmounts: 1 })
+  })
+
   it('deactivates the cached workbench whenever the showcase surface is visible', async () => {
     const wrapper = mountApp()
 

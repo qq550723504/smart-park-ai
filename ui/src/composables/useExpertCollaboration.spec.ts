@@ -117,6 +117,24 @@ describe('useExpertCollaboration', () => {
     expect(state.run.value?.runId).toBe('run-2')
   })
 
+  it('does not publish a start failure from a superseded collaboration', async () => {
+    let rejectOld!: (reason?: unknown) => void
+    const oldStart = new Promise<{ runId: string; statusUrl: string; eventsUrl: string }>((_resolve, reject) => {
+      rejectOld = reject
+    })
+    mockedStart.mockImplementationOnce(() => oldStart)
+      .mockResolvedValueOnce({ runId: 'run-2', statusUrl: '', eventsUrl: '' })
+    mockedGet.mockResolvedValue({ ...running, runId: 'run-2' })
+    const state = useExpertCollaboration(10)
+
+    const superseded = state.start('first').catch((cause) => cause)
+    await state.start('second')
+    rejectOld(new Error('superseded launch failed'))
+    await superseded
+
+    expect(state.error.value).toBe('')
+  })
+
   it('preserves a RUNNING collaboration across view changes and resumes polling on remount', async () => {
     mockedGet.mockResolvedValue(running)
     const firstView = useExpertCollaboration(10)

@@ -9,6 +9,7 @@ const requestedView = ref<WorkbenchView>('workflow')
 const requestedLaunch = ref<ScenarioLaunchRequest | null>(null)
 let nextLaunchRequestId = 0
 const hasEnteredWorkbench = ref(false)
+const workbenchSessionId = ref(0)
 const showcaseSurface = ref<InstanceType<typeof ShowcaseHome> | null>(null)
 const workbenchSurface = ref<InstanceType<typeof OperationsWorkbench> | null>(null)
 
@@ -49,6 +50,9 @@ function startScenario(id: ShowcaseScenarioId) {
 
 function enterWorkbench() {
   requestedLaunch.value = null
+  // Manual entry is an explicit fresh session boundary. Normal showcase
+  // returns keep the current instance hidden so live guided runs can resume.
+  workbenchSessionId.value++
   void showWorkbench('workflow')
 }
 
@@ -72,18 +76,17 @@ async function returnToShowcase() {
     @enter-workbench="enterWorkbench"
   />
 
-  <KeepAlive>
-    <OperationsWorkbench
-      ref="workbenchSurface"
-      v-if="hasEnteredWorkbench"
-      v-show="surface === 'workbench'"
-      data-surface="workbench"
-      tabindex="-1"
-      :active="surface === 'workbench'"
-      :initial-view="requestedView"
-      :launch-request="requestedLaunch"
-      @back-to-showcase="returnToShowcase"
-      @retry-guided-launch="startScenario"
-    />
-  </KeepAlive>
+  <OperationsWorkbench
+    v-if="hasEnteredWorkbench"
+    :key="workbenchSessionId"
+    ref="workbenchSurface"
+    v-show="surface === 'workbench'"
+    data-surface="workbench"
+    tabindex="-1"
+    :active="surface === 'workbench'"
+    :initial-view="requestedView"
+    :launch-request="requestedLaunch"
+    @back-to-showcase="returnToShowcase"
+    @retry-guided-launch="startScenario"
+  />
 </template>

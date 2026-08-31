@@ -257,6 +257,29 @@ describe('useVoiceSession', () => {
     expect(binding.errorMessage.value).toBe('')
   })
 
+  it('cancels the server turn when capture startup fails before retrying', async () => {
+    const h = makeHarness()
+    let captureAttempts = 0
+    h.fakeCapture.start = async (_stream, onChunk) => {
+      captureAttempts++
+      if (captureAttempts === 1) throw new Error('capture startup failed')
+      h.fakeCapture.started++
+      h.fakeCapture.onChunk = onChunk
+    }
+
+    await h.binding.toggleMicrophone()
+    h.serverSendsState('LISTENING')
+    h.serverSendsState('IDLE')
+    await h.binding.toggleMicrophone()
+
+    const controlTypes = h.fakeWs.sent
+      .filter((sent): sent is string => typeof sent === 'string')
+      .map((sent) => (JSON.parse(sent) as { type: string }).type)
+    expect(controlTypes).toEqual(['START_INPUT', 'INTERRUPT_OUTPUT', 'START_INPUT'])
+    expect(h.binding.connectionPhase.value).toBe('connected')
+    expect(captureAttempts).toBe(2)
+  })
+
   it('shares one pending handshake between prepare and an immediate microphone toggle', async () => {
     const pendingSession = deferred<{ sessionId: string; runId: string; wsPath: string }>()
     const sockets: FakeWebSocket[] = []

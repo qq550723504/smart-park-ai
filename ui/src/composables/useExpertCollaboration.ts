@@ -82,7 +82,9 @@ export function useExpertCollaboration(pollIntervalMs = 500) {
       if (generation === currentGeneration) void poll(started.runId, currentGeneration)
       return started.runId
     } catch (cause) {
-      error.value = cause instanceof Error ? cause.message : '专家协作启动失败'
+      if (generation === currentGeneration) {
+        error.value = cause instanceof Error ? cause.message : '专家协作启动失败'
+      }
       throw cause
     } finally {
       if (generation === currentGeneration) loading.value = false
