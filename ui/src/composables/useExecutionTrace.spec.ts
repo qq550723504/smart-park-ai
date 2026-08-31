@@ -1,4 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
+import { effectScope } from 'vue'
 import { useExecutionTrace } from './useExecutionTrace'
 
 type Listener = (event: MessageEvent) => void
@@ -147,5 +148,19 @@ describe('useExecutionTrace', () => {
 
     expect(trace.error.value).not.toBe('')
     expect(trace.events.value).toHaveLength(1)
+  })
+
+  it('closes the active stream when its component scope is disposed', () => {
+    const scope = effectScope()
+    const trace = scope.run(() => useExecutionTrace())!
+    trace.subscribe('run-1')
+    const source = FakeEventSource.instances.at(-1)!
+    source.emit('RUN_STARTED', eventOf(1, 'RUN_STARTED'))
+
+    scope.stop()
+
+    expect(source.readyState).toBe(2)
+    expect(trace.status.value).toBe('idle')
+    expect(trace.events.value).toEqual([])
   })
 })

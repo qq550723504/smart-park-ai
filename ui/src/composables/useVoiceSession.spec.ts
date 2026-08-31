@@ -472,6 +472,26 @@ describe('useVoiceSession', () => {
     expect(h.fakeTrack.stopped).toBe(1)
   })
 
+  it('releases active input on server ERROR and allows retry in the same session', async () => {
+    const h = makeHarness()
+    await h.binding.toggleMicrophone()
+    h.serverSendsState('LISTENING')
+
+    h.serverSendsState('ERROR')
+
+    expect(h.fakeCapture.stoppedCount).toBe(1)
+    expect(h.fakeTrack.stopped).toBe(1)
+    await h.binding.toggleMicrophone()
+
+    const startControls = h.fakeWs.sent
+      .filter((sent): sent is string => typeof sent === 'string')
+      .map((sent) => JSON.parse(sent) as { type: string })
+      .filter((frame) => frame.type === 'START_INPUT')
+    expect(startControls).toHaveLength(2)
+    expect(h.microphoneRequests()).toBe(2)
+    expect(h.binding.connectionPhase.value).toBe('connected')
+  })
+
   it('answer deltas append in order and tool events come from backend facts', async () => {
     const h = makeHarness()
     await h.binding.toggleMicrophone()

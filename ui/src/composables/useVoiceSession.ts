@@ -237,6 +237,7 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
       case 'SESSION_STATE':
         voicePhase.value = frame.state
         if (frame.state === 'IDLE' || frame.state === 'ERROR') cancellingTurn = false
+        if (frame.state === 'ERROR') void stopInput()
         if (frame.state === 'LISTENING') {
           suppressAudio = false
           ensurePlayer().beginTurnReset()

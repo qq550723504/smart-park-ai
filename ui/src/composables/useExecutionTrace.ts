@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, onScopeDispose, ref } from 'vue'
 import type { Ref } from 'vue'
 import type { ExecutionEvent } from '../types/execution'
 import { isTerminalEvent } from '../types/execution'
@@ -99,6 +99,8 @@ export function useExecutionTrace(): ExecutionTrace {
     error.value = ''
     status.value = 'idle'
   }
+
+  onScopeDispose(reset)
 
   return { events, status, error, lastSequence, isTerminal, subscribe, reset }
 }
