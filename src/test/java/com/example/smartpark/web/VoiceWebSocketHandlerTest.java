@@ -2,12 +2,12 @@ package com.example.smartpark.web;
 
 import com.example.smartpark.voice.model.VoiceSessionState;
 import com.example.smartpark.voice.VoiceTestSupport;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketMessage;
+import tools.jackson.databind.ObjectMapper;
 
 import java.net.URI;
 import java.util.List;

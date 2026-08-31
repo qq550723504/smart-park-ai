@@ -6,8 +6,6 @@ import com.example.smartpark.voice.model.ClientControlFrame;
 import com.example.smartpark.voice.model.ErrorFrame;
 import com.example.smartpark.voice.model.VoiceClientControlType;
 import com.example.smartpark.voice.model.VoiceErrorCode;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.lang.NonNull;
@@ -20,6 +18,9 @@ import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 import java.io.IOException;
 import java.net.URI;
 import java.util.Objects;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Bridges one WS connection to the voice session service: JSON text frames are
@@ -76,7 +77,7 @@ public class VoiceWebSocketHandler extends AbstractWebSocketHandler {
                 sendSafely(wsSession, objectMapper.writeValueAsString(new ErrorFrame(
                         sessionId, sessionId + "-edge", 0,
                         VoiceErrorCode.INVALID_FRAME, "非法控制帧")));
-            } catch (com.fasterxml.jackson.core.JsonProcessingException jpe) {
+            } catch (JacksonException jpe) {
                 log.debug("error frame serialization failed: {}", jpe.getClass().getSimpleName());
             }
         }
@@ -113,7 +114,7 @@ public class VoiceWebSocketHandler extends AbstractWebSocketHandler {
             public void publish(com.example.smartpark.voice.model.VoiceServerFrame frame) {
                 try {
                     sendSafely(wsSession, objectMapper.writeValueAsString(frame));
-                } catch (com.fasterxml.jackson.core.JsonProcessingException impossible) {
+                } catch (JacksonException impossible) {
                     throw new IllegalStateException(impossible);
                 }
             }

@@ -1,18 +1,28 @@
 package com.example.smartpark.web;
 
+import com.example.smartpark.execution.ExecutionEventPublisher;
 import com.example.smartpark.voice.VoiceDeadlines;
+import com.example.smartpark.voice.VoiceAnswerAgent;
 import com.example.smartpark.voice.VoiceSessionStore;
+import com.example.smartpark.voice.port.StreamingAsrPort;
+import com.example.smartpark.voice.port.StreamingTtsPort;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.boot.test.context.runner.WebApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.test.util.ReflectionTestUtils;
+import tools.jackson.databind.ObjectMapper;
 
 import java.lang.reflect.Method;
 import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 class VoiceConfigurationReviewTest {
 
@@ -56,6 +66,26 @@ class VoiceConfigurationReviewTest {
         } finally {
             pool.shutdown();
         }
+    }
+
+    @Test
+    void enabledVoiceUsesBootManagedJackson3Mapper() {
+        new WebApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(JacksonAutoConfiguration.class))
+                .withUserConfiguration(VoiceSessionConfiguration.class)
+                .withBean(StreamingAsrPort.class, () -> mock(StreamingAsrPort.class))
+                .withBean(StreamingTtsPort.class, () -> mock(StreamingTtsPort.class))
+                .withBean(VoiceAnswerAgent.class, () -> mock(VoiceAnswerAgent.class))
+                .withBean(ExecutionEventPublisher.class, () -> mock(ExecutionEventPublisher.class))
+                .withPropertyValues("smartpark.voice.enabled=true")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(ObjectMapper.class);
+                    assertThat(context).doesNotHaveBean(com.fasterxml.jackson.databind.ObjectMapper.class);
+                    VoiceWebSocketHandler handler = context.getBean(VoiceWebSocketHandler.class);
+                    assertThat(ReflectionTestUtils.getField(handler, "objectMapper"))
+                            .isSameAs(context.getBean(ObjectMapper.class));
+                });
     }
 
     @Configuration(proxyBeanMethods = false)
