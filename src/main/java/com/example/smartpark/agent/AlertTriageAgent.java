@@ -15,6 +15,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Consumer;
 
 @Component
 @ConditionalOnProperty(name = "spring.ai.dashscope.enabled", havingValue = "true", matchIfMissing = true)
@@ -32,7 +33,15 @@ public class AlertTriageAgent {
     }
 
     public AlertClassificationResult classify(Alert alert) {
+        return classify(alert, ignored -> { });
+    }
+
+    public AlertClassificationResult classify(
+            Alert alert,
+            Consumer<AlertModelFailureStage> failureObserver) {
         Objects.requireNonNull(alert, "alert");
+        Consumer<AlertModelFailureStage> requiredFailureObserver = Objects.requireNonNull(
+                failureObserver, "failureObserver");
         Prompt prompt = new Prompt(
                 List.of(
                         new SystemMessage(PromptCatalog.triageSystemPrompt() + OUTPUT_CONVERTER.getFormat()),
@@ -49,24 +58,50 @@ public class AlertTriageAgent {
                                     + PromptCatalog.strictRetryInstruction()),
                             new UserMessage(PromptCatalog.triageUserPrompt(alert))),
                     AlertStructuredOutputSupport.providerOptions("alert_triage", OUTPUT_CONVERTER));
-            return classifyResponse(extractText(chatModel.call(retry), "triage"));
+            try {
+                return classifyResponse(extractText(chatModel.call(retry), "triage"));
+            }
+            catch (ModelOutputException terminalFailure) {
+                reportBoundaryFailure(requiredFailureObserver, terminalFailure, AlertModelFailureStage.TRIAGE_PARSE);
+                throw terminalFailure;
+            }
+            catch (RuntimeException exception) {
+                requiredFailureObserver.accept(AlertModelFailureStage.PROVIDER_CALL);
+                throw exception;
+            }
+        }
+        catch (RuntimeException exception) {
+            requiredFailureObserver.accept(AlertModelFailureStage.PROVIDER_CALL);
+            throw exception;
         }
     }
 
     private AlertClassificationResult classifyResponse(String text) {
-        TriageModelOutput output = AlertStructuredOutputSupport.convert(OUTPUT_READER, text, "triage");
-        return output.toResult();
+        try {
+            TriageModelOutput output = AlertStructuredOutputSupport.convert(OUTPUT_READER, text, "triage");
+            return output.toResult();
+        }
+        catch (ModelOutputException exception) {
+            throw new ModelOutputException(exception.getMessage(), AlertModelFailureStage.TRIAGE_PARSE);
+        }
     }
 
     private static String extractText(ChatResponse response, String context) {
         if (response == null || response.getResult() == null || response.getResult().getOutput() == null) {
-            throw new ModelOutputException(context + " response was empty");
+            throw new ModelOutputException(context + " response was empty", AlertModelFailureStage.EMPTY_RESPONSE);
         }
         String text = response.getResult().getOutput().getText();
         if (text == null || text.isBlank()) {
-            throw new ModelOutputException(context + " response text was blank");
+            throw new ModelOutputException(context + " response text was blank", AlertModelFailureStage.EMPTY_RESPONSE);
         }
         return text;
+    }
+
+    private static void reportBoundaryFailure(
+            Consumer<AlertModelFailureStage> failureObserver,
+            ModelOutputException failure,
+            AlertModelFailureStage fallbackStage) {
+        failureObserver.accept(failure.failureStage() == null ? fallbackStage : failure.failureStage());
     }
 
     public enum AlertPriority {

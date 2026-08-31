@@ -9,6 +9,11 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.prompt.Prompt;
 
 import java.time.Instant;
 import java.util.List;
@@ -17,6 +22,10 @@ import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class AlertTriageAgentTest {
 
@@ -136,6 +145,36 @@ class AlertTriageAgentTest {
                 .hasMessage("triage structured output was invalid")
                 .hasNoCause();
         assertThat(model.callCount()).isEqualTo(2);
+    }
+
+    @Test
+    void terminalModelBoundaryFailuresLogOnlyAllowlistedStages() {
+        String sentinel = "RAW_PROVIDER_SENTINEL_6f7a9d";
+        ChatModel emptyModel = mock(ChatModel.class);
+        when(emptyModel.call(any(Prompt.class))).thenReturn(null);
+        ChatModel failingModel = mock(ChatModel.class);
+        when(failingModel.call(any(Prompt.class))).thenThrow(new IllegalStateException(sentinel));
+
+        assertBoundaryFailureStage(new TestChatModel(sentinel, sentinel), AlertModelFailureStage.TRIAGE_PARSE);
+        assertBoundaryFailureStage(emptyModel, AlertModelFailureStage.EMPTY_RESPONSE);
+        assertBoundaryFailureStage(failingModel, AlertModelFailureStage.PROVIDER_CALL);
+        ChatModel retryFailingModel = mock(ChatModel.class);
+        when(retryFailingModel.call(any(Prompt.class)))
+                .thenReturn(response("not-json"))
+                .thenThrow(new IllegalStateException(sentinel));
+        assertBoundaryFailureStage(retryFailingModel, AlertModelFailureStage.PROVIDER_CALL);
+    }
+
+    private static void assertBoundaryFailureStage(ChatModel model, AlertModelFailureStage stage) {
+        List<AlertModelFailureStage> observedStages = new java.util.ArrayList<>();
+
+        catchThrowable(() -> new AlertTriageAgent(model).classify(sampleAlert(), observedStages::add));
+
+        assertThat(observedStages).containsExactly(stage);
+    }
+
+    private static ChatResponse response(String text) {
+        return new ChatResponse(List.of(new Generation(new AssistantMessage(text))));
     }
 
     private static Stream<String> strictlyInvalidTriageOutputs() {

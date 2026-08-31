@@ -152,7 +152,7 @@ class AlertWorkflowPreflightProbeTest {
             assertThat(result).isEqualTo(ShowcaseProbeResult.FAILED);
             assertThat(appender.list).hasSize(1);
             String message = appender.list.get(0).getFormattedMessage();
-            assertThat(message).isEqualTo("alert preflight failed: stage=APPROVAL_BOUNDARY, "
+            assertThat(message).isEqualTo("alert preflight failed: stage=WORKFLOW_INVARIANT, "
                     + "code=INVARIANT_MISMATCH, waitingApproval=true, diagnosisPresent=true, "
                     + "errorsEmpty=true, workOrderAbsent=true, approvalAbsent=false");
             assertThat(message).doesNotContain(

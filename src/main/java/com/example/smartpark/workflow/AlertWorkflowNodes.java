@@ -7,6 +7,7 @@ import com.alibaba.cloud.ai.graph.action.AsyncNodeActionWithConfig;
 import com.alibaba.cloud.ai.graph.action.InterruptableAction;
 import com.alibaba.cloud.ai.graph.action.InterruptionMetadata;
 import com.example.smartpark.agent.AlertDiagnosisAgent;
+import com.example.smartpark.agent.AlertModelFailureStage;
 import com.example.smartpark.agent.AlertTriageAgent;
 import com.example.smartpark.model.alert.Alert;
 import com.example.smartpark.model.alert.ParkContext;
@@ -31,6 +32,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 
 import static com.alibaba.cloud.ai.graph.action.AsyncNodeAction.node_async;
 
@@ -59,6 +61,7 @@ public final class AlertWorkflowNodes {
     private final WorkflowEventPublisher eventPublisher;
     private final Clock clock;
     private final RiskGate riskGate;
+    private final Consumer<AlertModelFailureStage> failureObserver;
 
     public AlertWorkflowNodes(
             AlertTriageAgent triageAgent,
@@ -86,6 +89,23 @@ public final class AlertWorkflowNodes {
             double confidenceThreshold,
             com.example.smartpark.port.energy.EnergyPort energyPort,
             com.example.smartpark.port.security.SecurityPort securityPort) {
+        this(triageAgent, diagnosisAgent, devicePort, alertPort, workOrderPort, knowledgePort,
+                eventPublisher, clock, confidenceThreshold, energyPort, securityPort, null);
+    }
+
+    public AlertWorkflowNodes(
+            AlertTriageAgent triageAgent,
+            AlertDiagnosisAgent diagnosisAgent,
+            DevicePort devicePort,
+            AlertPort alertPort,
+            WorkOrderPort workOrderPort,
+            KnowledgePort knowledgePort,
+            WorkflowEventPublisher eventPublisher,
+            Clock clock,
+            double confidenceThreshold,
+            com.example.smartpark.port.energy.EnergyPort energyPort,
+            com.example.smartpark.port.security.SecurityPort securityPort,
+            Consumer<AlertModelFailureStage> failureObserver) {
         this.triageAgent = Objects.requireNonNull(triageAgent, "triageAgent");
         this.diagnosisAgent = Objects.requireNonNull(diagnosisAgent, "diagnosisAgent");
         this.devicePort = Objects.requireNonNull(devicePort, "devicePort");
@@ -97,6 +117,7 @@ public final class AlertWorkflowNodes {
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.riskGate = new RiskGate(confidenceThreshold);
+        this.failureObserver = failureObserver;
     }
 
     public AsyncNodeAction classifyAlert() {
@@ -113,7 +134,7 @@ public final class AlertWorkflowNodes {
                     WorkflowFailure.Code.CLASSIFICATION_FAILED,
                     "Unable to classify alert",
                     CLASSIFY_ALERT,
-                    () -> triageAgent.classify(alert));
+                    () -> classify(alert));
             return delta(
                     AlertWorkflowState.ALERT, AlertWorkflowState.serializable(alert),
                     AlertWorkflowState.CLASSIFICATION, AlertWorkflowState.serializable(classification),
@@ -233,7 +254,7 @@ public final class AlertWorkflowNodes {
                     WorkflowFailure.Code.DIAGNOSIS_FAILED,
                     "Unable to diagnose alert",
                     DIAGNOSE_ALERT,
-                    () -> diagnosisAgent.diagnose(
+                    () -> diagnose(
                             workflowState.alert(),
                             workflowState.parkContext(),
                             workflowState.retrievedDocuments(),
@@ -245,6 +266,22 @@ public final class AlertWorkflowNodes {
                     AlertWorkflowState.DIAGNOSIS, AlertWorkflowState.serializable(diagnosis),
                     AlertWorkflowState.RISK_LEVEL, AlertWorkflowState.serializable(diagnosis.riskLevel()));
         });
+    }
+
+    private AlertTriageAgent.AlertClassificationResult classify(Alert alert) {
+        return failureObserver == null
+                ? triageAgent.classify(alert)
+                : triageAgent.classify(alert, failureObserver);
+    }
+
+    private Diagnosis diagnose(
+            Alert alert,
+            ParkContext context,
+            List<KnowledgeDocument> documents,
+            Consumer<String> toolAuditor) {
+        return failureObserver == null
+                ? diagnosisAgent.diagnose(alert, context, documents, toolAuditor)
+                : diagnosisAgent.diagnose(alert, context, documents, toolAuditor, failureObserver);
     }
 
     public AsyncNodeAction riskGate() {

@@ -53,6 +53,7 @@ public final class AlertPreflightWorkflowFactory {
                 WorkflowExecutionStore.inMemory(),
                 WorkflowEventPublisher.inMemory(),
                 energyPort,
-                securityPort);
+                securityPort,
+                new AlertPreflightBoundaryObserver());
     }
 }

@@ -98,7 +98,7 @@ public class AlertDiagnosisAgent {
     }
 
     public Diagnosis diagnose(Alert alert, ParkContext context, List<KnowledgeDocument> documents) {
-        return diagnose(alert, context, documents, ignored -> { });
+        return diagnose(alert, context, documents, ignored -> { }, ignored -> { });
     }
 
     public Diagnosis diagnose(
@@ -106,10 +106,21 @@ public class AlertDiagnosisAgent {
             ParkContext context,
             List<KnowledgeDocument> documents,
             Consumer<String> toolAuditor) {
+        return diagnose(alert, context, documents, toolAuditor, ignored -> { });
+    }
+
+    public Diagnosis diagnose(
+            Alert alert,
+            ParkContext context,
+            List<KnowledgeDocument> documents,
+            Consumer<String> toolAuditor,
+            Consumer<AlertModelFailureStage> failureObserver) {
         Objects.requireNonNull(alert, "alert");
         Objects.requireNonNull(context, "context");
         List<KnowledgeDocument> safeDocuments = List.copyOf(Objects.requireNonNull(documents, "documents"));
         Consumer<String> requiredToolAuditor = Objects.requireNonNull(toolAuditor, "toolAuditor");
+        Consumer<AlertModelFailureStage> requiredFailureObserver = Objects.requireNonNull(
+                failureObserver, "failureObserver");
 
         Prompt prompt = new Prompt(
                 new SystemMessage(PromptCatalog.diagnosisSystemPrompt(toolNames()) + OUTPUT_CONVERTER.getFormat()),
@@ -123,7 +134,21 @@ public class AlertDiagnosisAgent {
                             + OUTPUT_CONVERTER.getFormat()
                             + PromptCatalog.strictRetryInstruction()),
                     new UserMessage(PromptCatalog.diagnosisUserPrompt(alert, context, safeDocuments)));
-            return createDiagnosis(callModel(retry, requiredToolAuditor), alert, safeDocuments);
+            try {
+                return createDiagnosis(callModel(retry, requiredToolAuditor), alert, safeDocuments);
+            }
+            catch (ModelOutputException terminalFailure) {
+                reportBoundaryFailure(requiredFailureObserver, terminalFailure);
+                throw terminalFailure;
+            }
+            catch (RuntimeException exception) {
+                requiredFailureObserver.accept(AlertModelFailureStage.PROVIDER_CALL);
+                throw exception;
+            }
+        }
+        catch (RuntimeException exception) {
+            requiredFailureObserver.accept(AlertModelFailureStage.PROVIDER_CALL);
+            throw exception;
         }
     }
 
@@ -133,7 +158,15 @@ public class AlertDiagnosisAgent {
                 .toolCallbacks(auditedToolCallbacks(toolAuditor))
                 .call()
                 .content();
-        return AlertStructuredOutputSupport.convert(OUTPUT_READER, content, "diagnosis");
+        if (content == null || content.isBlank()) {
+            throw new ModelOutputException("diagnosis response was empty", AlertModelFailureStage.EMPTY_RESPONSE);
+        }
+        try {
+            return AlertStructuredOutputSupport.convert(OUTPUT_READER, content, "diagnosis");
+        }
+        catch (ModelOutputException exception) {
+            throw new ModelOutputException(exception.getMessage(), AlertModelFailureStage.DIAGNOSIS_PARSE);
+        }
     }
 
     private Diagnosis createDiagnosis(
@@ -153,7 +186,9 @@ public class AlertDiagnosisAgent {
                 Instant.now());
 
         if (safeDocuments.isEmpty() && diagnosis.evidence().stream().noneMatch(item -> item.contains("INSUFFICIENT_EVIDENCE"))) {
-            throw new ModelOutputException("diagnosis must acknowledge insufficient evidence when no knowledge documents are available");
+            throw new ModelOutputException(
+                    "diagnosis must acknowledge insufficient evidence when no knowledge documents are available",
+                    AlertModelFailureStage.DIAGNOSIS_PARSE);
         }
 
         return diagnosis;
@@ -167,6 +202,13 @@ public class AlertDiagnosisAgent {
         return Stream.of(toolCallbacks)
                 .map(callback -> new AuditedToolCallback(callback, auditor))
                 .toArray(ToolCallback[]::new);
+    }
+
+    private static void reportBoundaryFailure(
+            Consumer<AlertModelFailureStage> failureObserver,
+            ModelOutputException failure) {
+        AlertModelFailureStage stage = failure.failureStage();
+        failureObserver.accept(stage == null ? AlertModelFailureStage.DIAGNOSIS_PARSE : stage);
     }
 
     private List<String> toolNames() {

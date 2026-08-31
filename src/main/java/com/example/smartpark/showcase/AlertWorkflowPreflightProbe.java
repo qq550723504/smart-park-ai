@@ -38,7 +38,7 @@ public final class AlertWorkflowPreflightProbe implements ShowcasePreflightProbe
         }
         log.warn("alert preflight failed: stage={}, code={}, waitingApproval={}, diagnosisPresent={}, "
                         + "errorsEmpty={}, workOrderAbsent={}, approvalAbsent={}",
-                FailureStage.APPROVAL_BOUNDARY,
+                FailureStage.WORKFLOW_INVARIANT,
                 FailureCode.INVARIANT_MISMATCH,
                 waitingApproval,
                 diagnosisPresent,
@@ -49,7 +49,7 @@ public final class AlertWorkflowPreflightProbe implements ShowcasePreflightProbe
     }
 
     private enum FailureStage {
-        APPROVAL_BOUNDARY
+        WORKFLOW_INVARIANT
     }
 
     private enum FailureCode {

@@ -23,6 +23,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 
@@ -34,6 +39,9 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class AlertDiagnosisAgentTest {
 
@@ -373,6 +381,29 @@ class AlertDiagnosisAgentTest {
         }
     }
 
+    @Test
+    void terminalDiagnosisParseFailureReportsOnlyItsAllowlistedStage() {
+        List<AlertModelFailureStage> observedStages = new java.util.ArrayList<>();
+        TestChatModel model = new TestChatModel("not-json", "not-json");
+
+        catchThrowable(() -> agent(model).diagnose(
+                sampleAlert(), sampleContext(), sampleKnowledge(), ignored -> { }, observedStages::add));
+
+        assertThat(observedStages).containsExactly(AlertModelFailureStage.DIAGNOSIS_PARSE);
+    }
+
+    @Test
+    void retryProviderFailureReportsOnlyTheProviderCallStage() {
+        ChatModel model = mock(ChatModel.class);
+        when(model.call(any(Prompt.class))).thenReturn(response("not-json")).thenThrow(new IllegalStateException("secret"));
+        List<AlertModelFailureStage> observedStages = new java.util.ArrayList<>();
+
+        catchThrowable(() -> agent(model).diagnose(
+                sampleAlert(), sampleContext(), sampleKnowledge(), ignored -> { }, observedStages::add));
+
+        assertThat(observedStages).containsExactly(AlertModelFailureStage.PROVIDER_CALL);
+    }
+
     @ParameterizedTest
     @MethodSource("invalidConfidences")
     void invalidConfidenceIsRejectedAtTheStructuredOutputBoundary(String confidence) {
@@ -399,7 +430,7 @@ class AlertDiagnosisAgentTest {
                 "{\"riskLevel\":\"LOW\",\"rootCause\":\"cause\",\"summary\":\"summary\",\"evidence\":[123],\"recommendedAction\":\"action\",\"confidence\":0.5}");
     }
 
-    private static AlertDiagnosisAgent agent(TestChatModel model) {
+    private static AlertDiagnosisAgent agent(ChatModel model) {
         MockParkFixture parkSystem = new MockParkFixture();
         return new AlertDiagnosisAgent(
                 model,
@@ -407,6 +438,10 @@ class AlertDiagnosisAgentTest {
                 new AlertQueryTool(parkSystem.alerts()),
                 new WorkOrderTool(parkSystem.workOrders()),
                 new ParkKnowledgeTool(parkSystem.knowledge()));
+    }
+
+    private static ChatResponse response(String text) {
+        return new ChatResponse(List.of(new Generation(new AssistantMessage(text))));
     }
 
     private static Alert sampleAlert() {
