@@ -118,6 +118,45 @@ describe('useOperationsAnalysis', () => {
     expect(clarified).toBe(true)
   })
 
+  it('keeps polling a clarified run when renewed trace setup is unavailable', async () => {
+    let clarified = false
+    let subscriptions = 0
+    const trace = {
+      events: ref<ExecutionEvent[]>([]),
+      subscribe() {
+        subscriptions += 1
+        if (subscriptions === 2) throw new Error('EventSource unavailable')
+      },
+    }
+    handler = (url, init) => {
+      if (url.includes('/clarifications')) {
+        clarified = true
+        return jsonResponse({ runId: RUN_ID, status: 'RUNNING', createdAt: '' })
+      }
+      if (init?.method === 'POST') return jsonResponse({ runId: RUN_ID }, 202)
+      if (/\/runs\/[0-9a-f-]+$/.test(url)) {
+        return jsonResponse({
+          runId: RUN_ID,
+          status: clarified ? 'COMPLETED' : 'NEEDS_CLARIFICATION',
+          clarificationQuestions: clarified ? undefined : ['请选择告警口径'],
+          createdAt: '',
+        })
+      }
+      return jsonResponse({}, 404)
+    }
+
+    const analysis = useOperationsAnalysis({ trace, pollIntervalMs: 1 })
+    await analysis.submit('告警情况')
+    analysis.selections.value = [{ term: '告警', metric: 'alert_count' }]
+
+    await analysis.clarify()
+
+    expect(subscriptions).toBe(2)
+    expect(analysis.phase.value).toBe('completed')
+    expect(analysis.dto.value?.status).toBe('COMPLETED')
+    expect(analysis.error.value).toBe('')
+  })
+
   it('continues checking a paused run so clarification expiry reaches the UI', async () => {
     const trace = fakeTrace()
     let statusCalls = 0

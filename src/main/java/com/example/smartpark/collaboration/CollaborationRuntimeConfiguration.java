@@ -130,7 +130,8 @@ public class CollaborationRuntimeConfiguration {
                 EvidenceLedger observed = new EvidenceLedger();
                 ToolCallback[] callbacks = audited(toolSet.callbacks(), observed, events, runId);
                 String primaryEvidence = collectPrimaryEvidence(domain, assignment, callbacks);
-                Set<String> primaryEvidenceRefs = observed.snapshot();
+                ExpertFindingValidator validator = new ExpertFindingValidator();
+                Set<String> primaryEvidenceRefs = validator.usableEvidenceRefs(observed.snapshotObservations());
                 String userPrompt = primaryEvidence.isEmpty() ? assignment
                         : assignment + "\n\nServer-collected read-only evidence:\n" + primaryEvidence;
                 String response = modelTextWithTools(model,
@@ -138,7 +139,7 @@ public class CollaborationRuntimeConfiguration {
                         userPrompt, callbacks);
                 ExpertFinding finding = bindPrimaryEvidence(
                         new ExpertFindingParser().parse(response, domain), primaryEvidenceRefs);
-                return new ExpertFindingValidator().validateWithObservations(
+                return validator.validateWithObservations(
                         finding, observed.snapshotObservations(), assignment);
             }
         };
@@ -164,18 +165,25 @@ public class CollaborationRuntimeConfiguration {
     static String collectPrimaryEvidence(ExpertDomain domain, String assignment, ToolCallback[] callbacks) {
         PrimaryEvidenceSpec spec = primaryEvidenceSpec(domain);
         java.util.regex.Matcher matcher = spec.entityPattern().matcher(assignment == null ? "" : assignment);
-        if (!matcher.find()) return "";
-        String entityId = matcher.group().toUpperCase(java.util.Locale.ROOT);
         ToolCallback callback = java.util.Arrays.stream(callbacks)
                 .filter(candidate -> spec.toolName().equals(candidate.getToolDefinition().name()))
                 .findFirst().orElse(null);
         if (callback == null) return "";
-        try {
-            return callback.call("{\"" + spec.argumentName() + "\":\"" + entityId + "\"}");
-        } catch (RuntimeException toolFailure) {
-            LOG.warn("PRIMARY_EVIDENCE_COLLECTION_FAILED");
-            return "";
+
+        java.util.Set<String> entityIds = new java.util.LinkedHashSet<>();
+        while (matcher.find()) {
+            entityIds.add(matcher.group().toUpperCase(java.util.Locale.ROOT));
         }
+        java.util.List<String> evidence = new java.util.ArrayList<>();
+        for (String entityId : entityIds) {
+            try {
+                String result = callback.call("{\"" + spec.argumentName() + "\":\"" + entityId + "\"}");
+                if (result != null && !result.isBlank()) evidence.add(result);
+            } catch (RuntimeException toolFailure) {
+                LOG.warn("PRIMARY_EVIDENCE_COLLECTION_FAILED");
+            }
+        }
+        return String.join("\n", evidence);
     }
 
     private static PrimaryEvidenceSpec primaryEvidenceSpec(ExpertDomain domain) {

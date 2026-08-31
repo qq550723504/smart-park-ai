@@ -140,6 +140,109 @@ class CollaborationRuntimeConfigurationTest {
     }
 
     @Test
+    void collectsPrimaryEvidenceForEveryUniqueSameDomainEntity() {
+        InMemoryExecutionEventPublisher events = new InMemoryExecutionEventPublisher();
+        UUID runId = UUID.randomUUID();
+        EvidenceLedger ledger = new EvidenceLedger();
+        List<String> inputs = new java.util.ArrayList<>();
+        ToolCallback callback = namedCallback("lookupEnergyConsumption", arguments -> {
+            inputs.add(arguments);
+            return arguments.contains("DEV-ENERGY-001")
+                    ? "{\"meterId\":\"DEV-ENERGY-001\",\"currentKwh\":138}"
+                    : "{\"meterId\":\"DEV-ENERGY-002\",\"currentKwh\":92}";
+        });
+
+        String evidence = CollaborationRuntimeConfiguration.collectPrimaryEvidence(
+                ExpertDomain.ENERGY,
+                "compare DEV-ENERGY-001 with DEV-ENERGY-002 and DEV-ENERGY-001 again",
+                new ToolCallback[]{CollaborationRuntimeConfiguration.audited(callback, ledger, events, runId)});
+
+        assertThat(inputs).containsExactly(
+                "{\"meterId\":\"DEV-ENERGY-001\"}",
+                "{\"meterId\":\"DEV-ENERGY-002\"}");
+        assertThat(evidence).contains("DEV-ENERGY-001", "DEV-ENERGY-002", "currentKwh");
+        assertThat(ledger.snapshotObservations()).hasSize(2);
+        assertThat(events.history(runId)).extracting(event -> event.eventType())
+                .containsExactly(
+                        ExecutionEventType.TOOL_CALL_STARTED, ExecutionEventType.TOOL_CALL_COMPLETED,
+                        ExecutionEventType.TOOL_CALL_STARTED, ExecutionEventType.TOOL_CALL_COMPLETED);
+    }
+
+    @Test
+    void retainsSuccessfulPrimaryEvidenceWhenAnotherEntityReturnsAnErrorResult() {
+        EvidenceLedger ledger = new EvidenceLedger();
+        List<String> inputs = new java.util.ArrayList<>();
+        ToolCallback callback = namedCallback("lookupEnergyConsumption", arguments -> {
+            inputs.add(arguments);
+            return arguments.contains("DEV-ENERGY-001")
+                    ? "{\"error\":\"meter not found\"}"
+                    : "{\"meterId\":\"DEV-ENERGY-002\",\"currentKwh\":92}";
+        });
+
+        CollaborationRuntimeConfiguration.collectPrimaryEvidence(
+                ExpertDomain.ENERGY,
+                "compare DEV-ENERGY-001 with DEV-ENERGY-002",
+                new ToolCallback[]{CollaborationRuntimeConfiguration.audited(
+                        callback, ledger, new InMemoryExecutionEventPublisher(), UUID.randomUUID())});
+
+        var usableRefs = new com.example.smartpark.collaboration.expert.ExpertFindingValidator()
+                .usableEvidenceRefs(ledger.snapshotObservations());
+        assertThat(inputs).hasSize(2);
+        assertThat(ledger.snapshotObservations()).hasSize(2);
+        assertThat(usableRefs).hasSize(1);
+        assertThat(ledger.snapshotObservations())
+                .filteredOn(observation -> usableRefs.contains(observation.ref()))
+                .singleElement().satisfies(observation ->
+                        assertThat(observation.input()).contains("DEV-ENERGY-002"));
+
+        var modelFinding = new com.example.smartpark.collaboration.model.ExpertFinding(
+                ExpertDomain.ENERGY,
+                com.example.smartpark.collaboration.model.FindingStatus.INSUFFICIENT_EVIDENCE,
+                "provider output is not trusted", List.of(), 0, List.of());
+        var validator = new com.example.smartpark.collaboration.expert.ExpertFindingValidator();
+        var validated = validator.validateWithObservations(
+                CollaborationRuntimeConfiguration.bindPrimaryEvidence(modelFinding, usableRefs),
+                ledger.snapshotObservations(),
+                "compare DEV-ENERGY-001 with DEV-ENERGY-002");
+
+        assertThat(validated.status())
+                .isEqualTo(com.example.smartpark.collaboration.model.FindingStatus.SUPPORTED);
+        assertThat(validated.evidenceRefs()).containsExactlyElementsOf(usableRefs);
+        assertThat(validated.conclusion()).contains("DEV-ENERGY-002").doesNotContain("meter not found");
+    }
+
+    @Test
+    void continuesPrimaryEvidenceCollectionAfterOneEntityThrows() {
+        InMemoryExecutionEventPublisher events = new InMemoryExecutionEventPublisher();
+        UUID runId = UUID.randomUUID();
+        EvidenceLedger ledger = new EvidenceLedger();
+        List<String> inputs = new java.util.ArrayList<>();
+        ToolCallback callback = namedCallback("lookupEnergyConsumption", arguments -> {
+            inputs.add(arguments);
+            if (arguments.contains("DEV-ENERGY-001")) {
+                throw new IllegalStateException("meter unavailable");
+            }
+            return "{\"meterId\":\"DEV-ENERGY-002\",\"currentKwh\":92}";
+        });
+
+        String evidence = CollaborationRuntimeConfiguration.collectPrimaryEvidence(
+                ExpertDomain.ENERGY,
+                "compare DEV-ENERGY-001 with DEV-ENERGY-002",
+                new ToolCallback[]{CollaborationRuntimeConfiguration.audited(callback, ledger, events, runId)});
+
+        assertThat(inputs).containsExactly(
+                "{\"meterId\":\"DEV-ENERGY-001\"}",
+                "{\"meterId\":\"DEV-ENERGY-002\"}");
+        assertThat(evidence).contains("DEV-ENERGY-002").doesNotContain("DEV-ENERGY-001");
+        assertThat(ledger.snapshotObservations()).singleElement().satisfies(observation ->
+                assertThat(observation.input()).contains("DEV-ENERGY-002"));
+        assertThat(events.history(runId)).extracting(event -> event.eventType())
+                .containsExactly(
+                        ExecutionEventType.TOOL_CALL_STARTED, ExecutionEventType.TOOL_CALL_FAILED,
+                        ExecutionEventType.TOOL_CALL_STARTED, ExecutionEventType.TOOL_CALL_COMPLETED);
+    }
+
+    @Test
     void skipsPrimaryEvidenceWhenAssignmentHasNoDomainEntity() {
         ToolCallback callback = namedCallback("lookupSecurityEvent", arguments -> {
             throw new AssertionError("callback must not be invoked without a security event ID");

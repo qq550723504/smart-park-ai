@@ -138,6 +138,15 @@ export function useOperationsAnalysis(
     }
   }
 
+  function subscribeTraceBestEffort(targetRunId: string): void {
+    try {
+      options.trace?.subscribe(targetRunId)
+    } catch {
+      // REST acceptance owns the run lifecycle. Trace transport is optional,
+      // so setup failures must not turn an accepted run into a retryable one.
+    }
+  }
+
   async function submit(question: string, callbacks?: AnalysisStartCallbacks): Promise<void> {
     if (!question.trim()) {
       error.value = '请输入分析问题'
@@ -160,12 +169,7 @@ export function useOperationsAnalysis(
       runId.value = startedRunId
       accepted = true
       callbacks?.onAccepted?.(startedRunId)
-      try {
-        options.trace?.subscribe(startedRunId)
-      } catch {
-        // The backend has accepted the run; a local trace setup failure must
-        // not report it as failed or cause a retry to create a second run.
-      }
+      subscribeTraceBestEffort(startedRunId)
       const terminal = await pollToTerminal(startedRunId, generation)
       if (generation !== operationGeneration || !terminal) return
       applyTerminal(terminal)
@@ -193,7 +197,7 @@ export function useOperationsAnalysis(
     try {
       await submitClarification(targetRunId, selections.value)
       if (generation !== operationGeneration) return
-      options.trace?.subscribe(targetRunId)
+      subscribeTraceBestEffort(targetRunId)
       const terminal = await pollToTerminal(targetRunId, generation)
       if (generation !== operationGeneration || !terminal) return
       applyTerminal(terminal)
