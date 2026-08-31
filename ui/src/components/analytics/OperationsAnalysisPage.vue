@@ -44,6 +44,7 @@ const analysis = useOperationsAnalysis({
 })
 const chosenMetrics = ref<string[]>([])
 let cancelGuidedAnalysisStart: (() => void) | null = null
+let pendingGuidedAnalysisStart: { promise: Promise<void>; cancel: () => void; question: string } | null = null
 let returnedFromShowcase = !props.active
 
 onScopeDispose(() => {
@@ -51,7 +52,13 @@ onScopeDispose(() => {
 })
 
 watch(() => props.active, (active) => {
-  if (!active) returnedFromShowcase = true
+  if (!active) {
+    returnedFromShowcase = true
+    return
+  }
+  // The analysis composable keeps an accepted run alive while its page is
+  // hidden. Reclaim the shared execution trace when the page becomes active.
+  if (analysis.runId.value) props.trace?.subscribe(analysis.runId.value)
 })
 
 function launchAnalysis(callbacks?: AnalysisStartCallbacks): void {
@@ -71,29 +78,40 @@ function submitAnalysisForm(): void {
 
 function startGuidedAnalysis(): Promise<void> {
   cancelGuidedAnalysisStart?.()
-  return new Promise((resolve, reject) => {
+  const submittedQuestion = question.value.trim()
+  let pending: { promise: Promise<void>; cancel: () => void; question: string }
+  const promise = new Promise<void>((resolve, reject) => {
     let settled = false
+    const clearPending = () => {
+      if (pendingGuidedAnalysisStart === pending) pendingGuidedAnalysisStart = null
+    }
     const cancel = () => {
       if (settled) return
       settled = true
       if (cancelGuidedAnalysisStart === cancel) cancelGuidedAnalysisStart = null
+      clearPending()
       reject(new Error('运营分析启动已取消'))
     }
     const accept = () => {
       if (settled) return
       settled = true
       if (cancelGuidedAnalysisStart === cancel) cancelGuidedAnalysisStart = null
+      clearPending()
       resolve()
     }
     const fail = (cause: Error) => {
       if (settled) return
       settled = true
       if (cancelGuidedAnalysisStart === cancel) cancelGuidedAnalysisStart = null
+      clearPending()
       reject(cause)
     }
     cancelGuidedAnalysisStart = cancel
     launchAnalysis({ onAccepted: accept, onFailed: fail })
   })
+  pending = { promise, cancel: cancelGuidedAnalysisStart!, question: submittedQuestion }
+  pendingGuidedAnalysisStart = pending
+  return promise
 }
 
 useGuidedLaunch({
@@ -106,8 +124,17 @@ useGuidedLaunch({
     const preservingExistingRun = returnedFromShowcase
       && analysis.runId.value
       && (analysis.phase.value === 'running' || analysis.phase.value === 'clarification')
+    const preservingPendingRun = returnedFromShowcase
+      && !analysis.runId.value
+      && analysis.phase.value === 'running'
+      && pendingGuidedAnalysisStart?.question === guidedQuestion
     returnedFromShowcase = false
     if (preservingExistingRun) {
+      return { state: 'started', message: '已保留当前运营分析，请继续查看' }
+    }
+    if (preservingPendingRun) {
+      question.value = guidedQuestion
+      await pendingGuidedAnalysisStart!.promise
       return { state: 'started', message: '已保留当前运营分析，请继续查看' }
     }
     question.value = guidedQuestion

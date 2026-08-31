@@ -141,10 +141,12 @@ const evidenceItems = computed<WorkbenchEvidenceItem[]>(() => [
   { label: '执行模式', ...executionEvidenceByView[activeView.value] },
 ])
 watch(
-  () => workflow.value?.workflowId,
-  (workflowId) => {
-    if (workflowId) {
-      // 订阅会重放统一发布器中的全部历史事件，重复调用是安全的。
+  () => [workflow.value?.workflowId, activeView.value] as const,
+  ([workflowId, view]) => {
+    if (view === 'workflow' && workflowId) {
+      // The trace is shared by all scenario pages. Reclaim it whenever the
+      // alert view becomes active again, otherwise another page's run remains
+      // visible while this workflow is still running.
       trace.subscribe(alertWorkflowRunId(workflowId))
     }
   },

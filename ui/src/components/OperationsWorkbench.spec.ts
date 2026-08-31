@@ -427,6 +427,57 @@ describe('OperationsWorkbench', () => {
     }
   })
 
+  it('resubscribes to the alert execution trace when returning to the workflow view', async () => {
+    const executionSubscriptions: string[] = []
+    const originalEventSource = globalThis.EventSource
+    globalThis.EventSource = class {
+      onerror: ((event: Event) => void) | null = null
+      constructor(url: string | URL) {
+        const value = String(url)
+        if (value.includes('/api/executions/')) executionSubscriptions.push(value)
+      }
+      addEventListener(): void {}
+      close(): void {}
+    } as unknown as typeof EventSource
+    globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        return new Response(JSON.stringify({
+          workflowId: 'wf-trace-reentry', alertId: 'ALT-TEMP-001', status: 'RUNNING',
+          diagnosis: null, approval: null, workOrder: null, errors: [], eventSequence: 1, riskReasons: [],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({
+        knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }) as typeof fetch
+
+    try {
+      const wrapper = mount(OperationsWorkbench, {
+        props: {
+          active: true,
+          initialView: 'workflow',
+          launchRequest: {
+            requestId: 22, mode: 'guided', scenarioId: 'ALERT_WORKFLOW', view: 'workflow',
+            launchInput: alertLaunchInput,
+          },
+        },
+        global: { stubs: operatorStubs },
+      })
+      await settleCapabilities()
+      expect(executionSubscriptions).toHaveLength(1)
+
+      await wrapper.get('[data-workbench-view="analytics"]').trigger('click')
+      await wrapper.get('[data-workbench-view="workflow"]').trigger('click')
+
+      expect(executionSubscriptions).toHaveLength(2)
+      expect(executionSubscriptions[1]).toBe(executionSubscriptions[0])
+      wrapper.unmount()
+    } finally {
+      globalThis.EventSource = originalEventSource
+    }
+  })
+
   it('resets a previously selected alert before starting the guided workflow', async () => {
     let guidedAlertId = ''
     const originalEventSource = globalThis.EventSource

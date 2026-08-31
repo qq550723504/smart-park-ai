@@ -7,6 +7,14 @@ import com.example.smartpark.collaboration.model.SupervisorPlan;
 import com.example.smartpark.collaboration.model.Synthesis;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.alibaba.cloud.ai.dashscope.api.DashScopeResponseFormat;
+import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.converter.BeanOutputConverter;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -19,6 +27,8 @@ import java.util.stream.Collectors;
 /** Supervisor synthesis is deliberately tool-free and can only consume validated findings. */
 public final class SupervisorSynthesizer {
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final BeanOutputConverter<SynthesisModelOutput> OUTPUT_CONVERTER =
+            new BeanOutputConverter<>(SynthesisModelOutput.class);
     private final SynthesisValidator validator;
 
     public SupervisorSynthesizer() { this(new SynthesisValidator()); }
@@ -66,7 +76,36 @@ public final class SupervisorSynthesizer {
         return validator.validate(synthesis, safeFindings, selectedDomains);
     }
 
+    /**
+     * Lets the supervisor make the cross-domain decision after the server has
+     * validated every expert finding. The model receives findings only, never
+     * tool callbacks or raw tool payloads, and the returned references/status
+     * are still checked against the validated finding set.
+     */
+    public Synthesis synthesize(ChatModel model, SupervisorPlan plan, List<ExpertFinding> findings) {
+        Objects.requireNonNull(model, "model");
+        String system = "You are the tool-free supervisor for park collaboration. "
+                + "Decide the cross-domain relationship from the validated expert findings below. "
+                + "Answer the user's relationship question directly in conclusion, with an explicit "
+                + "decision: 有关联、无关联 or 无法确认. Use only facts present in the findings; do not "
+                + "invent facts, expose raw tool payloads, or return independent domain summaries instead "
+                + "of the relationship decision. Return only JSON with status, selectedDomains, evidenceRefs, "
+                + "confidence, conclusion, uncertainties. If status is SUPPORTED, select every SUPPORTED "
+                + "finding and copy exactly its evidence references. If status is INSUFFICIENT_EVIDENCE or "
+                + "FAILED, selectedDomains and evidenceRefs must both be empty and confidence must be 0."
+                + OUTPUT_CONVERTER.getFormat();
+        ChatResponse response = model.call(new Prompt(
+                List.of(new SystemMessage(system), new UserMessage("plan=" + plan + "\nfindings=" + findings)),
+                synthesisProviderOptions()));
+        return parseAndValidate(extract(response), plan, findings, true);
+    }
+
     public Synthesis parseAndValidate(String modelJson, SupervisorPlan plan, List<ExpertFinding> findings) {
+        return parseAndValidate(modelJson, plan, findings, false);
+    }
+
+    private Synthesis parseAndValidate(String modelJson, SupervisorPlan plan,
+                                       List<ExpertFinding> findings, boolean modelConclusion) {
         Objects.requireNonNull(plan, "plan");
         List<ExpertFinding> safeFindings = List.copyOf(findings);
         if (!safeFindings.stream().map(ExpertFinding::domain).allMatch(plan.selectedDomains()::contains)) {
@@ -86,7 +125,9 @@ public final class SupervisorSynthesizer {
             if (!Double.isFinite(modelConfidence) || modelConfidence < 0 || modelConfidence > 1) {
                 throw new IllegalArgumentException("confidence must be between 0 and 1");
             }
-            String conclusion = deterministicConclusion(status, selectedDomains, safeFindings);
+            String conclusion = modelConclusion
+                    ? required(root, "conclusion")
+                    : deterministicConclusion(status, selectedDomains, safeFindings);
             double derivedConfidence = status == FindingStatus.SUPPORTED
                     ? safeFindings.stream()
                     .filter(finding -> selectedDomains.contains(finding.domain()))
@@ -106,7 +147,9 @@ public final class SupervisorSynthesizer {
             Synthesis synthesis = new Synthesis(
                     status, conclusion, status == FindingStatus.SUPPORTED ? strings(root.get("evidenceRefs")) : List.of(),
                     derivedConfidence, uncertainties);
-            return validator.validate(synthesis, safeFindings, selectedDomains);
+            return modelConclusion
+                    ? validator.validateModelSynthesis(synthesis, safeFindings, selectedDomains)
+                    : validator.validate(synthesis, safeFindings, selectedDomains);
         } catch (RuntimeException ex) {
             throw ex;
         } catch (Exception ex) {
@@ -118,6 +161,30 @@ public final class SupervisorSynthesizer {
         JsonNode value = root.get(field);
         if (value == null || !value.isTextual() || value.asText().isBlank()) throw new IllegalArgumentException(field + " must be non-empty");
         return value.asText().trim();
+    }
+
+    private static DashScopeChatOptions synthesisProviderOptions() {
+        DashScopeResponseFormat.JsonSchemaConfig schema = DashScopeResponseFormat.JsonSchemaConfig.builder()
+                .name("collaboration_supervisor_synthesis")
+                .description("Strict structured output for the cross-domain collaboration decision")
+                .schema(OUTPUT_CONVERTER.getJsonSchemaMap())
+                .strict(true)
+                .build();
+        return DashScopeChatOptions.builder()
+                .responseFormat(DashScopeResponseFormat.builder()
+                        .type(DashScopeResponseFormat.Type.JSON_SCHEMA)
+                        .jsonScheme(schema)
+                        .build())
+                .build();
+    }
+
+    private static String extract(ChatResponse response) {
+        if (response == null || response.getResult() == null || response.getResult().getOutput() == null
+                || response.getResult().getOutput().getText() == null
+                || response.getResult().getOutput().getText().isBlank()) {
+            throw new IllegalStateException("collaboration synthesis model response was blank");
+        }
+        return response.getResult().getOutput().getText();
     }
 
     private static List<String> strings(JsonNode node) {
@@ -161,4 +228,12 @@ public final class SupervisorSynthesizer {
         }
         return status == FindingStatus.FAILED ? "专家协作失败" : "没有可验证的专家结论";
     }
+
+    private record SynthesisModelOutput(
+            FindingStatus status,
+            List<ExpertDomain> selectedDomains,
+            List<String> evidenceRefs,
+            double confidence,
+            String conclusion,
+            List<String> uncertainties) { }
 }

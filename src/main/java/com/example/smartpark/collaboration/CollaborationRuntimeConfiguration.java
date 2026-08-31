@@ -113,7 +113,7 @@ public class CollaborationRuntimeConfiguration {
         return new ExpertCollaborationService(
                 planner::planDeterministically,
                 graph,
-                synthesizer::synthesize,
+                (plan, findings) -> synthesizer.synthesize(model, plan, findings),
                 new CollaborationRunStore(), events, runExecutor, properties.getRunTimeout(), Clock.systemUTC());
     }
 

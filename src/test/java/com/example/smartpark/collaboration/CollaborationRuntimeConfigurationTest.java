@@ -71,11 +71,11 @@ class CollaborationRuntimeConfigurationTest {
             CollaborationRun run = context.getBean(ExpertCollaborationService.class)
                     .start("A2 夜间能耗升高的原因是什么");
             CollaborationRun completed = awaitTerminal(context.getBean(ExpertCollaborationService.class), run.runId());
-            assertThat(completed.status()).isEqualTo(CollaborationRun.RunStatus.COMPLETED);
+            assertThat(completed.status()).as(completed.error()).isEqualTo(CollaborationRun.RunStatus.COMPLETED);
             assertThat(completed.plan().selectedDomains()).containsExactly(ExpertDomain.ENERGY);
             assertThat(model.expertPrompts()).containsExactly("ENERGY");
             assertThat(model.supervisorPromptCount()).isZero();
-            assertThat(model.synthesisPromptCount()).isZero();
+            assertThat(model.synthesisPromptCount()).isOne();
         });
     }
 
@@ -87,11 +87,12 @@ class CollaborationRuntimeConfigurationTest {
             CollaborationRun run = context.getBean(ExpertCollaborationService.class)
                     .start("A2 夜间能耗升高且门禁告警、冷机离线，是否有关联");
             CollaborationRun completed = awaitTerminal(context.getBean(ExpertCollaborationService.class), run.runId());
-            assertThat(completed.status()).isEqualTo(CollaborationRun.RunStatus.COMPLETED);
+            assertThat(completed.status()).as(completed.error()).isEqualTo(CollaborationRun.RunStatus.COMPLETED);
             assertThat(completed.plan().selectedDomains())
                     .containsExactlyInAnyOrder(ExpertDomain.ENERGY, ExpertDomain.DEVICE, ExpertDomain.SECURITY);
             assertThat(model.expertPrompts()).containsExactlyInAnyOrder("ENERGY", "DEVICE", "SECURITY");
             assertThat(model.supervisorPromptCount()).isZero();
+            assertThat(model.synthesisPromptCount()).isOne();
         });
     }
 
@@ -102,7 +103,8 @@ class CollaborationRuntimeConfigurationTest {
         runner.run(context -> {
             CollaborationRun run = context.getBean(ExpertCollaborationService.class)
                     .start("A2 夜间能耗升高的原因是什么");
-            assertThat(awaitTerminal(context.getBean(ExpertCollaborationService.class), run.runId()).status())
+            var completed = awaitTerminal(context.getBean(ExpertCollaborationService.class), run.runId());
+            assertThat(completed.status()).as(completed.error())
                     .isEqualTo(CollaborationRun.RunStatus.COMPLETED);
 
             assertThat(model.expertSystemPrompts()).isNotEmpty().allSatisfy(prompt ->
@@ -373,7 +375,9 @@ class CollaborationRuntimeConfigurationTest {
             String system = prompt.getSystemMessage().getText();
             prompts.add(prompt);
             String json;
-            if (system.contains("collaboration supervisor")) {
+            if (system.contains("tool-free supervisor")) {
+                json = "{\"status\":\"INSUFFICIENT_EVIDENCE\",\"selectedDomains\":[],\"evidenceRefs\":[],\"confidence\":0,\"conclusion\":\"无法确认关联\",\"uncertainties\":[\"more evidence needed\"]}";
+            } else if (system.contains("collaboration supervisor")) {
                 String question = prompt.getUserMessage().getText();
                 boolean crossDomain = question.contains("门禁") || question.contains("冷机");
                 json = crossDomain
@@ -420,7 +424,9 @@ class CollaborationRuntimeConfigurationTest {
         }
 
         long supervisorPromptCount() {
-            return supervisorPrompts().size();
+            return supervisorPrompts().stream()
+                    .filter(prompt -> !prompt.getSystemMessage().getText().contains("tool-free supervisor"))
+                    .count();
         }
 
         long synthesisPromptCount() {

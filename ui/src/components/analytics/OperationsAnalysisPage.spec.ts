@@ -247,6 +247,53 @@ describe('OperationsAnalysisPage', () => {
     wrapper.unmount()
   })
 
+  it('coalesces a pending guided submission when returning from the showcase', async () => {
+    const pendingPost = deferred<Response>()
+    let posts = 0
+    handler = (_url, init) => {
+      if (init?.method === 'POST') {
+        posts += 1
+        return pendingPost.promise as unknown as Response
+      }
+      return jsonResponse({ runId: 'pending-run', status: 'RUNNING', createdAt: '' })
+    }
+    const wrapper = mount(OperationsAnalysisPage, {
+      props: {
+        active: true,
+        pollIntervalMs: 1,
+        launchRequest: {
+          requestId: 32, mode: 'guided', scenarioId: 'OPERATIONS_ANALYSIS', view: 'analytics',
+          launchInput: { alertId: null, question: '过去5天各楼宇能耗' },
+        },
+      },
+    })
+    await flush(1)
+    expect(posts).toBe(1)
+
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({
+      launchRequest: {
+        requestId: 33, mode: 'guided', scenarioId: 'OPERATIONS_ANALYSIS', view: 'analytics',
+        launchInput: { alertId: null, question: '过去5天各楼宇能耗' },
+      },
+    })
+    await wrapper.setProps({ active: true })
+    await flush(1)
+
+    expect(posts).toBe(1)
+    expect((wrapper.emitted('launch-status') ?? [])
+      .some(([update]) => (update as { requestId: number; state: string }).requestId === 32
+        && (update as { state: string }).state === 'failed')).toBe(false)
+
+    pendingPost.resolve(jsonResponse({ runId: 'pending-run' }, 202))
+    await flush(2)
+
+    expect(wrapper.emitted('launch-status')?.at(-1)?.[0]).toMatchObject({
+      requestId: 33, state: 'started', message: '已保留当前运营分析，请继续查看',
+    })
+    wrapper.unmount()
+  })
+
   it('waits for the newer guided request before reporting the accepted run', async () => {
     const firstPost = deferred<Response>()
     const secondPost = deferred<Response>()
