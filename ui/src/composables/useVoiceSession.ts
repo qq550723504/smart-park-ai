@@ -132,6 +132,34 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
     toolEvents.value = []
   }
 
+  function failCurrentTransport(
+    currentSocket: WebSocketLike,
+    generation: number,
+    message: string,
+  ): boolean {
+    if (generation !== lifecycleGeneration
+      || socket !== currentSocket
+      || intentionalClose) return false
+
+    // Invalidate pending microphone/capture work before releasing current
+    // resources so a late permission or startup result cannot revive this turn.
+    lifecycleGeneration++
+    connectionAttempt = null
+    microphoneToggleAttempt = null
+    socket = null
+    sessionId.value = null
+    runId.value = null
+    connectionPhase.value = 'failed'
+    voicePhase.value = null
+    errorMessage.value = message
+    suppressAudio = false
+    cancellingTurn = false
+    void stopInput()
+    player?.cancel()
+    player?.beginTurnReset()
+    return true
+  }
+
   async function openConnection(generation: number): Promise<boolean> {
     connectionPhase.value = 'connecting'
     errorMessage.value = ''
@@ -153,28 +181,18 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
       connectionPhase.value = 'connected'
     }
     currentSocket.onerror = () => {
-      if (generation !== lifecycleGeneration || socket !== currentSocket) return
-      socket = null
-      connectionPhase.value = 'failed'
-      errorMessage.value = '语音连接失败，请重试'
-      currentSocket.close()
+      if (failCurrentTransport(currentSocket, generation, '语音连接失败，请重试')) {
+        currentSocket.close()
+      }
     }
     currentSocket.onmessage = (event) => {
       if (generation !== lifecycleGeneration || socket !== currentSocket) return
       handleSocketMessage(event.data)
     }
     currentSocket.onclose = () => {
-      const isCurrentSocket = socket === currentSocket
-      if (isCurrentSocket) socket = null
       // Unexpected server-side drop surfaces as a failure; intentional
       // local close() must not overwrite a clean shutdown state.
-      if (generation === lifecycleGeneration
-        && isCurrentSocket
-        && !intentionalClose
-        && connectionPhase.value !== 'failed') {
-        connectionPhase.value = 'failed'
-        errorMessage.value = '语音连接已断开'
-      }
+      failCurrentTransport(currentSocket, generation, '语音连接已断开')
     }
     try {
       await waitUntil(() => generation !== lifecycleGeneration

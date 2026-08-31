@@ -112,7 +112,7 @@ function statusLabelForTrace(status: keyof typeof traceStatusLabels): string {
   return traceStatusLabels[status]
 }
 const executionEvidenceByView: Record<WorkbenchView, Pick<WorkbenchEvidenceItem, 'value' | 'tone'>> = {
-  workflow: { value: '受控写入 · 审批后创建工单', tone: 'warning' },
+  workflow: { value: '受控写入 · 高风险或证据不足需审批', tone: 'warning' },
   customer: { value: '受控写入 · 可创建客服工单', tone: 'warning' },
   voice: { value: '只读查询 · 实时语音会话', tone: 'verified' },
   collaboration: { value: '只读查询 · 多专家汇总', tone: 'verified' },

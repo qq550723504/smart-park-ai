@@ -238,7 +238,7 @@ describe('OperationsWorkbench', () => {
     expect(wrapper.get('[data-evidence-item="场景"] strong').text()).toBe('告警工作流')
     expect(wrapper.get('[data-evidence-item="执行轨迹"] strong').text()).toBe('空闲')
     expect(wrapper.get('[data-evidence-item="知识检索"] strong').text()).toBe('Mock')
-    expect(wrapper.get('[data-evidence-item="执行模式"] strong').text()).toBe('受控写入 · 审批后创建工单')
+    expect(wrapper.get('[data-evidence-item="执行模式"] strong').text()).toBe('受控写入 · 高风险或证据不足需审批')
   })
 
   it('discloses scene-accurate execution semantics and verification tone', async () => {
@@ -250,7 +250,7 @@ describe('OperationsWorkbench', () => {
     await settleCapabilities()
 
     const expectedModes = [
-      ['workflow', '受控写入 · 审批后创建工单', 'warning'],
+      ['workflow', '受控写入 · 高风险或证据不足需审批', 'warning'],
       ['customer', '受控写入 · 可创建客服工单', 'warning'],
       ['voice', '只读查询 · 实时语音会话', 'verified'],
       ['collaboration', '只读查询 · 多专家汇总', 'verified'],

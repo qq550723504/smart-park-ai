@@ -175,6 +175,43 @@ describe('useVoiceSession', () => {
     expect(binarySends).toHaveLength(1)
   })
 
+  it('releases active capture and resets the turn when the transport fails', async () => {
+    const h = makeHarness()
+
+    await h.binding.toggleMicrophone()
+    h.serverSendsState('LISTENING')
+    h.fakeWs.fail()
+    await Promise.resolve()
+
+    expect(h.fakeWs.closed).toBe(true)
+    expect(h.binding.connectionPhase.value).toBe('failed')
+    expect(h.binding.voicePhase.value).toBeNull()
+    expect(h.fakeTrack.stopped).toBe(1)
+    expect(h.fakeCapture.stoppedCount).toBe(1)
+
+    await h.binding.toggleMicrophone()
+
+    expect(h.microphoneRequests()).toBe(2)
+    expect(h.fakeCapture.started).toBe(2)
+    expect(h.lastSentControl('START_INPUT')).toBeDefined()
+    expect(h.lastSentControl('COMMIT_INPUT')).toBeUndefined()
+  })
+
+  it('releases active capture when the remote socket closes unexpectedly', async () => {
+    const h = makeHarness()
+
+    await h.binding.toggleMicrophone()
+    h.serverSendsState('LISTENING')
+    h.fakeWs.onclose?.()
+    await Promise.resolve()
+
+    expect(h.binding.connectionPhase.value).toBe('failed')
+    expect(h.binding.errorMessage.value).toBe('语音连接已断开')
+    expect(h.binding.voicePhase.value).toBeNull()
+    expect(h.fakeTrack.stopped).toBe(1)
+    expect(h.fakeCapture.stoppedCount).toBe(1)
+  })
+
   it('prepares a backend session without requesting microphone access', async () => {
     const harness = makeHarness()
     await harness.binding.prepare()
@@ -217,6 +254,69 @@ describe('useVoiceSession', () => {
     expect(sockets[0]?.closed).toBe(true)
     expect(binding.connectionPhase.value).toBe('connected')
     expect(binding.errorMessage.value).toBe('')
+  })
+
+  it('ignores late callbacks from a failed socket after a new turn starts', async () => {
+    const sockets: FakeWebSocket[] = []
+    const captures: FakeCapture[] = []
+    const tracks: Array<{ stopped: number; stop(): void }> = []
+    let sessionsCreated = 0
+    const binding = useVoiceSession({
+      api: {
+        createSession: async () => {
+          sessionsCreated++
+          return {
+            sessionId: `vs-late-callback-${sessionsCreated}`,
+            runId: `00000000-0000-0000-0000-${String(sessionsCreated).padStart(12, '0')}`,
+            wsPath: `/ws/voice/sessions/vs-late-callback-${sessionsCreated}`,
+          }
+        },
+      },
+      openWebSocket: (url) => {
+        const socket = new FakeWebSocket(url)
+        sockets.push(socket)
+        queueMicrotask(() => socket.open())
+        return socket
+      },
+      requestMicrophone: async () => {
+        const track = { stopped: 0, stop() { this.stopped++ } }
+        tracks.push(track)
+        return { getTracks: () => [track] } as unknown as MediaStream
+      },
+      createCapture: () => {
+        const capture = new FakeCapture()
+        captures.push(capture)
+        return capture
+      },
+      createPlayer: () => new FakePlayer(),
+    })
+
+    await binding.toggleMicrophone()
+    const oldSocket = sockets[0]!
+    oldSocket.emitText({
+      type: 'SESSION_STATE', sessionId: 'vs-late-callback-1', messageId: 'old-listening',
+      sequence: 1, state: 'LISTENING', turnId: 'turn-old',
+    })
+    const lateError = oldSocket.onerror
+    const lateClose = oldSocket.onclose
+    oldSocket.fail()
+    await Promise.resolve()
+
+    await binding.toggleMicrophone()
+    const currentSocket = sockets[1]!
+    currentSocket.emitText({
+      type: 'SESSION_STATE', sessionId: 'vs-late-callback-2', messageId: 'new-listening',
+      sequence: 1, state: 'LISTENING', turnId: 'turn-new',
+    })
+    lateError?.()
+    lateClose?.()
+    await Promise.resolve()
+
+    expect(binding.sessionId.value).toBe('vs-late-callback-2')
+    expect(binding.connectionPhase.value).toBe('connected')
+    expect(binding.voicePhase.value).toBe('LISTENING')
+    expect(captures[1]?.stoppedCount).toBe(0)
+    expect(tracks[1]?.stopped).toBe(0)
   })
 
   it('reuses a connected transport after microphone permission fails', async () => {

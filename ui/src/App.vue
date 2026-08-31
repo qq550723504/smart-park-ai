@@ -9,7 +9,6 @@ const requestedView = ref<WorkbenchView>('workflow')
 const requestedLaunch = ref<ScenarioLaunchRequest | null>(null)
 let nextLaunchRequestId = 0
 const hasEnteredWorkbench = ref(false)
-const workbenchSessionId = ref(0)
 const showcaseSurface = ref<InstanceType<typeof ShowcaseHome> | null>(null)
 const workbenchSurface = ref<InstanceType<typeof OperationsWorkbench> | null>(null)
 
@@ -54,9 +53,8 @@ function startScenario(id: ShowcaseScenarioId, launchInput?: ShowcaseLaunchInput
 
 function enterWorkbench() {
   requestedLaunch.value = null
-  // Manual entry is an explicit fresh session boundary. Normal showcase
-  // returns keep the current instance hidden so live guided runs can resume.
-  workbenchSessionId.value++
+  // Keep the long-lived workbench instance: an analytics run may still be
+  // polling or waiting for clarification while the showcase is visible.
   void showWorkbench('workflow')
 }
 
@@ -82,7 +80,6 @@ async function returnToShowcase() {
 
   <OperationsWorkbench
     v-if="hasEnteredWorkbench"
-    :key="workbenchSessionId"
     ref="workbenchSurface"
     v-show="surface === 'workbench'"
     data-surface="workbench"
