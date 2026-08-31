@@ -103,6 +103,7 @@ public final class RagKnowledgeAdapter implements KnowledgeAdminPort {
                 .map(ManagedDocument::document)
                 .map(document -> lexicalMatch(document, query))
                 .filter(Objects::nonNull)
+                .filter(match -> match.score() >= minSimilarityScore)
                 .sorted(Comparator.comparingDouble(KnowledgeMatch::score).reversed()
                         .thenComparing(KnowledgeMatch::documentId))
                 .limit(MAX_RESULTS)

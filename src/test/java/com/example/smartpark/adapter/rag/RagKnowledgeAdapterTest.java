@@ -91,6 +91,20 @@ class RagKnowledgeAdapterTest {
     }
 
     @Test
+    void appliesTheConfiguredThresholdToLexicalFallbacks() {
+        KnowledgeDocument titleMatch = document("KD-POWER-TITLE-001", "Power emergency runbook", "parking guide");
+        KnowledgeDocument exactTagMatch = new KnowledgeDocument(
+                "KD-POWER-TAG-001", KnowledgeDomain.CUSTOMER_SERVICE, "Emergency runbook", "parking guide",
+                List.of("power"), Instant.EPOCH);
+        RagKnowledgeAdapter adapter = new RagKnowledgeAdapter(
+                stores(new KeywordEmbeddingModel()), List.of(titleMatch, exactTagMatch), 0.9);
+
+        assertThat(adapter.search(KnowledgeDomain.CUSTOMER_SERVICE, "power"))
+                .extracting(KnowledgeDocument::id)
+                .containsExactly("KD-POWER-TAG-001");
+    }
+
+    @Test
     void excludesDocumentsBelowTheConfiguredSimilarityThreshold() {
         RagKnowledgeAdapter adapter = new RagKnowledgeAdapter(
                 stores(new ThresholdEmbeddingModel()),
