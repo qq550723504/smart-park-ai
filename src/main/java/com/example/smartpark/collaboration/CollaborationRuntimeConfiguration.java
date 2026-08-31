@@ -150,9 +150,12 @@ public class CollaborationRuntimeConfiguration {
             public ExpertFinding analyze(String assignment, java.util.UUID runId) {
                 EvidenceLedger observed = new EvidenceLedger();
                 ToolCallback[] callbacks = audited(toolSet.callbacks(), observed, events, runId);
+                String primaryEvidence = collectPrimaryEvidence(domain, assignment, callbacks);
+                String userPrompt = primaryEvidence.isEmpty() ? assignment
+                        : assignment + "\n\nServer-collected read-only evidence:\n" + primaryEvidence;
                 String response = modelTextWithTools(model,
-                        "You are the " + domain.name() + " park expert. Analyze only your assigned domain. Before answering, you must call at least one relevant read-only tool. Do not return INSUFFICIENT_EVIDENCE until relevant tools have been attempted. Return only JSON with domain, status, conclusion, evidenceRefs, confidence, nextChecks. The domain must be exactly " + domain.name() + ". The status must be exactly one of SUPPORTED, INSUFFICIENT_EVIDENCE, FAILED; never use workflow states such as IN_PROGRESS or custom labels such as NO_ASSOCIATION_FOUND. Put a negative result in conclusion and keep the business status as SUPPORTED only when the cited tool result supports it. Cite evidence references ONLY by copying the [[evidence:...]] markers returned with each successful tool result; never invent or reuse a marker from another call.",
-                        assignment, callbacks);
+                        "You are the " + domain.name() + " park expert. Analyze only your assigned domain. Use the server-collected read-only evidence when it is present. You may call additional relevant read-only tools when needed. Do not return INSUFFICIENT_EVIDENCE until relevant tools have been attempted. Return only JSON with domain, status, conclusion, evidenceRefs, confidence, nextChecks. The domain must be exactly " + domain.name() + ". The status must be exactly one of SUPPORTED, INSUFFICIENT_EVIDENCE, FAILED; never use workflow states such as IN_PROGRESS or custom labels such as NO_ASSOCIATION_FOUND. Put a negative result in conclusion and keep the business status as SUPPORTED only when the cited tool result supports it. Cite evidence references ONLY by copying the [[evidence:...]] markers returned with each successful tool result; never invent or reuse a marker from another call.",
+                        userPrompt, callbacks);
                 ExpertFinding finding = new ExpertFindingParser().parse(response, domain);
                 return new ExpertFindingValidator().validateWithObservations(
                         finding, observed.snapshotObservations(), assignment);
@@ -171,6 +174,43 @@ public class CollaborationRuntimeConfiguration {
                 .map(callback -> audited(callback, observed, events, runId))
                 .toArray(ToolCallback[]::new);
     }
+
+    /**
+     * Grounds a recognized domain entity before the model turn. This avoids
+     * provider-specific forced-tool settings leaking into Spring AI's summary
+     * turn while preserving the same audited ToolCallback boundary.
+     */
+    static String collectPrimaryEvidence(ExpertDomain domain, String assignment, ToolCallback[] callbacks) {
+        PrimaryEvidenceSpec spec = primaryEvidenceSpec(domain);
+        java.util.regex.Matcher matcher = spec.entityPattern().matcher(assignment == null ? "" : assignment);
+        if (!matcher.find()) return "";
+        String entityId = matcher.group().toUpperCase(java.util.Locale.ROOT);
+        ToolCallback callback = java.util.Arrays.stream(callbacks)
+                .filter(candidate -> spec.toolName().equals(candidate.getToolDefinition().name()))
+                .findFirst().orElse(null);
+        if (callback == null) return "";
+        try {
+            return callback.call("{\"" + spec.argumentName() + "\":\"" + entityId + "\"}");
+        } catch (RuntimeException toolFailure) {
+            LOG.warn("PRIMARY_EVIDENCE_COLLECTION_FAILED");
+            return "";
+        }
+    }
+
+    private static PrimaryEvidenceSpec primaryEvidenceSpec(ExpertDomain domain) {
+        int insensitive = java.util.regex.Pattern.CASE_INSENSITIVE;
+        return switch (domain) {
+            case ENERGY -> new PrimaryEvidenceSpec("lookupEnergyConsumption", "meterId",
+                    java.util.regex.Pattern.compile("\\bDEV-(?:ENERGY|METER)[A-Z0-9-]*\\b", insensitive));
+            case DEVICE -> new PrimaryEvidenceSpec("lookupDeviceStatus", "deviceId",
+                    java.util.regex.Pattern.compile("\\bDEV-(?!(?:ENERGY|METER)(?:-|\\b))[A-Z0-9-]+\\b", insensitive));
+            case SECURITY -> new PrimaryEvidenceSpec("lookupSecurityEvent", "eventId",
+                    java.util.regex.Pattern.compile("\\bSEC-[A-Z0-9-]+\\b", insensitive));
+        };
+    }
+
+    private record PrimaryEvidenceSpec(String toolName, String argumentName,
+                                       java.util.regex.Pattern entityPattern) { }
 
     private static String modelText(ChatModel model, String system, String user) {
         return extract(model.call(new Prompt(new SystemMessage(system), new UserMessage(user))));
@@ -215,7 +255,6 @@ public class CollaborationRuntimeConfiguration {
         return extract(client.prompt(new Prompt(new SystemMessage(system), new UserMessage(user)))
                 .options(DashScopeChatOptions.builder()
                         .enableThinking(false)
-                        .toolChoice("required")
                         .build())
                 .toolCallbacks(callbacks).call().chatResponse());
     }

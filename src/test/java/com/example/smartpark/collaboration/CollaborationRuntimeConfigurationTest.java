@@ -8,6 +8,7 @@ import com.example.smartpark.collaboration.model.CollaborationRun;
 import com.example.smartpark.collaboration.model.ExpertDomain;
 import com.example.smartpark.execution.ExecutionEventPublisher;
 import com.example.smartpark.execution.InMemoryExecutionEventPublisher;
+import com.example.smartpark.execution.model.ExecutionEventType;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -201,7 +202,7 @@ class CollaborationRuntimeConfigurationTest {
     }
 
     @Test
-    void expertPromptRequiresAReadOnlyToolAttemptBeforeInsufficientEvidence() {
+    void expertPromptUsesAutomaticToolsWithoutForcingTheSummaryTurn() {
         RoutingChatModel model = AllDependencies.model();
         model.clear();
         runner.run(context -> {
@@ -212,13 +213,46 @@ class CollaborationRuntimeConfigurationTest {
 
             assertThat(model.expertSystemPrompts()).isNotEmpty().allSatisfy(prompt ->
                     assertThat(prompt).contains(
-                            "must call at least one relevant read-only tool",
+                            "Use the server-collected read-only evidence when it is present",
                             "Do not return INSUFFICIENT_EVIDENCE until relevant tools have been attempted"));
             assertThat(model.expertProviderOptions()).isNotEmpty().allSatisfy(options ->
-                    assertThat(options.getToolChoice()).isEqualTo("required"));
+                    assertThat(options.getToolChoice()).isNull());
             assertThat(model.expertProviderOptions()).allSatisfy(options ->
                     assertThat(options.getEnableThinking()).isFalse());
         });
+    }
+
+    @Test
+    void collectsDomainPrimaryEvidenceThroughTheAuditedCallback() {
+        InMemoryExecutionEventPublisher events = new InMemoryExecutionEventPublisher();
+        UUID runId = UUID.randomUUID();
+        EvidenceLedger ledger = new EvidenceLedger();
+        java.util.concurrent.atomic.AtomicReference<String> input = new java.util.concurrent.atomic.AtomicReference<>();
+        ToolCallback callback = namedCallback("lookupEnergyConsumption", arguments -> {
+            input.set(arguments);
+            return "{\"meterId\":\"DEV-ENERGY-001\",\"currentKwh\":138}";
+        });
+
+        String evidence = CollaborationRuntimeConfiguration.collectPrimaryEvidence(
+                ExpertDomain.ENERGY,
+                "inspect DEV-ENERGY-001 and ignore DEV-HVAC-001",
+                new ToolCallback[]{CollaborationRuntimeConfiguration.audited(callback, ledger, events, runId)});
+
+        assertThat(input.get()).isEqualTo("{\"meterId\":\"DEV-ENERGY-001\"}");
+        assertThat(evidence).contains("currentKwh", "[[evidence:tool:lookupEnergyConsumption#");
+        assertThat(ledger.snapshotObservations()).hasSize(1);
+        assertThat(events.history(runId)).extracting(event -> event.eventType())
+                .containsExactly(ExecutionEventType.TOOL_CALL_STARTED, ExecutionEventType.TOOL_CALL_COMPLETED);
+    }
+
+    @Test
+    void skipsPrimaryEvidenceWhenAssignmentHasNoDomainEntity() {
+        ToolCallback callback = namedCallback("lookupSecurityEvent", arguments -> {
+            throw new AssertionError("callback must not be invoked without a security event ID");
+        });
+
+        assertThat(CollaborationRuntimeConfiguration.collectPrimaryEvidence(
+                ExpertDomain.SECURITY, "inspect the entrance", new ToolCallback[]{callback})).isEmpty();
     }
 
     @Test
@@ -373,5 +407,20 @@ class CollaborationRuntimeConfigurationTest {
     static final class ProbeTool {
         @Tool(name = "probe", description = "test probe")
         public String probe(String input) { return input; }
+    }
+
+    private static ToolCallback namedCallback(String name,
+                                              java.util.function.Function<String, String> action) {
+        return new ToolCallback() {
+            @Override public ToolDefinition getToolDefinition() {
+                return new ToolDefinition() {
+                    @Override public String name() { return name; }
+                    @Override public String description() { return "test callback"; }
+                    @Override public String inputSchema() { return "{}"; }
+                };
+            }
+
+            @Override public String call(String input) { return action.apply(input); }
+        };
     }
 }
