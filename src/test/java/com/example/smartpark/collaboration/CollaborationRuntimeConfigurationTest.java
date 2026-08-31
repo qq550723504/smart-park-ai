@@ -1,5 +1,7 @@
 package com.example.smartpark.collaboration;
 
+import com.alibaba.cloud.ai.dashscope.api.DashScopeResponseFormat;
+import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import com.example.smartpark.collaboration.expert.ExpertToolSet;
 import com.example.smartpark.collaboration.expert.EvidenceLedger;
 import com.example.smartpark.collaboration.model.CollaborationRun;
@@ -24,6 +26,7 @@ import org.springframework.context.annotation.Import;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -70,12 +73,39 @@ class CollaborationRuntimeConfigurationTest {
                     .isEqualTo(CollaborationRun.RunStatus.COMPLETED);
 
             assertThat(model.supervisorPrompts()).singleElement().satisfies(prompt ->
-                    assertThat(prompt).contains(
+                    assertThat(prompt.getSystemMessage().getText()).contains(
                             "normalizedQuestion must exactly echo the normalized original question",
                             "Every assignment must preserve every concrete identifier from the original question",
                             "Explanatory assignment text is allowed",
                             "selectedDomains are advisory",
                             "server-owned deterministic routing is authoritative"));
+        });
+    }
+
+    @Test
+    void supervisorPreflightUsesStrictDashScopeSchemaWithObjectAssignments() {
+        RoutingChatModel model = AllDependencies.model();
+        model.clear();
+        runner.run(context -> {
+            ExpertCollaborationService service = context.getBean(ExpertCollaborationService.class);
+            CollaborationRun started = service.start("A2 夜间能耗升高的原因是什么");
+            assertThat(awaitTerminal(service, started.runId()).status())
+                    .isEqualTo(CollaborationRun.RunStatus.COMPLETED);
+
+            assertThat(model.supervisorPrompts()).hasSize(1);
+            Prompt prompt = model.supervisorPrompts().get(0);
+            assertThat(prompt.getOptions()).isInstanceOf(DashScopeChatOptions.class);
+            DashScopeResponseFormat responseFormat = ((DashScopeChatOptions) prompt.getOptions())
+                    .getResponseFormat();
+            assertThat(responseFormat.getType()).isEqualTo(DashScopeResponseFormat.Type.JSON_SCHEMA);
+            assertThat(responseFormat.getJsonScheme().getStrict()).isTrue();
+            @SuppressWarnings("unchecked")
+            Map<String, Object> schema = (Map<String, Object>) responseFormat.getJsonScheme().getSchema();
+            @SuppressWarnings("unchecked")
+            Map<String, Object> properties = (Map<String, Object>) schema.get("properties");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> assignments = (Map<String, Object>) properties.get("assignments");
+            assertThat(assignments).containsEntry("type", "object");
         });
     }
 
@@ -195,12 +225,12 @@ class CollaborationRuntimeConfigurationTest {
     }
 
     static final class RoutingChatModel implements ChatModel {
-        private final List<String> systems = Collections.synchronizedList(new ArrayList<>());
+        private final List<Prompt> prompts = Collections.synchronizedList(new ArrayList<>());
 
         @Override
         public ChatResponse call(Prompt prompt) {
             String system = prompt.getSystemMessage().getText();
-            systems.add(system);
+            prompts.add(prompt);
             String json;
             if (system.contains("collaboration supervisor")) {
                 String question = prompt.getUserMessage().getText();
@@ -225,20 +255,21 @@ class CollaborationRuntimeConfigurationTest {
             return "{\"normalizedQuestion\":\"" + question + "\",\"selectedDomains\":[" + selected + "],\"assignments\":{" + assignments + "},\"selectionReason\":\"question requires selected domains\"}";
         }
 
-        void clear() { systems.clear(); }
+        void clear() { prompts.clear(); }
 
         List<String> expertPrompts() {
-            return systems.stream().filter(value -> value.contains("park expert"))
+            return prompts.stream().map(prompt -> prompt.getSystemMessage().getText())
+                    .filter(value -> value.contains("park expert"))
                     .map(value -> value.substring(value.indexOf("the ") + 4, value.indexOf(" park expert"))).toList();
         }
 
         long supervisorPromptCount() {
-            return systems.stream().filter(value -> value.contains("collaboration supervisor")).count();
+            return supervisorPrompts().size();
         }
 
-        List<String> supervisorPrompts() {
-            return systems.stream()
-                    .filter(value -> value.contains("collaboration supervisor"))
+        List<Prompt> supervisorPrompts() {
+            return prompts.stream()
+                    .filter(prompt -> prompt.getSystemMessage().getText().contains("collaboration supervisor"))
                     .toList();
         }
     }
