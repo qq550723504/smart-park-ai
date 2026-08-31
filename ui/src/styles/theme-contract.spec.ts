@@ -170,10 +170,11 @@ describe('showcase theme contract', () => {
     expect(compactShell).toContain('.immersive-workbench__rail>summary{display:list-item;color:var(--showcase-cyan);cursor:pointer;}')
   })
 
-  it('keeps the stacked execution rail visible throughout the tablet range', () => {
+  it('leaves wide rail visibility to component state and only hides its disclosure control', () => {
     const compactShell = compact(shellCss)
 
-    expect(compactShell).toContain('@media(min-width:768px)and(max-width:1279px){.immersive-workbench__rail>summary{display:none;}.immersive-workbench__rail:not([open])>.immersive-workbench__rail-content{display:block;}')
+    expect(compactShell).toContain('@media(min-width:768px){.immersive-workbench__rail>summary{display:none;}}')
+    expect(compactShell).not.toContain('.immersive-workbench__rail:not([open])')
   })
 
   it('stacks workflow, customer, and analytics scene grids across the tablet range', () => {

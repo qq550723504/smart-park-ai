@@ -1,6 +1,6 @@
 import { mount } from '@vue/test-utils'
-import { defineComponent } from 'vue'
-import { describe, expect, it } from 'vitest'
+import { defineComponent, nextTick } from 'vue'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import ImmersiveWorkbenchShell from './ImmersiveWorkbenchShell.vue'
 import type { WorkbenchEvidenceItem, WorkbenchNavItem } from '../../types/workbench'
 
@@ -47,7 +47,39 @@ function mountShell(overrides: Record<string, unknown> = {}) {
   })
 }
 
+function installViewport(initialWidth: number) {
+  const listeners = new Set<(event: MediaQueryListEvent) => void>()
+  const mediaQuery = {
+    matches: initialWidth >= 768,
+    media: '(min-width: 768px)',
+    onchange: null,
+    addEventListener: vi.fn((_type: string, listener: (event: MediaQueryListEvent) => void) => {
+      listeners.add(listener)
+    }),
+    removeEventListener: vi.fn((_type: string, listener: (event: MediaQueryListEvent) => void) => {
+      listeners.delete(listener)
+    }),
+    dispatchEvent: vi.fn(),
+  }
+  vi.stubGlobal('matchMedia', vi.fn(() => mediaQuery as unknown as MediaQueryList))
+
+  return {
+    mediaQuery,
+    resizeTo(width: number): void {
+      mediaQuery.matches = width >= 768
+      listeners.forEach((listener) => listener({
+        matches: mediaQuery.matches,
+        media: mediaQuery.media,
+      } as MediaQueryListEvent))
+    },
+  }
+}
+
 describe('ImmersiveWorkbenchShell', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   it('renders the presentational workspace structure with supplied content', () => {
     const wrapper = mountShell()
 
@@ -114,13 +146,36 @@ describe('ImmersiveWorkbenchShell', () => {
       .toEqual(['verified', 'warning'])
   })
 
-  it('opens the native rail only when priority is requested', async () => {
+  it('keeps the rail behaviorally open at 1024 and natively collapsible at 390', async () => {
+    const viewport = installViewport(1024)
     const wrapper = mountShell({ railPriority: false })
+    const rail = wrapper.get('[data-workbench-rail]')
 
-    expect(wrapper.get('[data-workbench-rail]').attributes('open')).toBeUndefined()
+    expect((rail.element as HTMLDetailsElement).open).toBe(true)
+
+    viewport.resizeTo(390)
+    await nextTick()
+    expect((rail.element as HTMLDetailsElement).open).toBe(false)
 
     await wrapper.setProps({ railPriority: true })
+    expect((rail.element as HTMLDetailsElement).open).toBe(true)
 
-    expect(wrapper.get('[data-workbench-rail]').attributes('open')).toBeDefined()
+    await wrapper.setProps({ railPriority: false })
+    expect((rail.element as HTMLDetailsElement).open).toBe(false)
+    wrapper.get('summary').element.click()
+    expect((rail.element as HTMLDetailsElement).open).toBe(true)
+    wrapper.get('summary').element.click()
+    expect((rail.element as HTMLDetailsElement).open).toBe(false)
+  })
+
+  it('removes the rail viewport listener when the shell unmounts', () => {
+    const viewport = installViewport(1024)
+    const wrapper = mountShell()
+
+    expect(viewport.mediaQuery.addEventListener).toHaveBeenCalledOnce()
+    const listener = viewport.mediaQuery.addEventListener.mock.calls[0]?.[1]
+    wrapper.unmount()
+
+    expect(viewport.mediaQuery.removeEventListener).toHaveBeenCalledWith('change', listener)
   })
 })

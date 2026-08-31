@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Monitor } from '@element-plus/icons-vue'
 import type { DemoRole } from '../../types/workflow'
 import type { GuidedLaunchUpdate, WorkbenchEvidenceItem, WorkbenchNavItem, WorkbenchView } from '../../types/workbench'
@@ -22,6 +22,19 @@ const emit = defineEmits<{
 }>()
 
 const availableNavItems = computed(() => props.navItems.filter((item) => item.available))
+const railMediaQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+  ? window.matchMedia('(min-width: 768px)')
+  : null
+const wideRailViewport = ref(railMediaQuery?.matches ?? false)
+const railOpen = computed(() => wideRailViewport.value || props.railPriority)
+
+function handleRailViewportChange(event: MediaQueryListEvent): void {
+  wideRailViewport.value = event.matches
+}
+
+onMounted(() => railMediaQuery?.addEventListener('change', handleRailViewportChange))
+onBeforeUnmount(() => railMediaQuery?.removeEventListener('change', handleRailViewportChange))
+
 function updateRole(role: DemoRole): void { emit('update:role', role) }
 </script>
 
@@ -44,7 +57,7 @@ function updateRole(role: DemoRole): void { emit('update:role', role) }
     </header>
     <div class="immersive-workbench__workspace">
       <section class="immersive-workbench__stage" data-workbench-stage><slot /></section>
-      <details class="immersive-workbench__rail" data-workbench-rail :open="railPriority"><summary>执行轨迹</summary><div class="immersive-workbench__rail-content"><slot name="rail" /></div></details>
+      <details class="immersive-workbench__rail" data-workbench-rail :open="railOpen"><summary>执行轨迹</summary><div class="immersive-workbench__rail-content"><slot name="rail" /></div></details>
     </div>
     <WorkbenchEvidenceRibbon :items="evidenceItems" />
   </div>

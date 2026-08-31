@@ -172,8 +172,17 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
         errorMessage.value = '语音连接已断开'
       }
     }
-    await waitUntil(() => generation !== lifecycleGeneration
-      || String(connectionPhase.value) !== 'connecting')
+    try {
+      await waitUntil(() => generation !== lifecycleGeneration
+        || String(connectionPhase.value) !== 'connecting')
+    } catch (cause) {
+      if (generation === lifecycleGeneration && socket === currentSocket) {
+        socket = null
+        connectionPhase.value = 'failed'
+        currentSocket.close()
+      }
+      throw cause
+    }
     if (generation !== lifecycleGeneration) return false
     if (String(connectionPhase.value) !== 'connected') {
       throw new Error(errorMessage.value || '语音连接未就绪')
@@ -197,20 +206,17 @@ export function useVoiceSession(deps: UseVoiceSessionDeps = {}): VoiceSessionBin
   function waitUntil(condition: () => boolean): Promise<void> {
     if (condition()) return Promise.resolve()
     return new Promise((resolve, reject) => {
-      const deadline = Date.now() + 5000
       const timer = setInterval(() => {
         if (condition()) {
           clearInterval(timer)
+          clearTimeout(timeout)
           resolve()
-        } else if (Date.now() > deadline) {
-          clearInterval(timer)
-          reject(new Error('等待语音连接超时'))
         }
       }, 10)
-      // Timeout must not leak a half-open socket.
-      setTimeout(() => {
+      const timeout = setTimeout(() => {
         clearInterval(timer)
-      }, deadline - Date.now() + 100)
+        reject(new Error('等待语音连接超时'))
+      }, 5000)
     })
   }
 

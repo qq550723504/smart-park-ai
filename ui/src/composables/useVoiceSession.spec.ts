@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, ref } from 'vue'
 import { useVoiceSession } from './useVoiceSession'
 import { useGuidedLaunch } from './useGuidedLaunch'
@@ -262,6 +262,61 @@ describe('useVoiceSession', () => {
     expect(microphoneRequests).toBe(1)
     expect(capture.started).toBe(1)
     expect(binding.connectionPhase.value).toBe('connected')
+  })
+
+  it('retires a timed-out handshake before late open and creates one fresh retry connection', async () => {
+    vi.useFakeTimers()
+    const sockets: FakeWebSocket[] = []
+    let sessionsCreated = 0
+    const binding = useVoiceSession({
+      api: {
+        createSession: async () => {
+          sessionsCreated++
+          return {
+            sessionId: `vs-timeout-${sessionsCreated}`,
+            runId: `00000000-0000-0000-0000-${String(sessionsCreated).padStart(12, '0')}`,
+            wsPath: `/ws/voice/sessions/vs-timeout-${sessionsCreated}`,
+          }
+        },
+      },
+      openWebSocket: (url) => {
+        const socket = new FakeWebSocket(url)
+        sockets.push(socket)
+        return socket
+      },
+    })
+
+    try {
+      let firstFailure = ''
+      void binding.prepare().catch((error: unknown) => {
+        firstFailure = error instanceof Error ? error.message : String(error)
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(sockets).toHaveLength(1)
+
+      await vi.advanceTimersByTimeAsync(5000)
+
+      expect(firstFailure).toBe('等待语音连接超时')
+      expect(sockets[0]?.closed).toBe(true)
+      expect(binding.connectionPhase.value).toBe('failed')
+
+      sockets[0]?.open()
+      expect(binding.connectionPhase.value).toBe('failed')
+
+      const retryA = binding.prepare()
+      const retryB = binding.prepare()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(sessionsCreated).toBe(2)
+      expect(sockets).toHaveLength(2)
+
+      sockets[1]?.open()
+      await vi.advanceTimersByTimeAsync(10)
+      await Promise.all([retryA, retryB])
+      expect(binding.connectionPhase.value).toBe('connected')
+    } finally {
+      binding.close()
+      vi.useRealTimers()
+    }
   })
 
   it('commit sends COMMIT_INPUT and partial/final frames feed the transcript', async () => {
