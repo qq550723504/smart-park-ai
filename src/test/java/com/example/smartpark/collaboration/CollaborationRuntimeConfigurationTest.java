@@ -216,6 +216,8 @@ class CollaborationRuntimeConfigurationTest {
                             "Do not return INSUFFICIENT_EVIDENCE until relevant tools have been attempted"));
             assertThat(model.expertProviderOptions()).isNotEmpty().allSatisfy(options ->
                     assertThat(options.getToolChoice()).isEqualTo("required"));
+            assertThat(model.expertProviderOptions()).allSatisfy(options ->
+                    assertThat(options.getEnableThinking()).isFalse());
         });
     }
 

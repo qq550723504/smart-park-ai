@@ -213,7 +213,10 @@ public class CollaborationRuntimeConfiguration {
     private static String modelTextWithTools(ChatModel model, String system, String user, ToolCallback[] callbacks) {
         var client = org.springframework.ai.chat.client.ChatClient.builder(model).build();
         return extract(client.prompt(new Prompt(new SystemMessage(system), new UserMessage(user)))
-                .options(DashScopeChatOptions.builder().toolChoice("required").build())
+                .options(DashScopeChatOptions.builder()
+                        .enableThinking(false)
+                        .toolChoice("required")
+                        .build())
                 .toolCallbacks(callbacks).call().chatResponse());
     }
 
