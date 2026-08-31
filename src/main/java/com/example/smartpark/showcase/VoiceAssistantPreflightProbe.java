@@ -14,6 +14,7 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Component
 @ConditionalOnProperty(prefix = "smartpark.voice", name = "enabled", havingValue = "true")
@@ -44,33 +45,49 @@ public final class VoiceAssistantPreflightProbe implements ShowcasePreflightProb
     public ShowcaseProbeResult probe() {
         String sessionId = newIdentifier();
         String turnId = newIdentifier();
+        Thread probeThread = Thread.currentThread();
         boolean asrStarted = false;
         boolean ttsStarted = false;
 
         try {
+            if (probeThread.isInterrupted()) {
+                return ShowcaseProbeResult.FAILED;
+            }
             CountDownLatch asrClosed = new CountDownLatch(1);
-            AtomicBoolean asrError = new AtomicBoolean();
+            AtomicReference<AsrTerminalState> asrTerminal =
+                    new AtomicReference<>(AsrTerminalState.PENDING);
             asrStarted = true;
             asr.start(sessionId, turnId, new StreamingAsrPort.Listener() {
                 @Override
                 public void onPartial(String callbackSessionId, String callbackTurnId, String text) {
-                    // Silence is used only to prove a clean provider turn, not transcript accuracy.
+                    if (!matches(sessionId, turnId, callbackSessionId, callbackTurnId)) {
+                        return;
+                    }
+                    // Silence proves a clean provider turn, not transcript accuracy.
                 }
 
                 @Override
                 public void onFinal(String callbackSessionId, String callbackTurnId, String text) {
+                    if (!matches(sessionId, turnId, callbackSessionId, callbackTurnId)) {
+                        return;
+                    }
                     // Transcripts are intentionally neither inspected nor retained.
                 }
 
                 @Override
                 public void onError(String callbackSessionId, String callbackTurnId,
                                     VoiceErrorCode code) {
-                    asrError.set(true);
+                    if (matches(sessionId, turnId, callbackSessionId, callbackTurnId)) {
+                        asrTerminal.updateAndGet(VoiceAssistantPreflightProbe::recordAsrError);
+                    }
                 }
 
                 @Override
                 public void onClosed(String callbackSessionId, String callbackTurnId) {
-                    asrClosed.countDown();
+                    if (matches(sessionId, turnId, callbackSessionId, callbackTurnId)) {
+                        asrTerminal.updateAndGet(VoiceAssistantPreflightProbe::recordAsrClose);
+                        asrClosed.countDown();
+                    }
                 }
             });
             for (int frame = 0; frame < SILENCE_FRAMES; frame++) {
@@ -78,7 +95,8 @@ public final class VoiceAssistantPreflightProbe implements ShowcasePreflightProb
             }
             asr.commit(sessionId, turnId);
             asrClosed.await();
-            if (asrError.get()) {
+            if (asrTerminal.get() != AsrTerminalState.CLOSED
+                    || probeThread.isInterrupted()) {
                 return ShowcaseProbeResult.FAILED;
             }
 
@@ -101,15 +119,19 @@ public final class VoiceAssistantPreflightProbe implements ShowcasePreflightProb
                         public void onTextDelta(String delta) {
                             // Model output is deliberately not retained by preflight.
                         }
-                    });
-            if (!isValid(answer, successfulToolCompletion.get())) {
+                    }, probeThread::isInterrupted);
+            if (probeThread.isInterrupted()
+                    || !isValid(answer, successfulToolCompletion.get())) {
                 return ShowcaseProbeResult.FAILED;
             }
 
             CountDownLatch ttsTerminal = new CountDownLatch(1);
             AtomicBoolean receivedAudio = new AtomicBoolean();
-            AtomicBoolean completed = new AtomicBoolean();
-            AtomicBoolean ttsFailed = new AtomicBoolean();
+            AtomicReference<TtsTerminalState> ttsTerminalState =
+                    new AtomicReference<>(TtsTerminalState.PENDING);
+            if (probeThread.isInterrupted()) {
+                return ShowcaseProbeResult.FAILED;
+            }
             ttsStarted = true;
             tts.start(sessionId, turnId, List.of(answer.text()), new StreamingTtsPort.Listener() {
                 @Override
@@ -118,33 +140,51 @@ public final class VoiceAssistantPreflightProbe implements ShowcasePreflightProb
                     if (audio == null) {
                         return;
                     }
-                    if (audio.length > 0) {
-                        receivedAudio.set(true);
+                    try {
+                        if (matches(sessionId, turnId, callbackSessionId, callbackTurnId)
+                                && audio.length > 0) {
+                            receivedAudio.set(true);
+                        }
                     }
-                    Arrays.fill(audio, (byte) 0);
+                    finally {
+                        Arrays.fill(audio, (byte) 0);
+                    }
                 }
 
                 @Override
                 public void onError(String callbackSessionId, String callbackTurnId,
                                     VoiceErrorCode code) {
-                    ttsFailed.set(true);
-                    ttsTerminal.countDown();
+                    recordTtsTerminal(callbackSessionId, callbackTurnId,
+                            TtsTerminalState.ERROR);
                 }
 
                 @Override
                 public void onCompleted(String callbackSessionId, String callbackTurnId) {
-                    completed.set(true);
-                    ttsTerminal.countDown();
+                    recordTtsTerminal(callbackSessionId, callbackTurnId,
+                            TtsTerminalState.COMPLETED);
                 }
 
                 @Override
                 public void onInterrupted(String callbackSessionId, String callbackTurnId) {
-                    ttsFailed.set(true);
-                    ttsTerminal.countDown();
+                    recordTtsTerminal(callbackSessionId, callbackTurnId,
+                            TtsTerminalState.INTERRUPTED);
+                }
+
+                private void recordTtsTerminal(String callbackSessionId, String callbackTurnId,
+                                               TtsTerminalState event) {
+                    if (matches(sessionId, turnId, callbackSessionId, callbackTurnId)) {
+                        ttsTerminalState.updateAndGet(current ->
+                                current == TtsTerminalState.PENDING
+                                        ? event
+                                        : TtsTerminalState.INVALID);
+                        ttsTerminal.countDown();
+                    }
                 }
             });
             ttsTerminal.await();
-            return receivedAudio.get() && completed.get() && !ttsFailed.get()
+            return receivedAudio.get()
+                    && ttsTerminalState.get() == TtsTerminalState.COMPLETED
+                    && !probeThread.isInterrupted()
                     ? ShowcaseProbeResult.PASSED
                     : ShowcaseProbeResult.FAILED;
         }
@@ -173,6 +213,27 @@ public final class VoiceAssistantPreflightProbe implements ShowcasePreflightProb
                 && successfulToolCompletion;
     }
 
+    private static boolean matches(String sessionId, String turnId,
+                                   String callbackSessionId, String callbackTurnId) {
+        return sessionId.equals(callbackSessionId) && turnId.equals(callbackTurnId);
+    }
+
+    private static AsrTerminalState recordAsrError(AsrTerminalState current) {
+        return switch (current) {
+            case PENDING -> AsrTerminalState.ERROR;
+            case ERROR -> AsrTerminalState.ERROR;
+            case CLOSED, INVALID -> AsrTerminalState.INVALID;
+        };
+    }
+
+    private static AsrTerminalState recordAsrClose(AsrTerminalState current) {
+        return switch (current) {
+            case PENDING -> AsrTerminalState.CLOSED;
+            case ERROR -> AsrTerminalState.ERROR;
+            case CLOSED, INVALID -> AsrTerminalState.INVALID;
+        };
+    }
+
     private void cancelAsr(String sessionId, String turnId) {
         try {
             asr.cancel(sessionId, turnId);
@@ -193,5 +254,20 @@ public final class VoiceAssistantPreflightProbe implements ShowcasePreflightProb
 
     private static String newIdentifier() {
         return ID_PREFIX + UUID.randomUUID();
+    }
+
+    private enum AsrTerminalState {
+        PENDING,
+        CLOSED,
+        ERROR,
+        INVALID
+    }
+
+    private enum TtsTerminalState {
+        PENDING,
+        COMPLETED,
+        ERROR,
+        INTERRUPTED,
+        INVALID
     }
 }
