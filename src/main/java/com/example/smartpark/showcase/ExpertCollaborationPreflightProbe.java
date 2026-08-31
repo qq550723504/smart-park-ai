@@ -15,6 +15,8 @@ import java.util.stream.Collectors;
         havingValue = "true", matchIfMissing = true)
 public final class ExpertCollaborationPreflightProbe implements ShowcasePreflightProbe {
 
+    private static final int MAX_ATTEMPTS = 2;
+
     private static final String QUESTION =
             "请基于证据判断 DEV-ENERGY-001 夜间能耗升高、DEV-HVAC-001 冷机离线及 SEC-ACCESS-001 门禁告警是否有关联";
     private static final Set<ExpertDomain> REQUIRED_DOMAINS = Set.of(
@@ -34,8 +36,15 @@ public final class ExpertCollaborationPreflightProbe implements ShowcasePrefligh
 
     @Override
     public ShowcaseProbeResult probe() {
-        CollaborationRun started = service.start(QUESTION);
-        return awaiter.await(() -> service.get(started.runId()), this::terminalResult);
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            CollaborationRun started = service.start(QUESTION);
+            ShowcaseProbeResult result = awaiter.await(
+                    () -> service.get(started.runId()), this::terminalResult);
+            if (result == ShowcaseProbeResult.PASSED || Thread.currentThread().isInterrupted()) {
+                return result;
+            }
+        }
+        return ShowcaseProbeResult.FAILED;
     }
 
     private ShowcaseProbeResult terminalResult(CollaborationRun run) {

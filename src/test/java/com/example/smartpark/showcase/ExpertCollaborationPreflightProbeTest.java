@@ -20,6 +20,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -60,6 +61,30 @@ class ExpertCollaborationPreflightProbeTest {
 
         assertThat(new ExpertCollaborationPreflightProbe(service).probe())
                 .isEqualTo(ShowcaseProbeResult.FAILED);
+    }
+
+    @Test
+    void collaborationRetriesOneTerminalProviderFailure() {
+        ExpertCollaborationService service = mock(ExpertCollaborationService.class);
+        UUID failedId = UUID.randomUUID();
+        UUID passedId = UUID.randomUUID();
+        when(service.start(anyString())).thenReturn(
+                run(failedId, CollaborationRun.RunStatus.RUNNING, List.of()),
+                run(passedId, CollaborationRun.RunStatus.RUNNING, List.of()));
+        when(service.get(failedId)).thenReturn(run(
+                failedId, CollaborationRun.RunStatus.FAILED, List.of()));
+        List<ExpertFinding> findings = List.of(
+                supported(ExpertDomain.ENERGY),
+                supported(ExpertDomain.DEVICE),
+                supported(ExpertDomain.SECURITY));
+        when(service.get(passedId)).thenReturn(completed(passedId, findings,
+                new Synthesis(FindingStatus.SUPPORTED, "verified evidence",
+                        findings.stream().flatMap(finding -> finding.evidenceRefs().stream()).toList(),
+                        .8, List.of())));
+
+        assertThat(new ExpertCollaborationPreflightProbe(service).probe())
+                .isEqualTo(ShowcaseProbeResult.PASSED);
+        verify(service, times(2)).start(anyString());
     }
 
     @Test
