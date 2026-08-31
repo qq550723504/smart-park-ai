@@ -64,7 +64,7 @@ SPRING_AI_DASHSCOPE_ENABLED=false ./mvnw spring-boot:run
 
 #### 方式 B：启动完整告警工作流
 
-完整模式会调用 DashScope `qwen-plus`。密钥只应通过当前进程的 `AI_DASHSCOPE_API_KEY` 环境变量传入，不要写入源码、`.env`、命令行参数或 Git 历史。
+直接以非 Compose 方式运行后端时，完整模式会调用 DashScope `qwen-plus`。密钥只应通过当前进程的 `AI_DASHSCOPE_API_KEY` 环境变量传入，不要持久化到源码、命令行参数或 Git 历史。选择性全场景 Docker Compose 演示是刻意的例外：它从 gitignored 的本地 `.env` 读取密钥，见[选择性启用全场景演示](#选择性启用全场景演示)。
 
 Windows PowerShell：
 

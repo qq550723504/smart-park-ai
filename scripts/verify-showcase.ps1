@@ -34,15 +34,21 @@ function Assert-ShowcaseReport {
         'VOICE_ASSISTANT'
     )
     $results = @(Get-ShowcasePropertyValue -InputObject $Report -PropertyName 'results')
-    $ids = @($results | ForEach-Object {
-            [string](Get-ShowcasePropertyValue -InputObject $_ -PropertyName 'scenarioId')
-        })
+    $expectedIdSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $actualIdSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($expectedId in $expectedIds) {
+        $null = $expectedIdSet.Add($expectedId)
+    }
+    foreach ($result in $results) {
+        $scenarioId = [string](Get-ShowcasePropertyValue -InputObject $result -PropertyName 'scenarioId')
+        $null = $actualIdSet.Add($scenarioId)
+    }
 
-    if ($results.Count -ne 4 -or @($ids | Sort-Object -Unique).Count -ne 4) {
+    if ($results.Count -ne 4 -or $actualIdSet.Count -ne 4) {
         throw 'Showcase preflight must return four unique scenarios.'
     }
 
-    if (@(Compare-Object ($expectedIds | Sort-Object) ($ids | Sort-Object)).Count -ne 0) {
+    if (-not $expectedIdSet.SetEquals($actualIdSet)) {
         throw 'Showcase preflight scenario set is incomplete.'
     }
 
@@ -50,7 +56,7 @@ function Assert-ShowcaseReport {
     foreach ($result in $results) {
         $scenarioId = [string](Get-ShowcasePropertyValue -InputObject $result -PropertyName 'scenarioId')
         $status = [string](Get-ShowcasePropertyValue -InputObject $result -PropertyName 'status')
-        if ($status -ne 'READY') {
+        if ($status -cne 'READY') {
             throw "Showcase scenario is not ready: $scenarioId"
         }
 

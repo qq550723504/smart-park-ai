@@ -50,9 +50,29 @@ Assert-Rejected -Report ([pscustomobject]@{
         results = @($ready.results[0], $ready.results[1], $ready.results[2], $ready.results[0])
     }) -CaseName 'duplicate id'
 
+$lowercaseIds = Copy-Results $ready.results
+$lowercaseIds | ForEach-Object { $_.scenarioId = $_.scenarioId.ToLowerInvariant() }
+Assert-Rejected -Report ([pscustomobject]@{ results = $lowercaseIds }) -CaseName 'lowercase ids'
+
+$mixedCaseIds = Copy-Results $ready.results
+$mixedCaseIds[0].scenarioId = 'Alert_Workflow'
+Assert-Rejected -Report ([pscustomobject]@{ results = $mixedCaseIds }) -CaseName 'mixed-case id'
+
+$caseVariantIds = Copy-Results $ready.results
+$caseVariantIds[1].scenarioId = 'alert_workflow'
+Assert-Rejected -Report ([pscustomobject]@{ results = $caseVariantIds }) -CaseName 'case-variant duplicate id'
+
 $notReady = Copy-Results $ready.results
 $notReady[0].status = 'NOT_READY'
 Assert-Rejected -Report ([pscustomobject]@{ results = $notReady }) -CaseName 'not ready'
+
+$lowercaseReady = Copy-Results $ready.results
+$lowercaseReady[0].status = 'ready'
+Assert-Rejected -Report ([pscustomobject]@{ results = $lowercaseReady }) -CaseName 'lowercase ready status'
+
+$mixedCaseReady = Copy-Results $ready.results
+$mixedCaseReady[0].status = 'ReAdY'
+Assert-Rejected -Report ([pscustomobject]@{ results = $mixedCaseReady }) -CaseName 'mixed-case ready status'
 
 $malformedTimestamp = Copy-Results $ready.results
 $malformedTimestamp[0].verifiedAt = 'not-a-time'
