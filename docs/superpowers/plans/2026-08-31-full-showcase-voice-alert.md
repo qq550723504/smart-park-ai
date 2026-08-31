@@ -863,9 +863,9 @@ showcase:
 
 ```powershell
 .\mvnw.cmd -B "-Dtest=ShowcaseComposeConfigurationTest,AnalyticsComposeSecurityTest,VoiceConfigurationReviewTest" test
-$env:AI_DASHSCOPE_API_KEY = 'compose-contract-only'
-$env:SMARTPARK_ANALYTICS_DB_ADMIN_PASSWORD = 'compose-contract-admin-only'
-$env:SMARTPARK_ANALYTICS_DB_RO_PASSWORD = 'compose-contract-reader-only'
+$env:AI_DASHSCOPE_API_KEY = 'x'
+$env:SMARTPARK_ANALYTICS_DB_ADMIN_PASSWORD = 'y'
+$env:SMARTPARK_ANALYTICS_DB_RO_PASSWORD = 'z'
 docker compose -f compose.yaml -f compose.analytics.yaml -f compose.showcase.yaml --profile analytics config --quiet
 Remove-Item Env:AI_DASHSCOPE_API_KEY,Env:SMARTPARK_ANALYTICS_DB_ADMIN_PASSWORD,Env:SMARTPARK_ANALYTICS_DB_RO_PASSWORD
 ```
