@@ -242,6 +242,8 @@ class AlertDiagnosisAgentTest {
 
         assertThat(result.evidence()).containsExactly("INSUFFICIENT_EVIDENCE: no knowledge documents matched the request");
         assertThat(model.lastPrompt().getUserMessage().getText()).contains("INSUFFICIENT_EVIDENCE");
+        assertThat(model.lastPrompt().getSystemMessage().getText())
+                .contains("copy the exact INSUFFICIENT_EVIDENCE marker into the evidence array");
     }
 
     @Test

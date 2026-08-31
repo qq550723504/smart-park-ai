@@ -63,6 +63,7 @@ final class PromptCatalog {
                 do not invent or return them.
                 Every conclusion must be backed by evidence.
                 Missing tool data or missing knowledge is evidence insufficiency, not permission to guess.
+                When knowledge contains INSUFFICIENT_EVIDENCE, copy the exact INSUFFICIENT_EVIDENCE marker into the evidence array; do not paraphrase it.
                 Available read-only tools: %s
                 You are not allowed to create or mutate work orders in this step.
                 """.formatted(enumValues(RiskLevel.class), toolNames);
