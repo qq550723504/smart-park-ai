@@ -273,6 +273,13 @@ class CollaborationRuntimeConfigurationTest {
         assertThat(bound.status())
                 .isEqualTo(com.example.smartpark.collaboration.model.FindingStatus.SUPPORTED);
         assertThat(bound.evidenceRefs()).containsExactly("tool:lookupDeviceStatus#abc");
+        assertThat(bound.conclusion()).isEqualTo("Server-bound primary evidence.");
+
+        var validated = new com.example.smartpark.collaboration.expert.ExpertFindingValidator()
+                .validateWithObservations(bound, ledger.snapshotObservations(), "inspect DEV-HVAC-001");
+        assertThat(validated.status())
+                .isEqualTo(com.example.smartpark.collaboration.model.FindingStatus.SUPPORTED);
+        assertThat(validated.conclusion()).contains("DEV-HVAC-001", "OFFLINE");
     }
 
     @Test

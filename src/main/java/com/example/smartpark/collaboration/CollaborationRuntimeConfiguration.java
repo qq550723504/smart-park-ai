@@ -219,7 +219,7 @@ public class CollaborationRuntimeConfiguration {
         if (primaryEvidenceRefs == null || primaryEvidenceRefs.isEmpty()) return modelFinding;
         return new ExpertFinding(modelFinding.domain(),
                 com.example.smartpark.collaboration.model.FindingStatus.SUPPORTED,
-                modelFinding.conclusion(), primaryEvidenceRefs.stream().sorted().toList(),
+                "Server-bound primary evidence.", primaryEvidenceRefs.stream().sorted().toList(),
                 modelFinding.confidence(), modelFinding.nextChecks());
     }
 
