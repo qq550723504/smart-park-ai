@@ -12,7 +12,7 @@ npm install
 npm run dev
 ```
 
-访问 <http://localhost:5173>。Vite 会把 `/api` 请求代理到 `http://localhost:8080`。
+本机访问 <http://localhost:5173>；使用 Docker 启动时，局域网其他设备访问宿主机 IP 的 `5173` 端口，例如 `http://192.168.1.10:5173`。Vite 会把 `/api` 请求代理到 `http://localhost:8080`（容器内为 `http://backend:8080`）。
 
 ## 构建
 
