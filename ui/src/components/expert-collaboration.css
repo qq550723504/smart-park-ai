@@ -38,11 +38,18 @@
 .expert-assignment p { font-size: 11px; line-height: 1.5; margin: 5px 0 0; color: var(--showcase-ivory); }
 .expert-finding { display: grid; gap: 10px; }
 .expert-conclusion { font-size: 11px; line-height: 1.6; color: var(--showcase-ivory); margin: 0; }
+.expert-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.expert-details div { min-width: 0; padding: 8px 9px; border: 1px solid var(--showcase-border-soft); background: rgba(12, 17, 26, 0.62); }
+.expert-details dt { color: var(--showcase-muted); font-size: 9px; }
+.expert-details dd { margin: 4px 0 0; color: var(--showcase-ivory); font-size: 11px; overflow-wrap: anywhere; }
+.expert-detail-group { display: grid; gap: 6px; }
+.expert-detail-group-title { margin: 0; color: var(--showcase-cyan); font-size: 10px; }
 .expert-stats { justify-content: space-between; border-top: 1px solid var(--showcase-border-soft); padding-top: 9px; font-size: 10px; color: var(--showcase-muted); }
 .expert-stats strong { color: var(--showcase-cyan); }
 .collaboration-main .evidence-list { display: flex; flex-wrap: wrap; gap: 5px; }
 .collaboration-main .evidence-list span { font-family: ui-monospace, monospace; font-size: 9px; padding: 4px 6px; color: var(--showcase-cyan); background: var(--showcase-cyan-soft); }
 .next-checks, .uncertainty { font-size: 10px; line-height: 1.5; color: var(--showcase-amber); margin: 0; }
+.uncertainty { overflow-wrap: anywhere; }
 .expert-pending { font-size: 10px; color: var(--showcase-muted); display: flex; align-items: center; gap: 8px; }
 .expert-pending .status-pulse { width: 6px; height: 6px; box-shadow: none; }
 .collaboration-empty { padding: 28px; border: 1px dashed var(--showcase-border-soft); color: var(--showcase-muted); font-size: 11px; text-align: center; }

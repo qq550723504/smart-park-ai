@@ -116,9 +116,10 @@ describe('showcase theme contract', () => {
     }
     expect(compact(workbenchPrimitivesCss)).toMatch(/@keyframesworkbench-pulse\b/)
     expect(compact(workbenchPrimitivesCss)).toContain('animation:workbench-pulse')
+    expect(compact(workbenchPrimitivesCss)).toContain('.immersive-workbench.hero-rowh2{font-family:Georgia,"NotoSerifSC",serif;font-size:clamp(30px,3.1vw,46px);line-height:1.08;')
     const mobilePrimitives = compact(workbenchPrimitivesCss).match(/@media\(max-width:650px\)\{([\s\S]*)\}$/)?.[1]
     expect(mobilePrimitives).toContain('.immersive-workbench.main-content{padding:34px16px;')
-    expect(mobilePrimitives).toContain('.immersive-workbench.hero-rowh2{font-size:38px;')
+    expect(mobilePrimitives).toContain('.immersive-workbench.hero-rowh2{font-size:30px;')
 
     for (const selector of [
       '.immersive-workbench.main-content{', '.immersive-workbench.hero-row{',
@@ -175,6 +176,15 @@ describe('showcase theme contract', () => {
 
     expect(compactShell).toContain('@media(min-width:768px){.immersive-workbench__rail>summary{display:none;}}')
     expect(compactShell).not.toContain('.immersive-workbench__rail:not([open])')
+  })
+
+  it('keeps the inline role dropdown above the workspace content', () => {
+    expect(compact(shellCss)).toMatch(/\.immersive-workbench__topbar\{[^}]*position:relative;[^}]*z-index:20;/)
+  })
+
+  it('keeps the mobile hero title compressed after workbench overrides load', () => {
+    const mobileShell = compact(shellCss).match(/@media\(max-width:767px\)\{([\s\S]*)\}$/)?.[1]
+    expect(mobileShell).toContain('.immersive-workbench.hero-rowh2{font-size:30px;')
   })
 
   it('stacks workflow, customer, and analytics scene grids across the tablet range', () => {

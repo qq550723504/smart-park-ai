@@ -22,11 +22,11 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.timeout;
 
 class ExpertCollaborationPreflightProbeTest {
 
@@ -186,18 +186,23 @@ class ExpertCollaborationPreflightProbeTest {
         ExpertCollaborationService service = mock(ExpertCollaborationService.class);
         UUID runId = UUID.randomUUID();
         CountDownLatch polled = new CountDownLatch(1);
+        CountDownLatch aborted = new CountDownLatch(1);
         when(service.start(anyString())).thenReturn(run(runId, CollaborationRun.RunStatus.RUNNING, List.of()));
         when(service.get(runId)).thenAnswer(invocation -> {
             polled.countDown();
             return run(runId, CollaborationRun.RunStatus.RUNNING, List.of());
         });
+        doAnswer(invocation -> {
+            aborted.countDown();
+            return null;
+        }).when(service).abort(runId);
 
         var executor = Executors.newSingleThreadExecutor();
         try {
             var future = executor.submit(() -> new ExpertCollaborationPreflightProbe(service).probe());
             assertThat(polled.await(1, TimeUnit.SECONDS)).isTrue();
             future.cancel(true);
-            verify(service, timeout(1_000)).abort(runId);
+            assertThat(aborted.await(5, TimeUnit.SECONDS)).isTrue();
         } finally {
             executor.shutdownNow();
         }

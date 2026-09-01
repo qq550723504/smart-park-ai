@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { ExpertDomain, ExpertFinding, SupervisorPlan } from '../types/collaboration'
+import { expertDetailKey, formatFinding } from '../utils/collaborationPresentation'
 
 const props = defineProps<{
   domain: ExpertDomain
@@ -23,6 +24,7 @@ const status = computed(() => props.finding?.status ?? (props.plan ? 'RUNNING' :
 const statusLabel = computed(() => statusLabels[status.value] ?? status.value)
 const confidence = computed(() => props.finding ? `${Math.round(props.finding.confidence * 100)}%` : '--')
 const evidenceStatus = computed(() => props.finding?.evidenceRefs.length ? '工具证据已验证' : `模型置信度 ${confidence.value}`)
+const findingDisplay = computed(() => props.finding ? formatFinding(props.finding) : null)
 </script>
 
 <template>
@@ -33,10 +35,25 @@ const evidenceStatus = computed(() => props.finding?.evidenceRefs.length ? '工�
     </header>
     <div class="expert-assignment"><span>交接任务</span><p>{{ assignment || '等待主管分配任务' }}</p></div>
     <div v-if="finding" class="expert-finding">
-      <p class="expert-conclusion">{{ finding.conclusion }}</p>
+      <p class="expert-conclusion">{{ findingDisplay?.summary }}</p>
+      <dl v-if="findingDisplay?.details.length" class="expert-details">
+        <div v-for="(detail, index) in findingDisplay.details" :key="expertDetailKey(detail.label, detail.value, index)">
+          <dt>{{ detail.label }}</dt>
+          <dd>{{ detail.value }}</dd>
+        </div>
+      </dl>
+      <div v-for="(group, groupIndex) in findingDisplay?.detailGroups ?? []" :key="`${group.label}-${groupIndex}`" class="expert-detail-group">
+        <p class="expert-detail-group-title">{{ group.label }}</p>
+        <dl class="expert-details">
+          <div v-for="(detail, index) in group.details" :key="expertDetailKey(detail.label, detail.value, index)">
+            <dt>{{ detail.label }}</dt>
+            <dd>{{ detail.value }}</dd>
+          </div>
+        </dl>
+      </div>
       <div class="expert-stats"><span><strong>{{ evidenceStatus }}</strong></span><span>证据 <strong>{{ finding.evidenceRefs.length }} 条</strong></span></div>
-      <div v-if="finding.evidenceRefs.length" class="evidence-list"><span v-for="ref in finding.evidenceRefs" :key="ref">{{ ref }}</span></div>
-      <p v-if="finding.nextChecks.length" class="next-checks">后续核查：{{ finding.nextChecks.join('、') }}</p>
+      <div v-if="findingDisplay?.evidence.length" class="evidence-list"><span v-for="(evidence, index) in findingDisplay.evidence" :key="`${evidence}-${index}`">{{ evidence }}</span></div>
+      <p v-if="findingDisplay?.nextChecks.length" class="next-checks">后续核查：{{ findingDisplay.nextChecks.join('、') }}</p>
     </div>
     <div v-else class="expert-pending"><span class="status-pulse"></span>正在等待专家返回结构化结论</div>
   </article>
