@@ -30,6 +30,11 @@ const analysisStub = defineComponent({
   },
 })
 
+const analysisBoardStub = defineComponent({
+  props: { initialQuestion: { type: String, default: null } },
+  template: '<input aria-label="分析问题" :value="initialQuestion" />',
+})
+
 const traceRailStub = defineComponent({
   props: { status: { type: String, required: true } },
   template: '<div data-testid="trace-status">{{ status }}</div>',
@@ -193,7 +198,7 @@ describe('OperationsWorkbench', () => {
 
     await settleCapabilities()
 
-    expect(wrapper.findAll('[data-workbench-stage] > .main-content')).toHaveLength(6)
+    expect(wrapper.findAll('[data-workbench-stage] > .main-content')).toHaveLength(7)
     expect(wrapper.findAll('[data-workbench-rail] .global-rail')).toHaveLength(1)
     const shell = wrapper.get('[data-testid="immersive-workbench-shell"]')
     const rail = wrapper.get('[data-workbench-rail] .global-rail')
@@ -219,6 +224,23 @@ describe('OperationsWorkbench', () => {
     expect(labels).not.toContain('实时语音')
     expect(labels).not.toContain('专家协作')
     expect(labels).not.toContain('运营分析')
+    expect(labels).not.toContain('运营看板')
+  })
+
+  it('routes an operations board question into the existing analytics input', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow' },
+      global: { stubs: { ...operatorStubs, OperationsAnalysisPage: analysisBoardStub } },
+    })
+    await settleCapabilities()
+
+    await wrapper.get('[data-workbench-view="operations"]').trigger('click')
+    await wrapper.get('[data-board-question][data-question="过去5天各停车区域停车利用率"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.get('[data-workbench-view="analytics"]').classes()).toContain('active')
+    expect((wrapper.get('[aria-label="分析问题"]').element as HTMLInputElement).value)
+      .toBe('过去5天各停车区域停车利用率')
   })
 
   it('emits an intent to return to the showcase surface', async () => {
@@ -261,6 +283,7 @@ describe('OperationsWorkbench', () => {
       ['voice', '只读查询 · 实时语音会话', 'verified'],
       ['collaboration', '只读查询 · 多专家汇总', 'verified'],
       ['analytics', '真实只读数据', 'verified'],
+      ['operations', '真实只读数据 · 选择后分析', 'verified'],
     ] as const
 
     for (const [view, value, tone] of expectedModes) {

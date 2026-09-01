@@ -12,6 +12,7 @@ import OperationsAnalysisPage from './analytics/OperationsAnalysisPage.vue'
 import ExpertCollaborationPage from './ExpertCollaborationPage.vue'
 import VoiceAssistantPage from './voice/VoiceAssistantPage.vue'
 import GovernanceCenter from './governance/GovernanceCenter.vue'
+import OperationsBoard from './operations/OperationsBoard.vue'
 import { demoAlerts, type DemoRole } from '../types/workflow'
 import { useWorkflow } from '../composables/useWorkflow'
 import { useExecutionTrace } from '../composables/useExecutionTrace'
@@ -52,6 +53,7 @@ const navItems = computed<WorkbenchNavItem[]>(() => [
   { value: 'collaboration', label: '专家协作', available: capabilities.value?.collaborationEnabled === true },
   { value: 'analytics', label: '运营分析', available: capabilities.value?.analyticsEnabled === true },
   { value: 'governance', label: '治理中心', available: true },
+  { value: 'operations', label: '运营看板', available: capabilities.value?.analyticsEnabled === true },
 ])
 onMounted(() => {
   void getOperationsCapabilities()
@@ -66,6 +68,7 @@ onMounted(() => {
 })
 const selectedAlertId = ref(demoAlerts[0].id)
 const activeView = ref<WorkbenchView>(props.initialView)
+const selectedAnalysisQuestion = ref<string | null>(null)
 const hasVisitedWorkflow = ref(props.initialView === 'workflow')
 watch(() => props.initialView, (view) => { activeView.value = view })
 watch(() => props.active, (active) => {
@@ -136,6 +139,7 @@ const executionEvidenceByView: Record<WorkbenchView, Pick<WorkbenchEvidenceItem,
   collaboration: { value: '只读查询 · 多专家汇总', tone: 'verified' },
   analytics: { value: '真实只读数据', tone: 'verified' },
   governance: { value: '安全聚合 · 只读概览', tone: 'verified' },
+  operations: { value: '真实只读数据 · 选择后分析', tone: 'verified' },
 }
 const evidenceItems = computed<WorkbenchEvidenceItem[]>(() => [
   { label: '场景', value: navItems.value.find((item) => item.value === activeView.value)?.label ?? '告警工作流' },
@@ -143,6 +147,11 @@ const evidenceItems = computed<WorkbenchEvidenceItem[]>(() => [
   { label: '知识检索', ...knowledgeEvidence.value },
   { label: '执行模式', ...executionEvidenceByView[activeView.value] },
 ])
+
+function openAnalysisFromBoard(question: string): void {
+  selectedAnalysisQuestion.value = question
+  activeView.value = 'analytics'
+}
 watch(
   () => [workflow.value?.workflowId, activeView.value] as const,
   ([workflowId, view]) => {
@@ -280,6 +289,7 @@ function confidence(value?: number) {
         :trace="trace"
         :active="props.active && activeView === 'analytics'"
         :launch-request="props.launchRequest"
+        :initial-question="selectedAnalysisQuestion"
         @run-started="(id: string) => trace.subscribe(id)"
         @launch-status="handleGuidedLaunchUpdate"
       />
@@ -314,6 +324,8 @@ function confidence(value?: number) {
     </main>
 
     <GovernanceCenter v-show="activeView === 'governance'" :active="props.active && activeView === 'governance'" />
+
+    <OperationsBoard v-show="activeView === 'operations'" @open-analysis="openAnalysisFromBoard" />
 
     <main v-show="activeView === 'workflow'" class="main-content">
       <section class="hero-row">

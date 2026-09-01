@@ -14,7 +14,8 @@ const props = withDefaults(defineProps<{
   pollIntervalMs?: number
   active?: boolean
   launchRequest?: ScenarioLaunchRequest | null
-}>(), { active: true, launchRequest: null })
+  initialQuestion?: string | null
+}>(), { active: true, launchRequest: null, initialQuestion: null })
 const emit = defineEmits<{
   'run-started': [runId: string]
   'launch-status': [update: GuidedLaunchUpdate]
@@ -34,6 +35,7 @@ const recommendedGroups = [
       '过去5天按日期能耗日历热力图',
       '过去5天能耗目标完成率',
       '过去5天各楼宇能耗与占用人数关系',
+      '过去5天各楼宇平均占用人数',
       '过去5天各楼宇能耗空间分布',
       '过去5天各楼宇分时能耗堆叠图',
     ],
@@ -44,7 +46,7 @@ const recommendedGroups = [
   },
   {
     label: '停车资源',
-    questions: ['停车进场量'],
+    questions: ['过去5天各停车区域停车利用率', '过去5天各停车区域进场量'],
   },
 ]
 const analysis = useOperationsAnalysis({
@@ -68,6 +70,10 @@ watch(() => props.active, (active) => {
   // The analysis composable keeps an accepted run alive while its page is
   // hidden. Reclaim the shared execution trace when the page becomes active.
   if (analysis.runId.value) props.trace?.subscribe(analysis.runId.value)
+})
+
+watch(() => props.initialQuestion, (value) => {
+  if (value?.trim()) question.value = value.trim()
 })
 
 function launchAnalysis(callbacks?: AnalysisStartCallbacks): void {
