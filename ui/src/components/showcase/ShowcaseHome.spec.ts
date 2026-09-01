@@ -21,6 +21,7 @@ function scenario(
     ALERT_WORKFLOW: '告警处置',
     EXPERT_COLLABORATION: '跨域专家协作',
     OPERATIONS_ANALYSIS: '运营分析',
+    CUSTOMER_SERVICE: '园区客服',
     VOICE_ASSISTANT: '实时语音助手',
     CUSTOMER_SERVICE: '园区客服',
   }
@@ -28,6 +29,7 @@ function scenario(
     ALERT_WORKFLOW: '配电或暖通异常该如何处置？',
     EXPERT_COLLABORATION: '能耗、设备与安防是否存在关联？',
     OPERATIONS_ANALYSIS: '过去几天哪座楼能耗偏离基线？',
+    CUSTOMER_SERVICE: '园区服务如何自动回答并有序转人工？',
     VOICE_ASSISTANT: '通过语音询问园区问题并获得在线回答',
     CUSTOMER_SERVICE: '园区服务如何自动回答并有序转人工？',
   }
@@ -38,6 +40,7 @@ function scenario(
       question: '电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联',
     },
     OPERATIONS_ANALYSIS: { alertId: null, question: '过去5天各楼宇能耗' },
+    CUSTOMER_SERVICE: { alertId: null, question: '访客停车怎么收费？' },
     VOICE_ASSISTANT: { alertId: null, question: null },
     CUSTOMER_SERVICE: { alertId: null, question: '访客停车怎么收费？' },
   } as const

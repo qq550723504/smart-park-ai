@@ -202,6 +202,7 @@ describe('App surface coordinator', () => {
     ['ALERT_WORKFLOW', 'workflow'],
     ['EXPERT_COLLABORATION', 'collaboration'],
     ['OPERATIONS_ANALYSIS', 'analytics'],
+    ['CUSTOMER_SERVICE', 'customer'],
     ['VOICE_ASSISTANT', 'voice'],
     ['CUSTOMER_SERVICE', 'customer'],
   ] as Array<[ShowcaseScenario['id'], WorkbenchView]>)(

@@ -20,7 +20,10 @@
 | 运营演示 | 角色边界、指标、审计、反馈和一次性故障注入 |
 | 专家协作 | Supervisor 动态分派领域专家，并行分析、展示证据和汇总结论；需满足在线能力开关 |
 | 运营分析 | 自然语言转真实只读 PostgreSQL 分析，展示查询结果、图表和结论；需显式启用分析链路 |
+| 停车与能耗运营看板 | 以受控问题入口组织停车、能耗和空间指标，点击后复用运营分析只读查询；需显式启用分析链路 |
 | 实时语音 | 选择性启用的全场景演示模式；需完成在线预检后再进行浏览器端人工语音验收 |
+| AI 治理概览 | 场景就绪度、能力模式、运营计数和安全边界；管理员可查看审计明细 |
+| AI 智能协同中心 | 只读聚合告警工作流与客服工单，按来源/状态筛选，并跳回原场景处理；需要 `CUSTOMER_AGENT` 或 `ADMIN` |
 
 ## 快速开始
 
@@ -224,7 +227,7 @@ docker compose --env-file .env `
 .\scripts\verify-showcase.ps1
 ```
 
-验证器会向 `POST /api/showcase/preflight` 请求五个且仅五个演示场景，并且只在全部返回 `READY` 和有效 `verifiedAt` 时成功；成功输出只包含 `scenarioId`、`status` 和 `verifiedAt`。`READY` 收据仅在当前进程内有效 15 分钟，应用重启或收据过期后必须重新运行预检。
+验证器会向 `POST /api/showcase/preflight` 请求五个且仅五个演示场景（包括园区客服），并且只在全部返回 `READY` 和有效 `verifiedAt` 时成功；成功输出只包含 `scenarioId`、`status` 和 `verifiedAt`。`READY` 收据仅在当前进程内有效 15 分钟，应用重启或收据过期后必须重新运行预检。
 
 告警预检从不批准或创建工单；它只验证流程是否安全地停在人工审批边界。服务端语音预检也不能替代浏览器麦克风权限确认和一次人工真实说话的完整往返验收。
 
@@ -345,6 +348,7 @@ Remove-Item Env:SERVER_ADDRESS -ErrorAction SilentlyContinue
 | `POST /api/customer-service/sessions/{sessionId}/messages` | 继续提问 | 已转人工的会话停止自动回答 |
 | `GET /api/customer-service/sessions/{sessionId}/conversation` | 查看对话与安全检索轨迹 | 不返回知识正文 |
 | `GET /api/customer-service/tickets` | 查看人工工单 | 需要 `CUSTOMER_AGENT` 或 `ADMIN` |
+| `GET /api/collaboration/work-items` | 查看安全协同队列 | 只读；需要 `CUSTOMER_AGENT` 或 `ADMIN`，支持 `source`、`status`、`limit`（最多 50） |
 | `POST /api/alerts/{alertId}/workflows` | 启动告警工作流 | 只在 DashScope 启用时存在 |
 | `GET /api/workflows/{workflowId}` | 查询工作流状态 | 只返回脱敏公开 DTO |
 | `POST /api/workflows/{workflowId}/approval` | 审批或拒绝 | 需要稳定的 `idempotencyKey` |
@@ -352,6 +356,7 @@ Remove-Item Env:SERVER_ADDRESS -ErrorAction SilentlyContinue
 | `GET /api/workflows/{workflowId}/observability` | 查看安全观测摘要 | 不暴露内部 Graph 状态 |
 | `GET /api/knowledge` | 查看知识元数据 | 需要 `ADMIN`，不返回知识正文 |
 | `GET /api/operations/metrics` | 查看运营计数 | 内存数据 |
+| `GET /api/governance/overview` | 查看安全聚合治理概览 | 不返回原始业务正文 |
 | `GET /api/audit` | 查看安全审计记录 | 需要 `ADMIN` |
 
 高风险工作流进入 `WAITING_APPROVAL` 后，可以提交审批：

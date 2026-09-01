@@ -56,13 +56,17 @@ describe('OperationsAnalysisPage', () => {
       '过去5天按日期能耗日历热力图',
       '过去5天能耗目标完成率',
       '过去5天各楼宇能耗与占用人数关系',
+      '过去5天各楼宇平均占用人数',
       '过去5天各楼宇能耗空间分布',
       '过去5天各楼宇分时能耗堆叠图',
       '告警数量',
       '高风险告警数量',
-      '停车进场量',
       '设备离线数',
+      '过去5天各停车区域停车利用率',
+      '过去5天各停车区域进场量',
     ])
+    expect(wrapper.findAll('.analytics-preset-group').map((group) => group.attributes('aria-label')))
+      .toEqual(['能耗与空间', '告警与设备', '停车资源'])
 
     await presets[0].trigger('click')
 

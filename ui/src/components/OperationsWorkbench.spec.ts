@@ -30,6 +30,11 @@ const analysisStub = defineComponent({
   },
 })
 
+const analysisBoardStub = defineComponent({
+  props: { initialQuestion: { type: String, default: null } },
+  template: '<input aria-label="分析问题" :value="initialQuestion" />',
+})
+
 const traceRailStub = defineComponent({
   props: { status: { type: String, required: true } },
   template: '<div data-testid="trace-status">{{ status }}</div>',
@@ -58,6 +63,12 @@ const voiceStub = defineComponent({
 const customerStub = defineComponent({
   props: { role: { type: String, required: true } },
   template: '<div data-testid="customer-role">{{ role }}</div>',
+})
+
+const collaborationCenterStub = defineComponent({
+  props: { role: { type: String, required: true }, active: { type: Boolean, default: false } },
+  emits: ['open-view'],
+  template: '<div data-testid="collaboration-center-stub"><button type="button" data-collaboration-jump @click="$emit(\'open-view\', \'customer\')">打开客服</button></div>',
 })
 
 const guidedStatusStub = defineComponent({
@@ -193,7 +204,7 @@ describe('OperationsWorkbench', () => {
 
     await settleCapabilities()
 
-    expect(wrapper.findAll('[data-workbench-stage] > .main-content')).toHaveLength(5)
+    expect(wrapper.findAll('[data-workbench-stage] > .main-content')).toHaveLength(8)
     expect(wrapper.findAll('[data-workbench-rail] .global-rail')).toHaveLength(1)
     const shell = wrapper.get('[data-testid="immersive-workbench-shell"]')
     const rail = wrapper.get('[data-workbench-rail] .global-rail')
@@ -219,6 +230,23 @@ describe('OperationsWorkbench', () => {
     expect(labels).not.toContain('实时语音')
     expect(labels).not.toContain('专家协作')
     expect(labels).not.toContain('运营分析')
+    expect(labels).not.toContain('运营看板')
+  })
+
+  it('routes an operations board question into the existing analytics input', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow' },
+      global: { stubs: { ...operatorStubs, OperationsAnalysisPage: analysisBoardStub } },
+    })
+    await settleCapabilities()
+
+    await wrapper.get('[data-workbench-view="operations"]').trigger('click')
+    await wrapper.get('[data-board-question][data-question="过去5天各停车区域停车利用率"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.get('[data-workbench-view="analytics"]').classes()).toContain('active')
+    expect((wrapper.get('[aria-label="分析问题"]').element as HTMLInputElement).value)
+      .toBe('过去5天各停车区域停车利用率')
   })
 
   it('emits an intent to return to the showcase surface', async () => {
@@ -261,6 +289,7 @@ describe('OperationsWorkbench', () => {
       ['voice', '只读查询 · 实时语音会话', 'verified'],
       ['collaboration', '只读查询 · 多专家汇总', 'verified'],
       ['analytics', '真实只读数据', 'verified'],
+      ['operations', '真实只读数据 · 选择后分析', 'verified'],
     ] as const
 
     for (const [view, value, tone] of expectedModes) {
@@ -302,7 +331,7 @@ describe('OperationsWorkbench', () => {
 
     await settleCapabilities()
 
-    expect(wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())).toEqual(['告警工作流', '园区客服'])
+    expect(wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())).toEqual(['告警工作流', '园区客服', '协同中心', '治理中心'])
     expect(wrapper.get('[data-evidence-item="知识检索"] strong').text()).toBe('能力检查失败')
     expect(wrapper.get('[data-evidence-item="知识检索"]').attributes('data-tone')).toBe('warning')
   })
@@ -321,6 +350,24 @@ describe('OperationsWorkbench', () => {
 
     expect(wrapper.get('[data-workbench-view="customer"]').classes()).toContain('active')
     expect(wrapper.get('[data-testid="customer-role"]').text()).toBe('CUSTOMER_AGENT')
+  })
+
+  it('exposes the collaboration center to allowed roles and routes queue jumps into existing views', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow' },
+      global: { stubs: { ...operatorStubs, CollaborationCenter: collaborationCenterStub } },
+    })
+    await settleCapabilities()
+
+    expect(wrapper.get('[data-workbench-view="collaboration-center"]').text()).toBe('协同中心')
+    await wrapper.get('[data-workbench-view="collaboration-center"]').trigger('click')
+    await wrapper.get('[data-collaboration-jump]').trigger('click')
+    expect(wrapper.get('[data-workbench-view="customer"]').classes()).toContain('active')
+
+    wrapper.getComponent(ImmersiveWorkbenchShell).vm.$emit('update:role', 'VIEWER')
+    await nextTick()
+    expect(wrapper.find('[data-workbench-view="collaboration-center"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('opens the narrow-screen execution rail and keeps approval fields accessibly named', async () => {

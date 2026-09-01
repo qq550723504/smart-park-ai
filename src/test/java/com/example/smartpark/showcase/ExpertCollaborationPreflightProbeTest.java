@@ -51,6 +51,23 @@ class ExpertCollaborationPreflightProbeTest {
     }
 
     @Test
+    void collaborationPassesWhenAllDomainEvidenceIsCompleteButCorrelationNeedsReview() {
+        ExpertCollaborationService service = mock(ExpertCollaborationService.class);
+        UUID runId = UUID.randomUUID();
+        when(service.start(anyString())).thenReturn(run(runId, CollaborationRun.RunStatus.RUNNING, List.of()));
+        List<ExpertFinding> findings = List.of(
+                supported(ExpertDomain.ENERGY),
+                supported(ExpertDomain.DEVICE),
+                supported(ExpertDomain.SECURITY));
+        when(service.get(runId)).thenReturn(completed(runId, findings,
+                new Synthesis(FindingStatus.INSUFFICIENT_EVIDENCE, "无法确认关联",
+                        List.of(), 0, List.of("缺少跨域时空或因果关联证据"))));
+
+        assertThat(new ExpertCollaborationPreflightProbe(service).probe())
+                .isEqualTo(ShowcaseProbeResult.PASSED);
+    }
+
+    @Test
     void collaborationRejectsCompletedRunWithFindingsButNoEvidence() {
         ExpertCollaborationService service = mock(ExpertCollaborationService.class);
         UUID runId = UUID.randomUUID();

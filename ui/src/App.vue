@@ -16,6 +16,7 @@ const scenarioView: Record<ShowcaseScenarioId, GuidedWorkbenchView> = {
   ALERT_WORKFLOW: 'workflow',
   EXPERT_COLLABORATION: 'collaboration',
   OPERATIONS_ANALYSIS: 'analytics',
+  CUSTOMER_SERVICE: 'customer',
   VOICE_ASSISTANT: 'voice',
   CUSTOMER_SERVICE: 'customer',
 }

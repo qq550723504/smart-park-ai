@@ -1,5 +1,6 @@
 import type { AuditEntry, CustomerConversationResponse, CustomerServiceResponse, DemoRole, FeedbackRating, KnowledgeMetadata, OperationsMetrics, WorkflowEvent, WorkflowObservability, WorkflowResponse } from '../types/workflow'
 import type { ShowcaseLaunchInput, ShowcaseScenarioId } from '../types/workbench'
+import type { CollaborationWorkItem, CollaborationWorkItemFilters } from '../types/collaborationCenter'
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -110,6 +111,43 @@ export function getOperationsCapabilities() {
 
 export function getOperationsMetrics() {
   return request<OperationsMetrics>('/api/operations/metrics')
+}
+
+export function listCollaborationWorkItems(role: DemoRole, filters: CollaborationWorkItemFilters = {}) {
+  const params = new URLSearchParams()
+  if (filters.source) params.set('source', filters.source)
+  if (filters.status) params.set('status', filters.status)
+  if (filters.limit != null) params.set('limit', String(filters.limit))
+  const query = params.toString()
+  return request<CollaborationWorkItem[]>(`/api/collaboration/work-items${query ? `?${query}` : ''}`, {
+    headers: { 'X-Demo-Role': role },
+  })
+}
+
+export interface GovernanceOverview {
+  capturedAt: string
+  scenarios: { total: number; ready: number; notReady: number; disabled: number }
+  capabilities: OperationsCapabilities
+  business: {
+    workflowCount: number
+    completedWorkflowCount: number
+    customerSessionCount: number
+    humanTicketCount: number
+  }
+  governance: {
+    auditEntryCount: number
+    feedbackCount: number
+    positiveFeedbackCount: number
+    knowledgeDocumentCount: number
+    activeKnowledgeDocumentCount: number
+    completionRate: number | null
+    positiveFeedbackRate: number | null
+  }
+  boundaries: string[]
+}
+
+export function getGovernanceOverview() {
+  return request<GovernanceOverview>('/api/governance/overview')
 }
 
 export function getAuditEntries(role: DemoRole) {

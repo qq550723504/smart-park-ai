@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import {
-  ChatDotRound,
   Connection,
   DataLine,
   DocumentChecked,
@@ -28,7 +27,7 @@ const props = withDefaults(defineProps<{
   active: true,
 })
 
-const priority = ['EXPERT_COLLABORATION', 'ALERT_WORKFLOW', 'OPERATIONS_ANALYSIS', 'CUSTOMER_SERVICE', 'VOICE_ASSISTANT'] as const
+const priority = ['CUSTOMER_SERVICE', 'EXPERT_COLLABORATION', 'ALERT_WORKFLOW', 'OPERATIONS_ANALYSIS', 'VOICE_ASSISTANT'] as const
 const catalog = ref<ShowcaseScenarioCatalog | null>(null)
 const selectedId = ref<ShowcaseScenario['id'] | null>(null)
 const loading = ref(true)
@@ -89,8 +88,8 @@ function scenarioIcon(id: ShowcaseScenario['id']) {
     ALERT_WORKFLOW: Checked,
     EXPERT_COLLABORATION: Connection,
     OPERATIONS_ANALYSIS: DataLine,
+    CUSTOMER_SERVICE: User,
     VOICE_ASSISTANT: Monitor,
-    CUSTOMER_SERVICE: ChatDotRound,
   }[id]
 }
 
@@ -336,6 +335,13 @@ watch(() => props.active, (active) => {
         <div>
           <h3>人工确认</h3>
           <p>观点与建议由人工确认，高风险动作不自动执行。</p>
+        </div>
+      </article>
+      <article class="showcase-home__governance-summary">
+        <Lock aria-hidden="true" />
+        <div>
+          <h3>治理摘要</h3>
+          <p>聚合指标 · 边界清晰 · 人工可控。详细审计与能力状态请在工作台治理中心查看。</p>
         </div>
       </article>
     </section>

@@ -2,10 +2,10 @@ export type ShowcaseScenarioId =
   | 'ALERT_WORKFLOW'
   | 'EXPERT_COLLABORATION'
   | 'OPERATIONS_ANALYSIS'
-  | 'VOICE_ASSISTANT'
   | 'CUSTOMER_SERVICE'
+  | 'VOICE_ASSISTANT'
 
-export type WorkbenchView = 'workflow' | 'customer' | 'voice' | 'collaboration' | 'analytics'
+export type WorkbenchView = 'workflow' | 'customer' | 'voice' | 'collaboration' | 'collaboration-center' | 'analytics' | 'governance' | 'operations'
 export type GuidedWorkbenchView = WorkbenchView
 
 export interface ShowcaseLaunchInput {
