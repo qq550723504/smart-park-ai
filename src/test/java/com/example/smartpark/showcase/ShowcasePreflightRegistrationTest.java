@@ -40,11 +40,13 @@ class ShowcasePreflightRegistrationTest {
             .withUserConfiguration(ProbeFixture.class);
 
     @Test
-    void defaultModesRegisterOnlyTheOnlineCollaborationProbe() {
+    void defaultModesRegisterCollaborationAndOfflineCustomerProbes() {
         runner.run(context -> {
             assertThat(context.getBeansOfType(ShowcasePreflightProbe.class).values())
                     .extracting(ShowcasePreflightProbe::scenarioId)
-                    .containsExactly(ShowcaseScenarioId.EXPERT_COLLABORATION);
+                    .containsExactlyInAnyOrder(
+                            ShowcaseScenarioId.EXPERT_COLLABORATION,
+                            ShowcaseScenarioId.CUSTOMER_SERVICE);
             assertThat(context).doesNotHaveBean(AlertPreflightWorkflowFactory.class);
             assertThat(context).doesNotHaveBean(AlertWorkflowPreflightProbe.class);
             assertThat(context).doesNotHaveBean(OperationsAnalysisPreflightProbe.class);
@@ -73,6 +75,7 @@ class ShowcasePreflightRegistrationTest {
     @Import({
             ExpertCollaborationPreflightProbe.class,
             OperationsAnalysisPreflightProbe.class,
+            CustomerServicePreflightProbe.class,
             AlertPreflightWorkflowFactory.class,
             AlertWorkflowPreflightProbe.class,
             VoiceAssistantPreflightProbe.class

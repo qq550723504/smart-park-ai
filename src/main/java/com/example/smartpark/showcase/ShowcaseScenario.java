@@ -78,6 +78,7 @@ public record ShowcaseScenario(
             case EXPERT_COLLABORATION -> "本次部署未启用专家协作";
             case OPERATIONS_ANALYSIS -> "本次部署未启用运营分析";
             case VOICE_ASSISTANT -> "本次部署未启用语音体验";
+            case CUSTOMER_SERVICE -> "本次部署未启用园区客服";
         };
     }
 }

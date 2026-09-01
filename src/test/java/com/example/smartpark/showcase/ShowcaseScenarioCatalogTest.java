@@ -95,6 +95,9 @@ class ShowcaseScenarioCatalogTest {
                         tuple(ShowcaseScenarioId.OPERATIONS_ANALYSIS, "运营分析", 30,
                                 java.util.List.of("指标口径", "只读查询", "结果图表"),
                                 "只读数据，不自动执行操作"),
+                        tuple(ShowcaseScenarioId.CUSTOMER_SERVICE, "园区客服", 30,
+                                java.util.List.of("知识引用", "服务意图", "人工边界"),
+                                "报修或知识不足时转人工"),
                         tuple(ShowcaseScenarioId.VOICE_ASSISTANT, "实时语音助手", 30,
                                 java.util.List.of("语音识别", "工具调用", "语音回答"),
                                 "不执行设备控制或自动审批"));
@@ -108,6 +111,8 @@ class ShowcaseScenarioCatalogTest {
                 .isEqualTo("电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联");
         assertThat(scenario(ShowcaseScenarioId.OPERATIONS_ANALYSIS).launchInput().question())
                 .isEqualTo("过去5天各楼宇能耗");
+        assertThat(scenario(ShowcaseScenarioId.CUSTOMER_SERVICE).launchInput().question())
+                .isEqualTo("访客停车怎么收费？");
     }
 
     @Test
@@ -190,7 +195,13 @@ class ShowcaseScenarioCatalogTest {
                             .isEqualTo(java.time.ZoneOffset.UTC);
                     assertThat(context.getBean(ShowcaseScenarioCatalog.class).scenarios(NOW))
                             .allSatisfy(scenario -> {
-                                assertThat(scenario.status()).isEqualTo(ShowcaseScenarioStatus.DISABLED);
+                                if (scenario.id() == ShowcaseScenarioId.CUSTOMER_SERVICE) {
+                                    assertThat(scenario.status()).isEqualTo(ShowcaseScenarioStatus.NOT_READY);
+                                    assertThat(scenario.unavailableReason())
+                                            .isEqualTo("本次部署尚未完成在线验证");
+                                } else {
+                                    assertThat(scenario.status()).isEqualTo(ShowcaseScenarioStatus.DISABLED);
+                                }
                                 assertThat(scenario.live()).isFalse();
                             });
                 });

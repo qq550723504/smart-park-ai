@@ -6,6 +6,7 @@ public record ShowcaseLaunchInput(String alertId, String question) {
     private static final String COLLABORATION_QUESTION =
             "电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联";
     private static final String ANALYTICS_QUESTION = "过去5天各楼宇能耗";
+    private static final String CUSTOMER_SERVICE_QUESTION = "访客停车怎么收费？";
 
     public ShowcaseLaunchInput {
         alertId = normalize(alertId);
@@ -18,6 +19,7 @@ public record ShowcaseLaunchInput(String alertId, String question) {
             case EXPERT_COLLABORATION -> new ShowcaseLaunchInput(null, COLLABORATION_QUESTION);
             case OPERATIONS_ANALYSIS -> new ShowcaseLaunchInput(null, ANALYTICS_QUESTION);
             case VOICE_ASSISTANT -> new ShowcaseLaunchInput(null, null);
+            case CUSTOMER_SERVICE -> new ShowcaseLaunchInput(null, CUSTOMER_SERVICE_QUESTION);
         };
     }
 
