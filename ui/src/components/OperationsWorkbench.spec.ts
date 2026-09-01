@@ -65,6 +65,12 @@ const customerStub = defineComponent({
   template: '<div data-testid="customer-role">{{ role }}</div>',
 })
 
+const collaborationCenterStub = defineComponent({
+  props: { role: { type: String, required: true }, active: { type: Boolean, default: false } },
+  emits: ['open-view'],
+  template: '<div data-testid="collaboration-center-stub"><button type="button" data-collaboration-jump @click="$emit(\'open-view\', \'customer\')">打开客服</button></div>',
+})
+
 const guidedStatusStub = defineComponent({
   props: { active: { type: Boolean, default: true }, launchRequest: { type: Object, default: null } },
   emits: ['launch-status'],
@@ -198,7 +204,7 @@ describe('OperationsWorkbench', () => {
 
     await settleCapabilities()
 
-    expect(wrapper.findAll('[data-workbench-stage] > .main-content')).toHaveLength(7)
+    expect(wrapper.findAll('[data-workbench-stage] > .main-content')).toHaveLength(8)
     expect(wrapper.findAll('[data-workbench-rail] .global-rail')).toHaveLength(1)
     const shell = wrapper.get('[data-testid="immersive-workbench-shell"]')
     const rail = wrapper.get('[data-workbench-rail] .global-rail')
@@ -325,7 +331,7 @@ describe('OperationsWorkbench', () => {
 
     await settleCapabilities()
 
-    expect(wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())).toEqual(['告警工作流', '园区客服', '治理中心'])
+    expect(wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())).toEqual(['告警工作流', '园区客服', '协同中心', '治理中心'])
     expect(wrapper.get('[data-evidence-item="知识检索"] strong').text()).toBe('能力检查失败')
     expect(wrapper.get('[data-evidence-item="知识检索"]').attributes('data-tone')).toBe('warning')
   })
@@ -344,6 +350,24 @@ describe('OperationsWorkbench', () => {
 
     expect(wrapper.get('[data-workbench-view="customer"]').classes()).toContain('active')
     expect(wrapper.get('[data-testid="customer-role"]').text()).toBe('CUSTOMER_AGENT')
+  })
+
+  it('exposes the collaboration center to allowed roles and routes queue jumps into existing views', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow' },
+      global: { stubs: { ...operatorStubs, CollaborationCenter: collaborationCenterStub } },
+    })
+    await settleCapabilities()
+
+    expect(wrapper.get('[data-workbench-view="collaboration-center"]').text()).toBe('协同中心')
+    await wrapper.get('[data-workbench-view="collaboration-center"]').trigger('click')
+    await wrapper.get('[data-collaboration-jump]').trigger('click')
+    expect(wrapper.get('[data-workbench-view="customer"]').classes()).toContain('active')
+
+    wrapper.getComponent(ImmersiveWorkbenchShell).vm.$emit('update:role', 'VIEWER')
+    await nextTick()
+    expect(wrapper.find('[data-workbench-view="collaboration-center"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('opens the narrow-screen execution rail and keeps approval fields accessibly named', async () => {

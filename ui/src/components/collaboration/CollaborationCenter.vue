@@ -52,7 +52,7 @@ function open(item: CollaborationWorkItem): void {
 }
 
 watch([() => props.role, source, status, () => props.active], ([, , , active]) => { if (active) void load() })
-onMounted(() => { void load() })
+onMounted(() => { if (props.active) void load() })
 </script>
 
 <template>

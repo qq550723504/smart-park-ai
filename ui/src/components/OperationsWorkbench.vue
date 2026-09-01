@@ -13,6 +13,7 @@ import ExpertCollaborationPage from './ExpertCollaborationPage.vue'
 import VoiceAssistantPage from './voice/VoiceAssistantPage.vue'
 import GovernanceCenter from './governance/GovernanceCenter.vue'
 import OperationsBoard from './operations/OperationsBoard.vue'
+import CollaborationCenter from './collaboration/CollaborationCenter.vue'
 import { demoAlerts, type DemoRole } from '../types/workflow'
 import { useWorkflow } from '../composables/useWorkflow'
 import { useExecutionTrace } from '../composables/useExecutionTrace'
@@ -51,6 +52,7 @@ const navItems = computed<WorkbenchNavItem[]>(() => [
   { value: 'customer', label: '园区客服', available: true },
   { value: 'voice', label: '实时语音', available: capabilities.value?.voiceEnabled === true },
   { value: 'collaboration', label: '专家协作', available: capabilities.value?.collaborationEnabled === true },
+  { value: 'collaboration-center', label: '协同中心', available: role.value === 'ADMIN' || role.value === 'CUSTOMER_AGENT' },
   { value: 'analytics', label: '运营分析', available: capabilities.value?.analyticsEnabled === true },
   { value: 'governance', label: '治理中心', available: true },
   { value: 'operations', label: '运营看板', available: capabilities.value?.analyticsEnabled === true },
@@ -137,6 +139,7 @@ const executionEvidenceByView: Record<WorkbenchView, Pick<WorkbenchEvidenceItem,
   customer: { value: '受控写入 · 可创建客服工单', tone: 'warning' },
   voice: { value: '只读查询 · 实时语音会话', tone: 'verified' },
   collaboration: { value: '只读查询 · 多专家汇总', tone: 'verified' },
+  'collaboration-center': { value: '只读聚合 · 原场景处理', tone: 'verified' },
   analytics: { value: '真实只读数据', tone: 'verified' },
   governance: { value: '安全聚合 · 只读概览', tone: 'verified' },
   operations: { value: '真实只读数据 · 选择后分析', tone: 'verified' },
@@ -151,6 +154,10 @@ const evidenceItems = computed<WorkbenchEvidenceItem[]>(() => [
 function openAnalysisFromBoard(question: string): void {
   selectedAnalysisQuestion.value = question
   activeView.value = 'analytics'
+}
+
+function openCollaborationView(view: 'workflow' | 'customer'): void {
+  activeView.value = view
 }
 watch(
   () => [workflow.value?.workflowId, activeView.value] as const,
@@ -322,6 +329,13 @@ function confidence(value?: number) {
         @launch-status="handleGuidedLaunchUpdate"
       />
     </main>
+
+    <CollaborationCenter
+      v-show="activeView === 'collaboration-center'"
+      :role="role"
+      :active="props.active && activeView === 'collaboration-center'"
+      @open-view="openCollaborationView"
+    />
 
     <GovernanceCenter v-show="activeView === 'governance'" :active="props.active && activeView === 'governance'" />
 
