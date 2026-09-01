@@ -147,7 +147,22 @@ docker compose --env-file .env.example up --build
 
 默认栈启动 backend、frontend 和 analytics PostgreSQL 容器。前端入口为 <http://localhost:5173>；容器内 Vite 会把 `/api` 代理到 backend，因此可用 <http://localhost:5173/api/operations/capabilities> 查看当前能力。默认模式下 backend 暴露的同一 capabilities endpoint 也可直接通过 <http://localhost:8080/api/operations/capabilities> 访问。
 
-默认 Compose 端口只绑定本机回环：`127.0.0.1:5173:5173` 和 `127.0.0.1:8080:8080`。因此访问 URL 仍然是 <http://localhost:5173> 与 <http://localhost:8080>，但不会监听局域网或公网地址。
+默认 Compose 前端端口只绑定本机回环：`127.0.0.1:5173:5173`；backend 的 `8080` 端口也只绑定本机回环。默认访问 URL 是 <http://localhost:5173> 与 <http://localhost:8080>，不会监听局域网或公网地址。前端会在容器内部代理 `/api`，因此默认不需要把 backend API 暴露给局域网。
+
+如需让局域网其他电脑访问本地演示，必须显式设置前端绑定地址和语音 WebSocket 来源。下面示例假定宿主机局域网 IP 为 `192.168.6.246`；请替换为实际 IP：
+
+```powershell
+$env:SMARTPARK_FRONTEND_BIND_HOST="0.0.0.0"
+$env:SMARTPARK_VOICE_ALLOWED_ORIGINS="http://192.168.6.246:5173,http://localhost:5173,http://127.0.0.1:5173"
+
+docker compose --env-file .env `
+  -f compose.yaml `
+  -f compose.analytics.yaml `
+  -f compose.showcase.yaml `
+  --profile analytics up --build -d
+```
+
+其他电脑访问 <http://192.168.6.246:5173>。该局域网模式仅适用于受信任的本地演示网络；项目本身不提供生产级认证、租户隔离或 API 访问控制。
 
 常用生命周期命令：
 

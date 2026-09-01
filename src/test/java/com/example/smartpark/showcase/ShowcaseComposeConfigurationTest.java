@@ -34,7 +34,8 @@ class ShowcaseComposeConfigurationTest {
             "SMARTPARK_CUSTOMER_SERVICE_ANSWER_MODE", "dashscope",
             "SMARTPARK_VOICE_ENABLED", "true",
             "SMARTPARK_LOCAL_DEMO_ENABLED", "true",
-            "SMARTPARK_VOICE_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173",
+            "SMARTPARK_VOICE_ALLOWED_ORIGINS",
+                    "${SMARTPARK_VOICE_ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}",
             "SPRING_AI_DASHSCOPE_AUDIO_TRANSCRIPTION_OPTIONS_MODEL",
                     "${SPRING_AI_DASHSCOPE_AUDIO_TRANSCRIPTION_OPTIONS_MODEL:-paraformer-realtime-v2}",
             "SPRING_AI_DASHSCOPE_AUDIO_SPEECH_OPTIONS_MODEL",
@@ -47,7 +48,7 @@ class ShowcaseComposeConfigurationTest {
             SMARTPARK_CUSTOMER_SERVICE_ANSWER_MODE: dashscope
             SMARTPARK_VOICE_ENABLED: "true"
             SMARTPARK_LOCAL_DEMO_ENABLED: "true"
-            SMARTPARK_VOICE_ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+            SMARTPARK_VOICE_ALLOWED_ORIGINS: ${SMARTPARK_VOICE_ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
             SPRING_AI_DASHSCOPE_AUDIO_TRANSCRIPTION_OPTIONS_MODEL: ${SPRING_AI_DASHSCOPE_AUDIO_TRANSCRIPTION_OPTIONS_MODEL:-paraformer-realtime-v2}
             SPRING_AI_DASHSCOPE_AUDIO_SPEECH_OPTIONS_MODEL: ${SPRING_AI_DASHSCOPE_AUDIO_SPEECH_OPTIONS_MODEL:-cosyvoice-v2}
             SPRING_AI_DASHSCOPE_AUDIO_SPEECH_OPTIONS_VOICE: ${SPRING_AI_DASHSCOPE_AUDIO_SPEECH_OPTIONS_VOICE:-longxiaochun_v2}
@@ -81,6 +82,7 @@ class ShowcaseComposeConfigurationTest {
     void defaultComposeRemainsOfflineAndApplicationMapsThePreflightTimeout() throws Exception {
         Map<String, Object> defaultEnvironment = backendEnvironment(parseYaml(Path.of("compose.yaml")));
         Map<String, Object> application = parseYaml(Path.of("src/main/resources/application.yml"));
+        Map<String, Object> frontend = mapAt(mapAt(parseYaml(Path.of("compose.yaml")), "services"), "frontend");
 
         assertThat(defaultEnvironment.get("SPRING_AI_DASHSCOPE_ENABLED")).isEqualTo("false");
         assertThat(defaultEnvironment.getOrDefault("SMARTPARK_ANALYTICS_ENABLED", "false")).isEqualTo("false");
@@ -91,6 +93,8 @@ class ShowcaseComposeConfigurationTest {
         assertThat(defaultEnvironment.getOrDefault("SMARTPARK_KNOWLEDGE_MODE", "mock")).isEqualTo("mock");
         assertThat(defaultEnvironment.getOrDefault("SMARTPARK_CUSTOMER_SERVICE_ANSWER_MODE", "mock"))
                 .isEqualTo("mock");
+        assertThat(frontend.get("ports"))
+                .isEqualTo(List.of("${SMARTPARK_FRONTEND_BIND_HOST:-127.0.0.1}:5173:5173"));
         assertThat(mapAt(mapAt(application, "smartpark"), "showcase").get("preflight-timeout"))
                 .isEqualTo("${SMARTPARK_SHOWCASE_PREFLIGHT_TIMEOUT:90s}");
 
