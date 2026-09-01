@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ElInput } from 'element-plus'
 import CustomerServiceConsole from './CustomerServiceConsole.vue'
 import { askCustomerService, getCustomerConversation, listCustomerTickets, replyCustomerSession } from '../services/workflowApi'
+import type { CustomerServiceResponse } from '../types/workflow'
 
 vi.mock('../services/workflowApi', async () => {
   const actual = await vi.importActual<typeof import('../services/workflowApi')>('../services/workflowApi')
@@ -18,6 +19,12 @@ vi.mock('../services/workflowApi', async () => {
 afterEach(() => {
   vi.clearAllMocks()
 })
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise })
+  return { promise, resolve }
+}
 
 describe('CustomerServiceConsole', () => {
   it('keeps the customer question accessibly named after value entry', async () => {
@@ -165,6 +172,75 @@ describe('CustomerServiceConsole', () => {
     expect(askCustomerService).toHaveBeenNthCalledWith(2, '访客停车怎么收费？', expect.any(String))
     expect(replyCustomerSession).not.toHaveBeenCalled()
     expect(wrapper.find('.chat-message.user').text()).toContain('访客停车怎么收费？')
+    wrapper.unmount()
+  })
+
+  it('invalidates an in-flight manual request before starting a guided run', async () => {
+    vi.mocked(listCustomerTickets).mockResolvedValue([])
+    const oldRequest = deferred<CustomerServiceResponse>()
+    vi.mocked(askCustomerService)
+      .mockImplementationOnce(() => oldRequest.promise)
+      .mockResolvedValueOnce({
+        sessionId: 'CS-SESSION-NEW',
+        intent: 'PARKING_POLICY',
+        answer: '访客停车按园区规则执行。',
+        knowledgeSources: ['KB-PARKING-001'],
+        knowledgeCitations: [],
+        needsHuman: false,
+        reason: 'SUPPORTED',
+        citationIds: ['KB-PARKING-001'],
+        ticket: null,
+      })
+    vi.mocked(getCustomerConversation).mockResolvedValue({
+      sessionId: 'CS-SESSION-NEW',
+      messages: [],
+      retrievals: [],
+      humanHandoff: false,
+    })
+
+    const wrapper = mount(CustomerServiceConsole, {
+      props: { role: 'VIEWER', active: true },
+      global: {
+        stubs: {
+          'el-input': ElInput,
+          'el-button': true,
+          'el-tag': true,
+          'el-empty': true,
+        },
+      },
+    })
+
+    await wrapper.get('.chat-composer input').setValue('旧的现场报修问题')
+    await wrapper.get('.chat-composer').trigger('submit')
+    expect(askCustomerService).toHaveBeenCalledTimes(1)
+
+    await wrapper.setProps({
+      launchRequest: {
+        requestId: 9,
+        mode: 'guided',
+        scenarioId: 'CUSTOMER_SERVICE',
+        view: 'customer',
+        launchInput: { alertId: null, question: '访客停车怎么收费？' },
+      },
+    })
+    await flushPromises()
+
+    expect(askCustomerService).toHaveBeenNthCalledWith(2, '访客停车怎么收费？', expect.any(String))
+    oldRequest.resolve({
+      sessionId: 'CS-SESSION-OLD',
+      intent: 'REPAIR',
+      answer: '旧请求回答',
+      knowledgeSources: [],
+      knowledgeCitations: [],
+      needsHuman: true,
+      reason: 'INSUFFICIENT_EVIDENCE',
+      citationIds: [],
+      ticket: null,
+    })
+    await flushPromises()
+
+    expect(wrapper.find('.chat-stream').text()).not.toContain('旧请求回答')
+    expect(wrapper.find('.chat-stream').text()).toContain('访客停车按园区规则执行。')
     wrapper.unmount()
   })
 })

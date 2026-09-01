@@ -6,6 +6,9 @@ import com.example.smartpark.model.common.KnowledgeDomain;
 import com.example.smartpark.model.customer.CustomerAnswer;
 import com.example.smartpark.port.customer.CustomerAnswerPort;
 import com.example.smartpark.port.knowledge.KnowledgePort;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -55,6 +58,28 @@ class CustomerServicePreflightProbeTest {
                 new CustomerAnswer("请转人工", true, CustomerAnswer.Reason.INSUFFICIENT_EVIDENCE, List.of());
 
         assertThat(probe(handoff).probe()).isEqualTo(ShowcaseProbeResult.FAILED);
+    }
+
+    @Test
+    void logsSanitizedExceptionTypeWhenAnswerAdapterFails() {
+        CustomerAnswerPort failing = (question, intent, evidence) -> {
+            throw new IllegalStateException("provider-secret");
+        };
+        Logger logger = (Logger) org.slf4j.LoggerFactory.getLogger(CustomerServicePreflightProbe.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            assertThat(probe(failing).probe()).isEqualTo(ShowcaseProbeResult.FAILED);
+            assertThat(appender.list).hasSize(1);
+            String message = appender.list.get(0).getFormattedMessage();
+            assertThat(message).isEqualTo("customer service preflight failed: stage=ANSWER, "
+                    + "exceptionType=java.lang.IllegalStateException");
+            assertThat(message).doesNotContain("provider-secret");
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
     }
 
     private CustomerServicePreflightProbe probe(CustomerAnswerPort answerPort) {
