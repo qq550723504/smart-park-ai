@@ -30,9 +30,9 @@ describe('CollaborationCenter', () => {
     expect(wrapper.text()).toContain('ALERT_WORKFLOW:wf-1')
     expect(wrapper.text()).toContain('客服工单 cs-1')
     await wrapper.get('[data-work-item="CUSTOMER_TICKET:cs-1"] button').trigger('click')
-    expect(wrapper.emitted('open-view')).toEqual([['customer']])
+    expect(wrapper.emitted('open-view')).toEqual([['customer', undefined, 'cs-1']])
     await wrapper.get('[data-work-item="ALERT_WORKFLOW:wf-1"] button').trigger('click')
-    expect(wrapper.emitted('open-view')).toEqual([['customer'], ['workflow', 'wf-1']])
+    expect(wrapper.emitted('open-view')).toEqual([['customer', undefined, 'cs-1'], ['workflow', 'wf-1']])
   })
 
   it('ignores a stale queue response after the filters change', async () => {

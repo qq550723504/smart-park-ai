@@ -6,6 +6,7 @@ import com.example.smartpark.model.common.WorkflowStatus;
 import com.example.smartpark.model.customer.CustomerTicket;
 import com.example.smartpark.model.customer.CustomerTicketStatus;
 import com.example.smartpark.port.customer.CustomerTicketPort;
+import com.example.smartpark.port.customer.CustomerTicketReader;
 import com.example.smartpark.workflow.WorkflowExecutionStore;
 import com.example.smartpark.workflow.WorkflowSnapshot;
 
@@ -18,9 +19,13 @@ import java.util.Objects;
 
 public final class CollaborationCenterService {
     private final WorkflowExecutionStore workflows;
-    private final CustomerTicketPort tickets;
+    private final CustomerTicketReader tickets;
 
     public CollaborationCenterService(WorkflowExecutionStore workflows, CustomerTicketPort tickets) {
+        this(workflows, tickets::list);
+    }
+
+    public CollaborationCenterService(WorkflowExecutionStore workflows, CustomerTicketReader tickets) {
         this.workflows = workflows;
         this.tickets = Objects.requireNonNull(tickets, "tickets");
     }
@@ -30,12 +35,12 @@ public final class CollaborationCenterService {
         List<CollaborationWorkItem> items = new ArrayList<>();
         if (requested.source() == null || requested.source() == CollaborationWorkItem.Source.ALERT_WORKFLOW) {
             if (workflows != null) {
-                workflows.snapshots().stream().map(CollaborationCenterService::fromWorkflow)
+                currentWorkflowSnapshots(workflows.snapshots()).stream().map(CollaborationCenterService::fromWorkflow)
                         .filter(requested::accepts).forEach(items::add);
             }
         }
         if (requested.source() == null || requested.source() == CollaborationWorkItem.Source.CUSTOMER_TICKET) {
-            tickets.list().stream().map(CollaborationCenterService::fromTicket)
+            tickets.listActive().stream().map(CollaborationCenterService::fromTicket)
                     .filter(requested::accepts).forEach(items::add);
         }
         return items.stream()
@@ -71,7 +76,7 @@ public final class CollaborationCenterService {
                 "ALERT_WORKFLOW:" + snapshot.workflowId(),
                 CollaborationWorkItem.Source.ALERT_WORKFLOW,
                 CollaborationWorkItem.Status.valueOf(snapshot.status().name()),
-                diagnosis != null && diagnosis.riskLevel() == RiskLevel.HIGH
+                hasHighRiskSignal(snapshot, payload, diagnosis)
                         ? CollaborationWorkItem.Priority.HIGH : CollaborationWorkItem.Priority.NORMAL,
                 "告警处置 " + snapshot.alertId(), summary, parkId, buildingId, deviceId, updatedAt, "workflow");
     }
@@ -91,6 +96,46 @@ public final class CollaborationCenterService {
         return candidate == null ? "" : String.valueOf(candidate).trim();
     }
 
+    private static List<WorkflowSnapshot> currentWorkflowSnapshots(List<WorkflowSnapshot> snapshots) {
+        Map<String, WorkflowSnapshot> currentByAlert = new java.util.LinkedHashMap<>();
+        for (WorkflowSnapshot snapshot : snapshots) {
+            WorkflowSnapshot current = currentByAlert.get(snapshot.alertId());
+            if (current == null || isPreferredWorkflow(snapshot, current)) {
+                currentByAlert.put(snapshot.alertId(), snapshot);
+            }
+        }
+        return List.copyOf(currentByAlert.values());
+    }
+
+    private static boolean isPreferredWorkflow(WorkflowSnapshot candidate, WorkflowSnapshot current) {
+        boolean candidateRetryable = isRetryable(candidate.status());
+        boolean currentRetryable = isRetryable(current.status());
+        if (candidateRetryable != currentRetryable) return !candidateRetryable;
+        int byUpdatedAt = workflowUpdatedAt(candidate).compareTo(workflowUpdatedAt(current));
+        if (byUpdatedAt != 0) return byUpdatedAt > 0;
+        int bySequence = Long.compare(candidate.eventSequence(), current.eventSequence());
+        if (bySequence != 0) return bySequence > 0;
+        return candidate.workflowId().compareTo(current.workflowId()) > 0;
+    }
+
+    private static boolean isRetryable(WorkflowStatus status) {
+        return status == WorkflowStatus.FAILED || status == WorkflowStatus.WORK_ORDER_FAILED;
+    }
+
+    private static boolean hasHighRiskSignal(
+            WorkflowSnapshot snapshot, Map<String, Object> payload, Diagnosis diagnosis) {
+        return diagnosis != null && diagnosis.riskLevel() == RiskLevel.HIGH
+                || snapshot.workOrder() != null && snapshot.workOrder().riskLevel() == RiskLevel.HIGH
+                || isHighRisk(value(payload, "riskLevel"))
+                || isHighRisk(nestedValue(payload, "classification", "riskLevel"))
+                || isHighRisk(nestedValue(payload, "alert", "riskHint"))
+                || isHighRisk(nestedValue(payload, "diagnosis", "riskLevel"));
+    }
+
+    private static boolean isHighRisk(String value) {
+        return "HIGH".equalsIgnoreCase(value);
+    }
+
     private static Instant workflowUpdatedAt(
             WorkflowSnapshot snapshot, Map<String, Object> payload, Diagnosis diagnosis) {
         Instant stateUpdatedAt = instantValue(payload, "updatedAt");
@@ -100,6 +145,10 @@ public final class CollaborationCenterService {
         if (diagnosis != null) return diagnosis.diagnosedAt();
         Instant occurredAt = instantValue(payload, "alert", "occurredAt");
         return occurredAt == null ? Instant.EPOCH : occurredAt;
+    }
+
+    private static Instant workflowUpdatedAt(WorkflowSnapshot snapshot) {
+        return workflowUpdatedAt(snapshot, snapshot.statePayload(), snapshot.diagnosis());
     }
 
     private static Instant instantValue(Map<String, Object> payload, String... path) {

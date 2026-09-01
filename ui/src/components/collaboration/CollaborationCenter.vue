@@ -6,7 +6,7 @@ import type { CollaborationWorkItem, CollaborationWorkItemSource, CollaborationW
 import './collaboration-center.css'
 
 const props = withDefaults(defineProps<{ role: DemoRole; active?: boolean }>(), { active: true })
-const emit = defineEmits<{ 'open-view': [view: 'workflow' | 'customer', workflowId?: string] }>()
+const emit = defineEmits<{ 'open-view': [view: 'workflow' | 'customer', workflowId?: string, ticketId?: string] }>()
 const items = ref<CollaborationWorkItem[]>([])
 const loading = ref(false)
 const failed = ref(false)
@@ -59,7 +59,7 @@ function open(item: CollaborationWorkItem): void {
     if (item.detailPath === 'workflow') {
       emit('open-view', item.detailPath, item.id.replace(/^ALERT_WORKFLOW:/, ''))
     } else {
-      emit('open-view', item.detailPath)
+      emit('open-view', item.detailPath, undefined, item.id.replace(/^CUSTOMER_TICKET:/, ''))
     }
   }
 }

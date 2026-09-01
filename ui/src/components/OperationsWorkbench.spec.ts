@@ -21,6 +21,12 @@ const collaborationLaunchInput = {
   question: '电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联',
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise })
+  return { promise, resolve }
+}
+
 const analysisStub = defineComponent({
   props: { trace: { type: Object, required: true } },
   setup() {
@@ -333,6 +339,46 @@ describe('OperationsWorkbench', () => {
       expect(wrapper.get('[data-workbench-view="workflow"]').classes()).toContain('active')
       expect(wrapper.text()).toContain('wf-selected')
       expect(wrapper.get('[data-selected-alert]').text()).toBe('ALT-POWER-001')
+      wrapper.unmount()
+    } finally {
+      globalThis.EventSource = originalEventSource
+    }
+  })
+
+  it('does not reopen a workflow after navigating away while it is loading', async () => {
+    const originalEventSource = globalThis.EventSource
+    const pendingWorkflow = deferred<Response>()
+    globalThis.EventSource = class {
+      onerror: ((event: Event) => void) | null = null
+      constructor(_url: string | URL) {}
+      addEventListener(): void {}
+      close(): void {}
+    } as unknown as typeof EventSource
+    globalThis.fetch = (async (url: RequestInfo | URL) => {
+      if (String(url).includes('/api/workflows/wf-slow')) return pendingWorkflow.promise
+      return new Response(JSON.stringify({
+        knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }) as typeof fetch
+
+    try {
+      const wrapper = mount(OperationsWorkbench, {
+        props: { initialView: 'collaboration-center' },
+        global: { stubs: { ...operatorStubs, CollaborationCenter: collaborationWorkflowStub } },
+      })
+      await settleCapabilities()
+      await wrapper.get('[data-open-selected-workflow]').trigger('click')
+      await wrapper.get('[data-workbench-view="customer"]').trigger('click')
+
+      pendingWorkflow.resolve(new Response(JSON.stringify({
+        workflowId: 'wf-slow', alertId: 'ALT-POWER-001', status: 'WAITING_APPROVAL',
+        diagnosis: null, approval: null, workOrder: null, errors: [], eventSequence: 2, riskReasons: [],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      await flushPromises()
+
+      expect(wrapper.get('[data-workbench-view="customer"]').classes()).toContain('active')
+      expect(wrapper.get('[data-workbench-view="workflow"]').classes()).not.toContain('active')
       wrapper.unmount()
     } finally {
       globalThis.EventSource = originalEventSource

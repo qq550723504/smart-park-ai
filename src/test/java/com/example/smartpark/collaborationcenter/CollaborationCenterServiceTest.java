@@ -5,6 +5,7 @@ import com.example.smartpark.model.common.Diagnosis;
 import com.example.smartpark.model.common.RiskLevel;
 import com.example.smartpark.model.customer.CustomerTicket;
 import com.example.smartpark.port.customer.CustomerTicketPort;
+import com.example.smartpark.port.customer.CustomerTicketReader;
 import com.example.smartpark.workflow.WorkflowExecutionStore;
 import com.example.smartpark.workflow.WorkflowSnapshot;
 import org.junit.jupiter.api.Test;
@@ -111,6 +112,58 @@ class CollaborationCenterServiceTest {
                 .list(WorkItemQuery.defaults()).get(0);
 
         assertThat(item.updatedAt()).isEqualTo(occurredAt);
+    }
+
+    @Test
+    void preservesHighPriorityFromOriginalAlertAndClassificationSignals() {
+        WorkflowExecutionStore workflows = mock(WorkflowExecutionStore.class);
+        CustomerTicketPort tickets = mock(CustomerTicketPort.class);
+        when(workflows.snapshots()).thenReturn(List.of(new WorkflowSnapshot(
+                "wf-high-signal", "ALT-HIGH-SIGNAL", WorkflowStatus.RUNNING,
+                Map.of(
+                        "riskLevel", "LOW",
+                        "classification", Map.of("riskLevel", "HIGH"),
+                        "alert", Map.of("riskHint", "LOW")),
+                new Diagnosis("diag-low", "ALT-HIGH-SIGNAL", "DEV-1", RiskLevel.LOW,
+                        "cause", "summary", List.of(), "action", 0.9, Instant.EPOCH),
+                Optional.empty(), null, List.of(), 2)));
+        when(tickets.list()).thenReturn(List.of());
+
+        CollaborationWorkItem item = new CollaborationCenterService(workflows, tickets)
+                .list(WorkItemQuery.defaults()).get(0);
+
+        assertThat(item.priority()).isEqualTo(CollaborationWorkItem.Priority.HIGH);
+    }
+
+    @Test
+    void projectsOnlyTheCurrentWorkflowAttemptForAnAlert() {
+        WorkflowExecutionStore workflows = mock(WorkflowExecutionStore.class);
+        CustomerTicketPort tickets = mock(CustomerTicketPort.class);
+        when(workflows.snapshots()).thenReturn(List.of(
+                new WorkflowSnapshot("wf-failed", "ALT-RETRY", WorkflowStatus.FAILED,
+                        Map.of("updatedAt", "2026-09-01T08:00:00Z"), null, Optional.empty(), null, List.of(), 3),
+                new WorkflowSnapshot("wf-running", "ALT-RETRY", WorkflowStatus.RUNNING,
+                        Map.of("updatedAt", "2026-09-01T09:00:00Z"), null, Optional.empty(), null, List.of(), 1)));
+        when(tickets.list()).thenReturn(List.of());
+
+        List<CollaborationWorkItem> items = new CollaborationCenterService(workflows, tickets)
+                .list(WorkItemQuery.defaults());
+
+        assertThat(items).extracting(CollaborationWorkItem::id)
+                .containsExactly("ALERT_WORKFLOW:wf-running");
+    }
+
+    @Test
+    void readsCustomerItemsThroughTheLifecycleAwareReader() {
+        WorkflowExecutionStore workflows = mock(WorkflowExecutionStore.class);
+        CustomerTicketReader activeTickets = () -> List.of(new CustomerTicket(
+                "cs-active", "session-active", "REPAIR", "WAITING_AGENT", "当前工单。", Instant.EPOCH));
+
+        List<CollaborationWorkItem> items = new CollaborationCenterService(workflows, activeTickets)
+                .list(new WorkItemQuery(CollaborationWorkItem.Source.CUSTOMER_TICKET, null, 50));
+
+        assertThat(items).extracting(CollaborationWorkItem::id)
+                .containsExactly("CUSTOMER_TICKET:cs-active");
     }
 
     private static WorkflowSnapshot alertSnapshot() {

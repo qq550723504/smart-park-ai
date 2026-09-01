@@ -70,12 +70,18 @@ onMounted(() => {
 })
 const selectedAlertId = ref(demoAlerts[0].id)
 const activeView = ref<WorkbenchView>(props.initialView)
+let navigationGeneration = 0
 const selectedAnalysisQuestion = ref<string | null>(null)
 const selectedAnalysisQuestionToken = ref(0)
+const customerQueueRefreshToken = ref(0)
 const hasVisitedWorkflow = ref(props.initialView === 'workflow')
-watch(() => props.initialView, (view) => { activeView.value = view })
+function switchView(view: WorkbenchView): void {
+  navigationGeneration += 1
+  activeView.value = view
+}
+watch(() => props.initialView, (view) => { switchView(view) })
 watch(() => props.active, (active) => {
-  if (active) activeView.value = props.initialView
+  if (active) switchView(props.initialView)
 })
 watch(activeView, async (view) => {
   if (view !== 'workflow' || hasVisitedWorkflow.value) return
@@ -158,16 +164,20 @@ const evidenceItems = computed<WorkbenchEvidenceItem[]>(() => [
 function openAnalysisFromBoard(question: string): void {
   selectedAnalysisQuestion.value = question
   selectedAnalysisQuestionToken.value += 1
-  activeView.value = 'analytics'
+  switchView('analytics')
 }
 
-async function openCollaborationView(view: 'workflow' | 'customer', workflowId?: string): Promise<void> {
+async function openCollaborationView(view: 'workflow' | 'customer', workflowId?: string, _ticketId?: string): Promise<void> {
+  const generation = ++navigationGeneration
+  if (view === 'customer') customerQueueRefreshToken.value += 1
   if (view === 'workflow' && workflowId) {
     const loaded = await loadWorkflow(workflowId)
+    if (generation !== navigationGeneration) return
     if (loaded?.alertId && demoAlerts.some((alert) => alert.id === loaded.alertId)) {
       selectedAlertId.value = loaded.alertId
     }
   }
+  if (generation !== navigationGeneration) return
   activeView.value = view
 }
 watch(
@@ -296,7 +306,7 @@ function confidence(value?: number) {
     :evidence-items="evidenceItems"
     :guided-launch="currentGuidedLaunchUpdate"
     :rail-priority="needsApproval"
-    @switch-view="activeView = $event"
+    @switch-view="switchView"
     @update:role="role = $event"
     @back-to-showcase="emit('back-to-showcase')"
     @retry-guided-launch="retryGuidedLaunch"
@@ -319,6 +329,7 @@ function confidence(value?: number) {
       <CustomerServiceConsole
         :role="role"
         :active="props.active && activeView === 'customer'"
+        :refresh-token="customerQueueRefreshToken"
         :launch-request="props.launchRequest"
         @launch-status="handleGuidedLaunchUpdate"
       />
