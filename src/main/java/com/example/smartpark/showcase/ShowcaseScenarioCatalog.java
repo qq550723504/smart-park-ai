@@ -73,6 +73,17 @@ public final class ShowcaseScenarioCatalog {
                         "只读数据，不自动执行操作",
                         now),
                 scenario(
+                        ShowcaseScenarioId.CUSTOMER_SERVICE,
+                        true,
+                        "本次部署未启用园区客服",
+                        "园区客服",
+                        "园区服务如何自动回答并有序转人工？",
+                        30,
+                        List.of("知识检索", "客服回答"),
+                        List.of("知识引用", "服务意图", "人工边界"),
+                        "报修或知识不足时转人工",
+                        now),
+                scenario(
                         ShowcaseScenarioId.VOICE_ASSISTANT,
                         voiceEnabled,
                         "本次部署未启用语音体验",

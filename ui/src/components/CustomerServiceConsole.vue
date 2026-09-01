@@ -5,24 +5,40 @@ import { askCustomerService, getCustomerConversation, listCustomerTickets, reply
 import type { CustomerConversationResponse, CustomerServiceResponse, CustomerTicketResponse, DemoRole } from '../types/workflow'
 import { customerIntentLabel, customerTicketStatusLabel } from '../utils/labels'
 import { createRequestId } from '../utils/requestId'
+import { useGuidedLaunch } from '../composables/useGuidedLaunch'
+import type { GuidedLaunchUpdate, ScenarioLaunchRequest } from '../types/workbench'
 import './customer-service.css'
 
-const props = defineProps<{ role: DemoRole }>()
+const props = withDefaults(defineProps<{
+  role: DemoRole
+  active?: boolean
+  launchRequest?: ScenarioLaunchRequest | null
+}>(), { active: true, launchRequest: null })
+const emit = defineEmits<{ 'launch-status': [update: GuidedLaunchUpdate] }>()
 const question = ref('')
 const loading = ref(false)
 const messages = ref<Array<{ role: 'user' | 'assistant'; text: string; result?: CustomerServiceResponse }>>([])
 const tickets = ref<CustomerServiceResponse[]>([])
 const sessionId = ref('')
 const conversation = ref<CustomerConversationResponse | null>(null)
+let requestGeneration = 0
+let ticketsRequestGeneration = 0
 const suggestions = ['访客停车怎么收费？', '访客如何预约进入园区？', '可以查询公共区域能耗吗？', 'A1 洗手间漏水，需要报修']
 
 async function loadTickets() {
+  const generation = ++ticketsRequestGeneration
   if (!['CUSTOMER_AGENT', 'ADMIN'].includes(props.role)) {
     tickets.value = []
     return
   }
-  try { tickets.value = await listCustomerTickets(props.role) }
-  catch { tickets.value = [] }
+  const role = props.role
+  try {
+    const nextTickets = await listCustomerTickets(role)
+    if (generation === ticketsRequestGeneration && props.role === role) tickets.value = nextTickets
+  }
+  catch {
+    if (generation === ticketsRequestGeneration && props.role === role) tickets.value = []
+  }
 }
 
 async function rate(sessionId: string, rating: 'HELPFUL' | 'NOT_HELPFUL') {
@@ -43,27 +59,59 @@ async function advance(ticket: CustomerTicketResponse) {
   }
 }
 
-async function ask(text = question.value) {
+async function ask(text = question.value, options: { freshSession?: boolean } = {}): Promise<boolean> {
   const normalized = text.trim()
-  if (!normalized || loading.value) return
+  if (!normalized || (loading.value && !options.freshSession)) return false
+  const generation = ++requestGeneration
+  const useExistingSession = !options.freshSession && Boolean(sessionId.value)
   messages.value.push({ role: 'user', text: normalized })
   question.value = ''
   loading.value = true
   try {
     const requestId = createRequestId()
-    const result = sessionId.value
+    const result = useExistingSession
       ? await replyCustomerSession(sessionId.value, normalized, requestId)
       : await askCustomerService(normalized, requestId)
+    if (generation !== requestGeneration) return false
     sessionId.value = result.sessionId
     messages.value.push({ role: 'assistant', text: result.answer, result })
-    conversation.value = await getCustomerConversation(result.sessionId)
+    const nextConversation = await getCustomerConversation(result.sessionId)
+    if (generation !== requestGeneration) return false
+    conversation.value = nextConversation
     await loadTickets()
+    return true
   } catch (error) {
+    if (generation !== requestGeneration) return false
     ElMessage.error(error instanceof Error ? error.message : '客服请求失败')
+    return false
   } finally {
-    loading.value = false
+    if (generation === requestGeneration) loading.value = false
   }
 }
+
+function resetConversation(): void {
+  requestGeneration += 1
+  question.value = ''
+  messages.value = []
+  sessionId.value = ''
+  conversation.value = null
+  loading.value = false
+}
+
+useGuidedLaunch({
+  active: () => props.active,
+  request: () => props.launchRequest,
+  scenarioId: 'CUSTOMER_SERVICE',
+  start: async (request) => {
+    const guidedQuestion = request.launchInput?.question?.trim()
+    if (!guidedQuestion) throw new Error('园区客服演示配置无效')
+    resetConversation()
+    const started = await ask(guidedQuestion, { freshSession: true })
+    if (!started) throw new Error('客服演示启动失败')
+    return { state: 'started', message: '园区客服已启动' }
+  },
+  onUpdate: (update) => emit('launch-status', update),
+})
 
 watch(() => props.role, loadTickets)
 onMounted(loadTickets)

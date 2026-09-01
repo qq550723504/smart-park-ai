@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick, ref } from 'vue'
 import VoiceAssistantPage from './VoiceAssistantPage.vue'
@@ -59,6 +59,10 @@ beforeEach(() => {
   }
 })
 
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
 function text(wrapper: { find(selector: string): { text(): string } }, selector: string): string {
   return wrapper.find(selector).text().trim()
 }
@@ -70,6 +74,18 @@ describe('VoiceAssistantPage', () => {
     expect(text(wrapper, '[data-testid="voice-phase"]')).toContain('点击麦克风开始提问')
     expect(wrapper.find('.voice-mic-icon svg').exists()).toBe(true)
     expect(wrapper.find('.voice-mic-icon').text()).not.toContain('🎙')
+  })
+
+  it('disables microphone input on a remote HTTP origin', async () => {
+    vi.stubGlobal('location', { hostname: '192.168.6.246' })
+    vi.stubGlobal('isSecureContext', false)
+    const { wrapper } = mountPage()
+
+    expect(wrapper.find('[data-testid="voice-mic"]').attributes('disabled')).toBeDefined()
+    expect(text(wrapper, '[data-testid="voice-phase"]')).toContain('语音输入需要 HTTPS')
+
+    await wrapper.find('[data-testid="voice-mic"]').trigger('click')
+    expect(toggleMicrophone).not.toHaveBeenCalled()
   })
 
   it('clicking the mic delegates to the composable without faking phase', async () => {

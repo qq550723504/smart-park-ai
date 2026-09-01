@@ -1,12 +1,22 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ShowcaseHome from './ShowcaseHome.vue'
-import { getShowcaseScenarios } from '../../services/workflowApi'
-import type { ShowcaseScenario, ShowcaseScenarioCatalog, ShowcaseScenarioStatus } from '../../services/workflowApi'
+import { getGovernanceOverview, getShowcaseScenarios } from '../../services/workflowApi'
+import type { GovernanceOverview, ShowcaseScenario, ShowcaseScenarioCatalog, ShowcaseScenarioStatus } from '../../services/workflowApi'
 
 vi.mock('../../services/workflowApi', () => ({
   getShowcaseScenarios: vi.fn(),
+  getGovernanceOverview: vi.fn(),
 }))
+
+const governanceOverview: GovernanceOverview = {
+  capturedAt: '2026-09-01T08:00:00Z',
+  scenarios: { total: 5, ready: 4, notReady: 1, disabled: 0 },
+  capabilities: { knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none', analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: false },
+  business: { workflowCount: 4, completedWorkflowCount: 3, customerSessionCount: 5, humanTicketCount: 1 },
+  governance: { auditEntryCount: 7, feedbackCount: 4, positiveFeedbackCount: 3, knowledgeDocumentCount: 6, activeKnowledgeDocumentCount: 5, completionRate: 0.75, positiveFeedbackRate: 0.75 },
+  boundaries: ['演示角色，不是生产认证'],
+}
 
 const verifiedAt = '2026-08-30T09:59:59Z'
 
@@ -21,12 +31,14 @@ function scenario(
     ALERT_WORKFLOW: '告警处置',
     EXPERT_COLLABORATION: '跨域专家协作',
     OPERATIONS_ANALYSIS: '运营分析',
+    CUSTOMER_SERVICE: '园区客服',
     VOICE_ASSISTANT: '实时语音助手',
   }
   const questions: Record<ShowcaseScenario['id'], string> = {
     ALERT_WORKFLOW: '配电或暖通异常该如何处置？',
     EXPERT_COLLABORATION: '能耗、设备与安防是否存在关联？',
     OPERATIONS_ANALYSIS: '过去几天哪座楼能耗偏离基线？',
+    CUSTOMER_SERVICE: '园区服务如何自动回答并有序转人工？',
     VOICE_ASSISTANT: '通过语音询问园区问题并获得在线回答',
   }
   const launchInputs = {
@@ -36,6 +48,7 @@ function scenario(
       question: '电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联',
     },
     OPERATIONS_ANALYSIS: { alertId: null, question: '过去5天各楼宇能耗' },
+    CUSTOMER_SERVICE: { alertId: null, question: '访客停车怎么收费？' },
     VOICE_ASSISTANT: { alertId: null, question: null },
   } as const
 
@@ -81,6 +94,10 @@ function deferred<T>() {
 
 afterEach(() => {
   vi.resetAllMocks()
+})
+
+beforeEach(() => {
+  vi.mocked(getGovernanceOverview).mockResolvedValue(governanceOverview)
 })
 
 describe('ShowcaseHome truthful catalog selection', () => {
@@ -379,5 +396,35 @@ describe('ShowcaseHome truthful catalog selection', () => {
     await wrapper.get('[data-enter-workbench]').trigger('click')
 
     expect(wrapper.emitted('enter-workbench')).toEqual([[]])
+  })
+
+  it('renders the live governance status independently from the scenario catalog', async () => {
+    vi.mocked(getShowcaseScenarios).mockResolvedValue(catalog([
+      scenario('EXPERT_COLLABORATION', 'READY', true, null),
+    ]))
+    vi.mocked(getGovernanceOverview).mockResolvedValue({
+      ...governanceOverview,
+      scenarios: { total: 5, ready: 2, notReady: 2, disabled: 1 },
+      boundaries: ['治理边界来自服务端'],
+    })
+
+    const wrapper = await mountLoaded()
+
+    expect(wrapper.text()).toContain('2/5')
+    expect(wrapper.text()).toContain('治理边界来自服务端')
+    wrapper.unmount()
+  })
+
+  it('shows a non-blocking unavailable governance state when its request fails', async () => {
+    vi.mocked(getShowcaseScenarios).mockResolvedValue(catalog([
+      scenario('EXPERT_COLLABORATION', 'READY', true, null),
+    ]))
+    vi.mocked(getGovernanceOverview).mockRejectedValue(new Error('governance offline'))
+
+    const wrapper = await mountLoaded()
+
+    expect(wrapper.text()).toContain('治理状态暂不可用')
+    expect(wrapper.text()).toContain('跨域专家协作')
+    wrapper.unmount()
   })
 })

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { defineComponent, h, nextTick, onMounted, onUnmounted } from 'vue'
+import { defineComponent, h, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElInput } from 'element-plus'
 import OperationsWorkbench from './OperationsWorkbench.vue'
 import ImmersiveWorkbenchShell from './workbench/ImmersiveWorkbenchShell.vue'
@@ -28,6 +28,21 @@ const analysisStub = defineComponent({
     onUnmounted(() => { unmounts.analysis += 1 })
     return () => null
   },
+})
+
+const analysisBoardStub = defineComponent({
+  props: {
+    initialQuestion: { type: String, default: null },
+    initialQuestionToken: { type: Number, default: 0 },
+  },
+  setup(props) {
+    const value = ref(props.initialQuestion ?? '')
+    watch([() => props.initialQuestion, () => props.initialQuestionToken], ([next]) => {
+      if (next != null) value.value = next
+    })
+    return { value }
+  },
+  template: '<input aria-label="分析问题" v-model="value" />',
 })
 
 const traceRailStub = defineComponent({
@@ -185,6 +200,22 @@ describe('OperationsWorkbench', () => {
     expect(wrapper.get('[data-workbench-view="collaboration"]').classes()).toContain('active')
   })
 
+  it('resets the shared execution trace when entering the read-only governance view', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'analytics' },
+      global: { stubs: { ...operatorStubs, GovernanceCenter: true, ExecutionTraceRail: traceRailStub } },
+    })
+    await settleCapabilities()
+    const trace = wrapper.getComponent(analysisStub).props('trace') as { status: { value: string } }
+    trace.status.value = 'streaming'
+    await nextTick()
+
+    await wrapper.get('[data-workbench-view="governance"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.get('[data-testid="trace-status"]').text()).toBe('idle')
+  })
+
   it('keeps every scenario inside one stable stage beside the persistent rail', async () => {
     const wrapper = mount(OperationsWorkbench, {
       props: { initialView: 'workflow' },
@@ -193,7 +224,7 @@ describe('OperationsWorkbench', () => {
 
     await settleCapabilities()
 
-    expect(wrapper.findAll('[data-workbench-stage] > .main-content')).toHaveLength(5)
+    expect(wrapper.findAll('[data-workbench-stage] > .main-content')).toHaveLength(7)
     expect(wrapper.findAll('[data-workbench-rail] .global-rail')).toHaveLength(1)
     const shell = wrapper.get('[data-testid="immersive-workbench-shell"]')
     const rail = wrapper.get('[data-workbench-rail] .global-rail')
@@ -219,6 +250,42 @@ describe('OperationsWorkbench', () => {
     expect(labels).not.toContain('实时语音')
     expect(labels).not.toContain('专家协作')
     expect(labels).not.toContain('运营分析')
+    expect(labels).not.toContain('运营看板')
+  })
+
+  it('routes an operations board question into the existing analytics input', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow' },
+      global: { stubs: { ...operatorStubs, OperationsAnalysisPage: analysisBoardStub } },
+    })
+    await settleCapabilities()
+
+    await wrapper.get('[data-workbench-view="operations"]').trigger('click')
+    await wrapper.get('[data-board-question][data-question="过去5天各停车区域停车利用率"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.get('[data-workbench-view="analytics"]').classes()).toContain('active')
+    expect((wrapper.get('[aria-label="分析问题"]').element as HTMLInputElement).value)
+      .toBe('过去5天各停车区域停车利用率')
+  })
+
+  it('reapplies the board question when the same card is selected again', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow' },
+      global: { stubs: { ...operatorStubs, OperationsAnalysisPage: analysisBoardStub } },
+    })
+    await settleCapabilities()
+
+    await wrapper.get('[data-workbench-view="operations"]').trigger('click')
+    const card = wrapper.get('[data-board-question][data-question="过去5天各停车区域停车利用率"]')
+    await card.trigger('click')
+    const input = wrapper.get('[aria-label="分析问题"]')
+    await input.setValue('用户改写的问题')
+    await wrapper.get('[data-workbench-view="operations"]').trigger('click')
+    await card.trigger('click')
+
+    expect((wrapper.get('[aria-label="分析问题"]').element as HTMLInputElement).value)
+      .toBe('过去5天各停车区域停车利用率')
   })
 
   it('emits an intent to return to the showcase surface', async () => {
@@ -261,6 +328,7 @@ describe('OperationsWorkbench', () => {
       ['voice', '只读查询 · 实时语音会话', 'verified'],
       ['collaboration', '只读查询 · 多专家汇总', 'verified'],
       ['analytics', '真实只读数据', 'verified'],
+      ['operations', '真实只读数据 · 选择后分析', 'verified'],
     ] as const
 
     for (const [view, value, tone] of expectedModes) {
@@ -302,7 +370,7 @@ describe('OperationsWorkbench', () => {
 
     await settleCapabilities()
 
-    expect(wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())).toEqual(['告警工作流', '园区客服'])
+    expect(wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())).toEqual(['告警工作流', '园区客服', '治理中心'])
     expect(wrapper.get('[data-evidence-item="知识检索"] strong').text()).toBe('能力检查失败')
     expect(wrapper.get('[data-evidence-item="知识检索"]').attributes('data-tone')).toBe('warning')
   })

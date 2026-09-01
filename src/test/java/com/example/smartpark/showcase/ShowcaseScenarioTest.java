@@ -25,7 +25,8 @@ class ShowcaseScenarioTest {
                 ShowcaseScenarioId.ALERT_WORKFLOW,
                 ShowcaseScenarioId.EXPERT_COLLABORATION,
                 ShowcaseScenarioId.OPERATIONS_ANALYSIS,
-                ShowcaseScenarioId.VOICE_ASSISTANT);
+                ShowcaseScenarioId.VOICE_ASSISTANT,
+                ShowcaseScenarioId.CUSTOMER_SERVICE);
         assertThat(ShowcaseScenarioStatus.values()).containsExactly(
                 ShowcaseScenarioStatus.READY,
                 ShowcaseScenarioStatus.NOT_READY,
@@ -178,7 +179,8 @@ class ShowcaseScenarioTest {
                 Arguments.of(ShowcaseScenarioId.ALERT_WORKFLOW, "本次部署未启用告警处置"),
                 Arguments.of(ShowcaseScenarioId.EXPERT_COLLABORATION, "本次部署未启用专家协作"),
                 Arguments.of(ShowcaseScenarioId.OPERATIONS_ANALYSIS, "本次部署未启用运营分析"),
-                Arguments.of(ShowcaseScenarioId.VOICE_ASSISTANT, "本次部署未启用语音体验"));
+                Arguments.of(ShowcaseScenarioId.VOICE_ASSISTANT, "本次部署未启用语音体验"),
+                Arguments.of(ShowcaseScenarioId.CUSTOMER_SERVICE, "本次部署未启用园区客服"));
     }
 
     private String validUnavailableReason(ShowcaseScenarioStatus status) {

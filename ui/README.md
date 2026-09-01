@@ -12,7 +12,18 @@ npm install
 npm run dev
 ```
 
-本机访问 <http://localhost:5173>；使用 Docker 启动时，局域网其他设备访问宿主机 IP 的 `5173` 端口，例如 `http://192.168.1.10:5173`。Vite 会把 `/api` 请求代理到 `http://localhost:8080`（容器内为 `http://backend:8080`）。
+本机开发访问 <http://localhost:5173>。使用 Docker 启动时，默认前端端口只绑定 `127.0.0.1:5173`；如需让局域网设备访问，必须从项目根目录显式设置绑定地址：
+
+```powershell
+$env:SMARTPARK_FRONTEND_BIND_HOST="0.0.0.0"
+docker compose --env-file .env `
+  -f compose.yaml `
+  -f compose.analytics.yaml `
+  -f compose.showcase.yaml `
+  --profile analytics up --build -d
+```
+
+然后其他设备访问宿主机 IP 的 `5173` 端口，例如 <http://192.168.1.10:5173>。Vite 会把 `/api` 请求代理到 backend（容器内为 `http://backend:8080`）。该 HTTP 局域网模式不支持浏览器语音输入；语音演示请使用本机 `localhost` 或 HTTPS。
 
 ## 构建
 

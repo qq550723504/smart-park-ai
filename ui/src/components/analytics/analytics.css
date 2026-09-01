@@ -35,6 +35,23 @@
   color: var(--showcase-muted);
   font-size: 11px;
 }
+
+.analytics-preset-group {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.analytics-preset-group > strong {
+  color: var(--showcase-ivory);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+}
+
+.analytics-preset-group__items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
 .analytics-presets button {
   border: 1px solid rgba(112, 232, 255, 0.28);
   border-radius: 999px;

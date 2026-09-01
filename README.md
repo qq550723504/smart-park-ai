@@ -20,7 +20,9 @@
 | 运营演示 | 角色边界、指标、审计、反馈和一次性故障注入 |
 | 专家协作 | Supervisor 动态分派领域专家，并行分析、展示证据和汇总结论；需满足在线能力开关 |
 | 运营分析 | 自然语言转真实只读 PostgreSQL 分析，展示查询结果、图表和结论；需显式启用分析链路 |
+| 停车与能耗运营看板 | 以受控问题入口组织停车、能耗和空间指标，点击后复用运营分析只读查询；需显式启用分析链路 |
 | 实时语音 | 选择性启用的全场景演示模式；需完成在线预检后再进行浏览器端人工语音验收 |
+| AI 治理概览 | 场景就绪度、能力模式、运营计数和安全边界；管理员可查看审计明细 |
 
 ## 快速开始
 
@@ -162,7 +164,7 @@ docker compose --env-file .env `
   --profile analytics up --build -d
 ```
 
-其他电脑访问 <http://192.168.6.246:5173>。该局域网模式仅适用于受信任的本地演示网络；项目本身不提供生产级认证、租户隔离或 API 访问控制。
+其他电脑访问 <http://192.168.6.246:5173>。该 HTTP 局域网模式仅支持非语音场景：浏览器不会向非安全上下文授予麦克风权限，语音演示必须使用本机 `localhost` 或由受信任证书提供的 HTTPS 地址。该局域网模式仅适用于受信任的本地演示网络；项目本身不提供生产级认证、租户隔离或 API 访问控制。
 
 常用生命周期命令：
 
@@ -224,7 +226,7 @@ docker compose --env-file .env `
 .\scripts\verify-showcase.ps1
 ```
 
-验证器会向 `POST /api/showcase/preflight` 请求四个且仅四个演示场景，并且只在全部返回 `READY` 和有效 `verifiedAt` 时成功；成功输出只包含 `scenarioId`、`status` 和 `verifiedAt`。`READY` 收据仅在当前进程内有效 15 分钟，应用重启或收据过期后必须重新运行预检。
+验证器会向 `POST /api/showcase/preflight` 请求五个且仅五个演示场景（包括园区客服），并且只在全部返回 `READY` 和有效 `verifiedAt` 时成功；成功输出只包含 `scenarioId`、`status` 和 `verifiedAt`。`READY` 收据仅在当前进程内有效 15 分钟，应用重启或收据过期后必须重新运行预检。
 
 告警预检从不批准或创建工单；它只验证流程是否安全地停在人工审批边界。服务端语音预检也不能替代浏览器麦克风权限确认和一次人工真实说话的完整往返验收。
 
@@ -352,6 +354,7 @@ Remove-Item Env:SERVER_ADDRESS -ErrorAction SilentlyContinue
 | `GET /api/workflows/{workflowId}/observability` | 查看安全观测摘要 | 不暴露内部 Graph 状态 |
 | `GET /api/knowledge` | 查看知识元数据 | 需要 `ADMIN`，不返回知识正文 |
 | `GET /api/operations/metrics` | 查看运营计数 | 内存数据 |
+| `GET /api/governance/overview` | 查看安全聚合治理概览 | 不返回原始业务正文 |
 | `GET /api/audit` | 查看安全审计记录 | 需要 `ADMIN` |
 
 高风险工作流进入 `WAITING_APPROVAL` 后，可以提交审批：

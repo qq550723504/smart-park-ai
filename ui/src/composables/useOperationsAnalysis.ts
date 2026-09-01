@@ -20,6 +20,7 @@ export interface OperationsAnalysis {
   runId: Ref<string | null>
   chart: Ref<DisplayPayload | null>
   selections: Ref<Array<{ term: string; metric: string }>>
+  reset(): void
   submit(question: string, callbacks?: AnalysisStartCallbacks): Promise<void>
   clarify(): Promise<void>
 }
@@ -147,6 +148,17 @@ export function useOperationsAnalysis(
     }
   }
 
+  function reset(): void {
+    operationGeneration++
+    stopClarificationPolling()
+    phase.value = 'idle'
+    dto.value = null
+    error.value = ''
+    runId.value = null
+    chart.value = null
+    selections.value = []
+  }
+
   async function submit(question: string, callbacks?: AnalysisStartCallbacks): Promise<void> {
     if (!question.trim()) {
       error.value = '请输入分析问题'
@@ -214,5 +226,5 @@ export function useOperationsAnalysis(
     operationGeneration++
     stopClarificationPolling()
   })
-  return { phase, dto, error, runId, chart, selections, submit, clarify }
+  return { phase, dto, error, runId, chart, selections, reset, submit, clarify }
 }

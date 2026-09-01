@@ -6,6 +6,7 @@ import { useVoiceSession } from '../../composables/useVoiceSession'
 import { useGuidedLaunch } from '../../composables/useGuidedLaunch'
 import type { ExecutionTrace } from '../../composables/useExecutionTrace'
 import type { GuidedLaunchUpdate, ScenarioLaunchRequest } from '../../types/workbench'
+import { isVoiceInputAllowed, VOICE_INPUT_RESTRICTION_MESSAGE } from '../../utils/voiceAccess'
 
 const props = withDefaults(defineProps<{
   trace: ExecutionTrace
@@ -16,6 +17,7 @@ const props = withDefaults(defineProps<{
   launchRequest: null,
 })
 const emit = defineEmits<{ 'launch-status': [update: GuidedLaunchUpdate] }>()
+const voiceInputAllowed = isVoiceInputAllowed()
 
 const {
   voicePhase,
@@ -36,6 +38,7 @@ useGuidedLaunch({
   request: () => props.launchRequest,
   scenarioId: 'VOICE_ASSISTANT',
   start: async () => {
+    if (!voiceInputAllowed) throw new Error(VOICE_INPUT_RESTRICTION_MESSAGE)
     await prepare()
     return { state: 'ready', message: '语音链路已就绪，请点击麦克风授权并开始提问' }
   },
@@ -104,6 +107,7 @@ const interruptible = computed(
 const ttsActive = computed(() => voicePhase.value === 'SPEAKING')
 
 async function onMicClick(): Promise<void> {
+  if (!voiceInputAllowed) return
   await toggleMicrophone()
 }
 
@@ -137,6 +141,7 @@ function retry(): Promise<void> {
             class="voice-mic-button"
             :class="{ active: micActive, interruptible }"
             :aria-pressed="micActive"
+            :disabled="!voiceInputAllowed"
             data-testid="voice-mic"
             @click="onMicClick"
           >
@@ -145,7 +150,9 @@ function retry(): Promise<void> {
             <span v-else-if="micActive" class="voice-mic-label">点击结束输入</span>
             <span v-else class="voice-mic-label">点击开始提问</span>
           </button>
-          <p class="voice-phase-label" data-testid="voice-phase">{{ phaseLabel }}</p>
+          <p class="voice-phase-label" data-testid="voice-phase">
+            {{ voiceInputAllowed ? phaseLabel : VOICE_INPUT_RESTRICTION_MESSAGE }}
+          </p>
           <p v-if="ttsActive" class="voice-tts-state" data-testid="voice-tts-state">
             <i></i> TTS 播报中
           </p>

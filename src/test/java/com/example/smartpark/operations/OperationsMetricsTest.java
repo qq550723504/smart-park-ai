@@ -1,8 +1,7 @@
-package com.example.smartpark.web;
+package com.example.smartpark.operations;
 
 import com.example.smartpark.audit.AuditTrail;
 import com.example.smartpark.workflow.CustomerServiceWorkflow;
-import com.example.smartpark.workflow.WorkflowEventPublisher;
 import com.example.smartpark.workflow.WorkflowExecutionStore;
 import org.junit.jupiter.api.Test;
 

@@ -9,6 +9,7 @@ import {
 import { createVoiceSession } from '../services/voiceApi'
 import { PcmPlayer, type AudioBufferLike, type AudioContextLike, type PlaybackSourceLike } from '../audio/pcm-player'
 import { VoicePcmCapture, browserPcmCaptureDeps, type PcmCaptureDeps } from '../audio/pcm-capture'
+import { isVoiceInputAllowed, VOICE_INPUT_RESTRICTION_MESSAGE } from '../utils/voiceAccess'
 
 export interface WebSocketLike {
   binaryType: BinaryType
@@ -66,6 +67,7 @@ function defaultOpenWebSocket(url: string): WebSocketLike {
 }
 
 async function defaultRequestMicrophone(): Promise<MediaStream> {
+  if (!isVoiceInputAllowed()) throw new Error(VOICE_INPUT_RESTRICTION_MESSAGE)
   return navigator.mediaDevices.getUserMedia({ audio: true })
 }
 
