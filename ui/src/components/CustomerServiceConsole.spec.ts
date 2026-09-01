@@ -177,7 +177,7 @@ describe('CustomerServiceConsole', () => {
     adminTickets.resolve([{
       sessionId: 'CS-OLD', intent: 'REPAIR', answer: '旧工单', knowledgeSources: [], knowledgeCitations: [],
       needsHuman: true, reason: 'INSUFFICIENT_EVIDENCE', citationIds: [],
-      ticket: { id: 'T-OLD', sessionId: 'CS-OLD', intent: 'REPAIR', status: 'WAITING_AGENT', safeSummary: '旧特权工单', createdAt: '2026-09-01T08:00:00Z', updatedAt: '2026-09-01T08:00:00Z' },
+      ticket: { id: 'T-OLD', sessionId: 'CS-OLD', intent: 'REPAIR', status: 'WAITING_AGENT', safeSummary: '旧特权工单', createdAt: '2026-09-01T08:00:00Z' },
     }])
     await flushPromises()
 
