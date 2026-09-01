@@ -256,6 +256,81 @@ describe('ExpertCard', () => {
     wrapper.unmount()
   })
 
+  it('shows an explicit zero count for an empty alert history', () => {
+    const wrapper = mount(ExpertCard, {
+      props: {
+        domain: 'DEVICE',
+        plan: {
+          normalizedQuestion: 'q',
+          selectedDomains: ['DEVICE'],
+          assignments: { DEVICE: '查询设备 DEV-1 的关联告警' },
+          selectionReason: 'device alerts',
+        },
+        finding: {
+          domain: 'DEVICE',
+          status: 'SUPPORTED',
+          conclusion: '工具结果: {"deviceId":"DEV-1","alerts":[]}',
+          evidenceRefs: [],
+          confidence: 0.92,
+          nextChecks: [],
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('关联告警数量0')
+    wrapper.unmount()
+  })
+
+  it('projects identifiers from alert history items', () => {
+    const wrapper = mount(ExpertCard, {
+      props: {
+        domain: 'DEVICE',
+        plan: {
+          normalizedQuestion: 'q',
+          selectedDomains: ['DEVICE'],
+          assignments: { DEVICE: '查询设备 DEV-1 的告警历史' },
+          selectionReason: 'device alerts',
+        },
+        finding: {
+          domain: 'DEVICE',
+          status: 'SUPPORTED',
+          conclusion: '工具结果: {"deviceId":"DEV-1","alerts":[{"id":"ALT-1","classification":"POWER","riskHint":"HIGH"}]}',
+          evidenceRefs: [],
+          confidence: 0.92,
+          nextChecks: [],
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('告警ALT-1')
+    wrapper.unmount()
+  })
+
+  it('keeps repeated collection values for separate work orders', () => {
+    const wrapper = mount(ExpertCard, {
+      props: {
+        domain: 'DEVICE',
+        plan: {
+          normalizedQuestion: 'q',
+          selectedDomains: ['DEVICE'],
+          assignments: { DEVICE: '查询工单状态' },
+          selectionReason: 'work orders',
+        },
+        finding: {
+          domain: 'DEVICE',
+          status: 'SUPPORTED',
+          conclusion: '工具结果: {"workOrders":[{"id":"WO-1","status":"PENDING_EXECUTION"},{"id":"WO-2","status":"PENDING_EXECUTION"}]}',
+          evidenceRefs: [],
+          confidence: 0.92,
+          nextChecks: [],
+        },
+      },
+    })
+
+    expect(wrapper.findAll('.expert-details > div').filter((item) => item.text() === '状态待现场执行')).toHaveLength(2)
+    wrapper.unmount()
+  })
+
   it('includes recognized details from every cited tool result', () => {
     const wrapper = mount(ExpertCard, {
       props: {

@@ -49,6 +49,9 @@ const fieldLabels: Record<string, string> = {
   alertId: '告警',
   workOrderId: '工单',
   workOrderSummary: '工单摘要',
+  alertCount: '关联告警数量',
+  workOrderCount: '工单数量',
+  documentCount: '知识文档数量',
   buildingId: '楼宇',
   parkId: '园区',
   status: '状态',
@@ -165,39 +168,56 @@ function formatValue(key: string, value: unknown): string {
   return String(value ?? '')
 }
 
-function collectKnownFields(value: unknown, fields: Array<[string, unknown]> = [], context: 'root' | 'knowledge' | 'workorder' = 'root'): Array<[string, unknown]> {
+function collectKnownFields(value: unknown, fields: Array<[string, unknown]> = [], context: 'root' | 'knowledge' | 'workorder' | 'alert' = 'root', seen = new Set<string>()): Array<[string, unknown]> {
   if (Array.isArray(value)) {
-    value.forEach((item) => collectKnownFields(item, fields, context))
+    value.forEach((item) => collectKnownFields(item, fields, context, new Set<string>()))
     return fields
   }
   if (!value || typeof value !== 'object') return fields
 
   Object.entries(value).forEach(([key, nestedValue]) => {
-    const nextContext = key === 'documents' ? 'knowledge' : key === 'workOrders' ? 'workorder' : context
+    const collectionContext = key === 'documents'
+      ? 'knowledge'
+      : key === 'workOrders'
+        ? 'workorder'
+        : key === 'alerts'
+          ? 'alert'
+          : null
+    if (collectionContext && Array.isArray(nestedValue)) {
+      const countKey = collectionContext === 'knowledge'
+        ? 'documentCount'
+        : collectionContext === 'workorder'
+          ? 'workOrderCount'
+          : 'alertCount'
+      fields.push([countKey, nestedValue.length])
+      nestedValue.forEach((item) => collectKnownFields(item, fields, collectionContext, new Set<string>()))
+      return
+    }
+    const nextContext = collectionContext ?? context
     const isIdentifier = key === 'id' || key === 'documentId'
     const isScopedIdentifier = isIdentifier && context !== 'root'
     const projectedKey = isIdentifier && context === 'workorder'
       ? 'workOrderId'
+      : isIdentifier && context === 'alert'
+        ? 'alertId'
       : key === 'summary' && context === 'workorder'
         ? 'workOrderSummary'
         : key
     if (fieldLabels[key] && (typeof nestedValue !== 'object' || nestedValue === null || key === 'tags') && (!isIdentifier || isScopedIdentifier)) {
-      fields.push([projectedKey, nestedValue])
+      const marker = [projectedKey, typeof nestedValue, String(nestedValue)].join(':')
+      if (!seen.has(marker)) {
+        seen.add(marker)
+        fields.push([projectedKey, nestedValue])
+      }
     } else {
-      collectKnownFields(nestedValue, fields, nextContext)
+      collectKnownFields(nestedValue, fields, nextContext, seen)
     }
   })
   return fields
 }
 
 function collectUniqueKnownFields(value: unknown): Array<[string, unknown]> {
-  const seen = new Set<string>()
-  return collectKnownFields(value).filter(([key, fieldValue]) => {
-    const marker = [key, typeof fieldValue, String(fieldValue)].join(':')
-    if (seen.has(marker)) return false
-    seen.add(marker)
-    return true
-  })
+  return collectKnownFields(value)
 }
 
 function summaryFor(domain: ExpertDomain, finding: ExpertFinding, details: Array<{ label: string; value: string }>, hasStructuredObject: boolean): string {
