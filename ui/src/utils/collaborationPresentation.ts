@@ -141,6 +141,71 @@ function extractObjects(text: string): Record<string, unknown>[] {
   return objects
 }
 
+function collectStructuredFieldValues(value: unknown, fieldName: string, values: unknown[] = []): unknown[] {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectStructuredFieldValues(item, fieldName, values))
+    return values
+  }
+  if (!value || typeof value !== 'object') return values
+
+  Object.entries(value).forEach(([key, nestedValue]) => {
+    if (key === fieldName) values.push(nestedValue)
+    collectStructuredFieldValues(nestedValue, fieldName, values)
+  })
+  return values
+}
+
+function removeStructuredObjects(text: string): string {
+  let result = ''
+  let depth = 0
+  let inString = false
+  let escaped = false
+
+  for (const character of text) {
+    if (depth === 0) {
+      if (character === '{') {
+        depth = 1
+        continue
+      }
+      result += character
+      continue
+    }
+
+    if (inString) {
+      if (escaped) escaped = false
+      else if (character === '\\') escaped = true
+      else if (character === '"') inString = false
+      continue
+    }
+    if (character === '"') inString = true
+    else if (character === '{') depth += 1
+    else if (character === '}') depth -= 1
+  }
+
+  return result
+}
+
+function hasMeaningfulStructuredError(value: unknown): boolean {
+  if (value === null || value === undefined || value === false) return false
+  if (typeof value === 'string') return value.trim() !== '' && value.trim().toLowerCase() !== 'null'
+  return true
+}
+
+function hasExecutionFailure(text: string): boolean {
+  const objects = extractObjects(text)
+  const structuredErrors = objects.flatMap((object) => collectStructuredFieldValues(object, 'error'))
+  if (structuredErrors.some(hasMeaningfulStructuredError)) return true
+
+  const failureStatuses = new Set(['FAILED', 'FAILURE', 'ERROR', 'TIMEOUT'])
+  const structuredStatuses = objects
+    .flatMap((object) => collectStructuredFieldValues(object, 'status'))
+    .filter((value): value is string => typeof value === 'string')
+  if (structuredStatuses.some((status) => failureStatuses.has(status.trim().toUpperCase()))) return true
+
+  const textOutsideStructuredObjects = objects.length > 0 ? removeStructuredObjects(text) : text
+  return /(?:failed|failure|error|timeout|timed out|执行失败|查询失败|调用失败|工具失败)/i.test(textOutsideStructuredObjects)
+}
+
 function formatNumber(value: unknown): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) return String(value ?? '')
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
@@ -270,8 +335,10 @@ export function expertDetailKey(label: string, value: string, index: number): st
 }
 
 export function formatEvidenceRef(ref: string): string {
-  const match = /^tool:([^#]+)#/.exec(ref)
-  return match ? `${toolLabels[match[1]] ?? '工具查询'}证据` : '已验证证据'
+  const match = /^tool:([^#]+)#(.+)$/.exec(ref)
+  if (!match) return '已验证证据'
+  const identifier = match[2].length > 8 ? `${match[2].slice(0, 8)}…` : match[2]
+  return `${toolLabels[match[1]] ?? '工具查询'}证据 · ${identifier}`
 }
 
 export function formatNextCheck(check: string): string {
@@ -315,8 +382,7 @@ function formatUncertaintyText(text: string): string {
   }
   const domainToken = /\b(ENERGY|DEVICE|SECURITY)\b/i.exec(text)?.[1]?.toUpperCase() as ExpertDomain | undefined
   const domain = domainToken ? domainLabels[domainToken] : '部分专家'
-  const textWithoutNullError = text.replace(/["']?error["']?\s*[:=]\s*null\b/gi, '')
-  if (/(?:failed|failure|error|timeout|timed out|执行失败|查询失败|调用失败|工具失败)/i.test(textWithoutNullError)) {
+  if (hasExecutionFailure(text)) {
     return domain + '执行失败，本轮核查未完成，请重试相关工具。'
   }
   if (/[\u4e00-\u9fff]/.test(text)) {

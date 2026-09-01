@@ -434,8 +434,8 @@ describe('ExpertCard', () => {
         finding: {
           domain: 'ENERGY',
           status: 'SUPPORTED',
-          conclusion: '已验证工具结果[tool:lookupEnergyConsumption#abc123]: {"meterId":"DEV-ENERGY-001","parkId":"PARK-A","buildingId":"A2","measuredAt":"2025-08-25T00:00:00Z","currentKwh":138.2,"baselineKwh":120.0,"peakDemandKw":20.3,"varianceKwh":18.2,"varianceRatio":0.1517}',
-          evidenceRefs: ['tool:lookupEnergyConsumption#abc123'],
+          conclusion: '已验证工具结果[tool:lookupEnergyConsumption#abc123456789]: {"meterId":"DEV-ENERGY-001","parkId":"PARK-A","buildingId":"A2","measuredAt":"2025-08-25T00:00:00Z","currentKwh":138.2,"baselineKwh":120.0,"peakDemandKw":20.3,"varianceKwh":18.2,"varianceRatio":0.1517}',
+          evidenceRefs: ['tool:lookupEnergyConsumption#abc123456789'],
           confidence: 0.92,
           nextChecks: [],
         },
@@ -452,6 +452,7 @@ describe('ExpertCard', () => {
 
     const evidence = wrapper.get('.evidence-list').text()
     expect(evidence).toContain('能耗查询')
-    expect(evidence).not.toContain('abc123')
+    expect(evidence).toContain('abc12345')
+    expect(evidence).not.toContain('abc123456789')
   })
 })

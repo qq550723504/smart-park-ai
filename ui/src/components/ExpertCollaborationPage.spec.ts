@@ -110,6 +110,47 @@ describe('ExpertCollaborationPage', () => {
     expect(display.uncertainties[0]).toContain('工具结果')
   })
 
+  it('preserves shortened identifiers for repeated tool evidence', () => {
+    const display = formatSynthesis({
+      status: 'SUPPORTED',
+      conclusion: 'verified',
+      evidenceRefs: [
+        'tool:lookupEnergyConsumption#abc123456789',
+        'tool:lookupEnergyConsumption#def456789012',
+      ],
+      confidence: 0.9,
+      uncertainties: [],
+    })
+
+    expect(display.evidence).toEqual(['能耗查询证据 · abc12345…', '能耗查询证据 · def45678…'])
+  })
+
+  it('does not classify failure words inside a successful tool payload as execution failure', () => {
+    const display = formatSynthesis({
+      status: 'INSUFFICIENT_EVIDENCE',
+      conclusion: 'needs review',
+      evidenceRefs: ['tool:lookupDeviceStatus#fixture'],
+      confidence: 0,
+      uncertainties: ['DEVICE: 证据不足，工具结果 {"summary":"power failure during test","status":"OPEN","error":null}'],
+    })
+
+    expect(display.uncertainties[0]).not.toContain('执行失败')
+    expect(display.uncertainties[0]).toContain('工具结果')
+    expect(display.uncertainties[0]).toContain('power failure during test')
+  })
+
+  it('classifies a non-null structured tool error as execution failure', () => {
+    const display = formatSynthesis({
+      status: 'INSUFFICIENT_EVIDENCE',
+      conclusion: 'needs review',
+      evidenceRefs: ['tool:lookupDeviceStatus#fixture'],
+      confidence: 0,
+      uncertainties: ['DEVICE: 工具结果 {"summary":"power failure during test","status":"OPEN","error":"timeout"}'],
+    })
+
+    expect(display.uncertainties[0]).toContain('设备专家执行失败')
+  })
+
   it('localizes confidence uncertainty for the affected domain and peers', () => {
     const display = formatSynthesis({
       status: 'INSUFFICIENT_EVIDENCE',
