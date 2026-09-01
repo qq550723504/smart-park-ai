@@ -3,6 +3,7 @@ import type { ExpertDomain, ExpertFinding, Synthesis } from '../types/collaborat
 export interface FindingDisplay {
   summary: string
   details: Array<{ label: string; value: string }>
+  detailGroups: Array<{ label: string; details: Array<{ label: string; value: string }> }>
   evidence: string[]
   nextChecks: string[]
 }
@@ -168,7 +169,9 @@ function formatValue(key: string, value: unknown): string {
   return String(value ?? '')
 }
 
-function collectKnownFields(value: unknown, fields: Array<[string, unknown]> = [], context: 'root' | 'knowledge' | 'workorder' | 'alert' = 'root', seen = new Set<string>()): Array<[string, unknown]> {
+type RawDetailGroup = { label: string; fields: Array<[string, unknown]> }
+
+function collectKnownFields(value: unknown, fields: Array<[string, unknown]> = [], context: 'root' | 'knowledge' | 'workorder' | 'alert' = 'root', seen = new Set<string>(), includeCollectionItems = true): Array<[string, unknown]> {
   if (Array.isArray(value)) {
     value.forEach((item) => collectKnownFields(item, fields, context, new Set<string>()))
     return fields
@@ -190,7 +193,9 @@ function collectKnownFields(value: unknown, fields: Array<[string, unknown]> = [
           ? 'workOrderCount'
           : 'alertCount'
       fields.push([countKey, nestedValue.length])
-      nestedValue.forEach((item) => collectKnownFields(item, fields, collectionContext, new Set<string>()))
+      if (includeCollectionItems) {
+        nestedValue.forEach((item) => collectKnownFields(item, fields, collectionContext, new Set<string>(), true))
+      }
       return
     }
     const nextContext = collectionContext ?? context
@@ -210,14 +215,45 @@ function collectKnownFields(value: unknown, fields: Array<[string, unknown]> = [
         fields.push([projectedKey, nestedValue])
       }
     } else {
-      collectKnownFields(nestedValue, fields, nextContext, seen)
+      collectKnownFields(nestedValue, fields, nextContext, seen, includeCollectionItems)
     }
   })
   return fields
 }
 
-function collectUniqueKnownFields(value: unknown): Array<[string, unknown]> {
-  return collectKnownFields(value)
+function collectionLabel(key: string): string | null {
+  if (key === 'documents') return '知识文档'
+  if (key === 'workOrders') return '工单'
+  if (key === 'alerts') return '告警'
+  return null
+}
+
+function collectDetailGroups(value: unknown, groups: RawDetailGroup[] = []): RawDetailGroup[] {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectDetailGroups(item, groups))
+    return groups
+  }
+  if (!value || typeof value !== 'object') return groups
+
+  Object.entries(value).forEach(([key, nestedValue]) => {
+    const label = collectionLabel(key)
+    if (label && Array.isArray(nestedValue)) {
+      nestedValue.forEach((item, index) => {
+        const fields = collectKnownFields(item, [], key === 'documents' ? 'knowledge' : key === 'workOrders' ? 'workorder' : 'alert')
+        if (fields.length) groups.push({ label: `${label} ${index + 1}`, fields })
+      })
+      return
+    }
+    collectDetailGroups(nestedValue, groups)
+  })
+  return groups
+}
+
+function formatDetails(fields: Array<[string, unknown]>): Array<{ label: string; value: string }> {
+  return fields
+    .filter(([, value]) => value !== null && value !== '')
+    .map(([key, value]) => ({ label: fieldLabels[key], value: formatValue(key, value) }))
+    .filter((detail) => detail.value !== '')
 }
 
 function summaryFor(domain: ExpertDomain, finding: ExpertFinding, details: Array<{ label: string; value: string }>, hasStructuredObject: boolean): string {
@@ -248,14 +284,16 @@ export function formatNextCheck(check: string): string {
 
 export function formatFinding(finding: ExpertFinding): FindingDisplay {
   const objects = extractObjects(finding.conclusion)
-  const details = objects.flatMap((object) => collectUniqueKnownFields(object))
-    .filter(([, value]) => value !== null && value !== '')
-    .map(([key, value]) => ({ label: fieldLabels[key], value: formatValue(key, value) }))
-    .filter((detail) => detail.value !== '')
+  const details = formatDetails(objects.flatMap((object) => collectKnownFields(object, [], 'root', new Set<string>(), false)))
+  const detailGroups = objects.flatMap((object) => collectDetailGroups(object)).map((group) => ({
+    label: group.label,
+    details: formatDetails(group.fields),
+  })).filter((group) => group.details.length > 0)
 
   return {
     summary: summaryFor(finding.domain, finding, details, objects.length > 0),
     details,
+    detailGroups,
     evidence: finding.evidenceRefs.map(formatEvidenceRef),
     nextChecks: finding.nextChecks.map(formatNextCheck),
   }
@@ -275,12 +313,15 @@ function formatUncertaintyText(text: string): string {
     const affectedLabel = affectedDomain ? domainLabels[affectedDomain] : '相关专家'
     return affectedLabel + '置信度为 ' + confidence + '%，当前证据无法与' + peerLabels + '结论建立时间、空间或因果关联；现有结论均为独立的演示数据，暂无跨域关联证据。'
   }
-  const domain = text.includes('SECURITY') ? '安防专家' : text.includes('DEVICE') ? '设备专家' : text.includes('ENERGY') ? '能耗专家' : '部分专家'
+  const domainToken = /\b(ENERGY|DEVICE|SECURITY)\b/i.exec(text)?.[1]?.toUpperCase() as ExpertDomain | undefined
+  const domain = domainToken ? domainLabels[domainToken] : '部分专家'
   if (/(?:failed|failure|error|timeout|timed out|执行失败|查询失败|调用失败|工具失败)/i.test(text)) {
     return domain + '执行失败，本轮核查未完成，请重试相关工具。'
   }
-  if (/[\u4e00-\u9fff]/.test(text) && !/[a-z]{3,}/i.test(text)) return text
-  return `${domain}证据不足，当前无法确认跨域关联。`
+  if (/[\u4e00-\u9fff]/.test(text)) {
+    return text.replace(/\b(ENERGY|DEVICE|SECURITY)\b/gi, (match) => domainLabels[match.toUpperCase() as ExpertDomain] ?? match)
+  }
+  return `${domain}证据不足，当前无法确认请求结论。`
 }
 
 export function formatSynthesis(synthesis: Synthesis): SynthesisDisplay {

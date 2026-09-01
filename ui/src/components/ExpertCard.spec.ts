@@ -331,6 +331,38 @@ describe('ExpertCard', () => {
     wrapper.unmount()
   })
 
+  it('keeps collection item details grouped by work order', () => {
+    const wrapper = mount(ExpertCard, {
+      props: {
+        domain: 'DEVICE',
+        plan: {
+          normalizedQuestion: 'q',
+          selectedDomains: ['DEVICE'],
+          assignments: { DEVICE: '查询工单详情' },
+          selectionReason: 'work orders',
+        },
+        finding: {
+          domain: 'DEVICE',
+          status: 'SUPPORTED',
+          conclusion: '工具结果: {"workOrders":[{"id":"WO-1","status":"PENDING_EXECUTION","summary":"空调巡检"},{"id":"WO-2","status":"RESOLVED","summary":"门禁复核"}]}',
+          evidenceRefs: [],
+          confidence: 0.92,
+          nextChecks: [],
+        },
+      },
+    })
+
+    const groups = wrapper.findAll('.expert-detail-group')
+    expect(groups).toHaveLength(2)
+    expect(groups[0].text()).toContain('工单WO-1')
+    expect(groups[0].text()).toContain('状态待现场执行')
+    expect(groups[0].text()).toContain('工单摘要空调巡检')
+    expect(groups[1].text()).toContain('工单WO-2')
+    expect(groups[1].text()).toContain('状态已解决')
+    expect(groups[1].text()).toContain('工单摘要门禁复核')
+    wrapper.unmount()
+  })
+
   it('includes recognized details from every cited tool result', () => {
     const wrapper = mount(ExpertCard, {
       props: {

@@ -42,6 +42,15 @@ const findingDisplay = computed(() => props.finding ? formatFinding(props.findin
           <dd>{{ detail.value }}</dd>
         </div>
       </dl>
+      <div v-for="(group, groupIndex) in findingDisplay?.detailGroups ?? []" :key="`${group.label}-${groupIndex}`" class="expert-detail-group">
+        <p class="expert-detail-group-title">{{ group.label }}</p>
+        <dl class="expert-details">
+          <div v-for="(detail, index) in group.details" :key="expertDetailKey(detail.label, detail.value, index)">
+            <dt>{{ detail.label }}</dt>
+            <dd>{{ detail.value }}</dd>
+          </div>
+        </dl>
+      </div>
       <div class="expert-stats"><span><strong>{{ evidenceStatus }}</strong></span><span>证据 <strong>{{ finding.evidenceRefs.length }} 条</strong></span></div>
       <div v-if="findingDisplay?.evidence.length" class="evidence-list"><span v-for="(evidence, index) in findingDisplay.evidence" :key="`${evidence}-${index}`">{{ evidence }}</span></div>
       <p v-if="findingDisplay?.nextChecks.length" class="next-checks">后续核查：{{ findingDisplay.nextChecks.join('、') }}</p>
