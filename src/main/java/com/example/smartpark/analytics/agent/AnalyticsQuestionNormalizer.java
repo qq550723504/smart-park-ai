@@ -134,7 +134,7 @@ public final class AnalyticsQuestionNormalizer {
             case "category" -> containsAny(normalized, "按类别", "各类别", "按分类", "各分类", "按类型", "各类型");
             case "status" -> containsAny(normalized, "按状态", "各状态");
             case "device_type" -> containsAny(normalized, "按设备类型", "各设备类型");
-            case "parking_zone" -> containsAny(normalized, "按区域", "各区域", "按车区", "各车区");
+            case "parking_zone" -> containsAny(normalized, "按区域", "各区域", "按车区", "各车区", "各停车区域");
             default -> false;
         };
     }

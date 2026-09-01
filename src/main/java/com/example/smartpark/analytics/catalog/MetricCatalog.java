@@ -83,7 +83,7 @@ public class MetricCatalog {
                 "COUNT(*)", "snapshot_at", 1, "status = 'OFFLINE'"));
         register(new MetricDefinition(
                 "parking_entries", "停车进场量",
-                java.util.Set.of("停车进场量", "进场车辆数"),
+                java.util.Set.of("停车进场量", "进场量", "进场车辆数"),
                 "辆", "analytics.v_parking_daily",
                 java.util.Set.of("stat_date", "parking_zone"),
                 "SUM(entries)", "stat_date", 7, null));

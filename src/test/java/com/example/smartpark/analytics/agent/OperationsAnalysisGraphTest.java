@@ -252,6 +252,25 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
+    void preservesEachParkingZoneGroupingFromTheBoardQuestion() {
+        String parkingSql = """
+                SELECT parking_zone, SUM(entries) AS parking_entries FROM analytics.v_parking_daily
+                WHERE stat_date >= :fromTs AND stat_date < :toTs
+                GROUP BY parking_zone LIMIT 200""";
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("过去5天各停车区域进场量", List.of("停车进场量"),
+                        List.of(), null, List.of("parking_zone")),
+                List.of(parkingSql),
+                new ChartSpec.Proposal("BAR", "分停车区域进场量", "parking_zone", List.of("parking_entries"), "", "辆"),
+                "共 2 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "过去5天各停车区域进场量");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().dimensions()).containsExactly("parking_zone");
+    }
+
+    @Test
     void supportsDailyEnergyAggregationFromTheDerivedDailyDimension() {
         String dailyEnergySql = """
                 SELECT stat_date, SUM(kwh) AS energy_kwh FROM analytics.v_energy_hourly

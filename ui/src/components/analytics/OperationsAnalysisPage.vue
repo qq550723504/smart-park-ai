@@ -83,6 +83,7 @@ watch(() => props.active, (active) => {
 })
 
 function applyQuestion(value: string): void {
+  cancelGuidedAnalysisStart?.()
   analysis.reset()
   question.value = value.trim()
 }
