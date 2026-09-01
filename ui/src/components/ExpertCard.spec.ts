@@ -167,6 +167,34 @@ describe('ExpertCard', () => {
     wrapper.unmount()
   })
 
+  it('projects public security event details into the security card', () => {
+    const wrapper = mount(ExpertCard, {
+      props: {
+        domain: 'SECURITY',
+        plan: {
+          normalizedQuestion: 'q',
+          selectedDomains: ['SECURITY'],
+          assignments: { SECURITY: '查询安防事件 SEC-1' },
+          selectionReason: 'security',
+        },
+        finding: {
+          domain: 'SECURITY',
+          status: 'SUPPORTED',
+          conclusion: '工具结果: {"eventId":"SEC-1","event":{"eventType":"UNAUTHORIZED_ACCESS_ATTEMPT","evidenceSummary":"REDACTED: 北门门禁连续拒绝三次"}}',
+          evidenceRefs: [],
+          confidence: 0.92,
+          nextChecks: [],
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('事件类型')
+    expect(wrapper.text()).toContain('未授权访问')
+    expect(wrapper.text()).toContain('事件摘要')
+    expect(wrapper.text()).toContain('北门门禁连续拒绝三次')
+    wrapper.unmount()
+  })
+
   it('includes recognized details from every cited tool result', () => {
     const wrapper = mount(ExpertCard, {
       props: {

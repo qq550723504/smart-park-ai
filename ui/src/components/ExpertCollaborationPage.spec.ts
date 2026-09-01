@@ -119,6 +119,19 @@ describe('ExpertCollaborationPage', () => {
     wrapper.unmount()
   })
 
+  it('uses neutral wording when an unsupported synthesis has no confirmed conclusion', () => {
+    const display = formatSynthesis({
+      status: 'INSUFFICIENT_EVIDENCE',
+      conclusion: 'needs review',
+      evidenceRefs: [],
+      confidence: 0,
+      uncertainties: [],
+    })
+
+    expect(display.conclusion).toBe('当前证据不足，暂无法确认请求结论')
+    expect(display.conclusion).not.toContain('关联')
+  })
+
   it('renders Chinese customer-facing wording for supervisor uncertainty', async () => {
     globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === 'POST') {
@@ -183,7 +196,7 @@ describe('ExpertCollaborationPage', () => {
     expect(wrapper.find('[data-testid="expert-card-DEVICE"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('能耗专家已返回核查结果')
     expect(wrapper.text()).toContain('安防专家当前证据不足')
-    expect(wrapper.text()).toContain('当前证据不足，暂无法确认关联')
+    expect(wrapper.text()).toContain('当前证据不足，暂无法确认请求结论')
     expect(wrapper.text()).toContain('EnergyExpert')
     expect(wrapper.text()).toContain('Energy expert completed')
     expect(wrapper.text()).toContain('50%证据覆盖')

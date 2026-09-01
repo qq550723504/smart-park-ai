@@ -44,6 +44,8 @@ const fieldLabels: Record<string, string> = {
   meterId: '电表',
   deviceId: '设备',
   eventId: '事件',
+  eventType: '事件类型',
+  evidenceSummary: '事件摘要',
   alertId: '告警',
   buildingId: '楼宇',
   parkId: '园区',
@@ -82,6 +84,10 @@ const alertClassificationLabels: Record<string, string> = {
   ACCESS: '访问',
   PUMP: '水泵',
   UNKNOWN: '未知',
+}
+
+const securityEventTypeLabels: Record<string, string> = {
+  UNAUTHORIZED_ACCESS_ATTEMPT: '未授权访问尝试',
 }
 
 function extractObjects(text: string): Record<string, unknown>[] {
@@ -147,6 +153,7 @@ function formatValue(key: string, value: unknown): string {
   if (key === 'domain') return knowledgeDomainLabels[String(value).toUpperCase()] ?? String(value)
   if (key === 'tags' && Array.isArray(value)) return value.filter((item) => typeof item === 'string').join('、')
   if (key === 'classification') return alertClassificationLabels[String(value).toUpperCase()] ?? String(value)
+  if (key === 'eventType') return securityEventTypeLabels[String(value).toUpperCase()] ?? String(value)
   if (key === 'status' || key === 'riskLevel' || key === 'riskHint') return statusLabels[String(value).toUpperCase()] ?? String(value)
   if (typeof value === 'boolean') return value ? '是' : '否'
   if (typeof value === 'object' && value !== null) return ''
@@ -244,7 +251,7 @@ function formatUncertaintyText(text: string): string {
 export function formatSynthesis(synthesis: Synthesis): SynthesisDisplay {
   const localizedConclusion = synthesis.status === 'FAILED'
     ? '专家分析未完成'
-    : '当前证据不足，暂无法确认关联'
+    : '当前证据不足，暂无法确认请求结论'
   const rawConclusion = synthesis.conclusion.trim()
   return {
     conclusion: synthesis.status === 'SUPPORTED' && rawConclusion ? rawConclusion : localizedConclusion,
