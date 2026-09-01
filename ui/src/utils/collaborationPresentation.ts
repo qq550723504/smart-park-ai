@@ -315,7 +315,8 @@ function formatUncertaintyText(text: string): string {
   }
   const domainToken = /\b(ENERGY|DEVICE|SECURITY)\b/i.exec(text)?.[1]?.toUpperCase() as ExpertDomain | undefined
   const domain = domainToken ? domainLabels[domainToken] : '部分专家'
-  if (/(?:failed|failure|error|timeout|timed out|执行失败|查询失败|调用失败|工具失败)/i.test(text)) {
+  const textWithoutNullError = text.replace(/["']?error["']?\s*[:=]\s*null\b/gi, '')
+  if (/(?:failed|failure|error|timeout|timed out|执行失败|查询失败|调用失败|工具失败)/i.test(textWithoutNullError)) {
     return domain + '执行失败，本轮核查未完成，请重试相关工具。'
   }
   if (/[\u4e00-\u9fff]/.test(text)) {

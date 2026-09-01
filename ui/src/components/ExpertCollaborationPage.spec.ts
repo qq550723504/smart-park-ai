@@ -96,6 +96,20 @@ describe('ExpertCollaborationPage', () => {
     expect(display.uncertainties[0]).not.toContain('跨域关联')
   })
 
+  it('does not treat a null tool error as expert execution failure', () => {
+    const display = formatSynthesis({
+      status: 'INSUFFICIENT_EVIDENCE',
+      conclusion: 'needs review',
+      evidenceRefs: ['tool:lookupEnergyConsumption#fixture'],
+      confidence: 0,
+      uncertainties: ['ENERGY: 证据不足，工具结果 {"meterId":"MTR-2","error":null}'],
+    })
+
+    expect(display.uncertainties[0]).toContain('能耗专家')
+    expect(display.uncertainties[0]).not.toContain('执行失败')
+    expect(display.uncertainties[0]).toContain('工具结果')
+  })
+
   it('localizes confidence uncertainty for the affected domain and peers', () => {
     const display = formatSynthesis({
       status: 'INSUFFICIENT_EVIDENCE',
