@@ -131,6 +131,11 @@ class CustomerServiceWorkflowPortTest {
         }
 
         @Override
+        public CustomerTicket update(String ticketId, CustomerTicketStatus nextStatus) {
+            return update(ticketId, nextStatus, Instant.now());
+        }
+
+        @Override
         public CustomerTicket update(String ticketId, CustomerTicketStatus nextStatus, Instant updatedAt) {
             updated = true;
             events.add("ticket.update");

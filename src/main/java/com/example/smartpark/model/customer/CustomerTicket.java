@@ -35,6 +35,10 @@ public record CustomerTicket(
         return new CustomerTicket(id, sessionId, intent, nextStatus.name(), safeSummary, createdAt, updatedAt);
     }
 
+    public CustomerTicket transitionTo(CustomerTicketStatus nextStatus) {
+        return transitionTo(nextStatus, Instant.now());
+    }
+
     private static boolean isAllowed(CustomerTicketStatus current, CustomerTicketStatus next) {
         return switch (current) {
             case WAITING_AGENT -> next == CustomerTicketStatus.ASSIGNED || next == CustomerTicketStatus.CANCELLED;

@@ -125,4 +125,23 @@ describe('useWorkflow', () => {
     expect(binding.error.value).toBe('')
     scope.stop()
   })
+
+  it('clears the previous workflow while loading a selected workflow', async () => {
+    const selected = deferred<WorkflowResponse>()
+    vi.mocked(startWorkflow).mockResolvedValue(workflow('wf-old'))
+    vi.mocked(workflowApi.getWorkflow).mockReturnValueOnce(selected.promise)
+    vi.spyOn(workflowApi, 'subscribeToWorkflow').mockReturnValue({ close: vi.fn() } as unknown as EventSource)
+    const scope = effectScope()
+    let binding!: ReturnType<typeof useWorkflow>
+    scope.run(() => { binding = useWorkflow() })
+
+    await binding.start('A')
+    const loading = binding.load('wf-selected')
+    expect(binding.workflow.value).toBeNull()
+
+    selected.resolve(workflow('wf-selected'))
+    await expect(loading).resolves.toMatchObject({ workflowId: 'wf-selected' })
+    expect(binding.workflow.value?.workflowId).toBe('wf-selected')
+    scope.stop()
+  })
 })

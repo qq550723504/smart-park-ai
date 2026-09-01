@@ -279,6 +279,7 @@ public final class CustomerServiceWorkflow {
                 ticketPort.deleteBySessionId(currentTicket.sessionId());
                 throw new NoSuchElementException("Unknown customer service ticket: " + ticketId);
             }
+            currentTicket.transitionTo(nextStatus, now);
             CustomerTicket updatedTicket = ticketPort.update(ticketId, nextStatus, now);
             CustomerServiceResult updated = withTicket(match.result(), updatedTicket);
             sessionStore.update(new CustomerSessionStore.SessionSnapshot(

@@ -33,6 +33,11 @@ public final class InMemoryCustomerTicketAdapter implements CustomerTicketPort {
     }
 
     @Override
+    public CustomerTicket update(String ticketId, CustomerTicketStatus nextStatus) {
+        return update(ticketId, nextStatus, Instant.now());
+    }
+
+    @Override
     public CustomerTicket update(String ticketId, CustomerTicketStatus nextStatus, Instant updatedAt) {
         Objects.requireNonNull(nextStatus, "nextStatus");
         Objects.requireNonNull(updatedAt, "updatedAt");

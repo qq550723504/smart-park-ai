@@ -107,6 +107,7 @@ export function useWorkflow() {
     error.value = ''
     events.value = []
     approvalKey = null
+    workflow.value = null
     try {
       const result = await getWorkflow(workflowId)
       if (generation !== operationGeneration) return null
