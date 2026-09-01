@@ -77,6 +77,13 @@ async function ask(text = question.value): Promise<boolean> {
   }
 }
 
+function resetConversation(): void {
+  question.value = ''
+  messages.value = []
+  sessionId.value = ''
+  conversation.value = null
+}
+
 useGuidedLaunch({
   active: () => props.active,
   request: () => props.launchRequest,
@@ -84,6 +91,7 @@ useGuidedLaunch({
   start: async (request) => {
     const guidedQuestion = request.launchInput?.question?.trim()
     if (!guidedQuestion) throw new Error('客服演示配置无效')
+    resetConversation()
     const started = await ask(guidedQuestion)
     if (!started) throw new Error('客服演示启动失败')
     return { state: 'started', message: '园区客服已启动' }
