@@ -21,6 +21,7 @@ const messages = ref<Array<{ role: 'user' | 'assistant'; text: string; result?: 
 const tickets = ref<CustomerServiceResponse[]>([])
 const sessionId = ref('')
 const conversation = ref<CustomerConversationResponse | null>(null)
+let requestGeneration = 0
 const suggestions = ['访客停车怎么收费？', '访客如何预约进入园区？', '可以查询公共区域能耗吗？', 'A1 洗手间漏水，需要报修']
 
 async function loadTickets() {
@@ -50,27 +51,43 @@ async function advance(ticket: CustomerTicketResponse) {
   }
 }
 
-async function ask(text = question.value, idempotencyKey = createRequestId()): Promise<CustomerServiceResponse | null> {
+async function ask(text = question.value, options: { freshSession?: boolean } = {}): Promise<boolean> {
   const normalized = text.trim()
-  if (!normalized || loading.value) return null
+  if (!normalized || (loading.value && !options.freshSession)) return false
+  const generation = ++requestGeneration
+  const useExistingSession = !options.freshSession && Boolean(sessionId.value)
   messages.value.push({ role: 'user', text: normalized })
   question.value = ''
   loading.value = true
   try {
-    const result = sessionId.value
-      ? await replyCustomerSession(sessionId.value, normalized, idempotencyKey)
-      : await askCustomerService(normalized, idempotencyKey)
+    const requestId = createRequestId()
+    const result = useExistingSession
+      ? await replyCustomerSession(sessionId.value, normalized, requestId)
+      : await askCustomerService(normalized, requestId)
+    if (generation !== requestGeneration) return false
     sessionId.value = result.sessionId
     messages.value.push({ role: 'assistant', text: result.answer, result })
-    conversation.value = await getCustomerConversation(result.sessionId)
+    const nextConversation = await getCustomerConversation(result.sessionId)
+    if (generation !== requestGeneration) return false
+    conversation.value = nextConversation
     await loadTickets()
-    return result
+    return true
   } catch (error) {
+    if (generation !== requestGeneration) return false
     ElMessage.error(error instanceof Error ? error.message : '客服请求失败')
-    return null
+    return false
   } finally {
-    loading.value = false
+    if (generation === requestGeneration) loading.value = false
   }
+}
+
+function resetConversation(): void {
+  requestGeneration += 1
+  question.value = ''
+  messages.value = []
+  sessionId.value = ''
+  conversation.value = null
+  loading.value = false
 }
 
 useGuidedLaunch({
@@ -80,9 +97,10 @@ useGuidedLaunch({
   start: async (request) => {
     const guidedQuestion = request.launchInput?.question?.trim()
     if (!guidedQuestion) throw new Error('园区客服演示配置无效')
-    const result = await ask(guidedQuestion, `showcase-customer-${request.requestId}`)
-    if (!result?.answer?.trim()) throw new Error('园区客服未返回有效回答')
-    return { state: 'ready', message: '园区客服已完成停车问题演示' }
+    resetConversation()
+    const started = await ask(guidedQuestion, { freshSession: true })
+    if (!started) throw new Error('客服演示启动失败')
+    return { state: 'started', message: '园区客服已启动' }
   },
   onUpdate: (update) => emit('launch-status', update),
 })
