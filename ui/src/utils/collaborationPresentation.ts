@@ -38,6 +38,9 @@ const fieldLabels: Record<string, string> = {
   tags: '标签',
   score: '匹配度',
   updatedAt: '更新时间',
+  classification: '告警类型',
+  riskHint: '风险提示',
+  summary: '告警摘要',
   meterId: '电表',
   deviceId: '设备',
   eventId: '事件',
@@ -70,6 +73,15 @@ const statusLabels: Record<string, string> = {
 const knowledgeDomainLabels: Record<string, string> = {
   ALERT_OPERATIONS: '告警运维',
   CUSTOMER_SERVICE: '客户服务',
+}
+
+const alertClassificationLabels: Record<string, string> = {
+  TEMPERATURE: '温度',
+  POWER: '功率',
+  ENERGY: '能耗',
+  ACCESS: '访问',
+  PUMP: '水泵',
+  UNKNOWN: '未知',
 }
 
 function extractObjects(text: string): Record<string, unknown>[] {
@@ -134,27 +146,40 @@ function formatValue(key: string, value: unknown): string {
   if (key === 'score' && typeof value === 'number') return `${formatNumber(value * 100)}%`
   if (key === 'domain') return knowledgeDomainLabels[String(value).toUpperCase()] ?? String(value)
   if (key === 'tags' && Array.isArray(value)) return value.filter((item) => typeof item === 'string').join('、')
-  if (key === 'status' || key === 'riskLevel') return statusLabels[String(value).toUpperCase()] ?? String(value)
+  if (key === 'classification') return alertClassificationLabels[String(value).toUpperCase()] ?? String(value)
+  if (key === 'status' || key === 'riskLevel' || key === 'riskHint') return statusLabels[String(value).toUpperCase()] ?? String(value)
   if (typeof value === 'boolean') return value ? '是' : '否'
   if (typeof value === 'object' && value !== null) return ''
   return String(value ?? '')
 }
 
-function collectKnownFields(value: unknown, fields: Array<[string, unknown]> = []): Array<[string, unknown]> {
+function collectKnownFields(value: unknown, fields: Array<[string, unknown]> = [], knowledgeDocument = false): Array<[string, unknown]> {
   if (Array.isArray(value)) {
-    value.forEach((item) => collectKnownFields(item, fields))
+    value.forEach((item) => collectKnownFields(item, fields, knowledgeDocument))
     return fields
   }
   if (!value || typeof value !== 'object') return fields
 
   Object.entries(value).forEach(([key, nestedValue]) => {
-    if (fieldLabels[key] && (typeof nestedValue !== 'object' || nestedValue === null || key === 'tags')) {
+    const isKnowledgeDocuments = key === 'documents'
+    const isKnowledgeIdentifier = (key === 'id' || key === 'documentId') && knowledgeDocument
+    if (fieldLabels[key] && (typeof nestedValue !== 'object' || nestedValue === null || key === 'tags') && (key !== 'id' && key !== 'documentId' || isKnowledgeIdentifier)) {
       fields.push([key, nestedValue])
     } else {
-      collectKnownFields(nestedValue, fields)
+      collectKnownFields(nestedValue, fields, knowledgeDocument || isKnowledgeDocuments)
     }
   })
   return fields
+}
+
+function collectUniqueKnownFields(value: unknown): Array<[string, unknown]> {
+  const seen = new Set<string>()
+  return collectKnownFields(value).filter(([key, fieldValue]) => {
+    const marker = [key, typeof fieldValue, String(fieldValue)].join(':')
+    if (seen.has(marker)) return false
+    seen.add(marker)
+    return true
+  })
 }
 
 function summaryFor(domain: ExpertDomain, finding: ExpertFinding, details: Array<{ label: string; value: string }>, hasStructuredObject: boolean): string {
@@ -181,7 +206,7 @@ export function formatNextCheck(check: string): string {
 
 export function formatFinding(finding: ExpertFinding): FindingDisplay {
   const objects = extractObjects(finding.conclusion)
-  const details = objects.flatMap((object) => collectKnownFields(object))
+  const details = objects.flatMap((object) => collectUniqueKnownFields(object))
     .filter(([, value]) => value !== null && value !== '')
     .map(([key, value]) => ({ label: fieldLabels[key], value: formatValue(key, value) }))
     .filter((detail) => detail.value !== '')
@@ -197,7 +222,16 @@ export function formatFinding(finding: ExpertFinding): FindingDisplay {
 function formatUncertaintyText(text: string): string {
   const normalized = text.toLowerCase()
   if (normalized.includes('confidence 0.0') && normalized.includes('temporal, spatial, or causal')) {
-    return '安防专家置信度为 0%，当前证据无法与能耗、设备结论建立时间、空间或因果关联；现有结论均为独立的演示数据，暂无跨域关联证据。'
+    const domains = (text.match(/\b(ENERGY|DEVICE|SECURITY)\b/gi) ?? []).map((item) => item.toUpperCase() as ExpertDomain)
+    const affectedMatch = /\b(ENERGY|DEVICE|SECURITY)\b\s+finding\b/i.exec(text)
+    const affectedDomain = (affectedMatch?.[1]?.toUpperCase() as ExpertDomain | undefined) ?? domains[0]
+    const peerLabels = Array.from(new Set(domains.filter((item) => item !== affectedDomain)))
+      .map((item) => domainLabels[item].replace('专家', ''))
+      .join('、') || '其他领域'
+    const confidenceMatch = /\bconfidence\s+([0-9]+(?:\.[0-9]+)?)/i.exec(text)
+    const confidence = confidenceMatch ? formatNumber(Number(confidenceMatch[1]) * 100) : '0'
+    const affectedLabel = affectedDomain ? domainLabels[affectedDomain] : '相关专家'
+    return affectedLabel + '置信度为 ' + confidence + '%，当前证据无法与' + peerLabels + '结论建立时间、空间或因果关联；现有结论均为独立的演示数据，暂无跨域关联证据。'
   }
   const domain = text.includes('SECURITY') ? '安防专家' : text.includes('DEVICE') ? '设备专家' : text.includes('ENERGY') ? '能耗专家' : '部分专家'
   if (/(?:failed|failure|error|timeout|timed out|执行失败|查询失败|调用失败|工具失败)/i.test(text)) {

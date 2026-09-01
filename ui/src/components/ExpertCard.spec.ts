@@ -85,6 +85,88 @@ describe('ExpertCard', () => {
     wrapper.unmount()
   })
 
+  it('keeps nested device identifiers in the device context', () => {
+    const wrapper = mount(ExpertCard, {
+      props: {
+        domain: 'DEVICE',
+        plan: {
+          normalizedQuestion: 'q',
+          selectedDomains: ['DEVICE'],
+          assignments: { DEVICE: '检查设备 DEV-1' },
+          selectionReason: 'device',
+        },
+        finding: {
+          domain: 'DEVICE',
+          status: 'SUPPORTED',
+          conclusion: '工具结果: {"deviceId":"DEV-1","device":{"id":"device-record-1","status":"ONLINE"}}',
+          evidenceRefs: [],
+          confidence: 0.92,
+          nextChecks: [],
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('设备DEV-1')
+    expect(wrapper.text()).toContain('状态在线')
+    expect(wrapper.text()).not.toContain('知识文档')
+    wrapper.unmount()
+  })
+
+  it('deduplicates repeated identifiers inside one tool result', () => {
+    const wrapper = mount(ExpertCard, {
+      props: {
+        domain: 'ENERGY',
+        plan: {
+          normalizedQuestion: 'q',
+          selectedDomains: ['ENERGY'],
+          assignments: { ENERGY: '检查电表 MTR-2 的能耗' },
+          selectionReason: 'energy',
+        },
+        finding: {
+          domain: 'ENERGY',
+          status: 'SUPPORTED',
+          conclusion: '工具结果: {"meterId":"MTR-2","reading":{"meterId":"MTR-2","currentKwh":138.2}}',
+          evidenceRefs: [],
+          confidence: 0.92,
+          nextChecks: [],
+        },
+      },
+    })
+
+    expect(wrapper.findAll('.expert-details > div').filter((item) => item.text() === '电表MTR-2')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('projects alert fields returned by alert lookup tools', () => {
+    const wrapper = mount(ExpertCard, {
+      props: {
+        domain: 'DEVICE',
+        plan: {
+          normalizedQuestion: 'q',
+          selectedDomains: ['DEVICE'],
+          assignments: { DEVICE: '查询设备 DEV-1 的关联告警' },
+          selectionReason: 'device alerts',
+        },
+        finding: {
+          domain: 'DEVICE',
+          status: 'SUPPORTED',
+          conclusion: '工具结果: {"alertId":"ALT-1","alert":{"classification":"POWER","riskHint":"HIGH","summary":"HVAC overload","occurredAt":"2026-08-25T00:00:00Z"}}',
+          evidenceRefs: [],
+          confidence: 0.92,
+          nextChecks: [],
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('告警类型')
+    expect(wrapper.text()).toContain('功率')
+    expect(wrapper.text()).toContain('风险提示')
+    expect(wrapper.text()).toContain('高风险')
+    expect(wrapper.text()).toContain('告警摘要')
+    expect(wrapper.text()).toContain('HVAC overload')
+    wrapper.unmount()
+  })
+
   it('includes recognized details from every cited tool result', () => {
     const wrapper = mount(ExpertCard, {
       props: {

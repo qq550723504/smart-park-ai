@@ -82,6 +82,20 @@ describe('ExpertCollaborationPage', () => {
     expect(display.uncertainties[0]).not.toContain('证据不足')
   })
 
+  it('localizes confidence uncertainty for the affected domain and peers', () => {
+    const display = formatSynthesis({
+      status: 'INSUFFICIENT_EVIDENCE',
+      conclusion: 'needs review',
+      evidenceRefs: [],
+      confidence: 0,
+      uncertainties: ['DEVICE finding has confidence 0.0 and provides no temporal, spatial, or causal link to ENERGY or SECURITY findings; all findings are isolated mock data with no cross-domain correlation evidence'],
+    })
+
+    expect(display.uncertainties[0]).toContain('设备专家置信度为 0%')
+    expect(display.uncertainties[0]).toContain('能耗、安防')
+    expect(display.uncertainties[0]).not.toContain('安防专家置信度')
+  })
+
   it('preserves the supervisor conclusion when it is not one of the localized status labels', async () => {
     globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === 'POST') {
