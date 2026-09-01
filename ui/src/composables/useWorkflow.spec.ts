@@ -10,6 +10,7 @@ vi.mock('../services/workflowApi', async (importOriginal) => {
   return {
     ...actual,
     getWorkflow: vi.fn(),
+    getWorkflowEventHistory: vi.fn(),
     startWorkflow: vi.fn(),
     submitApproval: vi.fn(),
   }
@@ -178,6 +179,29 @@ describe('useWorkflow', () => {
 
     expect(binding.isTerminal.value).toBe(true)
     expect(subscribe).not.toHaveBeenCalled()
+    scope.stop()
+  })
+
+  it('hydrates terminal workflow history through a finite request', async () => {
+    vi.mocked(workflowApi.getWorkflow).mockResolvedValueOnce({
+      ...workflow('wf-history'),
+      status: 'FAILED',
+    })
+    vi.mocked(workflowApi.getWorkflowEventHistory).mockResolvedValueOnce([
+      {
+        eventId: '1', type: 'NODE_STARTED', node: 'diagnoseAlert', sequence: 1,
+        timestamp: '2026-09-01T00:00:00Z', redactedSummary: 'diagnoseAlert started',
+      },
+    ])
+    const scope = effectScope()
+    let binding!: ReturnType<typeof useWorkflow>
+    scope.run(() => { binding = useWorkflow() })
+
+    await expect(binding.load('wf-history')).resolves.toMatchObject({ workflowId: 'wf-history', status: 'FAILED' })
+
+    expect(workflowApi.getWorkflowEventHistory).toHaveBeenCalledWith('wf-history')
+    expect(binding.events.value).toHaveLength(1)
+    expect(binding.events.value[0]).toMatchObject({ eventId: '1', node: 'diagnoseAlert' })
     scope.stop()
   })
 })

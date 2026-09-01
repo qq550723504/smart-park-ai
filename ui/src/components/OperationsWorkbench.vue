@@ -170,7 +170,10 @@ function openAnalysisFromBoard(question: string): void {
 
 async function openCollaborationView(view: 'workflow' | 'customer', workflowId?: string, _ticketId?: string): Promise<void> {
   const generation = ++navigationGeneration
-  if (view === 'customer') customerQueueRefreshToken.value += 1
+  if (view === 'customer') {
+    cancelPendingLoad()
+    customerQueueRefreshToken.value += 1
+  }
   if (view === 'workflow' && workflowId) {
     const loaded = await loadWorkflow(workflowId)
     if (generation !== navigationGeneration) return

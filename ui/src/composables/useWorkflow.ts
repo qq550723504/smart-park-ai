@@ -1,5 +1,5 @@
 import { computed, onScopeDispose, ref } from 'vue'
-import { getWorkflow, startWorkflow, submitApproval, subscribeToWorkflow } from '../services/workflowApi'
+import { getWorkflow, getWorkflowEventHistory, startWorkflow, submitApproval, subscribeToWorkflow } from '../services/workflowApi'
 import type { DemoRole, WorkflowEvent, WorkflowResponse } from '../types/workflow'
 import { createRequestId } from '../utils/requestId'
 
@@ -139,8 +139,20 @@ export function useWorkflow() {
       const result = await getWorkflow(workflowId)
       if (generation !== operationGeneration) return null
       mergeWorkflow(result)
+      if (isTerminalStatus(result.status)) {
+        try {
+          const history = await getWorkflowEventHistory(result.workflowId)
+          if (generation !== operationGeneration) return null
+          events.value = history
+        } catch (cause) {
+          if (generation === operationGeneration) {
+            error.value = cause instanceof Error ? cause.message : '无法读取工作流事件历史'
+          }
+        }
+      } else {
+        subscribeIfLive(result, generation)
+      }
       pendingLoad = false
-      subscribeIfLive(result, generation)
       return result
     } catch (cause) {
       if (generation !== operationGeneration) return null

@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 
+import java.util.List;
 import java.util.Objects;
 
 @RestController
@@ -60,7 +61,15 @@ public class WorkflowEventController {
                         .id(event.eventId())
                         .event(event.type())
                         .data(event)
-                        .build());
+                .build());
+    }
+
+    @GetMapping("/{workflowId}/events/history")
+    public List<WebDtos.WorkflowEventDto> eventHistory(@PathVariable String workflowId) {
+        workflow.status(workflowId);
+        return eventPublisher.history(workflowId).stream()
+                .map(WebDtos::from)
+                .toList();
     }
 
     private static boolean isTerminal(WorkflowEvent event) {

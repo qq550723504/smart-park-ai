@@ -105,6 +105,27 @@ class WorkflowEventControllerTest {
                 .andExpect(jsonPath("$.tools[0]").value("KnowledgePort.search"))
                 .andExpect(jsonPath("$.failedNodes[0]").value("retrieveKnowledge"));
     }
+
+    @Test
+    void eventHistoryReturnsFiniteSafeDtosForTerminalWorkflowInspection() throws Exception {
+        String workflowId = "wf-history";
+        when(workflow.status(workflowId)).thenReturn(snapshot(workflowId));
+        when(eventPublisher.history(workflowId)).thenReturn(List.of(
+                new WorkflowEvent(workflowId, 1, WorkflowEvent.EventType.NODE_STARTED, "diagnoseAlert",
+                        Instant.parse("2026-08-23T01:45:00Z"), "diagnoseAlert started"),
+                new WorkflowEvent(workflowId, 2, WorkflowEvent.EventType.FAILED, "diagnoseAlert",
+                        Instant.parse("2026-08-23T01:46:00Z"), "provider secret-value failure")));
+
+        mockMvc.perform(get("/api/workflows/{workflowId}/events/history", workflowId))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith("application/json"))
+                .andExpect(jsonPath("$[0].eventId").value("1"))
+                .andExpect(jsonPath("$[0].type").value("NODE_STARTED"))
+                .andExpect(jsonPath("$[0].node").value("diagnoseAlert"))
+                .andExpect(jsonPath("$[1].redactedSummary").value("[REDACTED]"))
+                .andExpect(content().string(not(containsString("secret-value"))));
+    }
+
     @Test
     void eventsForUnknownWorkflowReturnNotFoundWithoutOpeningAStream() throws Exception {
         when(workflow.status("wf-missing"))

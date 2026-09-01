@@ -53,7 +53,7 @@ const analysisBoardStub = defineComponent({
 
 const collaborationWorkflowStub = defineComponent({
   emits: ['open-view'],
-  template: '<button type="button" data-open-selected-workflow @click="$emit(\'open-view\', \'workflow\', \'wf-selected\')">打开选中工作流</button>',
+  template: '<div><button type="button" data-open-selected-workflow @click="$emit(\'open-view\', \'workflow\', \'wf-selected\')">打开选中工作流</button><button type="button" data-open-customer @click="$emit(\'open-view\', \'customer\', undefined, \'ticket-1\')">打开客服</button></div>',
 })
 
 const traceRailStub = defineComponent({
@@ -376,6 +376,50 @@ describe('OperationsWorkbench', () => {
 
       pendingWorkflow.resolve(new Response(JSON.stringify({
         workflowId: 'wf-slow', alertId: 'ALT-POWER-001', status: 'WAITING_APPROVAL',
+        diagnosis: null, approval: null, workOrder: null, errors: [], eventSequence: 2, riskReasons: [],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      await flushPromises()
+
+      expect(wrapper.get('[data-workbench-view="customer"]').classes()).toContain('active')
+      expect(wrapper.get('[data-workbench-view="workflow"]').classes()).not.toContain('active')
+      expect(streams).toHaveLength(0)
+      wrapper.unmount()
+    } finally {
+      globalThis.EventSource = originalEventSource
+    }
+  })
+
+  it('cancels a queue workflow load when opening a customer item directly', async () => {
+    const originalEventSource = globalThis.EventSource
+    const pendingWorkflow = deferred<Response>()
+    const streams: Array<{ close: ReturnType<typeof vi.fn> }> = []
+    globalThis.EventSource = class {
+      onerror: ((event: Event) => void) | null = null
+      constructor(_url: string | URL) {
+        streams.push(this as unknown as { close: ReturnType<typeof vi.fn> })
+      }
+      addEventListener(): void {}
+      close = vi.fn()
+    } as unknown as typeof EventSource
+    globalThis.fetch = (async (url: RequestInfo | URL) => {
+      if (String(url).includes('/api/workflows/wf-selected')) return pendingWorkflow.promise
+      return new Response(JSON.stringify({
+        knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }) as typeof fetch
+
+    try {
+      const wrapper = mount(OperationsWorkbench, {
+        props: { initialView: 'collaboration-center' },
+        global: { stubs: { ...operatorStubs, CollaborationCenter: collaborationWorkflowStub } },
+      })
+      await settleCapabilities()
+      await wrapper.get('[data-open-selected-workflow]').trigger('click')
+      await wrapper.get('[data-open-customer]').trigger('click')
+
+      pendingWorkflow.resolve(new Response(JSON.stringify({
+        workflowId: 'wf-selected', alertId: 'ALT-POWER-001', status: 'WAITING_APPROVAL',
         diagnosis: null, approval: null, workOrder: null, errors: [], eventSequence: 2, riskReasons: [],
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       await flushPromises()

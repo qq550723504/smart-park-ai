@@ -174,6 +174,10 @@ export function getWorkflow(workflowId: string) {
   return request<WorkflowResponse>(`/api/workflows/${workflowId}`)
 }
 
+export function getWorkflowEventHistory(workflowId: string) {
+  return request<WorkflowEvent[]>(`/api/workflows/${workflowId}/events/history`)
+}
+
 export function submitApproval(workflowId: string, payload: {
   decision: 'APPROVE' | 'REJECT'
   reviewer: string
