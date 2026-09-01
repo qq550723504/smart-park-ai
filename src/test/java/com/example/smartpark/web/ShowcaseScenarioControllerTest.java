@@ -80,7 +80,7 @@ class ShowcaseScenarioControllerTest {
                 .andExpect(jsonPath("$.scenarios[2].launchInput.alertId").value(nullValue()))
                 .andExpect(jsonPath("$.scenarios[2].launchInput.question").value("过去5天各楼宇能耗"))
                 .andExpect(jsonPath("$.scenarios[3].launchInput.alertId").value(nullValue()))
-                .andExpect(jsonPath("$.scenarios[3].launchInput.question").value(nullValue()))
+                .andExpect(jsonPath("$.scenarios[3].launchInput.question").value("访客停车怎么收费？"))
                 .andReturn();
 
         String responseBody = result.getResponse().getContentAsString().toLowerCase(Locale.ROOT);

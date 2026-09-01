@@ -112,6 +112,32 @@ export function getOperationsMetrics() {
   return request<OperationsMetrics>('/api/operations/metrics')
 }
 
+export interface GovernanceOverview {
+  capturedAt: string
+  scenarios: { total: number; ready: number; notReady: number; disabled: number }
+  capabilities: OperationsCapabilities
+  business: {
+    workflowCount: number
+    completedWorkflowCount: number
+    customerSessionCount: number
+    humanTicketCount: number
+  }
+  governance: {
+    auditEntryCount: number
+    feedbackCount: number
+    positiveFeedbackCount: number
+    knowledgeDocumentCount: number
+    activeKnowledgeDocumentCount: number
+    completionRate: number | null
+    positiveFeedbackRate: number | null
+  }
+  boundaries: string[]
+}
+
+export function getGovernanceOverview() {
+  return request<GovernanceOverview>('/api/governance/overview')
+}
+
 export function getAuditEntries(role: DemoRole) {
   return request<AuditEntry[]>('/api/audit', { headers: { 'X-Demo-Role': role } })
 }

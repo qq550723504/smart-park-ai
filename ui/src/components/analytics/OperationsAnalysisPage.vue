@@ -21,22 +21,31 @@ const emit = defineEmits<{
 }>()
 
 const question = ref('')
-const recommendedQuestions = [
-  '过去5天各楼宇能耗',
-  '能耗总量',
-  '各楼宇能耗对比',
-  '过去5天按小时能耗趋势',
-  '过去5天各楼宇能耗排行',
-  '过去5天各楼宇能耗热力图',
-  '过去5天按日期能耗日历热力图',
-  '过去5天能耗目标完成率',
-  '过去5天各楼宇能耗与占用人数关系',
-  '过去5天各楼宇能耗空间分布',
-  '过去5天各楼宇分时能耗堆叠图',
-  '告警数量',
-  '高风险告警数量',
-  '停车进场量',
-  '设备离线数',
+const recommendedGroups = [
+  {
+    label: '能耗与空间',
+    questions: [
+      '过去5天各楼宇能耗',
+      '能耗总量',
+      '各楼宇能耗对比',
+      '过去5天按小时能耗趋势',
+      '过去5天各楼宇能耗排行',
+      '过去5天各楼宇能耗热力图',
+      '过去5天按日期能耗日历热力图',
+      '过去5天能耗目标完成率',
+      '过去5天各楼宇能耗与占用人数关系',
+      '过去5天各楼宇能耗空间分布',
+      '过去5天各楼宇分时能耗堆叠图',
+    ],
+  },
+  {
+    label: '告警与设备',
+    questions: ['告警数量', '高风险告警数量', '设备离线数'],
+  },
+  {
+    label: '停车资源',
+    questions: ['停车进场量'],
+  },
 ]
 const analysis = useOperationsAnalysis({
   ...(props.trace ? { trace: props.trace } : {}),
@@ -223,15 +232,20 @@ watch(
     </form>
     <div class="analytics-presets" role="group" aria-label="推荐问题">
       <span>试试这些问题</span>
-      <button
-        v-for="preset in recommendedQuestions"
-        :key="preset"
-        type="button"
-        :disabled="analysis.phase.value === 'running'"
-        @click="selectRecommendedQuestion(preset)"
-      >
-        {{ preset }}
-      </button>
+      <section v-for="group in recommendedGroups" :key="group.label" class="analytics-preset-group" :aria-label="group.label">
+        <strong>{{ group.label }}</strong>
+        <div class="analytics-preset-group__items">
+          <button
+            v-for="preset in group.questions"
+            :key="preset"
+            type="button"
+            :disabled="analysis.phase.value === 'running'"
+            @click="selectRecommendedQuestion(preset)"
+          >
+            {{ preset }}
+          </button>
+        </div>
+      </section>
     </div>
     <p v-if="analysis.error.value" class="analytics-error" data-testid="analytics-error">{{ analysis.error.value }}</p>
 

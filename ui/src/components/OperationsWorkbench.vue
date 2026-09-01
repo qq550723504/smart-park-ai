@@ -11,6 +11,7 @@ import ImmersiveWorkbenchShell from './workbench/ImmersiveWorkbenchShell.vue'
 import OperationsAnalysisPage from './analytics/OperationsAnalysisPage.vue'
 import ExpertCollaborationPage from './ExpertCollaborationPage.vue'
 import VoiceAssistantPage from './voice/VoiceAssistantPage.vue'
+import GovernanceCenter from './governance/GovernanceCenter.vue'
 import { demoAlerts, type DemoRole } from '../types/workflow'
 import { useWorkflow } from '../composables/useWorkflow'
 import { useExecutionTrace } from '../composables/useExecutionTrace'
@@ -50,6 +51,7 @@ const navItems = computed<WorkbenchNavItem[]>(() => [
   { value: 'voice', label: '实时语音', available: capabilities.value?.voiceEnabled === true },
   { value: 'collaboration', label: '专家协作', available: capabilities.value?.collaborationEnabled === true },
   { value: 'analytics', label: '运营分析', available: capabilities.value?.analyticsEnabled === true },
+  { value: 'governance', label: '治理中心', available: true },
 ])
 onMounted(() => {
   void getOperationsCapabilities()
@@ -133,6 +135,7 @@ const executionEvidenceByView: Record<WorkbenchView, Pick<WorkbenchEvidenceItem,
   voice: { value: '只读查询 · 实时语音会话', tone: 'verified' },
   collaboration: { value: '只读查询 · 多专家汇总', tone: 'verified' },
   analytics: { value: '真实只读数据', tone: 'verified' },
+  governance: { value: '安全聚合 · 只读概览', tone: 'verified' },
 }
 const evidenceItems = computed<WorkbenchEvidenceItem[]>(() => [
   { label: '场景', value: navItems.value.find((item) => item.value === activeView.value)?.label ?? '告警工作流' },
@@ -284,7 +287,12 @@ function confidence(value?: number) {
 
     <main v-show="activeView === 'customer'" class="main-content customer-main">
       <section class="hero-row customer-hero"><div><span class="eyebrow">园区服务 · 02</span><h2>园区服务问题<br /><em>快速响应与有序转人工</em></h2><p class="hero-copy">基于模拟园区知识回答常见咨询，报修或知识不足时自动生成客服工单。</p></div></section>
-      <CustomerServiceConsole :role="role" />
+      <CustomerServiceConsole
+        :role="role"
+        :active="props.active && activeView === 'customer'"
+        :launch-request="props.launchRequest"
+        @launch-status="handleGuidedLaunchUpdate"
+      />
     </main>
 
     <main v-show="activeView === 'voice'" class="main-content">
@@ -304,6 +312,8 @@ function confidence(value?: number) {
         @launch-status="handleGuidedLaunchUpdate"
       />
     </main>
+
+    <GovernanceCenter v-show="activeView === 'governance'" :active="props.active && activeView === 'governance'" />
 
     <main v-show="activeView === 'workflow'" class="main-content">
       <section class="hero-row">

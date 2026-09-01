@@ -60,9 +60,11 @@ describe('OperationsAnalysisPage', () => {
       '过去5天各楼宇分时能耗堆叠图',
       '告警数量',
       '高风险告警数量',
-      '停车进场量',
       '设备离线数',
+      '停车进场量',
     ])
+    expect(wrapper.findAll('.analytics-preset-group').map((group) => group.attributes('aria-label')))
+      .toEqual(['能耗与空间', '告警与设备', '停车资源'])
 
     await presets[0].trigger('click')
 

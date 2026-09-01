@@ -193,7 +193,7 @@ describe('OperationsWorkbench', () => {
 
     await settleCapabilities()
 
-    expect(wrapper.findAll('[data-workbench-stage] > .main-content')).toHaveLength(5)
+    expect(wrapper.findAll('[data-workbench-stage] > .main-content')).toHaveLength(6)
     expect(wrapper.findAll('[data-workbench-rail] .global-rail')).toHaveLength(1)
     const shell = wrapper.get('[data-testid="immersive-workbench-shell"]')
     const rail = wrapper.get('[data-workbench-rail] .global-rail')
@@ -302,7 +302,7 @@ describe('OperationsWorkbench', () => {
 
     await settleCapabilities()
 
-    expect(wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())).toEqual(['告警工作流', '园区客服'])
+    expect(wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())).toEqual(['告警工作流', '园区客服', '治理中心'])
     expect(wrapper.get('[data-evidence-item="知识检索"] strong').text()).toBe('能力检查失败')
     expect(wrapper.get('[data-evidence-item="知识检索"]').attributes('data-tone')).toBe('warning')
   })

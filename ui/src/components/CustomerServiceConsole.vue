@@ -5,9 +5,16 @@ import { askCustomerService, getCustomerConversation, listCustomerTickets, reply
 import type { CustomerConversationResponse, CustomerServiceResponse, CustomerTicketResponse, DemoRole } from '../types/workflow'
 import { customerIntentLabel, customerTicketStatusLabel } from '../utils/labels'
 import { createRequestId } from '../utils/requestId'
+import { useGuidedLaunch } from '../composables/useGuidedLaunch'
+import type { GuidedLaunchUpdate, ScenarioLaunchRequest } from '../types/workbench'
 import './customer-service.css'
 
-const props = defineProps<{ role: DemoRole }>()
+const props = withDefaults(defineProps<{
+  role: DemoRole
+  active?: boolean
+  launchRequest?: ScenarioLaunchRequest | null
+}>(), { active: true, launchRequest: null })
+const emit = defineEmits<{ 'launch-status': [update: GuidedLaunchUpdate] }>()
 const question = ref('')
 const loading = ref(false)
 const messages = ref<Array<{ role: 'user' | 'assistant'; text: string; result?: CustomerServiceResponse }>>([])
@@ -43,27 +50,42 @@ async function advance(ticket: CustomerTicketResponse) {
   }
 }
 
-async function ask(text = question.value) {
+async function ask(text = question.value, idempotencyKey = createRequestId()): Promise<CustomerServiceResponse | null> {
   const normalized = text.trim()
-  if (!normalized || loading.value) return
+  if (!normalized || loading.value) return null
   messages.value.push({ role: 'user', text: normalized })
   question.value = ''
   loading.value = true
   try {
-    const requestId = createRequestId()
     const result = sessionId.value
-      ? await replyCustomerSession(sessionId.value, normalized, requestId)
-      : await askCustomerService(normalized, requestId)
+      ? await replyCustomerSession(sessionId.value, normalized, idempotencyKey)
+      : await askCustomerService(normalized, idempotencyKey)
     sessionId.value = result.sessionId
     messages.value.push({ role: 'assistant', text: result.answer, result })
     conversation.value = await getCustomerConversation(result.sessionId)
     await loadTickets()
+    return result
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '客服请求失败')
+    return null
   } finally {
     loading.value = false
   }
 }
+
+useGuidedLaunch({
+  active: () => props.active,
+  request: () => props.launchRequest,
+  scenarioId: 'CUSTOMER_SERVICE',
+  start: async (request) => {
+    const guidedQuestion = request.launchInput?.question?.trim()
+    if (!guidedQuestion) throw new Error('园区客服演示配置无效')
+    const result = await ask(guidedQuestion, `showcase-customer-${request.requestId}`)
+    if (!result?.answer?.trim()) throw new Error('园区客服未返回有效回答')
+    return { state: 'ready', message: '园区客服已完成停车问题演示' }
+  },
+  onUpdate: (update) => emit('launch-status', update),
+})
 
 watch(() => props.role, loadTickets)
 onMounted(loadTickets)
