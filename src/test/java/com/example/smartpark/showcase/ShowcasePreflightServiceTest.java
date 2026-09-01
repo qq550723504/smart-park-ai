@@ -77,12 +77,14 @@ class ShowcasePreflightServiceTest {
     @Test
     void cancelsAProbeThatExceedsTheConfiguredTimeout() throws InterruptedException {
         var interrupted = new AtomicBoolean();
+        var entered = new CountDownLatch(1);
         ShowcasePreflightProbe blocking = new ShowcasePreflightProbe() {
             @Override public ShowcaseScenarioId scenarioId() {
                 return ShowcaseScenarioId.VOICE_ASSISTANT;
             }
 
             @Override public ShowcaseProbeResult probe() {
+                entered.countDown();
                 try {
                     new CountDownLatch(1).await();
                     return ShowcaseProbeResult.PASSED;
@@ -95,9 +97,10 @@ class ShowcasePreflightServiceTest {
         };
 
         ShowcasePreflightResult result = service(new InMemoryScenarioVerificationRegistry(),
-                Duration.ofMillis(25), List.of(blocking)).run().results().get(0);
+                Duration.ofMillis(100), List.of(blocking)).run().results().get(0);
 
         assertThat(result.status()).isEqualTo(ShowcasePreflightStatus.NOT_READY);
+        assertThat(entered.await(1, TimeUnit.SECONDS)).isTrue();
         long deadline = System.nanoTime() + Duration.ofSeconds(1).toNanos();
         while (!interrupted.get() && System.nanoTime() < deadline) {
             Thread.sleep(5);

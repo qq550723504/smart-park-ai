@@ -161,4 +161,27 @@ describe('CustomerServiceConsole', () => {
     expect(wrapper.find('.chat-stream').text()).toContain('访客停车按园区规则执行。')
     wrapper.unmount()
   })
+
+  it('ignores a privileged ticket list response after the role changes', async () => {
+    const adminTickets = deferred<CustomerServiceResponse[]>()
+    vi.mocked(listCustomerTickets)
+      .mockReturnValueOnce(adminTickets.promise)
+      .mockResolvedValueOnce([])
+
+    const wrapper = mount(CustomerServiceConsole, {
+      props: { role: 'ADMIN', active: true },
+      global: { stubs: { 'el-input': ElInput, 'el-button': true, 'el-tag': true, 'el-empty': true } },
+    })
+    await wrapper.setProps({ role: 'CUSTOMER_AGENT' })
+    await flushPromises()
+    adminTickets.resolve([{
+      sessionId: 'CS-OLD', intent: 'REPAIR', answer: '旧工单', knowledgeSources: [], knowledgeCitations: [],
+      needsHuman: true, reason: 'INSUFFICIENT_EVIDENCE', citationIds: [],
+      ticket: { id: 'T-OLD', sessionId: 'CS-OLD', intent: 'REPAIR', status: 'WAITING_AGENT', safeSummary: '旧特权工单', createdAt: '2026-09-01T08:00:00Z', updatedAt: '2026-09-01T08:00:00Z' },
+    }])
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('旧特权工单')
+    wrapper.unmount()
+  })
 })
