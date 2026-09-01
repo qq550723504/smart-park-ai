@@ -1,4 +1,4 @@
-package com.example.smartpark.web;
+package com.example.smartpark.operations;
 
 import com.example.smartpark.audit.AuditTrail;
 import com.example.smartpark.feedback.FeedbackService;
@@ -40,8 +40,6 @@ public final class OperationsMetrics {
 
     public Snapshot snapshot() {
         List<WorkflowSnapshot> workflows = workflowStore == null ? List.of() : workflowStore.snapshots();
-
-
         long completed = workflows.stream().filter(snapshot -> snapshot.status() == WorkflowStatus.COMPLETED).count();
         long humanTickets = customerService.tickets().size();
         var knowledge = knowledgeAdminPort == null ? List.<KnowledgeAdminPort.ManagedDocument>of() : knowledgeAdminPort.list();

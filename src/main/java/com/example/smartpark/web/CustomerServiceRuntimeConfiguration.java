@@ -4,6 +4,8 @@ import com.example.smartpark.audit.AuditTrail;
 import com.example.smartpark.adapter.mock.InMemoryCustomerSessionStore;
 import com.example.smartpark.adapter.mock.InMemoryCustomerTicketAdapter;
 import com.example.smartpark.feedback.FeedbackService;
+import com.example.smartpark.operations.OperationsCapabilitiesService;
+import com.example.smartpark.operations.OperationsMetrics;
 import com.example.smartpark.port.customer.CustomerAnswerPort;
 import com.example.smartpark.port.customer.CustomerSessionStore;
 import com.example.smartpark.port.customer.CustomerTicketPort;
@@ -16,6 +18,18 @@ import org.springframework.context.annotation.Configuration;
 
 @Configuration(proxyBeanMethods = false)
 public class CustomerServiceRuntimeConfiguration {
+
+    @Bean
+    OperationsCapabilitiesService operationsCapabilitiesService(
+            @Value("${smartpark.knowledge.mode:mock}") String knowledgeMode,
+            @Value("${smartpark.customer-service.answer-mode:mock}") String customerAnswerMode,
+            @Value("${smartpark.analytics.enabled:false}") boolean analyticsEnabled,
+            @Value("${smartpark.voice.enabled:false}") boolean voiceEnabled,
+            @Value("${smartpark.local-demo.enabled:false}") boolean localDemoEnabled,
+            org.springframework.beans.factory.ObjectProvider<com.example.smartpark.collaboration.ExpertCollaborationService> collaborationService) {
+        return new OperationsCapabilitiesService(knowledgeMode, customerAnswerMode, analyticsEnabled,
+                voiceEnabled, localDemoEnabled, collaborationService);
+    }
 
     @Bean
     AuditTrail auditTrail() {
