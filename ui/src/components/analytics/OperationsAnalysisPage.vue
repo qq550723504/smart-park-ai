@@ -35,6 +35,8 @@ const recommendedGroups = [
       '过去5天各楼宇能耗热力图',
       '过去5天按日期能耗日历热力图',
       '过去5天能耗目标完成率',
+      '过去5天各楼宇能耗基线偏差率',
+      '过去5天各楼宇能耗空间分布',
     ],
   },
   {
@@ -44,10 +46,8 @@ const recommendedGroups = [
   {
     label: '空间',
     questions: [
-      '过去5天各楼宇能耗与占用人数关系',
       '过去5天各楼宇平均占用人数',
-      '过去5天各楼宇能耗空间分布',
-      '过去5天各楼宇分时能耗堆叠图',
+      '过去5天各楼宇能耗与占用人数关系',
     ],
   },
   {
@@ -82,8 +82,13 @@ watch(() => props.active, (active) => {
   if (analysis.runId.value) props.trace?.subscribe(analysis.runId.value)
 })
 
+function applyQuestion(value: string): void {
+  analysis.reset()
+  question.value = value.trim()
+}
+
 watch([() => props.initialQuestion, () => props.initialQuestionToken], ([value]) => {
-  if (value?.trim()) question.value = value.trim()
+  if (value?.trim()) applyQuestion(value)
 })
 
 function launchAnalysis(callbacks?: AnalysisStartCallbacks): void {
@@ -170,7 +175,7 @@ useGuidedLaunch({
 })
 
 function selectRecommendedQuestion(value: string): void {
-  question.value = value
+  applyQuestion(value)
 }
 
 function resume(): void {

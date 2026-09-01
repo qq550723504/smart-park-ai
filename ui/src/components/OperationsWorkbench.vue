@@ -161,8 +161,13 @@ function openAnalysisFromBoard(question: string): void {
   activeView.value = 'analytics'
 }
 
-function openCollaborationView(view: 'workflow' | 'customer', workflowId?: string): void {
-  if (view === 'workflow' && workflowId) void loadWorkflow(workflowId)
+async function openCollaborationView(view: 'workflow' | 'customer', workflowId?: string): Promise<void> {
+  if (view === 'workflow' && workflowId) {
+    const loaded = await loadWorkflow(workflowId)
+    if (loaded?.alertId && demoAlerts.some((alert) => alert.id === loaded.alertId)) {
+      selectedAlertId.value = loaded.alertId
+    }
+  }
   activeView.value = view
 }
 watch(

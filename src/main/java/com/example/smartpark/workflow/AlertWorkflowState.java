@@ -15,11 +15,13 @@ import com.example.smartpark.model.common.WorkflowStatus;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 public final class AlertWorkflowState {
@@ -41,6 +43,8 @@ public final class AlertWorkflowState {
     public static final String RESULT_SUMMARY = "resultSummary";
     public static final String SCENARIO_ANALYSIS = "scenarioAnalysis";
     public static final String RISK_REASONS = "riskReasons";
+    public static final String CREATED_AT = "createdAt";
+    public static final String UPDATED_AT = "updatedAt";
 
     private static final List<String> REQUIRED_KEYS = List.of(
             WORKFLOW_ID,
@@ -55,7 +59,9 @@ public final class AlertWorkflowState {
             WORK_ORDER,
             STATUS,
             ERRORS,
-            EVENT_SEQUENCE);
+            EVENT_SEQUENCE,
+            CREATED_AT,
+            UPDATED_AT);
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper().findAndRegisterModules();
 
     private final Map<String, Object> data;
@@ -64,7 +70,8 @@ public final class AlertWorkflowState {
         this.data = new LinkedHashMap<>(data);
     }
 
-    public static AlertWorkflowState initial(String workflowId, String alertId) {
+    public static AlertWorkflowState initial(String workflowId, String alertId, Instant createdAt) {
+        Objects.requireNonNull(createdAt, "createdAt");
         Map<String, Object> data = new LinkedHashMap<>();
         data.put(WORKFLOW_ID, workflowId);
         data.put(ALERT_ID, alertId);
@@ -72,6 +79,8 @@ public final class AlertWorkflowState {
         data.put(STATUS, serializable(WorkflowStatus.RUNNING));
         data.put(ERRORS, List.of());
         data.put(EVENT_SEQUENCE, 0L);
+        data.put(CREATED_AT, createdAt.toString());
+        data.put(UPDATED_AT, createdAt.toString());
         return new AlertWorkflowState(data);
     }
 

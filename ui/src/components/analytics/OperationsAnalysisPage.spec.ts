@@ -55,12 +55,12 @@ describe('OperationsAnalysisPage', () => {
       '过去5天各楼宇能耗热力图',
       '过去5天按日期能耗日历热力图',
       '过去5天能耗目标完成率',
+      '过去5天各楼宇能耗基线偏差率',
+      '过去5天各楼宇能耗空间分布',
       '过去5天各停车区域停车利用率',
       '过去5天各停车区域进场量',
-      '过去5天各楼宇能耗与占用人数关系',
       '过去5天各楼宇平均占用人数',
-      '过去5天各楼宇能耗空间分布',
-      '过去5天各楼宇分时能耗堆叠图',
+      '过去5天各楼宇能耗与占用人数关系',
       '设备离线数',
       '告警数量',
       '高风险告警数量',
@@ -106,6 +106,26 @@ describe('OperationsAnalysisPage', () => {
     expect(wrapper.text()).toContain('1820.5')
     expect(wrapper.text()).toContain('返回 3 行')
     expect(wrapper.emitted('run-started')).toBeTruthy()
+    wrapper.unmount()
+  })
+
+  it('clears a completed result when a new recommended question is selected', async () => {
+    handler = (url, init) => {
+      if (init?.method === 'POST') return jsonResponse({ runId: RUN_ID }, 202)
+      if (/\/runs\/[0-9a-f-]+$/.test(url)) {
+        return jsonResponse({ runId: RUN_ID, status: 'COMPLETED', summary: '旧问题结果', rowCount: 1,
+          columns: ['building_id'], rows: [['B1']], createdAt: '2026-08-24T08:00:00Z' })
+      }
+      return jsonResponse({}, 404)
+    }
+    const wrapper = mount(OperationsAnalysisPage, { props: { pollIntervalMs: 1 } })
+    await wrapper.find('[aria-label="分析问题"]').setValue('旧问题')
+    await wrapper.find('form').trigger('submit')
+    await flush()
+    expect(wrapper.find('[data-testid="result-panel"]').exists()).toBe(true)
+    await wrapper.findAll('[aria-label="推荐问题"] button')[1].trigger('click')
+    expect(wrapper.find('[data-testid="result-panel"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('旧问题结果')
     wrapper.unmount()
   })
 

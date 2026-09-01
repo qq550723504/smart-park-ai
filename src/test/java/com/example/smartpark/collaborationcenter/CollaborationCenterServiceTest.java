@@ -96,6 +96,23 @@ class CollaborationCenterServiceTest {
         assertThat(item.deviceId()).isEqualTo("DEV-NESTED");
     }
 
+    @Test
+    void usesAlertOccurrenceAsWorkflowUpdateTimeBeforeDiagnosisExists() {
+        WorkflowExecutionStore workflows = mock(WorkflowExecutionStore.class);
+        CustomerTicketPort tickets = mock(CustomerTicketPort.class);
+        Instant occurredAt = Instant.parse("2026-09-01T10:15:00Z");
+        when(workflows.snapshots()).thenReturn(List.of(new WorkflowSnapshot(
+                "wf-running", "ALT-RUNNING", WorkflowStatus.RUNNING,
+                Map.of("alert", Map.of("occurredAt", occurredAt.toString())),
+                null, Optional.empty(), null, List.of(), 1)));
+        when(tickets.list()).thenReturn(List.of());
+
+        CollaborationWorkItem item = new CollaborationCenterService(workflows, tickets)
+                .list(WorkItemQuery.defaults()).get(0);
+
+        assertThat(item.updatedAt()).isEqualTo(occurredAt);
+    }
+
     private static WorkflowSnapshot alertSnapshot() {
         return new WorkflowSnapshot(
                 "wf-1", "ALT-POWER-001", WorkflowStatus.WAITING_APPROVAL,

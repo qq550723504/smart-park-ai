@@ -66,9 +66,7 @@ public final class CollaborationCenterService {
         String summary = location.isBlank()
                 ? "告警 " + snapshot.alertId() + " · " + snapshot.status().name()
                 : "告警 " + snapshot.alertId() + " · " + location;
-        Instant updatedAt = snapshot.workOrder() == null
-                ? (diagnosis == null ? Instant.EPOCH : diagnosis.diagnosedAt())
-                : snapshot.workOrder().updatedAt();
+        Instant updatedAt = workflowUpdatedAt(snapshot, payload, diagnosis);
         return new CollaborationWorkItem(
                 "ALERT_WORKFLOW:" + snapshot.workflowId(),
                 CollaborationWorkItem.Source.ALERT_WORKFLOW,
@@ -91,6 +89,28 @@ public final class CollaborationCenterService {
     private static String value(Map<String, Object> payload, String key) {
         Object candidate = payload.get(key);
         return candidate == null ? "" : String.valueOf(candidate).trim();
+    }
+
+    private static Instant workflowUpdatedAt(
+            WorkflowSnapshot snapshot, Map<String, Object> payload, Diagnosis diagnosis) {
+        Instant stateUpdatedAt = instantValue(payload, "updatedAt");
+        if (stateUpdatedAt != null) return stateUpdatedAt;
+        if (snapshot.workOrder() != null) return snapshot.workOrder().updatedAt();
+        if (snapshot.approval().isPresent()) return snapshot.approval().orElseThrow().decidedAt();
+        if (diagnosis != null) return diagnosis.diagnosedAt();
+        Instant occurredAt = instantValue(payload, "alert", "occurredAt");
+        return occurredAt == null ? Instant.EPOCH : occurredAt;
+    }
+
+    private static Instant instantValue(Map<String, Object> payload, String... path) {
+        String value = path.length == 1 ? value(payload, path[0]) : nestedValue(payload, path);
+        if (value.isBlank()) return null;
+        try {
+            return Instant.parse(value);
+        }
+        catch (RuntimeException ignored) {
+            return null;
+        }
     }
 
     private static String nestedValue(Map<String, Object> payload, String... path) {

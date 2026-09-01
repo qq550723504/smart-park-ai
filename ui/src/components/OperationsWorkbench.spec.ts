@@ -100,8 +100,9 @@ const guidedStatusStub = defineComponent({
 })
 
 const alertSelectorStub = defineComponent({
+  props: { selectedId: { type: String, required: true } },
   emits: ['select', 'start'],
-  template: '<button type="button" data-select-alternate-alert @click="$emit(\'select\', \'ALT-POWER-001\')">选择其他告警</button>',
+  template: '<div><span data-selected-alert>{{ selectedId }}</span><button type="button" data-select-alternate-alert @click="$emit(\'select\', \'ALT-POWER-001\')">选择其他告警</button></div>',
 })
 
 const operatorStubs = {
@@ -310,7 +311,7 @@ describe('OperationsWorkbench', () => {
     globalThis.fetch = (async (url: RequestInfo | URL) => {
       if (String(url).includes('/api/workflows/wf-selected')) {
         return new Response(JSON.stringify({
-          workflowId: 'wf-selected', alertId: 'ALT-SELECTED', status: 'WAITING_APPROVAL',
+          workflowId: 'wf-selected', alertId: 'ALT-POWER-001', status: 'WAITING_APPROVAL',
           diagnosis: null, approval: null, workOrder: null, errors: [], eventSequence: 2, riskReasons: [],
         }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
@@ -331,6 +332,7 @@ describe('OperationsWorkbench', () => {
 
       expect(wrapper.get('[data-workbench-view="workflow"]').classes()).toContain('active')
       expect(wrapper.text()).toContain('wf-selected')
+      expect(wrapper.get('[data-selected-alert]').text()).toBe('ALT-POWER-001')
       wrapper.unmount()
     } finally {
       globalThis.EventSource = originalEventSource

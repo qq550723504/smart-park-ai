@@ -75,7 +75,7 @@ watch([() => props.active, () => props.role], ([active]) => {
     </section>
 
     <p v-if="loading" class="governance-state" role="status">正在读取安全概览…</p>
-    <p v-else-if="failed" class="governance-state is-error" role="alert">当前无法读取治理概览，请稍后重试。</p>
+    <p v-else-if="failed" class="governance-state is-error" role="alert">当前无法读取治理概览，请稍后重试。<button type="button" data-governance-retry @click="load">重试</button></p>
 
     <template v-else-if="overview">
       <section class="panel governance-capabilities" aria-label="当前能力状态">
@@ -121,6 +121,7 @@ watch([() => props.active, () => props.role], ([active]) => {
 <style scoped>
 .governance-state { color: var(--showcase-muted); padding: 24px 0; }
 .governance-state.is-error { color: var(--showcase-amber); }
+.governance-state button { margin-left: 10px; border: 1px solid var(--showcase-amber); background: transparent; color: var(--showcase-amber); padding: 6px 12px; cursor: pointer; }
 .governance-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
 .governance-capabilities, .governance-scenarios { margin-bottom: 18px; padding: 24px; }
 .governance-capabilities dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 16px 0 0; }
@@ -141,4 +142,5 @@ watch([() => props.active, () => props.role], ([active]) => {
 @media (max-width: 850px) { .governance-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 500px) { .governance-grid { grid-template-columns: 1fr; } }
 @media (max-width: 650px) { .governance-capabilities dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 500px) { .governance-capabilities dl { grid-template-columns: 1fr; } }
 </style>

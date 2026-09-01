@@ -376,6 +376,7 @@ public final class AlertWorkflowNodes {
                         node,
                         node + " completed");
                 result.put(AlertWorkflowState.EVENT_SEQUENCE, sequence);
+                result.put(AlertWorkflowState.UPDATED_AT, Instant.now(clock).toString());
                 return result;
             }
             catch (Exception exception) {
