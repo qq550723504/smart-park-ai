@@ -30,6 +30,14 @@ const toolLabels: Record<string, string> = {
 }
 
 const fieldLabels: Record<string, string> = {
+  query: '检索词',
+  id: '知识文档',
+  documentId: '知识文档',
+  title: '知识标题',
+  domain: '知识领域',
+  tags: '标签',
+  score: '匹配度',
+  updatedAt: '更新时间',
   meterId: '电表',
   deviceId: '设备',
   eventId: '事件',
@@ -59,13 +67,21 @@ const statusLabels: Record<string, string> = {
   MEDIUM: '中风险',
 }
 
+const knowledgeDomainLabels: Record<string, string> = {
+  ALERT_OPERATIONS: '告警运维',
+  CUSTOMER_SERVICE: '客户服务',
+}
+
 function extractObjects(text: string): Record<string, unknown>[] {
   const objects: Record<string, unknown>[] = []
-  let start = text.indexOf('{')
-  while (start >= 0) {
+  let cursor = 0
+  while (cursor < text.length) {
+    const start = text.indexOf('{', cursor)
+    if (start < 0) break
     let depth = 0
     let inString = false
     let escaped = false
+    let end = -1
     for (let index = start; index < text.length; index += 1) {
       const character = text[index]
       if (inString) {
@@ -79,6 +95,7 @@ function extractObjects(text: string): Record<string, unknown>[] {
       else if (character === '}') {
         depth -= 1
         if (depth === 0) {
+          end = index
           try {
             const parsed: unknown = JSON.parse(text.slice(start, index + 1))
             if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
@@ -91,7 +108,8 @@ function extractObjects(text: string): Record<string, unknown>[] {
         }
       }
     }
-    start = text.indexOf('{', start + 1)
+    if (end < 0) break
+    cursor = end + 1
   }
   return objects
 }
@@ -109,10 +127,13 @@ function formatDate(value: unknown): string {
 }
 
 function formatValue(key: string, value: unknown): string {
-  if (key === 'measuredAt' || key === 'occurredAt') return formatDate(value)
+  if (key === 'measuredAt' || key === 'occurredAt' || key === 'updatedAt') return formatDate(value)
   if (key === 'currentKwh' || key === 'baselineKwh' || key === 'varianceKwh') return `${formatNumber(value)} kWh`
   if (key === 'peakDemandKw') return `${formatNumber(value)} kW`
   if (key === 'varianceRatio' && typeof value === 'number') return `${formatNumber(value * 100)}%`
+  if (key === 'score' && typeof value === 'number') return `${formatNumber(value * 100)}%`
+  if (key === 'domain') return knowledgeDomainLabels[String(value).toUpperCase()] ?? String(value)
+  if (key === 'tags' && Array.isArray(value)) return value.filter((item) => typeof item === 'string').join('、')
   if (key === 'status' || key === 'riskLevel') return statusLabels[String(value).toUpperCase()] ?? String(value)
   if (typeof value === 'boolean') return value ? '是' : '否'
   if (typeof value === 'object' && value !== null) return ''
@@ -127,7 +148,7 @@ function collectKnownFields(value: unknown, fields: Array<[string, unknown]> = [
   if (!value || typeof value !== 'object') return fields
 
   Object.entries(value).forEach(([key, nestedValue]) => {
-    if (fieldLabels[key] && (typeof nestedValue !== 'object' || nestedValue === null)) {
+    if (fieldLabels[key] && (typeof nestedValue !== 'object' || nestedValue === null || key === 'tags')) {
       fields.push([key, nestedValue])
     } else {
       collectKnownFields(nestedValue, fields)
@@ -160,14 +181,13 @@ export function formatNextCheck(check: string): string {
 
 export function formatFinding(finding: ExpertFinding): FindingDisplay {
   const objects = extractObjects(finding.conclusion)
-  const source = objects[0]
-  const details = collectKnownFields(source)
+  const details = objects.flatMap((object) => collectKnownFields(object))
     .filter(([, value]) => value !== null && value !== '')
     .map(([key, value]) => ({ label: fieldLabels[key], value: formatValue(key, value) }))
     .filter((detail) => detail.value !== '')
 
   return {
-    summary: summaryFor(finding.domain, finding, details, Boolean(source)),
+    summary: summaryFor(finding.domain, finding, details, objects.length > 0),
     details,
     evidence: finding.evidenceRefs.map(formatEvidenceRef),
     nextChecks: finding.nextChecks.map(formatNextCheck),
@@ -179,26 +199,21 @@ function formatUncertaintyText(text: string): string {
   if (normalized.includes('confidence 0.0') && normalized.includes('temporal, spatial, or causal')) {
     return '安防专家置信度为 0%，当前证据无法与能耗、设备结论建立时间、空间或因果关联；现有结论均为独立的演示数据，暂无跨域关联证据。'
   }
-  if (/[\u4e00-\u9fff]/.test(text) && !/[a-z]{3,}/i.test(text)) return text
   const domain = text.includes('SECURITY') ? '安防专家' : text.includes('DEVICE') ? '设备专家' : text.includes('ENERGY') ? '能耗专家' : '部分专家'
+  if (/(?:failed|failure|error|timeout|timed out|执行失败|查询失败|调用失败|工具失败)/i.test(text)) {
+    return domain + '执行失败，本轮核查未完成，请重试相关工具。'
+  }
+  if (/[\u4e00-\u9fff]/.test(text) && !/[a-z]{3,}/i.test(text)) return text
   return `${domain}证据不足，当前无法确认跨域关联。`
 }
 
 export function formatSynthesis(synthesis: Synthesis): SynthesisDisplay {
-  const localizedConclusion = synthesis.status === 'SUPPORTED'
-    ? '已确认存在关联'
-    : synthesis.status === 'FAILED'
-      ? '专家分析未完成'
-      : '当前证据不足，暂无法确认关联'
+  const localizedConclusion = synthesis.status === 'FAILED'
+    ? '专家分析未完成'
+    : '当前证据不足，暂无法确认关联'
   const rawConclusion = synthesis.conclusion.trim()
-  const isNegativeRelationship = /无关联|不存在关联|未发现关联|没有关联/.test(rawConclusion)
-    || /\b(?:no|without)\s+(?:relationship|correlation|link)\b|\bunrelated\b|\bnot related\b/i.test(rawConclusion)
   return {
-    conclusion: isNegativeRelationship
-      ? (/[^\u0000-\u007F]/.test(rawConclusion) ? rawConclusion : `未发现关联：${rawConclusion}`)
-      : rawConclusion && rawConclusion !== localizedConclusion
-        ? `${localizedConclusion}：${rawConclusion}`
-        : localizedConclusion,
+    conclusion: synthesis.status === 'SUPPORTED' && rawConclusion ? rawConclusion : localizedConclusion,
     uncertainties: synthesis.uncertainties.map(formatUncertaintyText),
     evidence: synthesis.evidenceRefs.map(formatEvidenceRef),
   }

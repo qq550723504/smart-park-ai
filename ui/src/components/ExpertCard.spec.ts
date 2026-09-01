@@ -85,6 +85,64 @@ describe('ExpertCard', () => {
     wrapper.unmount()
   })
 
+  it('includes recognized details from every cited tool result', () => {
+    const wrapper = mount(ExpertCard, {
+      props: {
+        domain: 'ENERGY',
+        plan: {
+          normalizedQuestion: 'q',
+          selectedDomains: ['ENERGY'],
+          assignments: { ENERGY: '比较电表 DEV-ENERGY-001 和 DEV-ENERGY-002 的能耗' },
+          selectionReason: 'energy comparison',
+        },
+        finding: {
+          domain: 'ENERGY',
+          status: 'SUPPORTED',
+          conclusion: '已验证工具结果: {"meterId":"DEV-ENERGY-001","reading":{"currentKwh":138.2}}；已验证工具结果: {"meterId":"DEV-ENERGY-002","reading":{"currentKwh":101.5}}',
+          evidenceRefs: [],
+          confidence: 0.92,
+          nextChecks: [],
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('DEV-ENERGY-001')
+    expect(wrapper.text()).toContain('DEV-ENERGY-002')
+    expect(wrapper.text()).toContain('138.2 kWh')
+    expect(wrapper.text()).toContain('101.5 kWh')
+    wrapper.unmount()
+  })
+
+  it('renders safe knowledge metadata instead of dropping the matched playbook', () => {
+    const wrapper = mount(ExpertCard, {
+      props: {
+        domain: 'ENERGY',
+        plan: {
+          normalizedQuestion: 'q',
+          selectedDomains: ['ENERGY'],
+          assignments: { ENERGY: '检索能耗处置知识' },
+          selectionReason: 'knowledge',
+        },
+        finding: {
+          domain: 'ENERGY',
+          status: 'SUPPORTED',
+          conclusion: '工具结果: {"query":"能耗","documents":[{"id":"KD-1","domain":"ALERT_OPERATIONS","title":"Energy playbook","tags":["energy","baseline"],"updatedAt":"2026-08-25T00:00:00Z"}]}',
+          evidenceRefs: [],
+          confidence: 0.92,
+          nextChecks: [],
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('能耗')
+    expect(wrapper.text()).toContain('KD-1')
+    expect(wrapper.text()).toContain('Energy playbook')
+    expect(wrapper.text()).toContain('告警运维')
+    expect(wrapper.text()).toContain('energy、baseline')
+    expect(wrapper.text()).toContain('2026/8/25')
+    wrapper.unmount()
+  })
+
   it('renders structured tool evidence as a Chinese customer-facing summary', () => {
     const wrapper = mount(ExpertCard, {
       props: {

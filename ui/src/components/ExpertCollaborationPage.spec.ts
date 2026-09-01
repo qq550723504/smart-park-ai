@@ -63,6 +63,25 @@ describe('ExpertCollaborationPage', () => {
     expect(display.conclusion).not.toContain('已确认存在关联')
   })
 
+  it('does not label a supported factual conclusion as a relationship', () => {
+    const display = formatSynthesis({
+      status: 'SUPPORTED', conclusion: 'MTR-2 consumption is 18.5 above baseline', evidenceRefs: [], confidence: 0.9, uncertainties: [],
+    })
+
+    expect(display.conclusion).toBe('MTR-2 consumption is 18.5 above baseline')
+    expect(display.conclusion).not.toContain('已确认存在关联')
+  })
+
+  it('keeps failed-expert uncertainty distinct from insufficient evidence', () => {
+    const display = formatSynthesis({
+      status: 'INSUFFICIENT_EVIDENCE', conclusion: 'needs review', evidenceRefs: [], confidence: 0,
+      uncertainties: ['DEVICE: failed to query device'],
+    })
+
+    expect(display.uncertainties[0]).toContain('设备专家执行失败')
+    expect(display.uncertainties[0]).not.toContain('证据不足')
+  })
+
   it('preserves the supervisor conclusion when it is not one of the localized status labels', async () => {
     globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === 'POST') {
