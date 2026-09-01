@@ -26,7 +26,7 @@ function Get-SafeShowcaseFailureMessage {
         [string] $Message
     )
 
-    $scenarioPattern = 'ALERT_WORKFLOW|EXPERT_COLLABORATION|OPERATIONS_ANALYSIS|VOICE_ASSISTANT'
+    $scenarioPattern = 'ALERT_WORKFLOW|EXPERT_COLLABORATION|OPERATIONS_ANALYSIS|VOICE_ASSISTANT|CUSTOMER_SERVICE'
     if (($Message -match "^Showcase scenario is not ready: ($scenarioPattern)$") -or ($Message -match "^Showcase scenario has no valid verification time: ($scenarioPattern)$")) {
         return $Message
     }
@@ -44,7 +44,8 @@ function Assert-ShowcaseReport {
         'ALERT_WORKFLOW',
         'EXPERT_COLLABORATION',
         'OPERATIONS_ANALYSIS',
-        'VOICE_ASSISTANT'
+        'VOICE_ASSISTANT',
+        'CUSTOMER_SERVICE'
     )
     $results = @(Get-ShowcasePropertyValue -InputObject $Report -PropertyName 'results')
     $expectedIdSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
@@ -57,8 +58,8 @@ function Assert-ShowcaseReport {
         $null = $actualIdSet.Add($scenarioId)
     }
 
-    if ($results.Count -ne 4 -or $actualIdSet.Count -ne 4) {
-        throw 'Showcase preflight must return four unique scenarios.'
+    if ($results.Count -ne 5 -or $actualIdSet.Count -ne 5) {
+        throw 'Showcase preflight must return five unique scenarios.'
     }
 
     if (-not $expectedIdSet.SetEquals($actualIdSet)) {

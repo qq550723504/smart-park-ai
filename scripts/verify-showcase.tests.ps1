@@ -10,7 +10,8 @@ $expected = @(
     'ALERT_WORKFLOW',
     'EXPERT_COLLABORATION',
     'OPERATIONS_ANALYSIS',
-    'VOICE_ASSISTANT'
+    'VOICE_ASSISTANT',
+    'CUSTOMER_SERVICE'
 )
 
 function New-ReadyResult([string] $ScenarioId) {
