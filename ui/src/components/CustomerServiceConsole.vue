@@ -13,10 +13,7 @@ const props = withDefaults(defineProps<{
   role: DemoRole
   active?: boolean
   launchRequest?: ScenarioLaunchRequest | null
-}>(), {
-  active: true,
-  launchRequest: null,
-})
+}>(), { active: true, launchRequest: null })
 const emit = defineEmits<{ 'launch-status': [update: GuidedLaunchUpdate] }>()
 const question = ref('')
 const loading = ref(false)
@@ -25,15 +22,23 @@ const tickets = ref<CustomerServiceResponse[]>([])
 const sessionId = ref('')
 const conversation = ref<CustomerConversationResponse | null>(null)
 let requestGeneration = 0
+let ticketsRequestGeneration = 0
 const suggestions = ['访客停车怎么收费？', '访客如何预约进入园区？', '可以查询公共区域能耗吗？', 'A1 洗手间漏水，需要报修']
 
 async function loadTickets() {
+  const generation = ++ticketsRequestGeneration
   if (!['CUSTOMER_AGENT', 'ADMIN'].includes(props.role)) {
     tickets.value = []
     return
   }
-  try { tickets.value = await listCustomerTickets(props.role) }
-  catch { tickets.value = [] }
+  const role = props.role
+  try {
+    const nextTickets = await listCustomerTickets(role)
+    if (generation === ticketsRequestGeneration && props.role === role) tickets.value = nextTickets
+  }
+  catch {
+    if (generation === ticketsRequestGeneration && props.role === role) tickets.value = []
+  }
 }
 
 async function rate(sessionId: string, rating: 'HELPFUL' | 'NOT_HELPFUL') {
@@ -99,7 +104,7 @@ useGuidedLaunch({
   scenarioId: 'CUSTOMER_SERVICE',
   start: async (request) => {
     const guidedQuestion = request.launchInput?.question?.trim()
-    if (!guidedQuestion) throw new Error('客服演示配置无效')
+    if (!guidedQuestion) throw new Error('园区客服演示配置无效')
     resetConversation()
     const started = await ask(guidedQuestion, { freshSession: true })
     if (!started) throw new Error('客服演示启动失败')

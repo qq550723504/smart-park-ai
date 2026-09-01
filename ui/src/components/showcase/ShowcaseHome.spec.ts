@@ -407,10 +407,24 @@ describe('ShowcaseHome truthful catalog selection', () => {
       scenarios: { total: 5, ready: 2, notReady: 2, disabled: 1 },
       boundaries: ['治理边界来自服务端'],
     })
+
     const wrapper = await mountLoaded()
 
     expect(wrapper.text()).toContain('2/5')
     expect(wrapper.text()).toContain('治理边界来自服务端')
+    wrapper.unmount()
+  })
+
+  it('shows a non-blocking unavailable governance state when its request fails', async () => {
+    vi.mocked(getShowcaseScenarios).mockResolvedValue(catalog([
+      scenario('EXPERT_COLLABORATION', 'READY', true, null),
+    ]))
+    vi.mocked(getGovernanceOverview).mockRejectedValue(new Error('governance offline'))
+
+    const wrapper = await mountLoaded()
+
+    expect(wrapper.text()).toContain('治理状态暂不可用')
+    expect(wrapper.text()).toContain('跨域专家协作')
     wrapper.unmount()
   })
 })
