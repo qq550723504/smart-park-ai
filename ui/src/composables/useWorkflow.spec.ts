@@ -144,4 +144,40 @@ describe('useWorkflow', () => {
     expect(binding.workflow.value?.workflowId).toBe('wf-selected')
     scope.stop()
   })
+
+  it('cancels an abandoned workflow load before it can subscribe', async () => {
+    const selected = deferred<WorkflowResponse>()
+    vi.mocked(workflowApi.getWorkflow).mockReturnValueOnce(selected.promise)
+    const subscribe = vi.spyOn(workflowApi, 'subscribeToWorkflow')
+    const scope = effectScope()
+    let binding!: ReturnType<typeof useWorkflow>
+    scope.run(() => { binding = useWorkflow() })
+
+    const loading = binding.load('wf-abandoned')
+    binding.cancelPendingLoad()
+    selected.resolve(workflow('wf-abandoned'))
+
+    await expect(loading).resolves.toBeNull()
+    expect(binding.workflow.value).toBeNull()
+    expect(binding.loading.value).toBe(false)
+    expect(subscribe).not.toHaveBeenCalled()
+    scope.stop()
+  })
+
+  it('does not subscribe to a terminal workflow loaded from the queue', async () => {
+    vi.mocked(workflowApi.getWorkflow).mockResolvedValueOnce({
+      ...workflow('wf-completed'),
+      status: 'COMPLETED',
+    })
+    const subscribe = vi.spyOn(workflowApi, 'subscribeToWorkflow')
+    const scope = effectScope()
+    let binding!: ReturnType<typeof useWorkflow>
+    scope.run(() => { binding = useWorkflow() })
+
+    await expect(binding.load('wf-completed')).resolves.toMatchObject({ workflowId: 'wf-completed', status: 'COMPLETED' })
+
+    expect(binding.isTerminal.value).toBe(true)
+    expect(subscribe).not.toHaveBeenCalled()
+    scope.stop()
+  })
 })

@@ -77,6 +77,7 @@ const customerQueueRefreshToken = ref(0)
 const hasVisitedWorkflow = ref(props.initialView === 'workflow')
 function switchView(view: WorkbenchView): void {
   navigationGeneration += 1
+  if (view !== 'workflow') cancelPendingLoad()
   activeView.value = view
 }
 watch(() => props.initialView, (view) => { switchView(view) })
@@ -91,7 +92,7 @@ watch(activeView, async (view) => {
 const role = ref<DemoRole>('ADMIN')
 const reviewer = ref('')
 const comment = ref('')
-const { workflow, events, loading, approving, error, isTerminal, start, load: loadWorkflow, approve, reset: resetWorkflow } = useWorkflow()
+const { workflow, events, loading, approving, error, isTerminal, start, load: loadWorkflow, approve, reset: resetWorkflow, cancelPendingLoad } = useWorkflow()
 const guidedLaunchUpdate = ref<GuidedLaunchUpdate | null>(null)
 const currentGuidedLaunchUpdate = computed(() => {
   const request = props.launchRequest

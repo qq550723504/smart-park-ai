@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElInput } from 'element-plus'
@@ -348,11 +348,14 @@ describe('OperationsWorkbench', () => {
   it('does not reopen a workflow after navigating away while it is loading', async () => {
     const originalEventSource = globalThis.EventSource
     const pendingWorkflow = deferred<Response>()
+    const streams: Array<{ close: ReturnType<typeof vi.fn> }> = []
     globalThis.EventSource = class {
       onerror: ((event: Event) => void) | null = null
-      constructor(_url: string | URL) {}
+      constructor(_url: string | URL) {
+        streams.push(this as unknown as { close: ReturnType<typeof vi.fn> })
+      }
       addEventListener(): void {}
-      close(): void {}
+      close = vi.fn()
     } as unknown as typeof EventSource
     globalThis.fetch = (async (url: RequestInfo | URL) => {
       if (String(url).includes('/api/workflows/wf-slow')) return pendingWorkflow.promise
@@ -379,6 +382,7 @@ describe('OperationsWorkbench', () => {
 
       expect(wrapper.get('[data-workbench-view="customer"]').classes()).toContain('active')
       expect(wrapper.get('[data-workbench-view="workflow"]').classes()).not.toContain('active')
+      expect(streams).toHaveLength(0)
       wrapper.unmount()
     } finally {
       globalThis.EventSource = originalEventSource

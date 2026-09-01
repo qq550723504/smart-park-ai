@@ -12,8 +12,11 @@ export function useWorkflow() {
   let eventSource: EventSource | null = null
   let approvalKey: string | null = null
   let operationGeneration = 0
+  let pendingLoad = false
 
-  const isTerminal = computed(() => ['COMPLETED', 'REJECTED', 'FAILED', 'WORK_ORDER_FAILED'].includes(workflow.value?.status ?? ''))
+  const terminalStatuses = ['COMPLETED', 'REJECTED', 'FAILED', 'WORK_ORDER_FAILED']
+  const isTerminalStatus = (status?: string) => terminalStatuses.includes(status ?? '')
+  const isTerminal = computed(() => isTerminalStatus(workflow.value?.status))
 
   function closeStream() {
     eventSource?.close()
@@ -22,6 +25,20 @@ export function useWorkflow() {
 
   function reset(): void {
     operationGeneration++
+    pendingLoad = false
+    closeStream()
+    workflow.value = null
+    events.value = []
+    loading.value = false
+    approving.value = false
+    error.value = ''
+    approvalKey = null
+  }
+
+  function cancelPendingLoad(): void {
+    if (!pendingLoad) return
+    operationGeneration++
+    pendingLoad = false
     closeStream()
     workflow.value = null
     events.value = []
@@ -64,8 +81,26 @@ export function useWorkflow() {
     }
   }
 
+  function subscribeIfLive(result: WorkflowResponse, generation: number): void {
+    if (isTerminalStatus(result.status)) return
+    try {
+      eventSource = subscribeToWorkflow(result.workflowId,
+        (event) => handleEvent(event, generation, result.workflowId), () => {
+        if (isCurrent(generation, result.workflowId) && !isTerminal.value) {
+          error.value = '实时事件连接中断，请检查后端服务。'
+        }
+      })
+    } catch {
+      if (isCurrent(generation, result.workflowId) && !isTerminal.value) {
+        error.value = '实时事件连接中断，请检查后端服务。'
+      }
+      eventSource = null
+    }
+  }
+
   async function start(alertId: string): Promise<WorkflowResponse | null> {
     const generation = ++operationGeneration
+    pendingLoad = false
     closeStream()
     loading.value = true
     approving.value = false
@@ -76,31 +111,23 @@ export function useWorkflow() {
       const result = await startWorkflow(alertId)
       if (generation !== operationGeneration) return null
       mergeWorkflow(result)
-      try {
-        eventSource = subscribeToWorkflow(result.workflowId,
-          (event) => handleEvent(event, generation, result.workflowId), () => {
-          if (isCurrent(generation, result.workflowId) && !isTerminal.value) {
-            error.value = '实时事件连接中断，请检查后端服务。'
-          }
-        })
-      } catch {
-        if (isCurrent(generation, result.workflowId) && !isTerminal.value) {
-          error.value = '实时事件连接中断，请检查后端服务。'
-        }
-        eventSource = null
-      }
+      subscribeIfLive(result, generation)
       return result
     } catch (cause) {
       if (generation !== operationGeneration) return null
       error.value = cause instanceof Error ? cause.message : '无法启动工作流'
       return null
     } finally {
-      if (generation === operationGeneration) loading.value = false
+      if (generation === operationGeneration) {
+        pendingLoad = false
+        loading.value = false
+      }
     }
   }
 
   async function load(workflowId: string): Promise<WorkflowResponse | null> {
     const generation = ++operationGeneration
+    pendingLoad = true
     closeStream()
     loading.value = true
     approving.value = false
@@ -112,26 +139,18 @@ export function useWorkflow() {
       const result = await getWorkflow(workflowId)
       if (generation !== operationGeneration) return null
       mergeWorkflow(result)
-      try {
-        eventSource = subscribeToWorkflow(result.workflowId,
-          (event) => handleEvent(event, generation, result.workflowId), () => {
-          if (isCurrent(generation, result.workflowId) && !isTerminal.value) {
-            error.value = '实时事件连接中断，请检查后端服务。'
-          }
-        })
-      } catch {
-        if (isCurrent(generation, result.workflowId) && !isTerminal.value) {
-          error.value = '实时事件连接中断，请检查后端服务。'
-        }
-        eventSource = null
-      }
+      pendingLoad = false
+      subscribeIfLive(result, generation)
       return result
     } catch (cause) {
       if (generation !== operationGeneration) return null
       error.value = cause instanceof Error ? cause.message : '无法读取工作流'
       return null
     } finally {
-      if (generation === operationGeneration) loading.value = false
+      if (generation === operationGeneration) {
+        pendingLoad = false
+        loading.value = false
+      }
     }
   }
 
@@ -161,5 +180,5 @@ export function useWorkflow() {
   }
 
   onScopeDispose(reset)
-  return { workflow, events, loading, approving, error, isTerminal, start, load, approve, refresh, closeStream, reset }
+  return { workflow, events, loading, approving, error, isTerminal, start, load, approve, refresh, closeStream, cancelPendingLoad, reset }
 }
