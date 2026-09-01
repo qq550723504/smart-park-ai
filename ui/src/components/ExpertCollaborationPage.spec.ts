@@ -5,7 +5,7 @@ import ExpertCollaborationPage from './ExpertCollaborationPage.vue'
 import type { ExecutionEvent } from '../types/execution'
 import type { ExecutionTrace } from '../composables/useExecutionTrace'
 import type { CollaborationRun } from '../types/collaboration'
-import { formatSynthesis } from '../utils/collaborationPresentation'
+import { formatNextCheck, formatSynthesis } from '../utils/collaborationPresentation'
 
 const RUN_ID = '11111111-2222-3333-4444-555555555555'
 let polls = 0
@@ -130,6 +130,10 @@ describe('ExpertCollaborationPage', () => {
 
     expect(display.conclusion).toBe('当前证据不足，暂无法确认请求结论')
     expect(display.conclusion).not.toContain('关联')
+  })
+
+  it('preserves retry instructions for failed experts', () => {
+    expect(formatNextCheck('retry the domain tool lookup')).toBe('重新查询分派实体的领域数据')
   })
 
   it('renders Chinese customer-facing wording for supervisor uncertainty', async () => {

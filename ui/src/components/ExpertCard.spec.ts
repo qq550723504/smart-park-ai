@@ -213,7 +213,7 @@ describe('ExpertCard', () => {
         finding: {
           domain: 'DEVICE',
           status: 'SUPPORTED',
-          conclusion: '工具结果: {"workOrders":[{"id":"WO-1","deviceId":"DEV-1","status":"OPEN","summary":"Work order content withheld"}]}',
+          conclusion: '工具结果: {"workOrders":[{"id":"WO-1","deviceId":"DEV-1","status":"PENDING_EXECUTION","summary":"Work order content withheld"}]}',
           evidenceRefs: [],
           confidence: 0.92,
           nextChecks: [],
@@ -222,7 +222,37 @@ describe('ExpertCard', () => {
     })
 
     expect(wrapper.text()).toContain('工单WO-1')
-    expect(wrapper.text()).toContain('状态未处理')
+    expect(wrapper.text()).toContain('状态待现场执行')
+    expect(wrapper.text()).toContain('工单摘要Work order content withheld')
+    expect(wrapper.text()).not.toContain('告警摘要')
+    wrapper.unmount()
+  })
+
+  it('translates every public work-order status', () => {
+    const wrapper = mount(ExpertCard, {
+      props: {
+        domain: 'DEVICE',
+        plan: {
+          normalizedQuestion: 'q',
+          selectedDomains: ['DEVICE'],
+          assignments: { DEVICE: '查询工单状态' },
+          selectionReason: 'work orders',
+        },
+        finding: {
+          domain: 'DEVICE',
+          status: 'SUPPORTED',
+          conclusion: '工具结果: {"workOrders":[{"id":"WO-1","status":"PENDING_EXECUTION"},{"id":"WO-2","status":"IN_PROGRESS"},{"id":"WO-3","status":"RESOLVED"},{"id":"WO-4","status":"CANCELLED"}]}',
+          evidenceRefs: [],
+          confidence: 0.92,
+          nextChecks: [],
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('状态待现场执行')
+    expect(wrapper.text()).toContain('状态执行中')
+    expect(wrapper.text()).toContain('状态已解决')
+    expect(wrapper.text()).toContain('状态已取消')
     wrapper.unmount()
   })
 

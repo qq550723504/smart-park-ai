@@ -48,6 +48,7 @@ const fieldLabels: Record<string, string> = {
   evidenceSummary: '事件摘要',
   alertId: '告警',
   workOrderId: '工单',
+  workOrderSummary: '工单摘要',
   buildingId: '楼宇',
   parkId: '园区',
   status: '状态',
@@ -68,6 +69,9 @@ const statusLabels: Record<string, string> = {
   OFFLINE: '离线',
   OPEN: '未处理',
   RESOLVED: '已解决',
+  PENDING_EXECUTION: '待现场执行',
+  IN_PROGRESS: '执行中',
+  CANCELLED: '已取消',
   HIGH: '高风险',
   LOW: '低风险',
   MEDIUM: '中风险',
@@ -172,7 +176,11 @@ function collectKnownFields(value: unknown, fields: Array<[string, unknown]> = [
     const nextContext = key === 'documents' ? 'knowledge' : key === 'workOrders' ? 'workorder' : context
     const isIdentifier = key === 'id' || key === 'documentId'
     const isScopedIdentifier = isIdentifier && context !== 'root'
-    const projectedKey = isIdentifier && context === 'workorder' ? 'workOrderId' : key
+    const projectedKey = isIdentifier && context === 'workorder'
+      ? 'workOrderId'
+      : key === 'summary' && context === 'workorder'
+        ? 'workOrderSummary'
+        : key
     if (fieldLabels[key] && (typeof nestedValue !== 'object' || nestedValue === null || key === 'tags') && (!isIdentifier || isScopedIdentifier)) {
       fields.push([projectedKey, nestedValue])
     } else {
@@ -213,7 +221,7 @@ export function formatEvidenceRef(ref: string): string {
 export function formatNextCheck(check: string): string {
   const normalized = check.toLowerCase()
   if (normalized.includes('redacted summary')) return '复核脱敏摘要'
-  if (normalized.includes('repeat') && normalized.includes('tool lookup')) return '重新查询分派实体的领域数据'
+  if ((normalized.includes('repeat') || normalized.includes('retry')) && normalized.includes('tool lookup')) return '重新查询分派实体的领域数据'
   if (/[\u4e00-\u9fff]/.test(check)) return check
   return '按领域重新核验相关证据'
 }
