@@ -99,6 +99,41 @@ export function useWorkflow() {
     }
   }
 
+  async function load(workflowId: string): Promise<WorkflowResponse | null> {
+    const generation = ++operationGeneration
+    closeStream()
+    loading.value = true
+    approving.value = false
+    error.value = ''
+    events.value = []
+    approvalKey = null
+    try {
+      const result = await getWorkflow(workflowId)
+      if (generation !== operationGeneration) return null
+      mergeWorkflow(result)
+      try {
+        eventSource = subscribeToWorkflow(result.workflowId,
+          (event) => handleEvent(event, generation, result.workflowId), () => {
+          if (isCurrent(generation, result.workflowId) && !isTerminal.value) {
+            error.value = '实时事件连接中断，请检查后端服务。'
+          }
+        })
+      } catch {
+        if (isCurrent(generation, result.workflowId) && !isTerminal.value) {
+          error.value = '实时事件连接中断，请检查后端服务。'
+        }
+        eventSource = null
+      }
+      return result
+    } catch (cause) {
+      if (generation !== operationGeneration) return null
+      error.value = cause instanceof Error ? cause.message : '无法读取工作流'
+      return null
+    } finally {
+      if (generation === operationGeneration) loading.value = false
+    }
+  }
+
   async function approve(payload: { decision: 'APPROVE' | 'REJECT'; reviewer: string; comment: string; role: DemoRole }) {
     if (!workflow.value) return
     const generation = operationGeneration
@@ -125,5 +160,5 @@ export function useWorkflow() {
   }
 
   onScopeDispose(reset)
-  return { workflow, events, loading, approving, error, isTerminal, start, approve, refresh, closeStream, reset }
+  return { workflow, events, loading, approving, error, isTerminal, start, load, approve, refresh, closeStream, reset }
 }

@@ -12,8 +12,8 @@ import {
   VideoPlay,
   WarningFilled,
 } from '@element-plus/icons-vue'
-import { getShowcaseScenarios } from '../../services/workflowApi'
-import type { ShowcaseScenario, ShowcaseScenarioCatalog } from '../../services/workflowApi'
+import { getGovernanceOverview, getShowcaseScenarios } from '../../services/workflowApi'
+import type { GovernanceOverview, ShowcaseScenario, ShowcaseScenarioCatalog } from '../../services/workflowApi'
 import './showcase-home.css'
 
 const emit = defineEmits<{
@@ -33,6 +33,10 @@ const selectedId = ref<ShowcaseScenario['id'] | null>(null)
 const loading = ref(true)
 const failed = ref(false)
 let catalogRequestGeneration = 0
+const governanceOverview = ref<GovernanceOverview | null>(null)
+const governanceLoading = ref(false)
+const governanceFailed = ref(false)
+let governanceRequestGeneration = 0
 
 const isSelectable = (scenario: ShowcaseScenario) => scenario.status === 'READY' && scenario.live
 
@@ -133,6 +137,23 @@ async function refreshCatalog() {
   }
 }
 
+async function refreshGovernance(): Promise<void> {
+  const requestGeneration = ++governanceRequestGeneration
+  governanceLoading.value = true
+  governanceFailed.value = false
+  try {
+    const nextOverview = await getGovernanceOverview()
+    if (requestGeneration !== governanceRequestGeneration) return
+    governanceOverview.value = nextOverview
+  } catch {
+    if (requestGeneration !== governanceRequestGeneration) return
+    governanceOverview.value = null
+    governanceFailed.value = true
+  } finally {
+    if (requestGeneration === governanceRequestGeneration) governanceLoading.value = false
+  }
+}
+
 async function startScenario() {
   const intendedScenarioId = selectedScenario.value?.id
   if (!intendedScenarioId || loading.value) {
@@ -149,9 +170,12 @@ async function startScenario() {
 watch(() => props.active, (active) => {
   if (active) {
     void refreshCatalog()
+    void refreshGovernance()
   } else {
     catalogRequestGeneration++
     loading.value = false
+    governanceRequestGeneration++
+    governanceLoading.value = false
   }
 }, {
   immediate: true,
@@ -341,7 +365,13 @@ watch(() => props.active, (active) => {
         <Lock aria-hidden="true" />
         <div>
           <h3>治理摘要</h3>
-          <p>聚合指标 · 边界清晰 · 人工可控。详细审计与能力状态请在工作台治理中心查看。</p>
+          <p v-if="governanceLoading">正在读取治理状态…</p>
+          <p v-else-if="governanceFailed" data-governance-status>治理状态暂不可用，详细审计与能力状态请在工作台治理中心查看。</p>
+          <template v-else-if="governanceOverview">
+            <p data-governance-status>已验证场景 {{ governanceOverview.scenarios.ready }}/{{ governanceOverview.scenarios.total }} · 聚合指标 · 人工可控。</p>
+            <ul><li v-for="boundary in governanceOverview.boundaries" :key="boundary">{{ boundary }}</li></ul>
+          </template>
+          <p v-else data-governance-status>治理状态暂不可用，详细审计与能力状态请在工作台治理中心查看。</p>
         </div>
       </article>
     </section>

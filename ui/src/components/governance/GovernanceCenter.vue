@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { getGovernanceOverview } from '../../services/workflowApi'
+import { getAuditEntries, getGovernanceOverview } from '../../services/workflowApi'
 import type { GovernanceOverview } from '../../services/workflowApi'
+import type { AuditEntry, DemoRole } from '../../types/workflow'
 
-const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true })
+const props = withDefaults(defineProps<{ active?: boolean; role?: DemoRole }>(), { active: true, role: 'VIEWER' })
 const overview = ref<GovernanceOverview | null>(null)
+const auditEntries = ref<AuditEntry[]>([])
 const loading = ref(false)
 const failed = ref(false)
+const auditLoading = ref(false)
+const auditFailed = ref(false)
+let requestGeneration = 0
 
 const readiness = computed(() => overview.value
   ? `${overview.value.scenarios.ready}/${overview.value.scenarios.total}`
@@ -17,19 +22,41 @@ function percent(value: number | null): string {
 }
 
 async function load(): Promise<void> {
+  const generation = ++requestGeneration
   loading.value = true
   failed.value = false
   try {
-    overview.value = await getGovernanceOverview()
+    const nextOverview = await getGovernanceOverview()
+    if (generation !== requestGeneration) return
+    overview.value = nextOverview
+    auditEntries.value = []
+    auditFailed.value = false
+    if (props.role === 'ADMIN') {
+      auditLoading.value = true
+      try {
+        const nextAuditEntries = await getAuditEntries(props.role)
+        if (generation !== requestGeneration) return
+        auditEntries.value = nextAuditEntries
+      } catch {
+        if (generation !== requestGeneration) return
+        auditFailed.value = true
+      } finally {
+        if (generation === requestGeneration) auditLoading.value = false
+      }
+    }
   } catch {
+    if (generation !== requestGeneration) return
     overview.value = null
     failed.value = true
   } finally {
-    loading.value = false
+    if (generation === requestGeneration) loading.value = false
   }
 }
 
-watch(() => props.active, (active) => { if (active) void load() }, { immediate: true })
+watch([() => props.active, () => props.role], ([active]) => {
+  if (active) void load()
+  else requestGeneration++
+}, { immediate: true })
 </script>
 
 <template>
@@ -76,6 +103,17 @@ watch(() => props.active, (active) => { if (active) void load() }, { immediate: 
         <div class="section-heading compact"><div><span class="eyebrow">使用边界</span><h2>演示与生产要分开</h2></div></div>
         <ul><li v-for="boundary in overview.boundaries" :key="boundary">{{ boundary }}</li></ul>
       </section>
+      <section v-if="props.role === 'ADMIN'" class="panel governance-audit" aria-label="管理员审计记录">
+        <div class="section-heading compact"><div><span class="eyebrow">管理员视图</span><h2>最近审计记录</h2></div></div>
+        <p v-if="auditLoading" class="governance-state" role="status">正在读取审计记录…</p>
+        <p v-else-if="auditFailed" class="governance-state is-error" role="alert">审计记录暂不可用，治理概览仍有效。</p>
+        <ul v-else class="governance-audit-list">
+          <li v-for="entry in auditEntries" :key="`${entry.timestamp}-${entry.resourceId}-${entry.action}`">
+            <strong>{{ entry.action }}</strong><span>{{ entry.resourceId }} · {{ entry.outcome }}</span>
+          </li>
+          <li v-if="auditEntries.length === 0">暂无审计记录</li>
+        </ul>
+      </section>
     </template>
   </main>
 </template>
@@ -96,6 +134,10 @@ watch(() => props.active, (active) => { if (active) void load() }, { immediate: 
 .governance-card strong { color: var(--showcase-cyan); font: 500 32px Georgia, serif; }
 .governance-boundaries { margin-top: 18px; padding: 24px; }
 .governance-boundaries ul { margin: 16px 0 0; padding-left: 20px; color: var(--showcase-muted); line-height: 1.8; }
+.governance-audit { margin-top: 18px; padding: 24px; }
+.governance-audit-list { display: grid; gap: 10px; margin: 16px 0 0; padding: 0; list-style: none; color: var(--showcase-muted); }
+.governance-audit-list li { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--showcase-border-soft); padding-bottom: 8px; }
+.governance-audit-list strong { color: var(--showcase-cyan); }
 @media (max-width: 850px) { .governance-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 500px) { .governance-grid { grid-template-columns: 1fr; } }
 @media (max-width: 650px) { .governance-capabilities dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

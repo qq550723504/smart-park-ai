@@ -9,7 +9,13 @@ public record CustomerTicket(
         String intent,
         String status,
         String safeSummary,
-        Instant createdAt) {
+        Instant createdAt,
+        Instant updatedAt) {
+
+    public CustomerTicket(String id, String sessionId, String intent, String status,
+                          String safeSummary, Instant createdAt) {
+        this(id, sessionId, intent, status, safeSummary, createdAt, createdAt);
+    }
 
     public CustomerTicket {
         id = requireText(id, "id");
@@ -18,14 +24,15 @@ public record CustomerTicket(
         status = CustomerTicketStatus.valueOf(requireText(status, "status")).name();
         safeSummary = requireText(safeSummary, "safeSummary");
         createdAt = Objects.requireNonNull(createdAt, "createdAt");
+        updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
     }
 
-    public CustomerTicket transitionTo(CustomerTicketStatus nextStatus) {
+    public CustomerTicket transitionTo(CustomerTicketStatus nextStatus, Instant updatedAt) {
         CustomerTicketStatus current = CustomerTicketStatus.valueOf(status);
         if (!isAllowed(current, nextStatus)) {
             throw new IllegalStateException("Ticket cannot transition from " + current + " to " + nextStatus);
         }
-        return new CustomerTicket(id, sessionId, intent, nextStatus.name(), safeSummary, createdAt);
+        return new CustomerTicket(id, sessionId, intent, nextStatus.name(), safeSummary, createdAt, updatedAt);
     }
 
     private static boolean isAllowed(CustomerTicketStatus current, CustomerTicketStatus next) {

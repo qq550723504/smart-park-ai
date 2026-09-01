@@ -55,7 +55,8 @@ public final class WebDtos {
             String intent,
             String status,
             String safeSummary,
-            Instant createdAt) { }
+            Instant createdAt,
+            Instant updatedAt) { }
 
     public record CustomerServiceResponse(
             String sessionId,
@@ -78,7 +79,8 @@ public final class WebDtos {
                         .map(citation -> new KnowledgeCitationResponse(citation.documentId(), citation.title(), citation.score()))
                         .toList(), result.needsHuman(),
                 ticket == null ? null : new CustomerTicketResponse(
-                        ticket.id(), ticket.sessionId(), ticket.intent(), ticket.status(), ticket.safeSummary(), ticket.createdAt()),
+                        ticket.id(), ticket.sessionId(), ticket.intent(), ticket.status(), ticket.safeSummary(),
+                        ticket.createdAt(), ticket.updatedAt()),
                 result.reason().name(), result.citationIds());
     }
 

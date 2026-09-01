@@ -11,7 +11,11 @@ public interface CustomerTicketPort {
 
     List<CustomerTicket> list();
 
-    CustomerTicket update(String ticketId, CustomerTicketStatus nextStatus);
+    default CustomerTicket update(String ticketId, CustomerTicketStatus nextStatus) {
+        return update(ticketId, nextStatus, Instant.now());
+    }
+
+    CustomerTicket update(String ticketId, CustomerTicketStatus nextStatus, Instant updatedAt);
 
     void deleteBySessionId(String sessionId);
 }

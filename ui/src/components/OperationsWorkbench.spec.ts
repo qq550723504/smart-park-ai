@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mount } from '@vue/test-utils'
-import { defineComponent, h, nextTick, onMounted, onUnmounted } from 'vue'
+import { flushPromises, mount } from '@vue/test-utils'
+import { defineComponent, h, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElInput } from 'element-plus'
 import OperationsWorkbench from './OperationsWorkbench.vue'
 import ImmersiveWorkbenchShell from './workbench/ImmersiveWorkbenchShell.vue'
@@ -31,8 +31,23 @@ const analysisStub = defineComponent({
 })
 
 const analysisBoardStub = defineComponent({
-  props: { initialQuestion: { type: String, default: null } },
-  template: '<input aria-label="分析问题" :value="initialQuestion" />',
+  props: {
+    initialQuestion: { type: String, default: null },
+    initialQuestionToken: { type: Number, default: 0 },
+  },
+  setup(props) {
+    const value = ref(props.initialQuestion ?? '')
+    watch([() => props.initialQuestion, () => props.initialQuestionToken], ([next]) => {
+      if (next != null) value.value = next
+    })
+    return { value }
+  },
+  template: '<input aria-label="分析问题" v-model="value" />',
+})
+
+const collaborationWorkflowStub = defineComponent({
+  emits: ['open-view'],
+  template: '<button type="button" data-open-selected-workflow @click="$emit(\'open-view\', \'workflow\', \'wf-selected\')">打开选中工作流</button>',
 })
 
 const traceRailStub = defineComponent({
@@ -247,6 +262,79 @@ describe('OperationsWorkbench', () => {
     expect(wrapper.get('[data-workbench-view="analytics"]').classes()).toContain('active')
     expect((wrapper.get('[aria-label="分析问题"]').element as HTMLInputElement).value)
       .toBe('过去5天各停车区域停车利用率')
+  })
+
+  it('reapplies the board question when the same card is selected again', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow' },
+      global: { stubs: { ...operatorStubs, OperationsAnalysisPage: analysisBoardStub } },
+    })
+    await settleCapabilities()
+
+    await wrapper.get('[data-workbench-view="operations"]').trigger('click')
+    const card = wrapper.get('[data-board-question][data-question="过去5天各停车区域停车利用率"]')
+    await card.trigger('click')
+    const input = wrapper.get('[aria-label="分析问题"]')
+    await input.setValue('用户改写的问题')
+    await wrapper.get('[data-workbench-view="operations"]').trigger('click')
+    await card.trigger('click')
+
+    expect((wrapper.get('[aria-label="分析问题"]').element as HTMLInputElement).value)
+      .toBe('过去5天各停车区域停车利用率')
+  })
+
+  it('resets the shared execution trace when entering the read-only governance view', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'analytics' },
+      global: { stubs: { ...operatorStubs, GovernanceCenter: true, ExecutionTraceRail: traceRailStub } },
+    })
+    await settleCapabilities()
+    const trace = wrapper.getComponent(analysisStub).props('trace') as { status: { value: string } }
+    trace.status.value = 'streaming'
+    await nextTick()
+
+    await wrapper.get('[data-workbench-view="governance"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.get('[data-testid="trace-status"]').text()).toBe('idle')
+  })
+
+  it('loads the selected workflow before opening it from the collaboration center', async () => {
+    const originalEventSource = globalThis.EventSource
+    globalThis.EventSource = class {
+      onerror: ((event: Event) => void) | null = null
+      constructor(_url: string | URL) {}
+      addEventListener(): void {}
+      close(): void {}
+    } as unknown as typeof EventSource
+    globalThis.fetch = (async (url: RequestInfo | URL) => {
+      if (String(url).includes('/api/workflows/wf-selected')) {
+        return new Response(JSON.stringify({
+          workflowId: 'wf-selected', alertId: 'ALT-SELECTED', status: 'WAITING_APPROVAL',
+          diagnosis: null, approval: null, workOrder: null, errors: [], eventSequence: 2, riskReasons: [],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({
+        knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }) as typeof fetch
+
+    try {
+      const wrapper = mount(OperationsWorkbench, {
+        props: { initialView: 'collaboration-center' },
+        global: { stubs: { ...operatorStubs, CollaborationCenter: collaborationWorkflowStub } },
+      })
+      await settleCapabilities()
+      await wrapper.get('[data-open-selected-workflow]').trigger('click')
+      await flushPromises()
+
+      expect(wrapper.get('[data-workbench-view="workflow"]').classes()).toContain('active')
+      expect(wrapper.text()).toContain('wf-selected')
+      wrapper.unmount()
+    } finally {
+      globalThis.EventSource = originalEventSource
+    }
   })
 
   it('emits an intent to return to the showcase surface', async () => {

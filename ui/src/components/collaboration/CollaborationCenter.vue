@@ -6,12 +6,13 @@ import type { CollaborationWorkItem, CollaborationWorkItemSource, CollaborationW
 import './collaboration-center.css'
 
 const props = withDefaults(defineProps<{ role: DemoRole; active?: boolean }>(), { active: true })
-const emit = defineEmits<{ 'open-view': [view: 'workflow' | 'customer'] }>()
+const emit = defineEmits<{ 'open-view': [view: 'workflow' | 'customer', workflowId?: string] }>()
 const items = ref<CollaborationWorkItem[]>([])
 const loading = ref(false)
 const failed = ref(false)
 const source = ref<CollaborationWorkItemSource | ''>('')
 const status = ref<CollaborationWorkItemStatus | ''>('')
+let requestGeneration = 0
 
 const canRead = computed(() => props.role === 'ADMIN' || props.role === 'CUSTOMER_AGENT')
 const attentionCount = computed(() => items.value.filter(item => ['WAITING_APPROVAL', 'FAILED', 'WORK_ORDER_FAILED', 'WAITING_AGENT'].includes(item.status)).length)
@@ -32,26 +33,41 @@ function formatTime(value: string): string {
 }
 
 async function load(): Promise<void> {
+  const generation = ++requestGeneration
   if (!canRead.value) { items.value = []; failed.value = false; return }
   loading.value = true
   failed.value = false
   try {
-    items.value = await listCollaborationWorkItems(props.role, {
+    const nextItems = await listCollaborationWorkItems(props.role, {
       source: source.value || undefined,
       status: status.value || undefined,
       limit: 50,
     })
+    if (generation !== requestGeneration) return
+    items.value = nextItems
   } catch {
+    if (generation !== requestGeneration) return
     items.value = []
     failed.value = true
-  } finally { loading.value = false }
+  } finally {
+    if (generation === requestGeneration) loading.value = false
+  }
 }
 
 function open(item: CollaborationWorkItem): void {
-  if (item.detailPath === 'workflow' || item.detailPath === 'customer') emit('open-view', item.detailPath)
+  if (item.detailPath === 'workflow' || item.detailPath === 'customer') {
+    if (item.detailPath === 'workflow') {
+      emit('open-view', item.detailPath, item.id.replace(/^ALERT_WORKFLOW:/, ''))
+    } else {
+      emit('open-view', item.detailPath)
+    }
+  }
 }
 
-watch([() => props.role, source, status, () => props.active], ([, , , active]) => { if (active) void load() })
+watch([() => props.role, source, status, () => props.active], ([, , , active]) => {
+  if (active) void load()
+  else requestGeneration++
+})
 onMounted(() => { if (props.active) void load() })
 </script>
 

@@ -74,6 +74,28 @@ class CollaborationCenterServiceTest {
                 .containsExactly("CUSTOMER_TICKET:cs-offline");
     }
 
+    @Test
+    void projectsLocationFromNestedAlertAndParkContextSnapshotPayload() {
+        WorkflowExecutionStore workflows = mock(WorkflowExecutionStore.class);
+        CustomerTicketPort tickets = mock(CustomerTicketPort.class);
+        when(workflows.snapshots()).thenReturn(List.of(new WorkflowSnapshot(
+                "wf-nested", "ALT-NESTED", WorkflowStatus.WAITING_APPROVAL,
+                Map.of(
+                        "alert", Map.of("parkId", "PARK-NESTED", "buildingId", "B7", "deviceId", "DEV-NESTED"),
+                        "parkContext", Map.of(
+                                "parkId", "PARK-NESTED", "buildingId", "B7",
+                                "device", Map.of("id", "DEV-NESTED"))),
+                null, Optional.empty(), null, List.of(), 1)));
+        when(tickets.list()).thenReturn(List.of());
+
+        CollaborationWorkItem item = new CollaborationCenterService(workflows, tickets)
+                .list(WorkItemQuery.defaults()).get(0);
+
+        assertThat(item.parkId()).isEqualTo("PARK-NESTED");
+        assertThat(item.buildingId()).isEqualTo("B7");
+        assertThat(item.deviceId()).isEqualTo("DEV-NESTED");
+    }
+
     private static WorkflowSnapshot alertSnapshot() {
         return new WorkflowSnapshot(
                 "wf-1", "ALT-POWER-001", WorkflowStatus.WAITING_APPROVAL,

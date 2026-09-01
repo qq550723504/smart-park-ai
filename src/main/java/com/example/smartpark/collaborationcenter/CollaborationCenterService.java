@@ -47,9 +47,12 @@ public final class CollaborationCenterService {
 
     private static CollaborationWorkItem fromWorkflow(WorkflowSnapshot snapshot) {
         Map<String, Object> payload = snapshot.statePayload();
-        String parkId = value(payload, "parkId");
-        String buildingId = value(payload, "buildingId");
-        String deviceId = value(payload, "deviceId");
+        String parkId = firstNonBlank(value(payload, "parkId"), nestedValue(payload, "alert", "parkId"),
+                nestedValue(payload, "parkContext", "parkId"));
+        String buildingId = firstNonBlank(value(payload, "buildingId"), nestedValue(payload, "alert", "buildingId"),
+                nestedValue(payload, "parkContext", "buildingId"));
+        String deviceId = firstNonBlank(value(payload, "deviceId"), nestedValue(payload, "alert", "deviceId"),
+                nestedValue(payload, "parkContext", "deviceId"), nestedValue(payload, "parkContext", "device", "id"));
         Diagnosis diagnosis = snapshot.diagnosis();
         if (diagnosis != null) {
             deviceId = diagnosis.deviceId();
@@ -82,12 +85,30 @@ public final class CollaborationCenterService {
                 CollaborationWorkItem.Status.valueOf(CustomerTicketStatus.valueOf(ticket.status()).name()),
                 CollaborationWorkItem.Priority.NORMAL,
                 "客服工单 " + ticket.id(), ticket.safeSummary(), null, null, null,
-                ticket.createdAt(), "customer");
+                ticket.updatedAt(), "customer");
     }
 
     private static String value(Map<String, Object> payload, String key) {
         Object candidate = payload.get(key);
         return candidate == null ? "" : String.valueOf(candidate).trim();
+    }
+
+    private static String nestedValue(Map<String, Object> payload, String... path) {
+        Object current = payload;
+        for (String key : path) {
+            if (!(current instanceof Map<?, ?> map)) {
+                return "";
+            }
+            current = map.get(key);
+        }
+        return current == null ? "" : String.valueOf(current).trim();
+    }
+
+    private static String firstNonBlank(String... values) {
+        return java.util.Arrays.stream(values)
+                .filter(value -> value != null && !value.isBlank())
+                .findFirst()
+                .orElse("");
     }
 
     private static String join(String separator, String... values) {

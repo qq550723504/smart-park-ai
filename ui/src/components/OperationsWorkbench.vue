@@ -71,6 +71,7 @@ onMounted(() => {
 const selectedAlertId = ref(demoAlerts[0].id)
 const activeView = ref<WorkbenchView>(props.initialView)
 const selectedAnalysisQuestion = ref<string | null>(null)
+const selectedAnalysisQuestionToken = ref(0)
 const hasVisitedWorkflow = ref(props.initialView === 'workflow')
 watch(() => props.initialView, (view) => { activeView.value = view })
 watch(() => props.active, (active) => {
@@ -84,7 +85,7 @@ watch(activeView, async (view) => {
 const role = ref<DemoRole>('ADMIN')
 const reviewer = ref('')
 const comment = ref('')
-const { workflow, events, loading, approving, error, isTerminal, start, approve, reset: resetWorkflow } = useWorkflow()
+const { workflow, events, loading, approving, error, isTerminal, start, load: loadWorkflow, approve, reset: resetWorkflow } = useWorkflow()
 const guidedLaunchUpdate = ref<GuidedLaunchUpdate | null>(null)
 const currentGuidedLaunchUpdate = computed(() => {
   const request = props.launchRequest
@@ -108,6 +109,9 @@ function retryGuidedLaunch(): void {
 
 // 统一执行轨迹：告警工作流通过确定性 runId 同时出现在右侧轨迹栏。
 const trace = useExecutionTrace()
+watch(activeView, (view, previousView) => {
+  if (view === 'governance' && previousView !== 'governance') trace.reset()
+})
 watch(
   () => props.launchRequest,
   (request, previousRequest) => {
@@ -153,10 +157,12 @@ const evidenceItems = computed<WorkbenchEvidenceItem[]>(() => [
 
 function openAnalysisFromBoard(question: string): void {
   selectedAnalysisQuestion.value = question
+  selectedAnalysisQuestionToken.value += 1
   activeView.value = 'analytics'
 }
 
-function openCollaborationView(view: 'workflow' | 'customer'): void {
+function openCollaborationView(view: 'workflow' | 'customer', workflowId?: string): void {
+  if (view === 'workflow' && workflowId) void loadWorkflow(workflowId)
   activeView.value = view
 }
 watch(
@@ -295,8 +301,9 @@ function confidence(value?: number) {
       <OperationsAnalysisPage
         :trace="trace"
         :active="props.active && activeView === 'analytics'"
-        :launch-request="props.launchRequest"
-        :initial-question="selectedAnalysisQuestion"
+          :launch-request="props.launchRequest"
+          :initial-question="selectedAnalysisQuestion"
+          :initial-question-token="selectedAnalysisQuestionToken"
         @run-started="(id: string) => trace.subscribe(id)"
         @launch-status="handleGuidedLaunchUpdate"
       />
@@ -337,7 +344,7 @@ function confidence(value?: number) {
       @open-view="openCollaborationView"
     />
 
-    <GovernanceCenter v-show="activeView === 'governance'" :active="props.active && activeView === 'governance'" />
+    <GovernanceCenter v-show="activeView === 'governance'" :role="role" :active="props.active && activeView === 'governance'" />
 
     <OperationsBoard v-show="activeView === 'operations'" @open-analysis="openAnalysisFromBoard" />
 
