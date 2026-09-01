@@ -25,6 +25,7 @@ import com.example.smartpark.port.workorder.WorkOrderPort;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,6 +47,7 @@ public final class AlertWorkflow {
     private final AlertWorkflowNodes nodes;
     private final CompiledGraph compiledGraph;
     private final Supplier<String> workflowIds;
+    private final Clock clock;
 
     public AlertWorkflow(
             AlertTriageAgent triageAgent,
@@ -153,6 +155,7 @@ public final class AlertWorkflow {
         this.executionStore = Objects.requireNonNull(executionStore, "executionStore");
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher");
         this.workflowIds = Objects.requireNonNull(workflowIds, "workflowIds");
+        this.clock = Objects.requireNonNull(clock, "clock");
         this.nodes = new AlertWorkflowNodes(
                 triageAgent,
                 diagnosisAgent,
@@ -178,7 +181,7 @@ public final class AlertWorkflow {
 
         String workflowId = requireIdentifier(workflowIds.get(), "workflowId");
         String graphThreadId = workflowId;
-        AlertWorkflowState initialState = AlertWorkflowState.initial(workflowId, requiredAlertId);
+        AlertWorkflowState initialState = AlertWorkflowState.initial(workflowId, requiredAlertId, Instant.now(clock));
         WorkflowExecutionStore.Execution execution = executionStore.register(
                 workflowId,
                 requiredAlertId,
@@ -211,7 +214,8 @@ public final class AlertWorkflow {
                 updateGraphState(execution, Map.of(
                         AlertWorkflowState.STATUS, WorkflowStatus.WAITING_APPROVAL.name(),
                         AlertWorkflowState.ERRORS, List.of(),
-                        AlertWorkflowState.EVENT_SEQUENCE, pausedSequence));
+                        AlertWorkflowState.EVENT_SEQUENCE, pausedSequence,
+                        AlertWorkflowState.UPDATED_AT, Instant.now(clock).toString()));
                 return status(workflowId);
             }
             return completeFromState(execution, AlertWorkflowState.from(output.state()));
@@ -254,7 +258,8 @@ public final class AlertWorkflow {
                 updateGraphState(execution, Map.of(
                         AlertWorkflowState.APPROVAL, AlertWorkflowState.serializable(requiredDecision),
                         AlertWorkflowState.STATUS, WorkflowStatus.RUNNING.name(),
-                        AlertWorkflowState.EVENT_SEQUENCE, resumedSequence));
+                        AlertWorkflowState.EVENT_SEQUENCE, resumedSequence,
+                        AlertWorkflowState.UPDATED_AT, Instant.now(clock).toString()));
                 InterruptionMetadata feedback = InterruptionMetadata.builder(interruption)
                         .addMetadata("approvalDecision", requiredDecision)
                         .build();
@@ -349,7 +354,8 @@ public final class AlertWorkflow {
         updateGraphState(execution, Map.of(
                 AlertWorkflowState.STATUS, status.name(),
                 AlertWorkflowState.ERRORS, state.errors(),
-                AlertWorkflowState.EVENT_SEQUENCE, completedSequence));
+                AlertWorkflowState.EVENT_SEQUENCE, completedSequence,
+                AlertWorkflowState.UPDATED_AT, Instant.now(clock).toString()));
         WorkflowSnapshot snapshot = execution.snapshot();
         eventPublisher.complete(execution.workflowId());
         return snapshot;
@@ -377,7 +383,8 @@ public final class AlertWorkflow {
         updateGraphState(execution, Map.of(
                 AlertWorkflowState.STATUS, failedStatus.name(),
                 AlertWorkflowState.ERRORS, List.of(failure.publicError()),
-                AlertWorkflowState.EVENT_SEQUENCE, sequence));
+                AlertWorkflowState.EVENT_SEQUENCE, sequence,
+                AlertWorkflowState.UPDATED_AT, Instant.now(clock).toString()));
         WorkflowSnapshot failed = execution.snapshot();
         eventPublisher.complete(execution.workflowId());
         return failed;

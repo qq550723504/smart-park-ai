@@ -14,6 +14,7 @@ import com.example.smartpark.model.customer.CustomerTicketStatus;
 import com.example.smartpark.port.customer.CustomerAnswerPort;
 import com.example.smartpark.port.customer.CustomerSessionStore;
 import com.example.smartpark.port.customer.CustomerTicketPort;
+import com.example.smartpark.port.customer.CustomerTicketReader;
 import com.example.smartpark.port.knowledge.KnowledgePort;
 
 import java.time.Clock;
@@ -34,7 +35,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
 
-public final class CustomerServiceWorkflow {
+public final class CustomerServiceWorkflow implements CustomerTicketReader {
 
     public static final double DEFAULT_MINIMUM_KNOWLEDGE_SCORE = 0.70;
 
@@ -264,6 +265,14 @@ public final class CustomerServiceWorkflow {
         }
     }
 
+    @Override
+    public List<CustomerTicket> listActive() {
+        return tickets().stream()
+                .map(CustomerServiceResult::ticket)
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
     public CustomerServiceResult updateTicket(String ticketId, String status) {
         customerStateLock.writeLock().lock();
         try {
@@ -279,8 +288,8 @@ public final class CustomerServiceWorkflow {
                 ticketPort.deleteBySessionId(currentTicket.sessionId());
                 throw new NoSuchElementException("Unknown customer service ticket: " + ticketId);
             }
-            currentTicket.transitionTo(nextStatus);
-            CustomerTicket updatedTicket = ticketPort.update(ticketId, nextStatus);
+            currentTicket.transitionTo(nextStatus, now);
+            CustomerTicket updatedTicket = ticketPort.update(ticketId, nextStatus, now);
             CustomerServiceResult updated = withTicket(match.result(), updatedTicket);
             sessionStore.update(new CustomerSessionStore.SessionSnapshot(
                     match.sessionId(), updated, match.createdAt(), match.messages(), match.retrievals()));

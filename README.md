@@ -23,6 +23,7 @@
 | 停车与能耗运营看板 | 以受控问题入口组织停车、能耗和空间指标，点击后复用运营分析只读查询；需显式启用分析链路 |
 | 实时语音 | 选择性启用的全场景演示模式；需完成在线预检后再进行浏览器端人工语音验收 |
 | AI 治理概览 | 场景就绪度、能力模式、运营计数和安全边界；管理员可查看审计明细 |
+| AI 智能协同中心 | 只读聚合告警工作流与客服工单，按来源/状态筛选，并跳回原场景处理；需要 `CUSTOMER_AGENT` 或 `ADMIN` |
 
 ## 快速开始
 
@@ -347,6 +348,7 @@ Remove-Item Env:SERVER_ADDRESS -ErrorAction SilentlyContinue
 | `POST /api/customer-service/sessions/{sessionId}/messages` | 继续提问 | 已转人工的会话停止自动回答 |
 | `GET /api/customer-service/sessions/{sessionId}/conversation` | 查看对话与安全检索轨迹 | 不返回知识正文 |
 | `GET /api/customer-service/tickets` | 查看人工工单 | 需要 `CUSTOMER_AGENT` 或 `ADMIN` |
+| `GET /api/collaboration/work-items` | 查看安全协同队列 | 只读；需要 `CUSTOMER_AGENT` 或 `ADMIN`，支持 `source`、`status`、`limit`（最多 50） |
 | `POST /api/alerts/{alertId}/workflows` | 启动告警工作流 | 只在 DashScope 启用时存在 |
 | `GET /api/workflows/{workflowId}` | 查询工作流状态 | 只返回脱敏公开 DTO |
 | `POST /api/workflows/{workflowId}/approval` | 审批或拒绝 | 需要稳定的 `idempotencyKey` |

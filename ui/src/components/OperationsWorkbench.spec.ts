@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElInput } from 'element-plus'
 import OperationsWorkbench from './OperationsWorkbench.vue'
@@ -19,6 +19,12 @@ const alertLaunchInput = { alertId: 'ALT-POWER-001', question: null }
 const collaborationLaunchInput = {
   alertId: null,
   question: '电表 DEV-ENERGY-001、设备 DEV-POWER-001 与安防事件 SEC-ACCESS-001 是否存在关联',
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise })
+  return { promise, resolve }
 }
 
 const analysisStub = defineComponent({
@@ -43,6 +49,11 @@ const analysisBoardStub = defineComponent({
     return { value }
   },
   template: '<input aria-label="分析问题" v-model="value" />',
+})
+
+const collaborationWorkflowStub = defineComponent({
+  emits: ['open-view'],
+  template: '<div><button type="button" data-open-selected-workflow @click="$emit(\'open-view\', \'workflow\', \'wf-selected\')">打开选中工作流</button><button type="button" data-open-customer @click="$emit(\'open-view\', \'customer\', undefined, \'ticket-1\')">打开客服</button></div>',
 })
 
 const traceRailStub = defineComponent({
@@ -75,6 +86,12 @@ const customerStub = defineComponent({
   template: '<div data-testid="customer-role">{{ role }}</div>',
 })
 
+const collaborationCenterStub = defineComponent({
+  props: { role: { type: String, required: true }, active: { type: Boolean, default: false } },
+  emits: ['open-view'],
+  template: '<div data-testid="collaboration-center-stub"><button type="button" data-collaboration-jump @click="$emit(\'open-view\', \'customer\')">打开客服</button></div>',
+})
+
 const guidedStatusStub = defineComponent({
   props: { active: { type: Boolean, default: true }, launchRequest: { type: Object, default: null } },
   emits: ['launch-status'],
@@ -89,8 +106,9 @@ const guidedStatusStub = defineComponent({
 })
 
 const alertSelectorStub = defineComponent({
+  props: { selectedId: { type: String, required: true } },
   emits: ['select', 'start'],
-  template: '<button type="button" data-select-alternate-alert @click="$emit(\'select\', \'ALT-POWER-001\')">选择其他告警</button>',
+  template: '<div><span data-selected-alert>{{ selectedId }}</span><button type="button" data-select-alternate-alert @click="$emit(\'select\', \'ALT-POWER-001\')">选择其他告警</button></div>',
 })
 
 const operatorStubs = {
@@ -200,22 +218,6 @@ describe('OperationsWorkbench', () => {
     expect(wrapper.get('[data-workbench-view="collaboration"]').classes()).toContain('active')
   })
 
-  it('resets the shared execution trace when entering the read-only governance view', async () => {
-    const wrapper = mount(OperationsWorkbench, {
-      props: { initialView: 'analytics' },
-      global: { stubs: { ...operatorStubs, GovernanceCenter: true, ExecutionTraceRail: traceRailStub } },
-    })
-    await settleCapabilities()
-    const trace = wrapper.getComponent(analysisStub).props('trace') as { status: { value: string } }
-    trace.status.value = 'streaming'
-    await nextTick()
-
-    await wrapper.get('[data-workbench-view="governance"]').trigger('click')
-    await nextTick()
-
-    expect(wrapper.get('[data-testid="trace-status"]').text()).toBe('idle')
-  })
-
   it('keeps every scenario inside one stable stage beside the persistent rail', async () => {
     const wrapper = mount(OperationsWorkbench, {
       props: { initialView: 'workflow' },
@@ -224,7 +226,7 @@ describe('OperationsWorkbench', () => {
 
     await settleCapabilities()
 
-    expect(wrapper.findAll('[data-workbench-stage] > .main-content')).toHaveLength(7)
+    expect(wrapper.findAll('[data-workbench-stage] > .main-content')).toHaveLength(8)
     expect(wrapper.findAll('[data-workbench-rail] .global-rail')).toHaveLength(1)
     const shell = wrapper.get('[data-testid="immersive-workbench-shell"]')
     const rail = wrapper.get('[data-workbench-rail] .global-rail')
@@ -286,6 +288,149 @@ describe('OperationsWorkbench', () => {
 
     expect((wrapper.get('[aria-label="分析问题"]').element as HTMLInputElement).value)
       .toBe('过去5天各停车区域停车利用率')
+  })
+
+  it('resets the shared execution trace when entering the read-only governance view', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'analytics' },
+      global: { stubs: { ...operatorStubs, GovernanceCenter: true, ExecutionTraceRail: traceRailStub } },
+    })
+    await settleCapabilities()
+    const trace = wrapper.getComponent(analysisStub).props('trace') as { status: { value: string } }
+    trace.status.value = 'streaming'
+    await nextTick()
+
+    await wrapper.get('[data-workbench-view="governance"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.get('[data-testid="trace-status"]').text()).toBe('idle')
+  })
+
+  it('loads the selected workflow before opening it from the collaboration center', async () => {
+    const originalEventSource = globalThis.EventSource
+    globalThis.EventSource = class {
+      onerror: ((event: Event) => void) | null = null
+      constructor(_url: string | URL) {}
+      addEventListener(): void {}
+      close(): void {}
+    } as unknown as typeof EventSource
+    globalThis.fetch = (async (url: RequestInfo | URL) => {
+      if (String(url).includes('/api/workflows/wf-selected')) {
+        return new Response(JSON.stringify({
+          workflowId: 'wf-selected', alertId: 'ALT-POWER-001', status: 'WAITING_APPROVAL',
+          diagnosis: null, approval: null, workOrder: null, errors: [], eventSequence: 2, riskReasons: [],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({
+        knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }) as typeof fetch
+
+    try {
+      const wrapper = mount(OperationsWorkbench, {
+        props: { initialView: 'collaboration-center' },
+        global: { stubs: { ...operatorStubs, CollaborationCenter: collaborationWorkflowStub } },
+      })
+      await settleCapabilities()
+      await wrapper.get('[data-open-selected-workflow]').trigger('click')
+      await flushPromises()
+
+      expect(wrapper.get('[data-workbench-view="workflow"]').classes()).toContain('active')
+      expect(wrapper.text()).toContain('wf-selected')
+      expect(wrapper.get('[data-selected-alert]').text()).toBe('ALT-POWER-001')
+      wrapper.unmount()
+    } finally {
+      globalThis.EventSource = originalEventSource
+    }
+  })
+
+  it('does not reopen a workflow after navigating away while it is loading', async () => {
+    const originalEventSource = globalThis.EventSource
+    const pendingWorkflow = deferred<Response>()
+    const streams: Array<{ close: ReturnType<typeof vi.fn> }> = []
+    globalThis.EventSource = class {
+      onerror: ((event: Event) => void) | null = null
+      constructor(_url: string | URL) {
+        streams.push(this as unknown as { close: ReturnType<typeof vi.fn> })
+      }
+      addEventListener(): void {}
+      close = vi.fn()
+    } as unknown as typeof EventSource
+    globalThis.fetch = (async (url: RequestInfo | URL) => {
+      if (String(url).includes('/api/workflows/wf-slow')) return pendingWorkflow.promise
+      return new Response(JSON.stringify({
+        knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }) as typeof fetch
+
+    try {
+      const wrapper = mount(OperationsWorkbench, {
+        props: { initialView: 'collaboration-center' },
+        global: { stubs: { ...operatorStubs, CollaborationCenter: collaborationWorkflowStub } },
+      })
+      await settleCapabilities()
+      await wrapper.get('[data-open-selected-workflow]').trigger('click')
+      await wrapper.get('[data-workbench-view="customer"]').trigger('click')
+
+      pendingWorkflow.resolve(new Response(JSON.stringify({
+        workflowId: 'wf-slow', alertId: 'ALT-POWER-001', status: 'WAITING_APPROVAL',
+        diagnosis: null, approval: null, workOrder: null, errors: [], eventSequence: 2, riskReasons: [],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      await flushPromises()
+
+      expect(wrapper.get('[data-workbench-view="customer"]').classes()).toContain('active')
+      expect(wrapper.get('[data-workbench-view="workflow"]').classes()).not.toContain('active')
+      expect(streams).toHaveLength(0)
+      wrapper.unmount()
+    } finally {
+      globalThis.EventSource = originalEventSource
+    }
+  })
+
+  it('cancels a queue workflow load when opening a customer item directly', async () => {
+    const originalEventSource = globalThis.EventSource
+    const pendingWorkflow = deferred<Response>()
+    const streams: Array<{ close: ReturnType<typeof vi.fn> }> = []
+    globalThis.EventSource = class {
+      onerror: ((event: Event) => void) | null = null
+      constructor(_url: string | URL) {
+        streams.push(this as unknown as { close: ReturnType<typeof vi.fn> })
+      }
+      addEventListener(): void {}
+      close = vi.fn()
+    } as unknown as typeof EventSource
+    globalThis.fetch = (async (url: RequestInfo | URL) => {
+      if (String(url).includes('/api/workflows/wf-selected')) return pendingWorkflow.promise
+      return new Response(JSON.stringify({
+        knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }) as typeof fetch
+
+    try {
+      const wrapper = mount(OperationsWorkbench, {
+        props: { initialView: 'collaboration-center' },
+        global: { stubs: { ...operatorStubs, CollaborationCenter: collaborationWorkflowStub } },
+      })
+      await settleCapabilities()
+      await wrapper.get('[data-open-selected-workflow]').trigger('click')
+      await wrapper.get('[data-open-customer]').trigger('click')
+
+      pendingWorkflow.resolve(new Response(JSON.stringify({
+        workflowId: 'wf-selected', alertId: 'ALT-POWER-001', status: 'WAITING_APPROVAL',
+        diagnosis: null, approval: null, workOrder: null, errors: [], eventSequence: 2, riskReasons: [],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      await flushPromises()
+
+      expect(wrapper.get('[data-workbench-view="customer"]').classes()).toContain('active')
+      expect(wrapper.get('[data-workbench-view="workflow"]').classes()).not.toContain('active')
+      expect(streams).toHaveLength(0)
+      wrapper.unmount()
+    } finally {
+      globalThis.EventSource = originalEventSource
+    }
   })
 
   it('emits an intent to return to the showcase surface', async () => {
@@ -370,7 +515,7 @@ describe('OperationsWorkbench', () => {
 
     await settleCapabilities()
 
-    expect(wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())).toEqual(['告警工作流', '园区客服', '治理中心'])
+    expect(wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())).toEqual(['告警工作流', '园区客服', '协同中心', '治理中心'])
     expect(wrapper.get('[data-evidence-item="知识检索"] strong').text()).toBe('能力检查失败')
     expect(wrapper.get('[data-evidence-item="知识检索"]').attributes('data-tone')).toBe('warning')
   })
@@ -389,6 +534,24 @@ describe('OperationsWorkbench', () => {
 
     expect(wrapper.get('[data-workbench-view="customer"]').classes()).toContain('active')
     expect(wrapper.get('[data-testid="customer-role"]').text()).toBe('CUSTOMER_AGENT')
+  })
+
+  it('exposes the collaboration center to allowed roles and routes queue jumps into existing views', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow' },
+      global: { stubs: { ...operatorStubs, CollaborationCenter: collaborationCenterStub } },
+    })
+    await settleCapabilities()
+
+    expect(wrapper.get('[data-workbench-view="collaboration-center"]').text()).toBe('协同中心')
+    await wrapper.get('[data-workbench-view="collaboration-center"]').trigger('click')
+    await wrapper.get('[data-collaboration-jump]').trigger('click')
+    expect(wrapper.get('[data-workbench-view="customer"]').classes()).toContain('active')
+
+    wrapper.getComponent(ImmersiveWorkbenchShell).vm.$emit('update:role', 'VIEWER')
+    await nextTick()
+    expect(wrapper.find('[data-workbench-view="collaboration-center"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('opens the narrow-screen execution rail and keeps approval fields accessibly named', async () => {

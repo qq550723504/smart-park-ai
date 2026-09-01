@@ -255,6 +255,7 @@ class CustomerServiceWorkflowConcurrencyTest {
 
         @Override public List<CustomerTicket> list() { return delegate.list(); }
         @Override public CustomerTicket update(String ticketId, CustomerTicketStatus nextStatus) { return delegate.update(ticketId, nextStatus); }
+        @Override public CustomerTicket update(String ticketId, CustomerTicketStatus nextStatus, Instant updatedAt) { return delegate.update(ticketId, nextStatus, updatedAt); }
         @Override public void deleteBySessionId(String sessionId) { delegate.deleteBySessionId(sessionId); }
     }
 }

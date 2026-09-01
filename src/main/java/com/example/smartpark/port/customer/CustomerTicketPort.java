@@ -13,5 +13,9 @@ public interface CustomerTicketPort {
 
     CustomerTicket update(String ticketId, CustomerTicketStatus nextStatus);
 
+    default CustomerTicket update(String ticketId, CustomerTicketStatus nextStatus, Instant updatedAt) {
+        return update(ticketId, nextStatus);
+    }
+
     void deleteBySessionId(String sessionId);
 }

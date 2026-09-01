@@ -21,13 +21,13 @@
 ```text
 ┌──────────────────────────────────────────────────────────────┐
 │ Vue 3 智慧园区运营控制台                                     │
-│ 告警工作流 │ 园区客服 │ 专家协作 │ 运营分析 │ 治理中心 │ 统一执行轨迹栏 │
+│ 告警工作流 │ 园区客服 │ 协同中心 │ 专家协作 │ 运营分析 │ 治理中心 │
 └──────────────────────────────┬───────────────────────────────┘
                                │ REST / SSE
                                ▼
 ┌──────────────────────────────────────────────────────────────┐
 │ Web/API 边界                                                   │
-│ Alert / CustomerService / ExpertCollaboration / Operations     │
+│ Alert / CustomerService / CollaborationCenter / Operations     │
 │ KnowledgeAdmin / Audit / Feedback / ExecutionEvent Controllers  │
 └───────────────┬───────────────────────┬────────────────────────┘
                 │                       │
@@ -227,7 +227,7 @@ safeSummary / typed displayPayload
 
 `DisplayPayload` 是受控的类型化展示负载：文本、工具调用、专家交接、SQL、图表、音频状态和错误分别使用不同结构。SQL 只发送经过校验的安全版本；音频负载当前只表示状态元数据。事件模型为语音场景提供 `VOICE` 和音频事件枚举；语音 Session、WebSocket 和前端语音入口只有在对应能力开关与预检通过后才进入可演示目录。
 
-Vue 3 控制台按场景切换页面：告警工作流、园区客服、专家协作、运营分析、停车与能耗运营看板和治理中心；看板点击问题后切换到运营分析页并复用同一只读查询链路。右侧统一执行轨迹栏为告警、专家协作和运营分析通过 `runId` 订阅后端事件。客服当前通过会话消息和工单状态展示进展，不接入统一执行事件流；治理中心读取安全聚合快照，管理员可额外查看审计明细。`X-Demo-Role` 用于本地演示查看者、操作员、审批人、客服坐席和管理员的 UI/API 操作边界，不是生产身份系统。
+Vue 3 控制台按场景切换页面：告警工作流、园区客服、AI 智能协同中心、专家协作、运营分析、停车与能耗运营看板和治理中心；协同中心只读取应用层 `CollaborationWorkItem` 安全投影，聚合告警工作流与客服工单但不合并两个领域模型，点击条目后回到原场景处理。看板点击问题后切换到运营分析页并复用同一只读查询链路。右侧统一执行轨迹栏为告警、专家协作和运营分析通过 `runId` 订阅后端事件。客服当前通过会话消息和工单状态展示进展，不接入统一执行事件流；治理中心读取安全聚合快照，管理员可额外查看审计明细。`X-Demo-Role` 用于本地演示查看者、操作员、审批人、客服坐席和管理员的 UI/API 操作边界，不是生产身份系统。
 
 ## 7. 知识、审计、反馈和 MCP
 
@@ -275,6 +275,7 @@ MCP 不提供知识正文、身份数据、工作流变更、工单写入、设�
 | `POST` | `/api/customer-service/sessions/{sessionId}/messages` | 在会话中继续提问 |
 | `GET` | `/api/customer-service/sessions/{sessionId}/conversation` | 查询对话和安全检索轨迹 |
 | `GET/PATCH` | `/api/customer-service/tickets[/{ticketId}]` | 查询或推进人工客服工单 |
+| `GET` | `/api/collaboration/work-items` | 查询告警与客服工单的安全只读协同投影；需要 `CUSTOMER_AGENT` 或 `ADMIN` |
 | `POST` | `/api/expert-collaboration/runs` | 发起专家协作 |
 | `GET` | `/api/expert-collaboration/runs/{runId}` | 查询专家协作状态、发现和汇总 |
 | `POST` | `/api/operations-analysis/runs` | 发起自然语言运营分析 |

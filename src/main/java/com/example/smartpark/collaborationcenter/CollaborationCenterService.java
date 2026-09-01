@@ -1,0 +1,187 @@
+package com.example.smartpark.collaborationcenter;
+
+import com.example.smartpark.model.common.Diagnosis;
+import com.example.smartpark.model.common.RiskLevel;
+import com.example.smartpark.model.common.WorkflowStatus;
+import com.example.smartpark.model.customer.CustomerTicket;
+import com.example.smartpark.model.customer.CustomerTicketStatus;
+import com.example.smartpark.port.customer.CustomerTicketPort;
+import com.example.smartpark.port.customer.CustomerTicketReader;
+import com.example.smartpark.workflow.WorkflowExecutionStore;
+import com.example.smartpark.workflow.WorkflowSnapshot;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+public final class CollaborationCenterService {
+    private final WorkflowExecutionStore workflows;
+    private final CustomerTicketReader tickets;
+
+    public CollaborationCenterService(WorkflowExecutionStore workflows, CustomerTicketPort tickets) {
+        this(workflows, tickets::list);
+    }
+
+    public CollaborationCenterService(WorkflowExecutionStore workflows, CustomerTicketReader tickets) {
+        this.workflows = workflows;
+        this.tickets = Objects.requireNonNull(tickets, "tickets");
+    }
+
+    public List<CollaborationWorkItem> list(WorkItemQuery query) {
+        WorkItemQuery requested = Objects.requireNonNull(query, "query");
+        List<CollaborationWorkItem> items = new ArrayList<>();
+        if (requested.source() == null || requested.source() == CollaborationWorkItem.Source.ALERT_WORKFLOW) {
+            if (workflows != null) {
+                currentWorkflowSnapshots(workflows.snapshots()).stream().map(CollaborationCenterService::fromWorkflow)
+                        .filter(requested::accepts).forEach(items::add);
+            }
+        }
+        if (requested.source() == null || requested.source() == CollaborationWorkItem.Source.CUSTOMER_TICKET) {
+            tickets.listActive().stream().map(CollaborationCenterService::fromTicket)
+                    .filter(requested::accepts).forEach(items::add);
+        }
+        return items.stream()
+                .sorted(Comparator.comparing(CollaborationWorkItem::updatedAt).reversed()
+                        .thenComparing(CollaborationWorkItem::id))
+                .limit(requested.limit())
+                .toList();
+    }
+
+    private static CollaborationWorkItem fromWorkflow(WorkflowSnapshot snapshot) {
+        Map<String, Object> payload = snapshot.statePayload();
+        String parkId = firstNonBlank(value(payload, "parkId"), nestedValue(payload, "alert", "parkId"),
+                nestedValue(payload, "parkContext", "parkId"));
+        String buildingId = firstNonBlank(value(payload, "buildingId"), nestedValue(payload, "alert", "buildingId"),
+                nestedValue(payload, "parkContext", "buildingId"));
+        String deviceId = firstNonBlank(value(payload, "deviceId"), nestedValue(payload, "alert", "deviceId"),
+                nestedValue(payload, "parkContext", "deviceId"), nestedValue(payload, "parkContext", "device", "id"));
+        Diagnosis diagnosis = snapshot.diagnosis();
+        if (diagnosis != null) {
+            deviceId = diagnosis.deviceId();
+        }
+        if (snapshot.workOrder() != null) {
+            parkId = snapshot.workOrder().parkId();
+            buildingId = snapshot.workOrder().buildingId();
+            deviceId = snapshot.workOrder().deviceId();
+        }
+        String location = join(" · ", buildingId, deviceId);
+        String summary = location.isBlank()
+                ? "告警 " + snapshot.alertId() + " · " + snapshot.status().name()
+                : "告警 " + snapshot.alertId() + " · " + location;
+        Instant updatedAt = workflowUpdatedAt(snapshot, payload, diagnosis);
+        return new CollaborationWorkItem(
+                "ALERT_WORKFLOW:" + snapshot.workflowId(),
+                CollaborationWorkItem.Source.ALERT_WORKFLOW,
+                CollaborationWorkItem.Status.valueOf(snapshot.status().name()),
+                hasHighRiskSignal(snapshot, payload, diagnosis)
+                        ? CollaborationWorkItem.Priority.HIGH : CollaborationWorkItem.Priority.NORMAL,
+                "告警处置 " + snapshot.alertId(), summary, parkId, buildingId, deviceId, updatedAt, "workflow");
+    }
+
+    private static CollaborationWorkItem fromTicket(CustomerTicket ticket) {
+        return new CollaborationWorkItem(
+                "CUSTOMER_TICKET:" + ticket.id(),
+                CollaborationWorkItem.Source.CUSTOMER_TICKET,
+                CollaborationWorkItem.Status.valueOf(CustomerTicketStatus.valueOf(ticket.status()).name()),
+                CollaborationWorkItem.Priority.NORMAL,
+                "客服工单 " + ticket.id(), ticket.safeSummary(), null, null, null,
+                ticket.updatedAt(), "customer");
+    }
+
+    private static String value(Map<String, Object> payload, String key) {
+        Object candidate = payload.get(key);
+        return candidate == null ? "" : String.valueOf(candidate).trim();
+    }
+
+    private static List<WorkflowSnapshot> currentWorkflowSnapshots(List<WorkflowSnapshot> snapshots) {
+        Map<String, WorkflowSnapshot> currentByAlert = new java.util.LinkedHashMap<>();
+        for (WorkflowSnapshot snapshot : snapshots) {
+            WorkflowSnapshot current = currentByAlert.get(snapshot.alertId());
+            if (current == null || isPreferredWorkflow(snapshot, current)) {
+                currentByAlert.put(snapshot.alertId(), snapshot);
+            }
+        }
+        return List.copyOf(currentByAlert.values());
+    }
+
+    private static boolean isPreferredWorkflow(WorkflowSnapshot candidate, WorkflowSnapshot current) {
+        boolean candidateRetryable = isRetryable(candidate.status());
+        boolean currentRetryable = isRetryable(current.status());
+        if (candidateRetryable != currentRetryable) return !candidateRetryable;
+        int byUpdatedAt = workflowUpdatedAt(candidate).compareTo(workflowUpdatedAt(current));
+        if (byUpdatedAt != 0) return byUpdatedAt > 0;
+        int bySequence = Long.compare(candidate.eventSequence(), current.eventSequence());
+        if (bySequence != 0) return bySequence > 0;
+        return candidate.workflowId().compareTo(current.workflowId()) > 0;
+    }
+
+    private static boolean isRetryable(WorkflowStatus status) {
+        return status == WorkflowStatus.FAILED || status == WorkflowStatus.WORK_ORDER_FAILED;
+    }
+
+    private static boolean hasHighRiskSignal(
+            WorkflowSnapshot snapshot, Map<String, Object> payload, Diagnosis diagnosis) {
+        return diagnosis != null && diagnosis.riskLevel() == RiskLevel.HIGH
+                || snapshot.workOrder() != null && snapshot.workOrder().riskLevel() == RiskLevel.HIGH
+                || isHighRisk(value(payload, "riskLevel"))
+                || isHighRisk(nestedValue(payload, "classification", "riskLevel"))
+                || isHighRisk(nestedValue(payload, "alert", "riskHint"))
+                || isHighRisk(nestedValue(payload, "diagnosis", "riskLevel"));
+    }
+
+    private static boolean isHighRisk(String value) {
+        return "HIGH".equalsIgnoreCase(value);
+    }
+
+    private static Instant workflowUpdatedAt(
+            WorkflowSnapshot snapshot, Map<String, Object> payload, Diagnosis diagnosis) {
+        Instant stateUpdatedAt = instantValue(payload, "updatedAt");
+        if (stateUpdatedAt != null) return stateUpdatedAt;
+        if (snapshot.workOrder() != null) return snapshot.workOrder().updatedAt();
+        if (snapshot.approval().isPresent()) return snapshot.approval().orElseThrow().decidedAt();
+        if (diagnosis != null) return diagnosis.diagnosedAt();
+        Instant occurredAt = instantValue(payload, "alert", "occurredAt");
+        return occurredAt == null ? Instant.EPOCH : occurredAt;
+    }
+
+    private static Instant workflowUpdatedAt(WorkflowSnapshot snapshot) {
+        return workflowUpdatedAt(snapshot, snapshot.statePayload(), snapshot.diagnosis());
+    }
+
+    private static Instant instantValue(Map<String, Object> payload, String... path) {
+        String value = path.length == 1 ? value(payload, path[0]) : nestedValue(payload, path);
+        if (value.isBlank()) return null;
+        try {
+            return Instant.parse(value);
+        }
+        catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private static String nestedValue(Map<String, Object> payload, String... path) {
+        Object current = payload;
+        for (String key : path) {
+            if (!(current instanceof Map<?, ?> map)) {
+                return "";
+            }
+            current = map.get(key);
+        }
+        return current == null ? "" : String.valueOf(current).trim();
+    }
+
+    private static String firstNonBlank(String... values) {
+        return java.util.Arrays.stream(values)
+                .filter(value -> value != null && !value.isBlank())
+                .findFirst()
+                .orElse("");
+    }
+
+    private static String join(String separator, String... values) {
+        return java.util.Arrays.stream(values).filter(value -> value != null && !value.isBlank())
+                .collect(java.util.stream.Collectors.joining(separator));
+    }
+}

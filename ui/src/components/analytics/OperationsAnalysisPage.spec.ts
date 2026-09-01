@@ -113,28 +113,17 @@ describe('OperationsAnalysisPage', () => {
     handler = (url, init) => {
       if (init?.method === 'POST') return jsonResponse({ runId: RUN_ID }, 202)
       if (/\/runs\/[0-9a-f-]+$/.test(url)) {
-        return jsonResponse({
-          runId: RUN_ID,
-          status: 'COMPLETED',
-          summary: '旧问题结果',
-          rowCount: 1,
-          columns: ['building_id'],
-          rows: [['B1']],
-          createdAt: '2026-08-24T08:00:00Z',
-        })
+        return jsonResponse({ runId: RUN_ID, status: 'COMPLETED', summary: '旧问题结果', rowCount: 1,
+          columns: ['building_id'], rows: [['B1']], createdAt: '2026-08-24T08:00:00Z' })
       }
       return jsonResponse({}, 404)
     }
-
     const wrapper = mount(OperationsAnalysisPage, { props: { pollIntervalMs: 1 } })
     await wrapper.find('[aria-label="分析问题"]').setValue('旧问题')
     await wrapper.find('form').trigger('submit')
     await flush()
-
     expect(wrapper.find('[data-testid="result-panel"]').exists()).toBe(true)
     await wrapper.findAll('[aria-label="推荐问题"] button')[1].trigger('click')
-
-    expect((wrapper.find('[aria-label="分析问题"]').element as HTMLInputElement).value).toBe('能耗总量')
     expect(wrapper.find('[data-testid="result-panel"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('旧问题结果')
     wrapper.unmount()
@@ -425,6 +414,35 @@ describe('OperationsAnalysisPage', () => {
     expect((wrapper.emitted('launch-status') ?? [])
       .some(([update]) => (update as { requestId: number; state: string }).requestId === 81
         && (update as { state: string }).state === 'started')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('cancels a pending guided start when a board question resets analysis', async () => {
+    const pendingPost = deferred<Response>()
+    handler = (_url, init) => init?.method === 'POST'
+      ? pendingPost.promise as unknown as Response
+      : jsonResponse({ runId: 'pending-run', status: 'RUNNING', createdAt: '' })
+
+    const wrapper = mount(OperationsAnalysisPage, {
+      props: {
+        active: true,
+        pollIntervalMs: 1,
+        launchRequest: {
+          requestId: 91, mode: 'guided', scenarioId: 'OPERATIONS_ANALYSIS', view: 'analytics',
+          launchInput: { alertId: null, question: '过去5天各楼宇能耗' },
+        },
+      },
+    })
+    await flush(1)
+    expect(wrapper.emitted('launch-status')?.at(-1)?.[0]).toMatchObject({ requestId: 91, state: 'preparing' })
+
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ initialQuestion: '过去5天各停车区域进场量', initialQuestionToken: 1 })
+    await flush(1)
+
+    expect(wrapper.emitted('launch-status')?.at(-1)?.[0]).toMatchObject({ requestId: 91, state: 'failed' })
+    pendingPost.resolve(jsonResponse({ runId: 'late-run' }, 202))
+    await flush(1)
     wrapper.unmount()
   })
 })

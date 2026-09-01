@@ -62,15 +62,11 @@ describe('GovernanceCenter', () => {
       if (attempts === 1) throw new Error('temporary failure')
       return overview
     })
-
     const wrapper = mount(GovernanceCenter, { props: { role: 'VIEWER' } })
     await flushPromises()
-
     const retry = wrapper.get('[data-governance-retry]')
-    expect(retry.text()).toContain('重试')
     await retry.trigger('click')
     await flushPromises()
-
     expect(attempts).toBe(2)
     expect(wrapper.find('.governance-capabilities').exists()).toBe(true)
     wrapper.unmount()

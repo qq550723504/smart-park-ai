@@ -45,6 +45,8 @@ class GovernanceOverviewServiceTest {
         assertThat(overview.governance().completionRate()).isEqualTo(0.75);
         assertThat(overview.governance().positiveFeedbackRate()).isEqualTo(0.75);
         assertThat(overview.boundaries()).contains("演示角色，不是生产认证");
+        assertThat(overview.boundaries()).anyMatch(boundary ->
+                boundary.contains("客服知识问答") && boundary.contains("会话消息"));
         assertThat(overview.toString()).doesNotContain("resource", "secret", "raw");
     }
 

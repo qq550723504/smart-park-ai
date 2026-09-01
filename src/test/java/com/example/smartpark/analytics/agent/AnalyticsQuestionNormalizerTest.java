@@ -74,4 +74,19 @@ class AnalyticsQuestionNormalizerTest {
 
         assertThat(normalized.requestedDimensions()).containsExactly("stat_date");
     }
+
+    @Test
+    void recognizesEachParkingZoneAsAnExplicitGrouping() {
+        var modelUnderstanding = new AnalyticsModelClient.QuestionUnderstanding(
+                "过去5天各停车区域进场量",
+                List.of("停车进场量"),
+                List.of(),
+                null,
+                List.of("parking_zone"),
+                Map.of());
+
+        var normalized = normalizer.normalize("过去5天各停车区域进场量", modelUnderstanding);
+
+        assertThat(normalized.requestedDimensions()).containsExactly("parking_zone");
+    }
 }

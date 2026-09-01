@@ -13,6 +13,7 @@ import ExpertCollaborationPage from './ExpertCollaborationPage.vue'
 import VoiceAssistantPage from './voice/VoiceAssistantPage.vue'
 import GovernanceCenter from './governance/GovernanceCenter.vue'
 import OperationsBoard from './operations/OperationsBoard.vue'
+import CollaborationCenter from './collaboration/CollaborationCenter.vue'
 import { demoAlerts, type DemoRole } from '../types/workflow'
 import { useWorkflow } from '../composables/useWorkflow'
 import { useExecutionTrace } from '../composables/useExecutionTrace'
@@ -51,6 +52,7 @@ const navItems = computed<WorkbenchNavItem[]>(() => [
   { value: 'customer', label: '园区客服', available: true },
   { value: 'voice', label: '实时语音', available: capabilities.value?.voiceEnabled === true },
   { value: 'collaboration', label: '专家协作', available: capabilities.value?.collaborationEnabled === true },
+  { value: 'collaboration-center', label: '协同中心', available: role.value === 'ADMIN' || role.value === 'CUSTOMER_AGENT' },
   { value: 'analytics', label: '运营分析', available: capabilities.value?.analyticsEnabled === true },
   { value: 'governance', label: '治理中心', available: true },
   { value: 'operations', label: '运营看板', available: capabilities.value?.analyticsEnabled === true },
@@ -68,12 +70,19 @@ onMounted(() => {
 })
 const selectedAlertId = ref(demoAlerts[0].id)
 const activeView = ref<WorkbenchView>(props.initialView)
+let navigationGeneration = 0
 const selectedAnalysisQuestion = ref<string | null>(null)
 const selectedAnalysisQuestionToken = ref(0)
+const customerQueueRefreshToken = ref(0)
 const hasVisitedWorkflow = ref(props.initialView === 'workflow')
-watch(() => props.initialView, (view) => { activeView.value = view })
+function switchView(view: WorkbenchView): void {
+  navigationGeneration += 1
+  if (view !== 'workflow') cancelPendingLoad()
+  activeView.value = view
+}
+watch(() => props.initialView, (view) => { switchView(view) })
 watch(() => props.active, (active) => {
-  if (active) activeView.value = props.initialView
+  if (active) switchView(props.initialView)
 })
 watch(activeView, async (view) => {
   if (view !== 'workflow' || hasVisitedWorkflow.value) return
@@ -83,7 +92,7 @@ watch(activeView, async (view) => {
 const role = ref<DemoRole>('ADMIN')
 const reviewer = ref('')
 const comment = ref('')
-const { workflow, events, loading, approving, error, isTerminal, start, approve, reset: resetWorkflow } = useWorkflow()
+const { workflow, events, loading, approving, error, isTerminal, start, load: loadWorkflow, approve, reset: resetWorkflow, cancelPendingLoad } = useWorkflow()
 const guidedLaunchUpdate = ref<GuidedLaunchUpdate | null>(null)
 const currentGuidedLaunchUpdate = computed(() => {
   const request = props.launchRequest
@@ -141,6 +150,7 @@ const executionEvidenceByView: Record<WorkbenchView, Pick<WorkbenchEvidenceItem,
   customer: { value: '受控写入 · 可创建客服工单', tone: 'warning' },
   voice: { value: '只读查询 · 实时语音会话', tone: 'verified' },
   collaboration: { value: '只读查询 · 多专家汇总', tone: 'verified' },
+  'collaboration-center': { value: '只读聚合 · 原场景处理', tone: 'verified' },
   analytics: { value: '真实只读数据', tone: 'verified' },
   governance: { value: '安全聚合 · 只读概览', tone: 'verified' },
   operations: { value: '真实只读数据 · 选择后分析', tone: 'verified' },
@@ -155,7 +165,24 @@ const evidenceItems = computed<WorkbenchEvidenceItem[]>(() => [
 function openAnalysisFromBoard(question: string): void {
   selectedAnalysisQuestion.value = question
   selectedAnalysisQuestionToken.value += 1
-  activeView.value = 'analytics'
+  switchView('analytics')
+}
+
+async function openCollaborationView(view: 'workflow' | 'customer', workflowId?: string, _ticketId?: string): Promise<void> {
+  const generation = ++navigationGeneration
+  if (view === 'customer') {
+    cancelPendingLoad()
+    customerQueueRefreshToken.value += 1
+  }
+  if (view === 'workflow' && workflowId) {
+    const loaded = await loadWorkflow(workflowId)
+    if (generation !== navigationGeneration) return
+    if (loaded?.alertId && demoAlerts.some((alert) => alert.id === loaded.alertId)) {
+      selectedAlertId.value = loaded.alertId
+    }
+  }
+  if (generation !== navigationGeneration) return
+  activeView.value = view
 }
 watch(
   () => [workflow.value?.workflowId, activeView.value] as const,
@@ -283,7 +310,7 @@ function confidence(value?: number) {
     :evidence-items="evidenceItems"
     :guided-launch="currentGuidedLaunchUpdate"
     :rail-priority="needsApproval"
-    @switch-view="activeView = $event"
+    @switch-view="switchView"
     @update:role="role = $event"
     @back-to-showcase="emit('back-to-showcase')"
     @retry-guided-launch="retryGuidedLaunch"
@@ -306,6 +333,7 @@ function confidence(value?: number) {
       <CustomerServiceConsole
         :role="role"
         :active="props.active && activeView === 'customer'"
+        :refresh-token="customerQueueRefreshToken"
         :launch-request="props.launchRequest"
         @launch-status="handleGuidedLaunchUpdate"
       />
@@ -328,6 +356,13 @@ function confidence(value?: number) {
         @launch-status="handleGuidedLaunchUpdate"
       />
     </main>
+
+    <CollaborationCenter
+      v-show="activeView === 'collaboration-center'"
+      :role="role"
+      :active="props.active && activeView === 'collaboration-center'"
+      @open-view="openCollaborationView"
+    />
 
     <GovernanceCenter v-show="activeView === 'governance'" :role="role" :active="props.active && activeView === 'governance'" />
 

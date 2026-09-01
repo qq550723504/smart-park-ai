@@ -5,7 +5,7 @@ export type ShowcaseScenarioId =
   | 'CUSTOMER_SERVICE'
   | 'VOICE_ASSISTANT'
 
-export type WorkbenchView = 'workflow' | 'customer' | 'voice' | 'collaboration' | 'analytics' | 'governance' | 'operations'
+export type WorkbenchView = 'workflow' | 'customer' | 'voice' | 'collaboration' | 'collaboration-center' | 'analytics' | 'governance' | 'operations'
 export type GuidedWorkbenchView = WorkbenchView
 
 export interface ShowcaseLaunchInput {

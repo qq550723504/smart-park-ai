@@ -48,4 +48,17 @@ class InMemoryCustomerTicketAdapterTest {
                 .isInstanceOf(NoSuchElementException.class)
                 .hasMessageContaining("CS-9999");
     }
+
+    @Test
+    void preservesCreationTimeAndRecordsTheModificationTimeOnTransition() {
+        InMemoryCustomerTicketAdapter adapter = new InMemoryCustomerTicketAdapter();
+        Instant createdAt = Instant.parse("2026-08-23T02:00:00Z");
+        Instant updatedAt = Instant.parse("2026-08-23T03:00:00Z");
+        CustomerTicket ticket = adapter.create("cs-1", "REPAIR", "A1 restroom leak", createdAt);
+
+        CustomerTicket assigned = adapter.update(ticket.id(), CustomerTicketStatus.ASSIGNED, updatedAt);
+
+        assertThat(assigned.createdAt()).isEqualTo(createdAt);
+        assertThat(assigned.updatedAt()).isEqualTo(updatedAt);
+    }
 }

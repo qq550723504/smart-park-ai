@@ -34,12 +34,18 @@ public final class InMemoryCustomerTicketAdapter implements CustomerTicketPort {
 
     @Override
     public CustomerTicket update(String ticketId, CustomerTicketStatus nextStatus) {
+        return update(ticketId, nextStatus, Instant.now());
+    }
+
+    @Override
+    public CustomerTicket update(String ticketId, CustomerTicketStatus nextStatus, Instant updatedAt) {
         Objects.requireNonNull(nextStatus, "nextStatus");
+        Objects.requireNonNull(updatedAt, "updatedAt");
         return tickets.compute(ticketId, (id, current) -> {
             if (current == null) {
                 throw new NoSuchElementException("Unknown customer ticket: " + id);
             }
-            return current.transitionTo(nextStatus);
+            return current.transitionTo(nextStatus, updatedAt);
         });
     }
 

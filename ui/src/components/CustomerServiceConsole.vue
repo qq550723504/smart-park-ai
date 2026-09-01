@@ -12,6 +12,7 @@ import './customer-service.css'
 const props = withDefaults(defineProps<{
   role: DemoRole
   active?: boolean
+  refreshToken?: number
   launchRequest?: ScenarioLaunchRequest | null
 }>(), { active: true, launchRequest: null })
 const emit = defineEmits<{ 'launch-status': [update: GuidedLaunchUpdate] }>()
@@ -113,7 +114,7 @@ useGuidedLaunch({
   onUpdate: (update) => emit('launch-status', update),
 })
 
-watch(() => props.role, loadTickets)
+watch([() => props.role, () => props.refreshToken], loadTickets)
 onMounted(loadTickets)
 </script>
 

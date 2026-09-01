@@ -184,4 +184,27 @@ describe('CustomerServiceConsole', () => {
     expect(wrapper.text()).not.toContain('旧特权工单')
     wrapper.unmount()
   })
+
+  it('refreshes the ticket queue when a collaboration item opens the customer view', async () => {
+    vi.mocked(listCustomerTickets)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{
+        sessionId: 'CS-QUEUE', intent: 'REPAIR', answer: '已转人工', knowledgeSources: [],
+        knowledgeCitations: [], needsHuman: true, reason: 'INSUFFICIENT_EVIDENCE', citationIds: [],
+        ticket: { id: 'T-QUEUE', sessionId: 'CS-QUEUE', intent: 'REPAIR', status: 'WAITING_AGENT',
+          safeSummary: '刚打开的工单', createdAt: '2026-09-01T08:00:00Z' },
+      }])
+
+    const wrapper = mount(CustomerServiceConsole, {
+      props: { role: 'ADMIN', active: true, refreshToken: 0 },
+      global: { stubs: { 'el-input': ElInput, 'el-button': true, 'el-tag': true, 'el-empty': true } },
+    })
+    await flushPromises()
+    await wrapper.setProps({ refreshToken: 1 })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('刚打开的工单')
+    expect(listCustomerTickets).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
 })
