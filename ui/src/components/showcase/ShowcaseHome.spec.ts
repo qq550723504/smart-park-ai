@@ -23,6 +23,7 @@ function scenario(
     OPERATIONS_ANALYSIS: '运营分析',
     CUSTOMER_SERVICE: '园区客服',
     VOICE_ASSISTANT: '实时语音助手',
+    CUSTOMER_SERVICE: '园区客服',
   }
   const questions: Record<ShowcaseScenario['id'], string> = {
     ALERT_WORKFLOW: '配电或暖通异常该如何处置？',
@@ -30,6 +31,7 @@ function scenario(
     OPERATIONS_ANALYSIS: '过去几天哪座楼能耗偏离基线？',
     CUSTOMER_SERVICE: '园区服务如何自动回答并有序转人工？',
     VOICE_ASSISTANT: '通过语音询问园区问题并获得在线回答',
+    CUSTOMER_SERVICE: '园区服务如何自动回答并有序转人工？',
   }
   const launchInputs = {
     ALERT_WORKFLOW: { alertId: 'ALT-POWER-001', question: null },
@@ -40,6 +42,7 @@ function scenario(
     OPERATIONS_ANALYSIS: { alertId: null, question: '过去5天各楼宇能耗' },
     CUSTOMER_SERVICE: { alertId: null, question: '访客停车怎么收费？' },
     VOICE_ASSISTANT: { alertId: null, question: null },
+    CUSTOMER_SERVICE: { alertId: null, question: '访客停车怎么收费？' },
   } as const
 
   return {

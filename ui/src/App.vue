@@ -18,6 +18,7 @@ const scenarioView: Record<ShowcaseScenarioId, GuidedWorkbenchView> = {
   OPERATIONS_ANALYSIS: 'analytics',
   CUSTOMER_SERVICE: 'customer',
   VOICE_ASSISTANT: 'voice',
+  CUSTOMER_SERVICE: 'customer',
 }
 
 function focusComponentRoot(component: InstanceType<typeof ShowcaseHome> | InstanceType<typeof OperationsWorkbench> | null) {
