@@ -55,6 +55,27 @@ describe('GovernanceCenter', () => {
     expect(wrapper.text()).not.toContain('3/5')
   })
 
+  it('retries a failed governance overview through the visible retry action', async () => {
+    let attempts = 0
+    vi.mocked(getGovernanceOverview).mockImplementation(async () => {
+      attempts += 1
+      if (attempts === 1) throw new Error('temporary failure')
+      return overview
+    })
+
+    const wrapper = mount(GovernanceCenter, { props: { role: 'VIEWER' } })
+    await flushPromises()
+
+    const retry = wrapper.get('[data-governance-retry]')
+    expect(retry.text()).toContain('重试')
+    await retry.trigger('click')
+    await flushPromises()
+
+    expect(attempts).toBe(2)
+    expect(wrapper.find('.governance-capabilities').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('loads audit details only for administrators without replacing the overview', async () => {
     vi.mocked(getAuditEntries).mockResolvedValue([{
       actorRole: 'ADMIN', action: 'APPROVE_WORKFLOW', resourceId: 'wf-1', outcome: 'SUCCESS', timestamp: '2026-09-01T08:01:00Z',

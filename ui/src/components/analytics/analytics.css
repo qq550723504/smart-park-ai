@@ -42,7 +42,7 @@
 }
 
 .analytics-preset-group > strong {
-  color: var(--ink-strong, #233449);
+  color: var(--showcase-ivory);
   font-size: 0.72rem;
   letter-spacing: 0.08em;
 }
