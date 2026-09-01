@@ -70,7 +70,9 @@ async function ask(text = question.value, options: { freshSession?: boolean } = 
     if (generation !== requestGeneration) return false
     sessionId.value = result.sessionId
     messages.value.push({ role: 'assistant', text: result.answer, result })
-    conversation.value = await getCustomerConversation(result.sessionId)
+    const nextConversation = await getCustomerConversation(result.sessionId)
+    if (generation !== requestGeneration) return false
+    conversation.value = nextConversation
     await loadTickets()
     return true
   } catch (error) {

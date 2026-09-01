@@ -243,4 +243,79 @@ describe('CustomerServiceConsole', () => {
     expect(wrapper.find('.chat-stream').text()).toContain('访客停车按园区规则执行。')
     wrapper.unmount()
   })
+
+  it('does not restore stale conversation details after a guided relaunch', async () => {
+    vi.mocked(listCustomerTickets).mockResolvedValue([])
+    const oldConversation = deferred<Awaited<ReturnType<typeof getCustomerConversation>>>()
+    vi.mocked(askCustomerService)
+      .mockResolvedValueOnce({
+        sessionId: 'CS-SESSION-OLD',
+        intent: 'REPAIR',
+        answer: '旧请求回答',
+        knowledgeSources: [],
+        knowledgeCitations: [],
+        needsHuman: true,
+        reason: 'INSUFFICIENT_EVIDENCE',
+        citationIds: [],
+        ticket: null,
+      })
+      .mockResolvedValueOnce({
+        sessionId: 'CS-SESSION-NEW',
+        intent: 'PARKING_POLICY',
+        answer: '访客停车按园区规则执行。',
+        knowledgeSources: ['KB-PARKING-001'],
+        knowledgeCitations: [],
+        needsHuman: false,
+        reason: 'SUPPORTED',
+        citationIds: ['KB-PARKING-001'],
+        ticket: null,
+      })
+    vi.mocked(getCustomerConversation)
+      .mockImplementationOnce(() => oldConversation.promise)
+      .mockResolvedValueOnce({
+        sessionId: 'CS-SESSION-NEW',
+        messages: [],
+        retrievals: [],
+        humanHandoff: false,
+      })
+
+    const wrapper = mount(CustomerServiceConsole, {
+      props: { role: 'VIEWER', active: true },
+      global: {
+        stubs: {
+          'el-input': ElInput,
+          'el-button': true,
+          'el-tag': true,
+          'el-empty': true,
+        },
+      },
+    })
+
+    await wrapper.get('.chat-composer input').setValue('旧的现场报修问题')
+    await wrapper.get('.chat-composer').trigger('submit')
+    expect(getCustomerConversation).toHaveBeenCalledTimes(1)
+
+    await wrapper.setProps({
+      launchRequest: {
+        requestId: 10,
+        mode: 'guided',
+        scenarioId: 'CUSTOMER_SERVICE',
+        view: 'customer',
+        launchInput: { alertId: null, question: '访客停车怎么收费？' },
+      },
+    })
+    await flushPromises()
+
+    oldConversation.resolve({
+      sessionId: 'CS-SESSION-OLD',
+      messages: [],
+      retrievals: [{ query: '旧请求', documentIds: [], createdAt: '2026-09-01T00:00:00Z' }],
+      humanHandoff: true,
+    })
+    await flushPromises()
+
+    expect(wrapper.find('.chat-composer input').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('.retrieval-trace').exists()).toBe(false)
+    wrapper.unmount()
+  })
 })
