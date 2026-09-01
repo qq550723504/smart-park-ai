@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ExpertCard from './ExpertCard.vue'
+import { expertDetailKey } from '../utils/collaborationPresentation'
 
 describe('ExpertCard', () => {
+  it('creates unique keys for repeated detail occurrences', () => {
+    expect(expertDetailKey('状态', '在线', 0)).not.toBe(expertDetailKey('状态', '在线', 1))
+  })
+
   it('preserves the business meaning of a plain-text finding conclusion', () => {
     const wrapper = mount(ExpertCard, {
       props: {
@@ -192,6 +197,32 @@ describe('ExpertCard', () => {
     expect(wrapper.text()).toContain('未授权访问')
     expect(wrapper.text()).toContain('事件摘要')
     expect(wrapper.text()).toContain('北门门禁连续拒绝三次')
+    wrapper.unmount()
+  })
+
+  it('projects work-order identifiers in the work-order context', () => {
+    const wrapper = mount(ExpertCard, {
+      props: {
+        domain: 'DEVICE',
+        plan: {
+          normalizedQuestion: 'q',
+          selectedDomains: ['DEVICE'],
+          assignments: { DEVICE: '查询设备 DEV-1 的工单' },
+          selectionReason: 'work orders',
+        },
+        finding: {
+          domain: 'DEVICE',
+          status: 'SUPPORTED',
+          conclusion: '工具结果: {"workOrders":[{"id":"WO-1","deviceId":"DEV-1","status":"OPEN","summary":"Work order content withheld"}]}',
+          evidenceRefs: [],
+          confidence: 0.92,
+          nextChecks: [],
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('工单WO-1')
+    expect(wrapper.text()).toContain('状态未处理')
     wrapper.unmount()
   })
 

@@ -47,6 +47,7 @@ const fieldLabels: Record<string, string> = {
   eventType: '事件类型',
   evidenceSummary: '事件摘要',
   alertId: '告警',
+  workOrderId: '工单',
   buildingId: '楼宇',
   parkId: '园区',
   status: '状态',
@@ -160,20 +161,22 @@ function formatValue(key: string, value: unknown): string {
   return String(value ?? '')
 }
 
-function collectKnownFields(value: unknown, fields: Array<[string, unknown]> = [], knowledgeDocument = false): Array<[string, unknown]> {
+function collectKnownFields(value: unknown, fields: Array<[string, unknown]> = [], context: 'root' | 'knowledge' | 'workorder' = 'root'): Array<[string, unknown]> {
   if (Array.isArray(value)) {
-    value.forEach((item) => collectKnownFields(item, fields, knowledgeDocument))
+    value.forEach((item) => collectKnownFields(item, fields, context))
     return fields
   }
   if (!value || typeof value !== 'object') return fields
 
   Object.entries(value).forEach(([key, nestedValue]) => {
-    const isKnowledgeDocuments = key === 'documents'
-    const isKnowledgeIdentifier = (key === 'id' || key === 'documentId') && knowledgeDocument
-    if (fieldLabels[key] && (typeof nestedValue !== 'object' || nestedValue === null || key === 'tags') && (key !== 'id' && key !== 'documentId' || isKnowledgeIdentifier)) {
-      fields.push([key, nestedValue])
+    const nextContext = key === 'documents' ? 'knowledge' : key === 'workOrders' ? 'workorder' : context
+    const isIdentifier = key === 'id' || key === 'documentId'
+    const isScopedIdentifier = isIdentifier && context !== 'root'
+    const projectedKey = isIdentifier && context === 'workorder' ? 'workOrderId' : key
+    if (fieldLabels[key] && (typeof nestedValue !== 'object' || nestedValue === null || key === 'tags') && (!isIdentifier || isScopedIdentifier)) {
+      fields.push([projectedKey, nestedValue])
     } else {
-      collectKnownFields(nestedValue, fields, knowledgeDocument || isKnowledgeDocuments)
+      collectKnownFields(nestedValue, fields, nextContext)
     }
   })
   return fields
@@ -196,6 +199,10 @@ function summaryFor(domain: ExpertDomain, finding: ExpertFinding, details: Array
   if (hasStructuredObject) return `${domainLabels[domain]}已返回核查结果。`
   const conclusion = finding.conclusion.trim()
   return conclusion ? `${domainLabels[domain]}已返回核查结果：${conclusion}` : `${domainLabels[domain]}已返回核查结果。`
+}
+
+export function expertDetailKey(label: string, value: string, index: number): string {
+  return [label, value, index].join('-')
 }
 
 export function formatEvidenceRef(ref: string): string {

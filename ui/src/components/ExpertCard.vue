@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { ExpertDomain, ExpertFinding, SupervisorPlan } from '../types/collaboration'
-import { formatFinding } from '../utils/collaborationPresentation'
+import { expertDetailKey, formatFinding } from '../utils/collaborationPresentation'
 
 const props = defineProps<{
   domain: ExpertDomain
@@ -37,7 +37,7 @@ const findingDisplay = computed(() => props.finding ? formatFinding(props.findin
     <div v-if="finding" class="expert-finding">
       <p class="expert-conclusion">{{ findingDisplay?.summary }}</p>
       <dl v-if="findingDisplay?.details.length" class="expert-details">
-        <div v-for="detail in findingDisplay.details" :key="`${detail.label}-${detail.value}`">
+        <div v-for="(detail, index) in findingDisplay.details" :key="expertDetailKey(detail.label, detail.value, index)">
           <dt>{{ detail.label }}</dt>
           <dd>{{ detail.value }}</dd>
         </div>
