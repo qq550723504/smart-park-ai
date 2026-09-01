@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import {
+  ChatDotRound,
   Connection,
   DataLine,
   DocumentChecked,
@@ -27,7 +28,7 @@ const props = withDefaults(defineProps<{
   active: true,
 })
 
-const priority = ['EXPERT_COLLABORATION', 'ALERT_WORKFLOW', 'OPERATIONS_ANALYSIS', 'VOICE_ASSISTANT'] as const
+const priority = ['EXPERT_COLLABORATION', 'ALERT_WORKFLOW', 'OPERATIONS_ANALYSIS', 'CUSTOMER_SERVICE', 'VOICE_ASSISTANT'] as const
 const catalog = ref<ShowcaseScenarioCatalog | null>(null)
 const selectedId = ref<ShowcaseScenario['id'] | null>(null)
 const loading = ref(true)
@@ -89,6 +90,7 @@ function scenarioIcon(id: ShowcaseScenario['id']) {
     EXPERT_COLLABORATION: Connection,
     OPERATIONS_ANALYSIS: DataLine,
     VOICE_ASSISTANT: Monitor,
+    CUSTOMER_SERVICE: ChatDotRound,
   }[id]
 }
 

@@ -3,9 +3,10 @@ export type ShowcaseScenarioId =
   | 'EXPERT_COLLABORATION'
   | 'OPERATIONS_ANALYSIS'
   | 'VOICE_ASSISTANT'
+  | 'CUSTOMER_SERVICE'
 
 export type WorkbenchView = 'workflow' | 'customer' | 'voice' | 'collaboration' | 'analytics'
-export type GuidedWorkbenchView = Exclude<WorkbenchView, 'customer'>
+export type GuidedWorkbenchView = WorkbenchView
 
 export interface ShowcaseLaunchInput {
   alertId: string | null

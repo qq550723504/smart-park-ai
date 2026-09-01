@@ -224,7 +224,7 @@ docker compose --env-file .env `
 .\scripts\verify-showcase.ps1
 ```
 
-验证器会向 `POST /api/showcase/preflight` 请求四个且仅四个演示场景，并且只在全部返回 `READY` 和有效 `verifiedAt` 时成功；成功输出只包含 `scenarioId`、`status` 和 `verifiedAt`。`READY` 收据仅在当前进程内有效 15 分钟，应用重启或收据过期后必须重新运行预检。
+验证器会向 `POST /api/showcase/preflight` 请求五个且仅五个演示场景，并且只在全部返回 `READY` 和有效 `verifiedAt` 时成功；成功输出只包含 `scenarioId`、`status` 和 `verifiedAt`。`READY` 收据仅在当前进程内有效 15 分钟，应用重启或收据过期后必须重新运行预检。
 
 告警预检从不批准或创建工单；它只验证流程是否安全地停在人工审批边界。服务端语音预检也不能替代浏览器麦克风权限确认和一次人工真实说话的完整往返验收。
 

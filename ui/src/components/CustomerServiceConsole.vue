@@ -5,9 +5,19 @@ import { askCustomerService, getCustomerConversation, listCustomerTickets, reply
 import type { CustomerConversationResponse, CustomerServiceResponse, CustomerTicketResponse, DemoRole } from '../types/workflow'
 import { customerIntentLabel, customerTicketStatusLabel } from '../utils/labels'
 import { createRequestId } from '../utils/requestId'
+import { useGuidedLaunch } from '../composables/useGuidedLaunch'
+import type { GuidedLaunchUpdate, ScenarioLaunchRequest } from '../types/workbench'
 import './customer-service.css'
 
-const props = defineProps<{ role: DemoRole }>()
+const props = withDefaults(defineProps<{
+  role: DemoRole
+  active?: boolean
+  launchRequest?: ScenarioLaunchRequest | null
+}>(), {
+  active: true,
+  launchRequest: null,
+})
+const emit = defineEmits<{ 'launch-status': [update: GuidedLaunchUpdate] }>()
 const question = ref('')
 const loading = ref(false)
 const messages = ref<Array<{ role: 'user' | 'assistant'; text: string; result?: CustomerServiceResponse }>>([])
@@ -43,9 +53,9 @@ async function advance(ticket: CustomerTicketResponse) {
   }
 }
 
-async function ask(text = question.value) {
+async function ask(text = question.value): Promise<boolean> {
   const normalized = text.trim()
-  if (!normalized || loading.value) return
+  if (!normalized || loading.value) return false
   messages.value.push({ role: 'user', text: normalized })
   question.value = ''
   loading.value = true
@@ -58,12 +68,28 @@ async function ask(text = question.value) {
     messages.value.push({ role: 'assistant', text: result.answer, result })
     conversation.value = await getCustomerConversation(result.sessionId)
     await loadTickets()
+    return true
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '客服请求失败')
+    return false
   } finally {
     loading.value = false
   }
 }
+
+useGuidedLaunch({
+  active: () => props.active,
+  request: () => props.launchRequest,
+  scenarioId: 'CUSTOMER_SERVICE',
+  start: async (request) => {
+    const guidedQuestion = request.launchInput?.question?.trim()
+    if (!guidedQuestion) throw new Error('客服演示配置无效')
+    const started = await ask(guidedQuestion)
+    if (!started) throw new Error('客服演示启动失败')
+    return { state: 'started', message: '园区客服已启动' }
+  },
+  onUpdate: (update) => emit('launch-status', update),
+})
 
 watch(() => props.role, loadTickets)
 onMounted(loadTickets)
