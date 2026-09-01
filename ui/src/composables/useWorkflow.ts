@@ -1,6 +1,7 @@
 import { computed, onScopeDispose, ref } from 'vue'
 import { getWorkflow, startWorkflow, submitApproval, subscribeToWorkflow } from '../services/workflowApi'
 import type { DemoRole, WorkflowEvent, WorkflowResponse } from '../types/workflow'
+import { createRequestId } from '../utils/requestId'
 
 export function useWorkflow() {
   const workflow = ref<WorkflowResponse | null>(null)
@@ -105,7 +106,7 @@ export function useWorkflow() {
     approving.value = true
     error.value = ''
     try {
-      approvalKey ??= crypto.randomUUID()
+      approvalKey ??= createRequestId()
       const { role, ...decision } = payload
       const approved = await submitApproval(workflowId, {
         ...decision,

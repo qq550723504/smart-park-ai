@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { askCustomerService, getCustomerConversation, listCustomerTickets, replyCustomerSession, submitFeedback, updateCustomerTicket } from '../services/workflowApi'
 import type { CustomerConversationResponse, CustomerServiceResponse, CustomerTicketResponse, DemoRole } from '../types/workflow'
 import { customerIntentLabel, customerTicketStatusLabel } from '../utils/labels'
+import { createRequestId } from '../utils/requestId'
 import './customer-service.css'
 
 const props = defineProps<{ role: DemoRole }>()
@@ -49,9 +50,10 @@ async function ask(text = question.value) {
   question.value = ''
   loading.value = true
   try {
+    const requestId = createRequestId()
     const result = sessionId.value
-      ? await replyCustomerSession(sessionId.value, normalized, crypto.randomUUID())
-      : await askCustomerService(normalized, crypto.randomUUID())
+      ? await replyCustomerSession(sessionId.value, normalized, requestId)
+      : await askCustomerService(normalized, requestId)
     sessionId.value = result.sessionId
     messages.value.push({ role: 'assistant', text: result.answer, result })
     conversation.value = await getCustomerConversation(result.sessionId)
