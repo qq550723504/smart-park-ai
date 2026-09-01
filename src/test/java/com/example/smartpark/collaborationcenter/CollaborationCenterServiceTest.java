@@ -61,6 +61,19 @@ class CollaborationCenterServiceTest {
         assertThat(items.get(0).id()).isEqualTo("CUSTOMER_TICKET:cs-2");
     }
 
+    @Test
+    void remainsAvailableWhenAlertWorkflowIsDisabled() {
+        CustomerTicketPort tickets = mock(CustomerTicketPort.class);
+        when(tickets.list()).thenReturn(List.of(new CustomerTicket(
+                "cs-offline", "session-offline", "REPAIR", "WAITING_AGENT", "维修请求。", Instant.EPOCH)));
+
+        List<CollaborationWorkItem> items = new CollaborationCenterService(null, tickets)
+                .list(WorkItemQuery.defaults());
+
+        assertThat(items).extracting(CollaborationWorkItem::id)
+                .containsExactly("CUSTOMER_TICKET:cs-offline");
+    }
+
     private static WorkflowSnapshot alertSnapshot() {
         return new WorkflowSnapshot(
                 "wf-1", "ALT-POWER-001", WorkflowStatus.WAITING_APPROVAL,

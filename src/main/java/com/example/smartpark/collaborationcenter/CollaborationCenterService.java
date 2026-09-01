@@ -21,7 +21,7 @@ public final class CollaborationCenterService {
     private final CustomerTicketPort tickets;
 
     public CollaborationCenterService(WorkflowExecutionStore workflows, CustomerTicketPort tickets) {
-        this.workflows = Objects.requireNonNull(workflows, "workflows");
+        this.workflows = workflows;
         this.tickets = Objects.requireNonNull(tickets, "tickets");
     }
 
@@ -29,8 +29,10 @@ public final class CollaborationCenterService {
         WorkItemQuery requested = Objects.requireNonNull(query, "query");
         List<CollaborationWorkItem> items = new ArrayList<>();
         if (requested.source() == null || requested.source() == CollaborationWorkItem.Source.ALERT_WORKFLOW) {
-            workflows.snapshots().stream().map(CollaborationCenterService::fromWorkflow)
-                    .filter(requested::accepts).forEach(items::add);
+            if (workflows != null) {
+                workflows.snapshots().stream().map(CollaborationCenterService::fromWorkflow)
+                        .filter(requested::accepts).forEach(items::add);
+            }
         }
         if (requested.source() == null || requested.source() == CollaborationWorkItem.Source.CUSTOMER_TICKET) {
             tickets.list().stream().map(CollaborationCenterService::fromTicket)
