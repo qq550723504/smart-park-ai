@@ -62,9 +62,7 @@ public final class ExpertCollaborationPreflightProbe implements ShowcasePrefligh
     private boolean hasCompleteEvidence(CollaborationRun run) {
         if (run.plan() == null || !run.plan().selectedDomains().equals(REQUIRED_DOMAINS)
                 || run.findings().size() != REQUIRED_DOMAINS.size()
-                || run.synthesis() == null
-                || run.synthesis().status() != FindingStatus.SUPPORTED
-                || run.synthesis().evidenceRefs().isEmpty()) {
+                || run.synthesis() == null) {
             return false;
         }
         Set<ExpertDomain> findingDomains = run.findings().stream()
@@ -78,6 +76,16 @@ public final class ExpertCollaborationPreflightProbe implements ShowcasePrefligh
         Set<String> findingEvidence = run.findings().stream()
                 .flatMap(finding -> finding.evidenceRefs().stream())
                 .collect(Collectors.toSet());
-        return Set.copyOf(run.synthesis().evidenceRefs()).equals(findingEvidence);
+        if (run.synthesis().status() == FindingStatus.SUPPORTED) {
+            return !run.synthesis().evidenceRefs().isEmpty()
+                    && Set.copyOf(run.synthesis().evidenceRefs()).equals(findingEvidence);
+        }
+        // A completed supervisor may safely conclude that the available,
+        // fully grounded domain observations do not establish a cross-domain
+        // relationship. That is still a runnable showcase result, provided it
+        // discloses the uncertainty and does not attach unsupported evidence.
+        return run.synthesis().status() == FindingStatus.INSUFFICIENT_EVIDENCE
+                && run.synthesis().evidenceRefs().isEmpty()
+                && !run.synthesis().uncertainties().isEmpty();
     }
 }
