@@ -204,7 +204,6 @@ describe('App surface coordinator', () => {
     ['OPERATIONS_ANALYSIS', 'analytics'],
     ['CUSTOMER_SERVICE', 'customer'],
     ['VOICE_ASSISTANT', 'voice'],
-    ['CUSTOMER_SERVICE', 'customer'],
   ] as Array<[ShowcaseScenario['id'], WorkbenchView]>)(
     'opens %s in the cached workbench %s view',
     async (scenarioId, expectedView) => {
