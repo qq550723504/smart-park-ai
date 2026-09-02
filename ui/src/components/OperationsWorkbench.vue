@@ -36,7 +36,7 @@ const emit = defineEmits<{
   'retry-guided-launch': [scenarioId: ShowcaseScenarioId, launchInput: ShowcaseLaunchInput]
 }>()
 
-const capabilities = ref<{ knowledgeMode: string; customerAnswerMode: string; vectorStore: string; analyticsEnabled: boolean; collaborationEnabled: boolean; voiceEnabled: boolean } | null>(null)
+const capabilities = ref<{ knowledgeMode: string; customerAnswerMode: string; vectorStore: string; analyticsEnabled: boolean; collaborationEnabled: boolean; voiceEnabled: boolean; securityIncidentEnabled: boolean } | null>(null)
 const capabilityLoadState = ref<'loading' | 'ready' | 'failed'>('loading')
 const capabilityLabels = computed(() => capabilities.value ? {
   knowledge: capabilities.value.knowledgeMode === 'mock' ? 'Mock' : 'RAG',
@@ -52,7 +52,7 @@ const navItems = computed<WorkbenchNavItem[]>(() => [
   { value: 'workflow', label: '告警工作流', available: true },
   { value: 'customer', label: '园区客服', available: true },
   { value: 'collaboration-center', label: '协同中心', available: ['ADMIN', 'APPROVER', 'CUSTOMER_AGENT'].includes(role.value) },
-  { value: 'security-incidents', label: '安全事件研判', available: ['ADMIN', 'APPROVER'].includes(role.value) },
+  { value: 'security-incidents', label: '安全事件研判', available: ['ADMIN', 'APPROVER'].includes(role.value) && capabilities.value?.securityIncidentEnabled === true },
   { value: 'operations', label: '运营看板', available: capabilities.value?.analyticsEnabled === true },
   { value: 'analytics', label: '运营分析', available: capabilities.value?.analyticsEnabled === true },
   { value: 'collaboration', label: '专家协作', available: capabilities.value?.collaborationEnabled === true },
@@ -182,6 +182,7 @@ function openAnalysisFromBoard(question: string): void {
 async function openCollaborationView(view: 'workflow' | 'customer' | 'security-incident', workflowId?: string, _ticketId?: string): Promise<void> {
   const generation = ++navigationGeneration
   if (view === 'security-incident') {
+    if (!['ADMIN', 'APPROVER'].includes(role.value) || capabilities.value?.securityIncidentEnabled !== true) return
     securityIncidentTargetId.value = workflowId ?? null
     switchView('security-incidents')
     return

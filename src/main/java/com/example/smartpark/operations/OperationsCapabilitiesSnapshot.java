@@ -6,5 +6,6 @@ public record OperationsCapabilitiesSnapshot(
         String vectorStore,
         boolean analyticsEnabled,
         boolean collaborationEnabled,
-        boolean voiceEnabled) {
+        boolean voiceEnabled,
+        boolean securityIncidentEnabled) {
 }

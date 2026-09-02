@@ -8,6 +8,7 @@ import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoff;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoffPort;
 import com.example.smartpark.port.security.SecurityEventReader;
+import com.example.smartpark.collaborationcenter.SecurityIncidentHandoffStore;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -92,6 +93,49 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void reconcilesAllStoredStatesWhenALateEventBridgesTwoIncidents() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-1", "A1", "ACCESS", BASE),
+                event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(16 * 60))));
+        SecurityIncidentService service = service(events);
+
+        SecurityIncident later = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.eventIds().contains("SEC-2"))
+                .findFirst().orElseThrow();
+        service.review(later.incidentId());
+        SecurityIncident handedOff = service.handoff(later.incidentId());
+        events.add(event("SEC-BRIDGE", "A1", "ACCESS", BASE.plusSeconds(8 * 60)));
+
+        SecurityIncident merged = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(merged.incidentId()).isNotEqualTo(later.incidentId());
+        assertThat(merged.eventIds()).containsExactly("SEC-1", "SEC-BRIDGE", "SEC-2");
+        assertThat(merged.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(merged.handoffWorkItemId()).isEqualTo(handedOff.handoffWorkItemId());
+    }
+
+    @Test
+    void refreshesExistingHandoffProjectionAfterCorrelationDataChanges() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-1", "A1", "ACCESS", BASE, "REDACTED:旧摘要")));
+        List<Alert> alerts = new ArrayList<>();
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, alerts, 50, handoffs);
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(incident.incidentId());
+        service.handoff(incident.incidentId());
+
+        events.set(0, event("SEC-1", "A1", "ACCESS", BASE, "REDACTED:新摘要"));
+        alerts.add(new Alert("ALT-1", "PARK-A", "A1", "DEV-1", AlertClassification.ACCESS,
+                RiskLevel.HIGH, "REDACTED:高风险告警", BASE.plusSeconds(30), List.of("security-event:SEC-1")));
+        service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(handoffs.list()).singleElement().satisfies(handoff -> {
+            assertThat(handoff.riskLevel()).isEqualTo(SecurityIncidentRisk.HIGH);
+            assertThat(handoff.safeSummary()).isEqualTo("REDACTED:新摘要");
+        });
+    }
+
+    @Test
     void missingRiskInformationDefaultsToMedium() {
         SecurityIncidentService service = service(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
 
@@ -154,6 +198,22 @@ class SecurityIncidentServiceTest {
     }
 
     private static SecurityIncidentService service(List<SecurityEvent> events, List<Alert> alerts, int capacity) {
+        return service(events, alerts, capacity, new SecurityIncidentHandoffPort() {
+            @Override
+            public SecurityIncidentHandoff createOrGet(SecurityIncident incident, Instant now) {
+                return new SecurityIncidentHandoff("WI:" + incident.incidentId(), incident.incidentId(), incident.parkId(),
+                        incident.buildingId(), incident.riskLevel(), incident.summary(), now);
+            }
+
+            @Override
+            public List<SecurityIncidentHandoff> list() {
+                return List.of();
+            }
+        });
+    }
+
+    private static SecurityIncidentService service(List<SecurityEvent> events, List<Alert> alerts, int capacity,
+                                                    SecurityIncidentHandoffPort handoffs) {
         SecurityEventReader security = new SecurityEventReader() {
             @Override
             public SecurityEvent getEvent(String eventId) {
@@ -181,18 +241,6 @@ class SecurityIncidentServiceTest {
                 return alerts;
             }
         };
-        SecurityIncidentHandoffPort handoffs = new SecurityIncidentHandoffPort() {
-            @Override
-            public SecurityIncidentHandoff createOrGet(SecurityIncident incident, Instant now) {
-                return new SecurityIncidentHandoff("WI:" + incident.incidentId(), incident.incidentId(), incident.parkId(),
-                        incident.buildingId(), incident.riskLevel(), incident.summary(), now);
-            }
-
-            @Override
-            public List<SecurityIncidentHandoff> list() {
-                return List.of();
-            }
-        };
         return new SecurityIncidentService(security, alertPort, new SecurityIncidentStore(capacity), handoffs,
                 Clock.fixed(BASE.plusSeconds(3600), ZoneOffset.UTC));
     }
@@ -202,6 +250,15 @@ class SecurityIncidentServiceTest {
     }
 
     private static SecurityEvent event(String id, String parkId, String buildingId, String type, Instant occurredAt) {
-        return new SecurityEvent(id, parkId, buildingId, type, occurredAt, "REDACTED: safe event summary");
+        return event(id, parkId, buildingId, type, occurredAt, "REDACTED: safe event summary");
+    }
+
+    private static SecurityEvent event(String id, String buildingId, String type, Instant occurredAt, String summary) {
+        return event(id, "PARK-A", buildingId, type, occurredAt, summary);
+    }
+
+    private static SecurityEvent event(String id, String parkId, String buildingId, String type, Instant occurredAt,
+                                       String summary) {
+        return new SecurityEvent(id, parkId, buildingId, type, occurredAt, summary);
     }
 }

@@ -20,7 +20,7 @@ class GovernanceOverviewControllerTest {
         GovernanceOverview expected = new GovernanceOverview(
                 Instant.EPOCH,
                 new GovernanceOverview.ScenarioCounts(1, 1, 0, 0),
-                new OperationsCapabilitiesSnapshot("mock", "mock", "none", false, false, false),
+                new OperationsCapabilitiesSnapshot("mock", "mock", "none", false, false, false, false),
                 new GovernanceOverview.BusinessCounts(0, 0, 0, 0),
                 new GovernanceOverview.GovernanceCounts(0, 0, 0, 0, 0, null, null),
                 List.of("演示角色，不是生产认证"));

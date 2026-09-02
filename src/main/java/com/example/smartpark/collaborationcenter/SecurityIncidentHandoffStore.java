@@ -30,12 +30,38 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
                         existing.buildingId(), higherRisk(existing.riskLevel(), incident.riskLevel()), incident.summary(),
                         existing.createdAt());
         handoffs.put(incident.incidentId(), handoff);
+        trimToCapacity();
+        return handoff;
+    }
+
+    @Override
+    public synchronized SecurityIncidentHandoff refresh(SecurityIncident incident, Instant now) {
+        if (incident.handoffWorkItemId() != null) {
+            String existingIncidentId = handoffs.entrySet().stream()
+                    .filter(entry -> incident.handoffWorkItemId().equals(entry.getValue().workItemId()))
+                    .map(Map.Entry::getKey)
+                    .filter(id -> !id.equals(incident.incidentId()))
+                    .findFirst()
+                    .orElse(null);
+            if (existingIncidentId != null) handoffs.remove(existingIncidentId);
+            if (existingIncidentId == null && !handoffs.containsKey(incident.incidentId())) {
+                SecurityIncidentHandoff restored = new SecurityIncidentHandoff(incident.handoffWorkItemId(),
+                        incident.incidentId(), incident.parkId(), incident.buildingId(), incident.riskLevel(),
+                        incident.summary(), now);
+                handoffs.put(incident.incidentId(), restored);
+                trimToCapacity();
+                return restored;
+            }
+        }
+        return createOrGet(incident, now);
+    }
+
+    private void trimToCapacity() {
         while (handoffs.size() > capacity) {
             Iterator<String> ids = handoffs.keySet().iterator();
             ids.next();
             ids.remove();
         }
-        return handoff;
     }
 
     private static SecurityIncidentRisk higherRisk(SecurityIncidentRisk left, SecurityIncidentRisk right) {

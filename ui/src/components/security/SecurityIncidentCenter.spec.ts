@@ -110,6 +110,24 @@ describe('SecurityIncidentCenter', () => {
     expect(wrapper.find('.hero-metrics').text()).toContain('0已转协同')
   })
 
+  it('offers navigation to an already completed handoff without creating another handoff', async () => {
+    const completed = { ...detail, status: 'HANDOFF', handoffWorkItemId: 'SECURITY_INCIDENT:INC-1' }
+    globalThis.fetch = (async (input, init) => {
+      expect(init?.method ?? 'GET').toBe('GET')
+      return String(input).includes('/api/security/incidents?')
+        ? response({ items: [{ ...summary, status: 'HANDOFF' }], total: 1 })
+        : response(completed)
+    }) as typeof fetch
+
+    const wrapper = mount(SecurityIncidentCenter, { props: { role: 'ADMIN' } })
+    await flushPromises()
+    await wrapper.get('[data-security-action="open-handoff"]').trigger('click')
+
+    expect(wrapper.emitted('open-collaboration')).toEqual([[
+      { incidentId: 'INC-1', workItemId: 'SECURITY_INCIDENT:INC-1' },
+    ]])
+  })
+
   it('ignores a late handoff response after selecting another incident', async () => {
     let resolveHandoff!: (value: Response) => void
     const handoff = new Promise<Response>(resolve => { resolveHandoff = resolve })

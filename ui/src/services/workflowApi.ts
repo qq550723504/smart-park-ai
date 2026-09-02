@@ -123,6 +123,7 @@ export interface OperationsCapabilities {
   analyticsEnabled: boolean
   collaborationEnabled: boolean
   voiceEnabled: boolean
+  securityIncidentEnabled: boolean
 }
 
 export function getOperationsCapabilities() {

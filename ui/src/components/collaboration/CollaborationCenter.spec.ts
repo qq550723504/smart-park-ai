@@ -73,6 +73,26 @@ describe('CollaborationCenter', () => {
     expect(wrapper.get(`[data-work-item="${focused.id}"]`).classes()).toContain('is-focused')
   })
 
+  it('does not append a focused item that does not match the active source filter', async () => {
+    const focused = {
+      id: 'SECURITY_INCIDENT:INC-1', source: 'SECURITY_INCIDENT', status: 'COMPLETED', priority: 'HIGH',
+      title: '安全事件研判 INC-1', safeSummary: 'REDACTED:安全事件摘要', parkId: 'PARK-A', buildingId: 'A1', deviceId: null,
+      updatedAt: '2026-09-01T06:00:00Z', detailPath: 'security-incident',
+    }
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      if (url.includes('workItemId=') && !url.includes('source=')) return response([focused])
+      return response([])
+    }) as typeof fetch
+
+    const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN', focusWorkItemId: focused.id } })
+    await flushPromises()
+    await wrapper.get('select').setValue('ALERT_WORKFLOW')
+    await flushPromises()
+
+    expect(wrapper.find(`[data-work-item="${focused.id}"]`).exists()).toBe(false)
+  })
+
   it('ignores a stale queue response after the filters change', async () => {
     let resolveFirst!: (value: Response) => void
     let resolveSecond!: (value: Response) => void

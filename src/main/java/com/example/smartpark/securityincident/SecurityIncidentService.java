@@ -23,7 +23,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
-import java.util.Optional;
 
 public final class SecurityIncidentService {
     private static final Duration GROUPING_WINDOW = Duration.ofMinutes(15);
@@ -48,7 +47,12 @@ public final class SecurityIncidentService {
         Objects.requireNonNull(query, "query");
         List<SecurityIncident> correlated = correlate();
         List<SecurityIncident> merged = correlated.stream().map(this::restoreState).toList();
-        merged.forEach(store::save);
+        merged.forEach(incident -> {
+            store.save(incident);
+            if (incident.status() == SecurityIncidentStatus.HANDOFF) {
+                handoffs.refresh(incident, clock.instant());
+            }
+        });
         java.util.Set<String> currentIds = merged.stream().map(SecurityIncident::incidentId)
                 .collect(java.util.stream.Collectors.toSet());
         List<SecurityIncident> filtered = store.findAll().stream()
@@ -75,7 +79,10 @@ public final class SecurityIncidentService {
 
     public synchronized SecurityIncident handoff(String incidentId) {
         SecurityIncident current = get(incidentId);
-        if (current.handoffWorkItemId() != null) return current;
+        if (current.handoffWorkItemId() != null) {
+            handoffs.refresh(current, clock.instant());
+            return current;
+        }
         SecurityIncidentHandoff handoff = handoffs.createOrGet(current, clock.instant());
         SecurityIncident result = current.handoff(handoff.workItemId(), clock.instant());
         store.save(result);
@@ -141,20 +148,48 @@ public final class SecurityIncidentService {
     }
 
     private SecurityIncident restoreState(SecurityIncident fresh) {
-        Optional<SecurityIncident> exact = store.get(fresh.incidentId());
-        if (exact.isPresent()) return withStoredState(fresh, exact.get());
-
-        List<SecurityIncident> expanded = store.findAll().stream()
+        List<SecurityIncident> candidates = store.findAll().stream()
                 .filter(existing -> sameCorrelation(existing, fresh))
                 .filter(existing -> fresh.eventIds().containsAll(existing.eventIds()))
                 .toList();
-        return expanded.size() == 1 ? withStoredState(fresh, expanded.get(0)) : fresh;
+        if (candidates.isEmpty()) return fresh;
+
+        SecurityIncident state = candidates.stream()
+                .max(Comparator.comparingInt(existing -> statusRank(existing.status())))
+                .orElseThrow();
+        List<String> handoffIds = candidates.stream()
+                .map(SecurityIncident::handoffWorkItemId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (handoffIds.size() > 1) {
+            throw new IllegalStateException("cannot merge security incidents with conflicting handoff work items");
+        }
+        SecurityIncident canonical = candidates.stream()
+                .min(Comparator.comparing(SecurityIncident::openedAt).thenComparing(SecurityIncident::incidentId))
+                .orElseThrow();
+        Instant reviewedAt = candidates.stream()
+                .map(SecurityIncident::reviewedAt)
+                .filter(Objects::nonNull)
+                .max(Comparator.naturalOrder())
+                .orElse(null);
+        return withStoredState(fresh, canonical.incidentId(), state.status(), reviewedAt,
+                handoffIds.isEmpty() ? null : handoffIds.get(0));
     }
 
-    private static SecurityIncident withStoredState(SecurityIncident fresh, SecurityIncident existing) {
-        return new SecurityIncident(existing.incidentId(), fresh.parkId(), fresh.buildingId(), fresh.eventType(),
-                fresh.riskLevel(), existing.status(), fresh.openedAt(), fresh.lastOccurredAt(), fresh.eventIds(), fresh.alertIds(),
-                fresh.evidence(), fresh.timeline(), fresh.recommendations(), existing.reviewedAt(), existing.handoffWorkItemId());
+    private static SecurityIncident withStoredState(SecurityIncident fresh, String incidentId, SecurityIncidentStatus status,
+                                                    Instant reviewedAt, String handoffWorkItemId) {
+        return new SecurityIncident(incidentId, fresh.parkId(), fresh.buildingId(), fresh.eventType(),
+                fresh.riskLevel(), status, fresh.openedAt(), fresh.lastOccurredAt(), fresh.eventIds(), fresh.alertIds(),
+                fresh.evidence(), fresh.timeline(), fresh.recommendations(), reviewedAt, handoffWorkItemId);
+    }
+
+    private static int statusRank(SecurityIncidentStatus status) {
+        return switch (status) {
+            case OPEN -> 0;
+            case REVIEWED -> 1;
+            case HANDOFF -> 2;
+        };
     }
 
     private static boolean sameCorrelation(SecurityIncident left, SecurityIncident right) {

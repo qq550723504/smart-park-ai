@@ -90,7 +90,7 @@ const customerStub = defineComponent({
 const collaborationCenterStub = defineComponent({
   props: { role: { type: String, required: true }, active: { type: Boolean, default: false }, focusWorkItemId: { type: String, default: null } },
   emits: ['open-view'],
-  template: '<div data-testid="collaboration-center-stub" :data-focus-work-item-id="focusWorkItemId"><button type="button" data-collaboration-jump @click="$emit(\'open-view\', \'customer\')">打开客服</button></div>',
+  template: '<div data-testid="collaboration-center-stub" :data-focus-work-item-id="focusWorkItemId"><button type="button" data-collaboration-jump @click="$emit(\'open-view\', \'customer\')">打开客服</button><button type="button" data-collaboration-security @click="$emit(\'open-view\', \'security-incident\', \'INC-1\')">打开安全事件</button></div>',
 })
 
 const securityIncidentStub = defineComponent({
@@ -150,7 +150,7 @@ describe('OperationsWorkbench', () => {
     originalFetch = globalThis.fetch
     globalThis.fetch = (async () => new Response(JSON.stringify({
       knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
-      analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
+      analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as typeof fetch
   })
 
@@ -183,6 +183,21 @@ describe('OperationsWorkbench', () => {
     expect(wrapper.get('[data-focus-work-item-id]').attributes('data-focus-work-item-id')).toBe('SECURITY_INCIDENT:INC-1')
     await wrapper.getComponent(ImmersiveWorkbenchShell).vm.$emit('update:role', 'CUSTOMER_AGENT')
     await nextTick()
+    expect(wrapper.find('[data-workbench-view="security-incidents"]').exists()).toBe(false)
+  })
+
+  it('does not let a customer agent open the restricted security incident scene', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'collaboration-center' },
+      global: { stubs: { ...operatorStubs, CollaborationCenter: collaborationCenterStub } },
+    })
+    await settleCapabilities()
+
+    await wrapper.getComponent(ImmersiveWorkbenchShell).vm.$emit('update:role', 'CUSTOMER_AGENT')
+    await nextTick()
+    await wrapper.get('[data-collaboration-security]').trigger('click')
+
+    expect(wrapper.get('[data-workbench-view="collaboration-center"]').classes()).toContain('active')
     expect(wrapper.find('[data-workbench-view="security-incidents"]').exists()).toBe(false)
   })
 
@@ -287,7 +302,7 @@ describe('OperationsWorkbench', () => {
   it('hides capability-gated operator navigation when backend capabilities are disabled', async () => {
     globalThis.fetch = (async () => new Response(JSON.stringify({
       knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
-      analyticsEnabled: false, collaborationEnabled: false, voiceEnabled: false,
+      analyticsEnabled: false, collaborationEnabled: false, voiceEnabled: false, securityIncidentEnabled: false,
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as typeof fetch
 
     const wrapper = mount(OperationsWorkbench, {
@@ -298,6 +313,7 @@ describe('OperationsWorkbench', () => {
     await settleCapabilities()
 
     const labels = wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())
+    expect(labels).not.toContain('安全事件研判')
     expect(labels).not.toContain('实时语音')
     expect(labels).not.toContain('专家协作')
     expect(labels).not.toContain('运营分析')
@@ -372,7 +388,7 @@ describe('OperationsWorkbench', () => {
       }
       return new Response(JSON.stringify({
         knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
-        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
+        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
       }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }) as typeof fetch
 
@@ -410,7 +426,7 @@ describe('OperationsWorkbench', () => {
       if (String(url).includes('/api/workflows/wf-slow')) return pendingWorkflow.promise
       return new Response(JSON.stringify({
         knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
-        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
+        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
       }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }) as typeof fetch
 
@@ -454,7 +470,7 @@ describe('OperationsWorkbench', () => {
       if (String(url).includes('/api/workflows/wf-selected')) return pendingWorkflow.promise
       return new Response(JSON.stringify({
         knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
-        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
+        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
       }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }) as typeof fetch
 
@@ -548,7 +564,7 @@ describe('OperationsWorkbench', () => {
 
     resolveCapabilities(new Response(JSON.stringify({
       knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
-      analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
+      analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     await settleCapabilities()
 
@@ -564,7 +580,7 @@ describe('OperationsWorkbench', () => {
 
     await settleCapabilities()
 
-    expect(wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())).toEqual(['告警工作流', '园区客服', '协同中心', '安全事件研判', '治理中心'])
+    expect(wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())).toEqual(['告警工作流', '园区客服', '协同中心', '治理中心'])
     expect(wrapper.get('[data-evidence-item="知识检索"] strong').text()).toBe('能力检查失败')
     expect(wrapper.get('[data-evidence-item="知识检索"]').attributes('data-tone')).toBe('warning')
   })
@@ -624,7 +640,7 @@ describe('OperationsWorkbench', () => {
       }
       return new Response(JSON.stringify({
         knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
-        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
+        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
       }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }) as typeof fetch
 
@@ -683,7 +699,7 @@ describe('OperationsWorkbench', () => {
       }
       return new Response(JSON.stringify({
         knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
-        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
+        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
       }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }) as typeof fetch
 
@@ -732,7 +748,7 @@ describe('OperationsWorkbench', () => {
       }
       return new Response(JSON.stringify({
         knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
-        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
+        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
       }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }) as typeof fetch
 
@@ -781,7 +797,7 @@ describe('OperationsWorkbench', () => {
       }
       return new Response(JSON.stringify({
         knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
-        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
+        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
       }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }) as typeof fetch
 
@@ -828,7 +844,7 @@ describe('OperationsWorkbench', () => {
       }
       return new Response(JSON.stringify({
         knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
-        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
+        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
       }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }) as typeof fetch
 
