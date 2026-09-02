@@ -106,6 +106,91 @@ describe('CollaborationCenter', () => {
     expect(drawer.textContent).not.toContain('已超时')
   })
 
+  it('summarizes the current queue and sorts items by SLA urgency', async () => {
+    globalThis.fetch = (async () => response([
+      {
+        id: 'ALERT_WORKFLOW:on-track', source: 'ALERT_WORKFLOW', status: 'RUNNING', priority: 'NORMAL',
+        title: '正常工作项', safeSummary: '仍在 SLA 内', parkId: null, buildingId: null, deviceId: null,
+        updatedAt: '2026-09-02T08:00:00Z', openedAt: '2026-09-02T07:00:00Z',
+        slaDueAt: '2026-09-02T12:00:00Z', slaState: 'ON_TRACK', detailPath: 'workflow',
+      },
+      {
+        id: 'CUSTOMER_TICKET:due-soon', source: 'CUSTOMER_TICKET', status: 'WAITING_AGENT', priority: 'NORMAL',
+        title: '即将到期工作项', safeSummary: '即将达到 SLA', parkId: null, buildingId: null, deviceId: null,
+        updatedAt: '2026-09-02T08:30:00Z', openedAt: '2026-09-02T07:30:00Z',
+        slaDueAt: '2026-09-02T09:30:00Z', slaState: 'DUE_SOON', detailPath: 'customer',
+      },
+      {
+        id: 'ALERT_WORKFLOW:overdue', source: 'ALERT_WORKFLOW', status: 'FAILED', priority: 'HIGH',
+        title: '超时工作项', safeSummary: '已超过 SLA', parkId: null, buildingId: null, deviceId: null,
+        updatedAt: '2026-09-02T09:00:00Z', openedAt: '2026-09-02T06:00:00Z',
+        slaDueAt: '2026-09-02T08:00:00Z', slaState: 'OVERDUE', detailPath: 'workflow',
+      },
+      {
+        id: 'CUSTOMER_TICKET:completed', source: 'CUSTOMER_TICKET', status: 'CLOSED', priority: 'NORMAL',
+        title: '已完成工作项', safeSummary: '已完成', parkId: null, buildingId: null, deviceId: null,
+        updatedAt: '2026-09-02T10:00:00Z', openedAt: '2026-09-02T05:00:00Z',
+        slaDueAt: '2026-09-02T09:00:00Z', slaState: 'COMPLETED', detailPath: 'customer',
+      },
+    ])) as typeof fetch
+
+    const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
+    await flushPromises()
+
+    expect(wrapper.get('[data-sla-overview="total"] strong').text()).toBe('4')
+    expect(wrapper.get('[data-sla-overview="overdue"] strong').text()).toBe('1')
+    expect(wrapper.get('[data-sla-overview="due-soon"] strong').text()).toBe('1')
+    expect(wrapper.get('[data-sla-overview="on-track"] strong').text()).toBe('1')
+
+    await wrapper.get('[data-sla-sort]').setValue('sla')
+    expect(wrapper.findAll('[data-work-item]').map(item => item.attributes('data-work-item'))).toEqual([
+      'ALERT_WORKFLOW:overdue', 'CUSTOMER_TICKET:due-soon', 'ALERT_WORKFLOW:on-track', 'CUSTOMER_TICKET:completed',
+    ])
+
+    await wrapper.get('[data-sla-sort]').setValue('updatedAt')
+    expect(wrapper.find('[data-work-item]').attributes('data-work-item')).toBe('CUSTOMER_TICKET:completed')
+  })
+
+  it('orders equal active SLA states by deadline before update time', async () => {
+    globalThis.fetch = (async () => response([
+      {
+        id: 'CUSTOMER_TICKET:due-later', source: 'CUSTOMER_TICKET', status: 'WAITING_AGENT', priority: 'NORMAL',
+        title: '较晚到期工单', safeSummary: '较晚到期', parkId: null, buildingId: null, deviceId: null,
+        updatedAt: '2026-09-02T09:50:00Z', openedAt: '2026-09-02T08:20:00Z',
+        slaDueAt: '2026-09-02T10:20:00Z', slaState: 'DUE_SOON', detailPath: 'customer',
+      },
+      {
+        id: 'ALERT_WORKFLOW:due-first', source: 'ALERT_WORKFLOW', status: 'RUNNING', priority: 'HIGH',
+        title: '较早到期告警', safeSummary: '较早到期', parkId: null, buildingId: null, deviceId: null,
+        updatedAt: '2026-09-02T09:00:00Z', openedAt: '2026-09-02T08:05:00Z',
+        slaDueAt: '2026-09-02T10:05:00Z', slaState: 'DUE_SOON', detailPath: 'workflow',
+      },
+    ])) as typeof fetch
+
+    const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-work-item]').map(item => item.attributes('data-work-item'))).toEqual([
+      'ALERT_WORKFLOW:due-first', 'CUSTOMER_TICKET:due-later',
+    ])
+  })
+
+  it('sends the selected queue sort mode to the API', async () => {
+    const requests: string[] = []
+    globalThis.fetch = (async (input) => {
+      requests.push(String(input))
+      return response([])
+    }) as typeof fetch
+
+    const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
+    await flushPromises()
+    expect(requests[0]).toContain('sort=sla')
+
+    await wrapper.get('[data-sla-sort]').setValue('updatedAt')
+    await flushPromises()
+    expect(requests[1]).toContain('sort=updatedAt')
+  })
+
   it('closes cached details when read access is revoked', async () => {
     globalThis.fetch = (async () => response([{
       id: 'CUSTOMER_TICKET:cs-access', source: 'CUSTOMER_TICKET', status: 'WAITING_AGENT', priority: 'NORMAL',
@@ -150,6 +235,41 @@ describe('CollaborationCenter', () => {
 
       expect(calls).toBe(2)
       expect(wrapper.text()).toContain('即将到期')
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps the SLA overview visible while a background refresh is pending', async () => {
+    vi.useFakeTimers()
+    try {
+      let calls = 0
+      let resolveRefresh!: (value: Response) => void
+      const pendingRefresh = new Promise<Response>((resolve) => { resolveRefresh = resolve })
+      globalThis.fetch = (async () => {
+        calls += 1
+        if (calls === 1) return response([{
+          id: 'CUSTOMER_TICKET:cs-overview-refresh', source: 'CUSTOMER_TICKET', status: 'WAITING_AGENT', priority: 'NORMAL',
+          title: '客服工单 cs-overview-refresh', safeSummary: '保留概览的工单', parkId: null, buildingId: null, deviceId: null,
+          updatedAt: '2026-09-02T09:00:00Z', openedAt: '2026-09-02T08:00:00Z',
+          slaDueAt: '2026-09-02T12:00:00Z', slaState: 'ON_TRACK', detailPath: 'customer',
+        }])
+        return pendingRefresh
+      }) as typeof fetch
+
+      const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
+      await flushPromises()
+      expect(wrapper.get('[data-sla-overview="total"]')).not.toBeNull()
+
+      vi.advanceTimersByTime(30_000)
+      await Promise.resolve()
+      await wrapper.vm.$nextTick()
+
+      expect(calls).toBe(2)
+      expect(wrapper.get('[data-sla-overview="total"]')).not.toBeNull()
+      resolveRefresh(response([]))
+      await flushPromises()
       wrapper.unmount()
     } finally {
       vi.useRealTimers()

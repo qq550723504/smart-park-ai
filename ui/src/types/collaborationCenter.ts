@@ -37,4 +37,5 @@ export interface CollaborationWorkItemFilters {
   source?: CollaborationWorkItemSource
   status?: CollaborationWorkItemStatus
   limit?: number
+  sort?: 'sla' | 'updatedAt'
 }

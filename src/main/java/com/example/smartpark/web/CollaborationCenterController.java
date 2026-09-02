@@ -26,11 +26,24 @@ public class CollaborationCenterController {
             @RequestParam(required = false) String source,
             @RequestParam(required = false) String status,
             @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(defaultValue = "sla") String sort,
             @RequestHeader(value = "X-Demo-Role", required = false) String role) {
         DemoRole.require(role, DemoRole.CUSTOMER_AGENT, DemoRole.ADMIN);
         WorkItemQuery query = new WorkItemQuery(parse(source, CollaborationWorkItem.Source.class, "source"),
-                parse(status, CollaborationWorkItem.Status.class, "status"), limit);
+                parse(status, CollaborationWorkItem.Status.class, "status"), limit,
+                parseSort(sort));
         return service.list(query).stream().map(CollaborationCenterDtos.WorkItemResponse::from).toList();
+    }
+
+    private static WorkItemQuery.SortMode parseSort(String raw) {
+        String normalized = raw == null ? "" : raw.trim().toUpperCase(Locale.ROOT);
+        if ("UPDATEDAT".equals(normalized)) normalized = "UPDATED_AT";
+        try {
+            return normalized.isBlank() ? WorkItemQuery.SortMode.SLA
+                    : Enum.valueOf(WorkItemQuery.SortMode.class, normalized);
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException("sort is not supported");
+        }
     }
 
     private static <E extends Enum<E>> E parse(String raw, Class<E> type, String field) {
