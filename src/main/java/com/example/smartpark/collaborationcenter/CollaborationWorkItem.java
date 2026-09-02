@@ -14,6 +14,9 @@ public record CollaborationWorkItem(
         String buildingId,
         String deviceId,
         Instant updatedAt,
+        Instant openedAt,
+        Instant slaDueAt,
+        SlaState slaState,
         String detailPath) {
 
     public CollaborationWorkItem {
@@ -24,7 +27,15 @@ public record CollaborationWorkItem(
         title = requireText(title, "title");
         safeSummary = requireText(safeSummary, "safeSummary");
         updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
+        slaState = Objects.requireNonNull(slaState, "slaState");
         detailPath = requireText(detailPath, "detailPath");
+    }
+
+    public CollaborationWorkItem(String id, Source source, Status status, Priority priority, String title,
+                                 String safeSummary, String parkId, String buildingId, String deviceId,
+                                 Instant updatedAt, String detailPath) {
+        this(id, source, status, priority, title, safeSummary, parkId, buildingId, deviceId,
+                updatedAt, null, null, SlaState.NOT_APPLICABLE, detailPath);
     }
 
     private static String requireText(String value, String field) {
@@ -35,6 +46,8 @@ public record CollaborationWorkItem(
     public enum Source { ALERT_WORKFLOW, CUSTOMER_TICKET }
 
     public enum Priority { HIGH, NORMAL }
+
+    public enum SlaState { ON_TRACK, DUE_SOON, OVERDUE, COMPLETED, NOT_APPLICABLE }
 
     public enum Status {
         RUNNING,

@@ -11,6 +11,7 @@ import com.example.smartpark.workflow.WorkflowSnapshot;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.time.Clock;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -20,6 +21,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class CollaborationCenterServiceTest {
+
+    private static final Clock TEST_CLOCK = Clock.fixed(Instant.parse("2026-09-02T10:00:00Z"), java.time.ZoneOffset.UTC);
 
     @Test
     void projectsAlertAndCustomerTicketWithoutLeakingDomainObjects() {
@@ -39,9 +42,15 @@ class CollaborationCenterServiceTest {
         assertThat(alert.status()).isEqualTo(CollaborationWorkItem.Status.WAITING_APPROVAL);
         assertThat(alert.priority()).isEqualTo(CollaborationWorkItem.Priority.HIGH);
         assertThat(alert.detailPath()).isEqualTo("workflow");
+        assertThat(alert.openedAt()).isEqualTo(Instant.EPOCH);
+        assertThat(alert.slaDueAt()).isEqualTo(Instant.parse("1970-01-01T00:30:00Z"));
+        assertThat(alert.slaState()).isEqualTo(CollaborationWorkItem.SlaState.OVERDUE);
         assertThat(alert.safeSummary()).doesNotContain("raw diagnosis", "approval comment");
         assertThat(alert.safeSummary()).contains("ALT-POWER-001", "A2", "DEV-POWER-001");
         assertThat(items.get(1).detailPath()).isEqualTo("customer");
+        assertThat(items.get(1).openedAt()).isEqualTo(Instant.EPOCH);
+        assertThat(items.get(1).slaDueAt()).isEqualTo(Instant.parse("1970-01-01T04:00:00Z"));
+        assertThat(items.get(1).slaState()).isEqualTo(CollaborationWorkItem.SlaState.OVERDUE);
     }
 
     @Test
@@ -146,7 +155,7 @@ class CollaborationCenterServiceTest {
                         Map.of("updatedAt", "2026-09-01T09:00:00Z"), null, Optional.empty(), null, List.of(), 1)));
         when(tickets.list()).thenReturn(List.of());
 
-        List<CollaborationWorkItem> items = new CollaborationCenterService(workflows, tickets)
+        List<CollaborationWorkItem> items = new CollaborationCenterService(workflows, tickets, TEST_CLOCK)
                 .list(WorkItemQuery.defaults());
 
         assertThat(items).extracting(CollaborationWorkItem::id)

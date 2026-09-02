@@ -10,6 +10,7 @@ import com.example.smartpark.port.customer.CustomerTicketReader;
 import com.example.smartpark.workflow.WorkflowExecutionStore;
 import com.example.smartpark.workflow.WorkflowSnapshot;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -20,14 +21,26 @@ import java.util.Objects;
 public final class CollaborationCenterService {
     private final WorkflowExecutionStore workflows;
     private final CustomerTicketReader tickets;
+    private final Clock clock;
+    private final CollaborationSlaPolicy slaPolicy;
 
     public CollaborationCenterService(WorkflowExecutionStore workflows, CustomerTicketPort tickets) {
         this(workflows, tickets::list);
     }
 
+    public CollaborationCenterService(WorkflowExecutionStore workflows, CustomerTicketPort tickets, Clock clock) {
+        this(workflows, tickets::list, clock);
+    }
+
     public CollaborationCenterService(WorkflowExecutionStore workflows, CustomerTicketReader tickets) {
+        this(workflows, tickets, Clock.systemUTC());
+    }
+
+    public CollaborationCenterService(WorkflowExecutionStore workflows, CustomerTicketReader tickets, Clock clock) {
         this.workflows = workflows;
         this.tickets = Objects.requireNonNull(tickets, "tickets");
+        this.clock = Objects.requireNonNull(clock, "clock");
+        this.slaPolicy = new CollaborationSlaPolicy();
     }
 
     public List<CollaborationWorkItem> list(WorkItemQuery query) {
@@ -35,12 +48,12 @@ public final class CollaborationCenterService {
         List<CollaborationWorkItem> items = new ArrayList<>();
         if (requested.source() == null || requested.source() == CollaborationWorkItem.Source.ALERT_WORKFLOW) {
             if (workflows != null) {
-                currentWorkflowSnapshots(workflows.snapshots()).stream().map(CollaborationCenterService::fromWorkflow)
+                currentWorkflowSnapshots(workflows.snapshots()).stream().map(this::fromWorkflow)
                         .filter(requested::accepts).forEach(items::add);
             }
         }
         if (requested.source() == null || requested.source() == CollaborationWorkItem.Source.CUSTOMER_TICKET) {
-            tickets.listActive().stream().map(CollaborationCenterService::fromTicket)
+            tickets.listActive().stream().map(this::fromTicket)
                     .filter(requested::accepts).forEach(items::add);
         }
         return items.stream()
@@ -50,7 +63,7 @@ public final class CollaborationCenterService {
                 .toList();
     }
 
-    private static CollaborationWorkItem fromWorkflow(WorkflowSnapshot snapshot) {
+    private CollaborationWorkItem fromWorkflow(WorkflowSnapshot snapshot) {
         Map<String, Object> payload = snapshot.statePayload();
         String parkId = firstNonBlank(value(payload, "parkId"), nestedValue(payload, "alert", "parkId"),
                 nestedValue(payload, "parkContext", "parkId"));
@@ -72,23 +85,43 @@ public final class CollaborationCenterService {
                 ? "告警 " + snapshot.alertId() + " · " + snapshot.status().name()
                 : "告警 " + snapshot.alertId() + " · " + location;
         Instant updatedAt = workflowUpdatedAt(snapshot, payload, diagnosis);
+        CollaborationWorkItem.Status status = CollaborationWorkItem.Status.valueOf(snapshot.status().name());
+        CollaborationWorkItem.Priority priority = priorityFor(snapshot, payload, diagnosis);
+        CollaborationSlaPolicy.SlaEvaluation sla = slaPolicy.evaluate(
+                CollaborationWorkItem.Source.ALERT_WORKFLOW, priority, status,
+                workflowOpenedAt(snapshot, payload), clock.instant());
         return new CollaborationWorkItem(
                 "ALERT_WORKFLOW:" + snapshot.workflowId(),
                 CollaborationWorkItem.Source.ALERT_WORKFLOW,
-                CollaborationWorkItem.Status.valueOf(snapshot.status().name()),
-                hasHighRiskSignal(snapshot, payload, diagnosis)
-                        ? CollaborationWorkItem.Priority.HIGH : CollaborationWorkItem.Priority.NORMAL,
-                "告警处置 " + snapshot.alertId(), summary, parkId, buildingId, deviceId, updatedAt, "workflow");
+                status, priority, "告警处置 " + snapshot.alertId(), summary, parkId, buildingId, deviceId, updatedAt,
+                workflowOpenedAt(snapshot, payload), sla.dueAt(), sla.state(), "workflow");
     }
 
-    private static CollaborationWorkItem fromTicket(CustomerTicket ticket) {
+    private CollaborationWorkItem fromTicket(CustomerTicket ticket) {
+        CollaborationWorkItem.Status status = CollaborationWorkItem.Status.valueOf(CustomerTicketStatus.valueOf(ticket.status()).name());
+        CollaborationSlaPolicy.SlaEvaluation sla = slaPolicy.evaluate(
+                CollaborationWorkItem.Source.CUSTOMER_TICKET, CollaborationWorkItem.Priority.NORMAL, status,
+                ticket.createdAt(), clock.instant());
         return new CollaborationWorkItem(
                 "CUSTOMER_TICKET:" + ticket.id(),
                 CollaborationWorkItem.Source.CUSTOMER_TICKET,
-                CollaborationWorkItem.Status.valueOf(CustomerTicketStatus.valueOf(ticket.status()).name()),
+                status,
                 CollaborationWorkItem.Priority.NORMAL,
                 "客服工单 " + ticket.id(), ticket.safeSummary(), null, null, null,
-                ticket.updatedAt(), "customer");
+                ticket.updatedAt(), ticket.createdAt(), sla.dueAt(), sla.state(), "customer");
+    }
+
+    private static CollaborationWorkItem.Priority priorityFor(WorkflowSnapshot snapshot, Map<String, Object> payload,
+                                                               Diagnosis diagnosis) {
+        return hasHighRiskSignal(snapshot, payload, diagnosis)
+                ? CollaborationWorkItem.Priority.HIGH : CollaborationWorkItem.Priority.NORMAL;
+    }
+
+    private static Instant workflowOpenedAt(WorkflowSnapshot snapshot, Map<String, Object> payload) {
+        Instant occurredAt = instantValue(payload, "alert", "occurredAt");
+        if (occurredAt != null) return occurredAt;
+        Instant updatedAt = instantValue(payload, "updatedAt");
+        return updatedAt != null ? updatedAt : workflowUpdatedAt(snapshot);
     }
 
     private static String value(Map<String, Object> payload, String key) {
