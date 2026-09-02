@@ -1,9 +1,11 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { ref } from 'vue'
 import { ElInput } from 'element-plus'
 import CustomerServiceConsole from './CustomerServiceConsole.vue'
 import { askCustomerService, getCustomerConversation, listCustomerTickets, replyCustomerSession } from '../services/workflowApi'
 import type { CustomerServiceResponse } from '../types/workflow'
+import type { ExecutionEvent } from '../types/execution'
 
 vi.mock('../services/workflowApi', async () => {
   const actual = await vi.importActual<typeof import('../services/workflowApi')>('../services/workflowApi')
@@ -182,6 +184,37 @@ describe('CustomerServiceConsole', () => {
     await flushPromises()
 
     expect(wrapper.text()).not.toContain('旧特权工单')
+    wrapper.unmount()
+  })
+
+  it('subscribes the shared trace for new sessions and replies', async () => {
+    vi.mocked(listCustomerTickets).mockResolvedValue([])
+    vi.mocked(askCustomerService).mockResolvedValue({
+      sessionId: 'CS-TRACE', intent: 'PARKING', answer: '停车规则', knowledgeSources: [], knowledgeCitations: [],
+      needsHuman: false, reason: 'SUPPORTED', citationIds: [], ticket: null, executionRunId: 'run-customer-1',
+    })
+    vi.mocked(replyCustomerSession).mockResolvedValue({
+      sessionId: 'CS-TRACE', intent: 'PARKING', answer: '补充说明', knowledgeSources: [], knowledgeCitations: [],
+      needsHuman: false, reason: 'SUPPORTED', citationIds: [], ticket: null, executionRunId: 'run-customer-2',
+    })
+    vi.mocked(getCustomerConversation).mockResolvedValue({
+      sessionId: 'CS-TRACE', messages: [], retrievals: [], humanHandoff: false,
+    })
+    const trace = { events: ref<ExecutionEvent[]>([]), subscribe: vi.fn() }
+    const wrapper = mount(CustomerServiceConsole, {
+      props: { role: 'VIEWER', active: true, trace },
+      global: { stubs: { 'el-input': ElInput, 'el-button': true, 'el-tag': true, 'el-empty': true } },
+    })
+
+    await wrapper.get('.chat-composer input').setValue('访客停车怎么收费？')
+    await wrapper.get('.chat-composer').trigger('submit')
+    await flushPromises()
+    expect(trace.subscribe).toHaveBeenNthCalledWith(1, 'run-customer-1')
+
+    await wrapper.get('.chat-composer input').setValue('还有其他说明吗？')
+    await wrapper.get('.chat-composer').trigger('submit')
+    await flushPromises()
+    expect(trace.subscribe).toHaveBeenNthCalledWith(2, 'run-customer-2')
     wrapper.unmount()
   })
 

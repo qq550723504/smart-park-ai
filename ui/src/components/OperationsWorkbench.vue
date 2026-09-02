@@ -335,6 +335,7 @@ function confidence(value?: number) {
         :active="props.active && activeView === 'customer'"
         :refresh-token="customerQueueRefreshToken"
         :launch-request="props.launchRequest"
+        :trace="trace"
         @launch-status="handleGuidedLaunchUpdate"
       />
     </main>

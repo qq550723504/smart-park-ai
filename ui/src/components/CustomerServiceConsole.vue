@@ -7,6 +7,7 @@ import { customerIntentLabel, customerTicketStatusLabel } from '../utils/labels'
 import { createRequestId } from '../utils/requestId'
 import { useGuidedLaunch } from '../composables/useGuidedLaunch'
 import type { GuidedLaunchUpdate, ScenarioLaunchRequest } from '../types/workbench'
+import type { ExecutionTraceLike } from '../composables/useOperationsAnalysis'
 import './customer-service.css'
 
 const props = withDefaults(defineProps<{
@@ -14,6 +15,7 @@ const props = withDefaults(defineProps<{
   active?: boolean
   refreshToken?: number
   launchRequest?: ScenarioLaunchRequest | null
+  trace?: ExecutionTraceLike
 }>(), { active: true, launchRequest: null })
 const emit = defineEmits<{ 'launch-status': [update: GuidedLaunchUpdate] }>()
 const question = ref('')
@@ -21,10 +23,17 @@ const loading = ref(false)
 const messages = ref<Array<{ role: 'user' | 'assistant'; text: string; result?: CustomerServiceResponse }>>([])
 const tickets = ref<CustomerServiceResponse[]>([])
 const sessionId = ref('')
+const latestExecutionRunId = ref<string | null>(null)
 const conversation = ref<CustomerConversationResponse | null>(null)
 let requestGeneration = 0
 let ticketsRequestGeneration = 0
 const suggestions = ['访客停车怎么收费？', '访客如何预约进入园区？', '可以查询公共区域能耗吗？', 'A1 洗手间漏水，需要报修']
+
+function subscribeExecution(runId?: string): void {
+  if (!runId || !props.trace) return
+  latestExecutionRunId.value = runId
+  try { props.trace.subscribe(runId) } catch { /* trace is an optional presentation surface */ }
+}
 
 async function loadTickets() {
   const generation = ++ticketsRequestGeneration
@@ -74,6 +83,7 @@ async function ask(text = question.value, options: { freshSession?: boolean } = 
       ? await replyCustomerSession(sessionId.value, normalized, requestId)
       : await askCustomerService(normalized, requestId)
     if (generation !== requestGeneration) return false
+    subscribeExecution(result.executionRunId)
     sessionId.value = result.sessionId
     messages.value.push({ role: 'assistant', text: result.answer, result })
     const nextConversation = await getCustomerConversation(result.sessionId)
@@ -95,6 +105,7 @@ function resetConversation(): void {
   question.value = ''
   messages.value = []
   sessionId.value = ''
+  latestExecutionRunId.value = null
   conversation.value = null
   loading.value = false
 }
@@ -115,6 +126,9 @@ useGuidedLaunch({
 })
 
 watch([() => props.role, () => props.refreshToken], loadTickets)
+watch(() => props.active, (active) => {
+  if (active) subscribeExecution(latestExecutionRunId.value ?? undefined)
+})
 onMounted(loadTickets)
 </script>
 
