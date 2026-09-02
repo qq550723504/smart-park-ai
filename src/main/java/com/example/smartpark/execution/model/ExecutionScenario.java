@@ -5,5 +5,6 @@ public enum ExecutionScenario {
     VOICE,
     EXPERT_COLLABORATION,
     OPERATIONS_ANALYSIS,
-    ALERT_WORKFLOW
+    ALERT_WORKFLOW,
+    CUSTOMER_SERVICE
 }
