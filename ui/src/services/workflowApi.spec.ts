@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { getShowcaseScenarios, listCollaborationSlaTrend } from './workflowApi'
+import { askCustomerService, getShowcaseScenarios, listCollaborationSlaTrend, replyCustomerSession } from './workflowApi'
 import type { ShowcaseScenarioCatalog } from './workflowApi'
 
 const originalFetch = globalThis.fetch
@@ -44,4 +44,23 @@ it('loads the read-only collaboration SLA trend with the demo role', async () =>
   expect(fetchMock).toHaveBeenCalledWith('/api/collaboration/sla-trend?limit=60', expect.objectContaining({
     headers: expect.objectContaining({ 'X-Demo-Role': 'ADMIN' }),
   }))
+})
+
+it('retains the customer execution run id from the response header', async () => {
+  const responseBody = {
+    sessionId: 'cs-1', intent: 'PARKING', answer: 'safe', knowledgeSources: [], knowledgeCitations: [],
+    needsHuman: false, ticket: null, reason: 'SUPPORTED', citationIds: [],
+  }
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify(responseBody), {
+      status: 200, headers: { 'Content-Type': 'application/json', 'X-Execution-Run-Id': 'run-customer-1' },
+    }))
+    .mockResolvedValueOnce(new Response(JSON.stringify(responseBody), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+  globalThis.fetch = fetchMock as typeof fetch
+
+  await expect(askCustomerService('访客停车怎么收费？', 'key-1')).resolves.toMatchObject({ executionRunId: 'run-customer-1' })
+  const reply = await replyCustomerSession('cs-1', '继续咨询', 'key-2')
+  expect(reply.executionRunId).toBeUndefined()
 })

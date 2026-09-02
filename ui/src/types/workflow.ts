@@ -73,6 +73,8 @@ export interface CustomerServiceResponse {
   reason: 'SUPPORTED' | 'INSUFFICIENT_EVIDENCE' | 'POLICY_LIMIT' | 'RETRIEVAL_UNAVAILABLE'
   citationIds: string[]
   ticket: CustomerTicketResponse | null
+  /** Client-only metadata read from X-Execution-Run-Id; absent on older servers. */
+  executionRunId?: string
 }
 
 export type WorkflowStatus = 'RUNNING' | 'WAITING_APPROVAL' | 'COMPLETED' | 'REJECTED' | 'FAILED' | 'WORK_ORDER_FAILED'
