@@ -18,12 +18,15 @@ final class CollaborationCenterDtos {
             String buildingId,
             String deviceId,
             Instant updatedAt,
+            Instant openedAt,
+            Instant slaDueAt,
+            CollaborationWorkItem.SlaState slaState,
             String detailPath) {
 
         static WorkItemResponse from(CollaborationWorkItem item) {
             return new WorkItemResponse(item.id(), item.source(), item.status(), item.priority(), item.title(),
                     item.safeSummary(), item.parkId(), item.buildingId(), item.deviceId(), item.updatedAt(),
-                    item.detailPath());
+                    item.openedAt(), item.slaDueAt(), item.slaState(), item.detailPath());
         }
     }
 }

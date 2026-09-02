@@ -36,6 +36,9 @@ class CollaborationCenterControllerTest {
                 .andExpect(jsonPath("$[0].id").value("ALERT_WORKFLOW:wf-1"))
                 .andExpect(jsonPath("$[0].source").value("ALERT_WORKFLOW"))
                 .andExpect(jsonPath("$[0].safeSummary").value("告警 ALT-POWER-001 · A2 · DEV-POWER-001"))
+                .andExpect(jsonPath("$[0].openedAt").value("2026-09-01T08:00:00Z"))
+                .andExpect(jsonPath("$[0].slaDueAt").value("2026-09-01T08:30:00Z"))
+                .andExpect(jsonPath("$[0].slaState").value("DUE_SOON"))
                 .andExpect(jsonPath("$[0].diagnosis").doesNotExist())
                 .andExpect(jsonPath("$[0].approval").doesNotExist());
     }
@@ -63,6 +66,8 @@ class CollaborationCenterControllerTest {
                 "ALERT_WORKFLOW:wf-1", CollaborationWorkItem.Source.ALERT_WORKFLOW,
                 CollaborationWorkItem.Status.WAITING_APPROVAL, CollaborationWorkItem.Priority.HIGH,
                 "告警处置 ALT-POWER-001", "告警 ALT-POWER-001 · A2 · DEV-POWER-001",
-                "PARK-A", "A2", "DEV-POWER-001", Instant.parse("2026-09-01T08:00:00Z"), "workflow");
+                "PARK-A", "A2", "DEV-POWER-001", Instant.parse("2026-09-01T08:30:00Z"),
+                Instant.parse("2026-09-01T08:00:00Z"), Instant.parse("2026-09-01T08:30:00Z"),
+                CollaborationWorkItem.SlaState.DUE_SOON, "workflow");
     }
 }
