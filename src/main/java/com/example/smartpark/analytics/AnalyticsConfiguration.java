@@ -23,6 +23,9 @@ import com.example.smartpark.analytics.agent.time.JioNlpTimeIntentProvider;
 import com.example.smartpark.analytics.catalog.MetricCatalog;
 import com.example.smartpark.analytics.sql.QueryCostGuard;
 import com.example.smartpark.analytics.sql.ReadOnlyQueryExecutor;
+import com.example.smartpark.analytics.report.OperationsDailyReportService;
+import com.example.smartpark.analytics.report.OperationsDailyReportStore;
+import com.example.smartpark.analytics.report.OperationsReportSectionRunner;
 
 import javax.sql.DataSource;
 
@@ -206,5 +209,33 @@ public class AnalyticsConfiguration {
                                                         com.example.smartpark.execution.ExecutionEventPublisher publisher) {
         return new OperationsAnalysisService(metricCatalog, graph::run, analyticsExecutor,
                 properties.getAnalysisTimeout(), properties.getClarificationTimeout(), analyticsClock, publisher);
+    }
+
+    @Bean
+    OperationsDailyReportStore operationsDailyReportStore(Clock analyticsClock) {
+        return new OperationsDailyReportStore(Duration.ofMinutes(30), analyticsClock);
+    }
+
+    @Bean
+    OperationsReportSectionRunner operationsReportSectionRunner(OperationsAnalysisService analysisService) {
+        return section -> analysisService.startAndAwait(section.question())
+                .thenApply(record -> {
+                    // A clarification is terminal for the report section, but
+                    // the underlying analysis still owns an active run until
+                    // it is explicitly aborted.
+                    if ("NEEDS_CLARIFICATION".equals(record.status())) {
+                        analysisService.abort(record.runId());
+                    }
+                    return record;
+                });
+    }
+
+    @Bean
+    OperationsDailyReportService operationsDailyReportService(
+            OperationsReportSectionRunner sectionRunner,
+            OperationsDailyReportStore reportStore,
+            com.example.smartpark.execution.ExecutionEventPublisher publisher,
+            Clock analyticsClock) {
+        return new OperationsDailyReportService(sectionRunner, reportStore, publisher, analyticsClock);
     }
 }
