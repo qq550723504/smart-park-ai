@@ -1,11 +1,11 @@
 package com.example.smartpark.adapter.mock;
 
 import com.example.smartpark.model.security.SecurityEvent;
-import com.example.smartpark.port.security.SecurityPort;
+import com.example.smartpark.port.security.SecurityEventReader;
 
 import java.util.List;
 
-public final class MockSecurityAdapter implements SecurityPort {
+public final class MockSecurityAdapter implements SecurityEventReader {
     private final MockParkDataStore dataStore;
 
     public MockSecurityAdapter(MockParkDataStore dataStore) {

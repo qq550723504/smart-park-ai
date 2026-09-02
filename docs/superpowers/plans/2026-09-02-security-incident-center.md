@@ -24,7 +24,7 @@
 ### Task 1: 扩展安全读取端口与 Mock 数据投影
 
 **Files:**
-- Modify: `src/main/java/com/example/smartpark/port/security/SecurityPort.java`
+- Create: `src/main/java/com/example/smartpark/port/security/SecurityEventReader.java`
 - Modify: `src/main/java/com/example/smartpark/adapter/mock/MockSecurityAdapter.java`
 - Modify: `src/main/java/com/example/smartpark/adapter/mock/MockParkDataStore.java`
 - Modify: `src/main/java/com/example/smartpark/port/alert/AlertPort.java`
@@ -33,7 +33,7 @@
 - Create: `src/test/java/com/example/smartpark/adapter/mock/MockAlertAdapterTest.java`
 
 **Interfaces:**
-- Produces `List<SecurityEvent> listEvents()` on `SecurityPort`; returned list is immutable and deterministically sorted by `occurredAt`, then `eventId`.
+- Produces `List<SecurityEvent> listEvents()` on `SecurityEventReader`; existing `SecurityPort` remains single-event lookup only.
 - `MockSecurityAdapter.listEvents()` delegates to a new package-visible `MockParkDataStore.listSecurityEvents()` and returns a copy.
 - Produces `List<Alert> listActive()` on `AlertPort`; `MockAlertAdapter` delegates to a sorted immutable store projection so correlation never relies on hard-coded IDs.
 
@@ -42,9 +42,9 @@
 
 Run: `./mvnw.cmd -q -Dtest=MockSecurityAdapterTest,MockAlertAdapterTest test`
 
-Expected: FAIL because `listEvents()`, `listActive()` and the store readers do not exist.
+Expected: FAIL because `SecurityEventReader`, `listActive()` and the store readers do not exist.
 
-- [ ] **Step 3: Write minimal implementation** — add the port method, store reader, and adapter delegation; preserve `getEvent` behavior and do not expose the map.
+- [ ] **Step 3: Write minimal implementation** — add the narrow event-reader port, alert reader method, store readers, and adapter delegation; preserve `SecurityPort.getEvent` behavior and do not expose maps.
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `./mvnw.cmd -q -Dtest=MockSecurityAdapterTest,MockAlertAdapterTest test`
@@ -80,7 +80,7 @@ git commit -m "feat: expose safe security event collection"
 - `SecurityIncidentService.get(String incidentId): SecurityIncident`.
 - `SecurityIncidentService.review(String incidentId): SecurityIncident`.
 - `SecurityIncidentService.handoff(String incidentId): SecurityIncident`.
-- The service constructor consumes `SecurityPort`, `AlertPort`, `SecurityIncidentStore`, `SecurityIncidentHandoffPort`, and `Clock`; it never depends on a Mock adapter or collaboration implementation.
+- The service constructor consumes `SecurityEventReader`, `AlertPort`, `SecurityIncidentStore`, `SecurityIncidentHandoffPort`, and `Clock`; it never depends on a Mock adapter or collaboration implementation.
 - `SecurityIncidentStore` exposes `get`, `save`, `findAll`, and `findByHandoff`; all returned models are immutable snapshots.
 - `SecurityIncidentHandoffPort.createOrGet(SecurityIncident incident, Instant now): SecurityIncidentHandoff` is the only write boundary used by the service; `list(): List<SecurityIncidentHandoff>` supplies the collaboration projection.
 - `SecurityIncident` exposes stable IDs, risk/status, counts, safe summary, evidence, timeline, recommendations, `reviewedAt`, and `handoffWorkItemId`.

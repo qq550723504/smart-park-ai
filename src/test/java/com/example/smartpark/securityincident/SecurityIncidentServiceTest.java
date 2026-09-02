@@ -7,7 +7,7 @@ import com.example.smartpark.model.security.SecurityEvent;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoff;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoffPort;
-import com.example.smartpark.port.security.SecurityPort;
+import com.example.smartpark.port.security.SecurityEventReader;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -76,7 +76,7 @@ class SecurityIncidentServiceTest {
     }
 
     private static SecurityIncidentService service(List<SecurityEvent> events, List<Alert> alerts) {
-        SecurityPort security = new SecurityPort() {
+        SecurityEventReader security = new SecurityEventReader() {
             @Override
             public SecurityEvent getEvent(String eventId) {
                 return events.stream().filter(event -> event.eventId().equals(eventId)).findFirst().orElseThrow();

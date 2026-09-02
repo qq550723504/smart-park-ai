@@ -6,7 +6,7 @@ import com.example.smartpark.model.security.SecurityEvent;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoff;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoffPort;
-import com.example.smartpark.port.security.SecurityPort;
+import com.example.smartpark.port.security.SecurityEventReader;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -24,13 +24,13 @@ public final class SecurityIncidentService {
     private static final Duration GROUPING_WINDOW = Duration.ofMinutes(15);
     private static final String SECURITY_EVENT_PREFIX = "security-event:";
 
-    private final SecurityPort security;
+    private final SecurityEventReader security;
     private final AlertPort alerts;
     private final SecurityIncidentStore store;
     private final SecurityIncidentHandoffPort handoffs;
     private final Clock clock;
 
-    public SecurityIncidentService(SecurityPort security, AlertPort alerts, SecurityIncidentStore store,
+    public SecurityIncidentService(SecurityEventReader security, AlertPort alerts, SecurityIncidentStore store,
                                    SecurityIncidentHandoffPort handoffs, Clock clock) {
         this.security = Objects.requireNonNull(security, "security");
         this.alerts = Objects.requireNonNull(alerts, "alerts");

@@ -1,7 +1,7 @@
 package com.example.smartpark.adapter.mock;
 
 import com.example.smartpark.model.security.SecurityEvent;
-import com.example.smartpark.port.security.SecurityPort;
+import com.example.smartpark.port.security.SecurityEventReader;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -13,7 +13,7 @@ class MockSecurityAdapterTest {
 
     @Test
     void listsSeededSecurityEventsAsAnImmutableProjection() {
-        SecurityPort port = new MockSecurityAdapter(new MockParkDataStore());
+        SecurityEventReader port = new MockSecurityAdapter(new MockParkDataStore());
 
         List<SecurityEvent> events = port.listEvents();
 

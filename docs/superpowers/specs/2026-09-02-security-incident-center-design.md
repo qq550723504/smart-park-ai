@@ -11,7 +11,7 @@
 ### 2.1 本次范围
 
 - 新增独立的 `SecurityIncident` 领域模型、归并服务和安全 DTO。
-- 复用现有 `SecurityPort`、`AlertPort`、告警工作流、协同中心和审批链，不复制其写入逻辑。
+- 复用现有 `SecurityPort` 的单事件查询，并新增窄接口 `SecurityEventReader` 提供有限事件集合；同时复用 `AlertPort`、告警工作流、协同中心和审批链，不复制其写入逻辑。
 - 按同园区、同区域（当前由 `buildingId` 表示）、同事件类型且时间差不超过 15 分钟的确定性规则归并事件。
 - 提供安全事件列表、事件详情时间线、关联告警和脱敏证据摘要。
 - 提供“标记已研判”和“转为协同工作项”两个动作；转出后继续使用现有协同中心和审批能力。
@@ -32,7 +32,7 @@
 ### 3.1 分层与依赖
 
 ```text
-SecurityPort + AlertPort
+SecurityEventReader + AlertPort
           ↓
 SecurityIncidentService
   ├─ 读取并归并脱敏事件
