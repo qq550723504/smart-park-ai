@@ -151,6 +151,30 @@ describe('CollaborationCenter', () => {
     expect(wrapper.find('[data-work-item]').attributes('data-work-item')).toBe('CUSTOMER_TICKET:completed')
   })
 
+  it('orders equal active SLA states by deadline before update time', async () => {
+    globalThis.fetch = (async () => response([
+      {
+        id: 'CUSTOMER_TICKET:due-later', source: 'CUSTOMER_TICKET', status: 'WAITING_AGENT', priority: 'NORMAL',
+        title: '较晚到期工单', safeSummary: '较晚到期', parkId: null, buildingId: null, deviceId: null,
+        updatedAt: '2026-09-02T09:50:00Z', openedAt: '2026-09-02T08:20:00Z',
+        slaDueAt: '2026-09-02T10:20:00Z', slaState: 'DUE_SOON', detailPath: 'customer',
+      },
+      {
+        id: 'ALERT_WORKFLOW:due-first', source: 'ALERT_WORKFLOW', status: 'RUNNING', priority: 'HIGH',
+        title: '较早到期告警', safeSummary: '较早到期', parkId: null, buildingId: null, deviceId: null,
+        updatedAt: '2026-09-02T09:00:00Z', openedAt: '2026-09-02T08:05:00Z',
+        slaDueAt: '2026-09-02T10:05:00Z', slaState: 'DUE_SOON', detailPath: 'workflow',
+      },
+    ])) as typeof fetch
+
+    const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-work-item]').map(item => item.attributes('data-work-item'))).toEqual([
+      'ALERT_WORKFLOW:due-first', 'CUSTOMER_TICKET:due-later',
+    ])
+  })
+
   it('sends the selected queue sort mode to the API', async () => {
     const requests: string[] = []
     globalThis.fetch = (async (input) => {

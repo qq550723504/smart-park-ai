@@ -32,13 +32,25 @@ const slaOverview = computed(() => ({
 const slaRank: Record<CollaborationWorkItemSlaState, number> = {
   OVERDUE: 0, DUE_SOON: 1, ON_TRACK: 2, NOT_APPLICABLE: 3, COMPLETED: 4,
 }
+const activeSlaStates = new Set<CollaborationWorkItemSlaState>(['OVERDUE', 'DUE_SOON', 'ON_TRACK'])
+function isActiveSlaState(value?: CollaborationWorkItemSlaState): boolean {
+  return value !== undefined && activeSlaStates.has(value)
+}
+function timeValue(value: string | null): number {
+  const timestamp = value ? new Date(value).getTime() : Number.NaN
+  return Number.isNaN(timestamp) ? Number.POSITIVE_INFINITY : timestamp
+}
 const sortedItems = computed(() => [...items.value].sort((left, right) => {
   if (sortMode.value === 'sla') {
     const rankDifference = (slaRank[left.slaState ?? 'NOT_APPLICABLE'] ?? slaRank.NOT_APPLICABLE)
       - (slaRank[right.slaState ?? 'NOT_APPLICABLE'] ?? slaRank.NOT_APPLICABLE)
     if (rankDifference !== 0) return rankDifference
+    if (isActiveSlaState(left.slaState) && isActiveSlaState(right.slaState)) {
+      const deadlineDifference = timeValue(left.slaDueAt) - timeValue(right.slaDueAt)
+      if (deadlineDifference !== 0) return deadlineDifference
+    }
   }
-  const updatedDifference = new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
+  const updatedDifference = timeValue(right.updatedAt) - timeValue(left.updatedAt)
   if (updatedDifference !== 0) return updatedDifference
   return left.id.localeCompare(right.id)
 }))
