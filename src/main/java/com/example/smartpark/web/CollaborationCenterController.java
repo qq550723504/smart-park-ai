@@ -29,7 +29,7 @@ public class CollaborationCenterController {
             @RequestParam(defaultValue = "50") int limit,
             @RequestParam(defaultValue = "sla") String sort,
             @RequestHeader(value = "X-Demo-Role", required = false) String role) {
-        DemoRole.require(role, DemoRole.CUSTOMER_AGENT, DemoRole.ADMIN);
+        DemoRole.require(role, DemoRole.CUSTOMER_AGENT, DemoRole.APPROVER, DemoRole.ADMIN);
         WorkItemQuery query = new WorkItemQuery(parse(source, CollaborationWorkItem.Source.class, "source"),
                 parse(status, CollaborationWorkItem.Status.class, "status"), limit,
                 parseSort(sort));
@@ -40,7 +40,7 @@ public class CollaborationCenterController {
     public List<CollaborationCenterDtos.SlaTrendResponse> trend(
             @RequestParam(defaultValue = "60") int limit,
             @RequestHeader(value = "X-Demo-Role", required = false) String role) {
-        DemoRole.require(role, DemoRole.CUSTOMER_AGENT, DemoRole.ADMIN);
+        DemoRole.require(role, DemoRole.CUSTOMER_AGENT, DemoRole.APPROVER, DemoRole.ADMIN);
         if (limit < 1 || limit > CollaborationSlaSnapshotStore.MAX_SNAPSHOTS) {
             throw new IllegalArgumentException("limit must be between 1 and " + CollaborationSlaSnapshotStore.MAX_SNAPSHOTS);
         }

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { listCollaborationSlaTrend, listCollaborationWorkItems } from '../../services/workflowApi'
+import { listCollaborationSlaTrend, listCollaborationWorkItems, submitApproval, updateCustomerTicket } from '../../services/workflowApi'
 import type { DemoRole } from '../../types/workflow'
 import type { CollaborationSlaSnapshot, CollaborationWorkItem, CollaborationWorkItemSource, CollaborationWorkItemSlaState, CollaborationWorkItemStatus } from '../../types/collaborationCenter'
 import CollaborationSlaTrendChart from './CollaborationSlaTrendChart.vue'
+import { createRequestId } from '../../utils/requestId'
 import './collaboration-center.css'
 
 const props = withDefaults(defineProps<{ role: DemoRole; active?: boolean }>(), { active: true })
@@ -18,6 +19,19 @@ const selectedItem = ref<CollaborationWorkItem | null>(null)
 const trendSnapshots = ref<CollaborationSlaSnapshot[]>([])
 const trendLoading = ref(false)
 const trendFailed = ref(false)
+const actionBusy = ref(false)
+const actionError = ref('')
+const approvalReviewer = ref('')
+const approvalComment = ref('')
+type ApprovalAttempt = {
+  itemId: string
+  decision: 'APPROVE' | 'REJECT'
+  reviewer: string
+  comment: string
+  idempotencyKey: string
+}
+const approvalAttempts = new Map<string, ApprovalAttempt>()
+const pendingActionItems = new Set<string>()
 let requestGeneration = 0
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 const drawer = ref<HTMLElement | null>(null)
@@ -25,7 +39,14 @@ const lastTrigger = ref<HTMLElement | null>(null)
 const queueHeading = ref<HTMLElement | null>(null)
 const SLA_REFRESH_INTERVAL_MS = 30_000
 
-const canRead = computed(() => props.role === 'ADMIN' || props.role === 'CUSTOMER_AGENT')
+const canRead = computed(() => ['ADMIN', 'APPROVER', 'CUSTOMER_AGENT'].includes(props.role))
+const canApproveSelected = computed(() => (props.role === 'ADMIN' || props.role === 'APPROVER')
+  ? selectedItem.value?.source === 'ALERT_WORKFLOW' && selectedItem.value.status === 'WAITING_APPROVAL'
+  : false)
+const customerNextStatus = computed(() => {
+  if (selectedItem.value?.source !== 'CUSTOMER_TICKET') return null
+  return ({ WAITING_AGENT: 'ASSIGNED', ASSIGNED: 'IN_PROGRESS', IN_PROGRESS: 'RESOLVED', WAITING_CUSTOMER: 'IN_PROGRESS', RESOLVED: 'CLOSED' } as Record<string, string>)[selectedItem.value.status] ?? null
+})
 const attentionCount = computed(() => items.value.filter(item => ['WAITING_APPROVAL', 'FAILED', 'WORK_ORDER_FAILED', 'WAITING_AGENT'].includes(item.status)).length)
 const slaOverview = computed(() => ({
   total: items.value.length,
@@ -92,8 +113,7 @@ async function load(preserveItems = false): Promise<void> {
     trendLoading.value = false
     failed.value = false
     trendFailed.value = false
-    selectedItem.value = null
-    lastTrigger.value = null
+    closeDetails(false)
     return
   }
   if (!preserveItems) {
@@ -158,23 +178,109 @@ function reconcileSelectedItem(nextItems: CollaborationWorkItem[]): void {
   const refreshedItem = nextItems.find(item => item.id === selectedItem.value?.id)
   if (refreshedItem) {
     selectedItem.value = refreshedItem
+    actionBusy.value = pendingActionItems.has(refreshedItem.id)
+    if (refreshedItem.source === 'ALERT_WORKFLOW' && refreshedItem.status !== 'WAITING_APPROVAL') {
+      approvalAttempts.delete(refreshedItem.id)
+    }
   } else {
-    selectedItem.value = null
-    lastTrigger.value = null
+    approvalAttempts.delete(selectedItem.value.id)
+    closeDetails(false)
     void nextTick(() => queueHeading.value?.focus())
   }
 }
+function resetDisplayedActionState(): void {
+  actionError.value = ''
+  actionBusy.value = false
+}
 function openDetails(item: CollaborationWorkItem, event: MouseEvent): void {
+  resetDisplayedActionState()
   lastTrigger.value = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
   selectedItem.value = item
+  actionBusy.value = pendingActionItems.has(item.id)
+  approvalReviewer.value = ''
+  approvalComment.value = ''
 }
 function closeDetails(restoreFocus = true): void {
+  resetDisplayedActionState()
   const trigger = lastTrigger.value
   selectedItem.value = null
   lastTrigger.value = null
+  approvalReviewer.value = ''
+  approvalComment.value = ''
   if (restoreFocus) void nextTick(() => trigger?.focus())
 }
 function handleCloseClick(): void { closeDetails() }
+
+function beginAction(itemId: string): void {
+  pendingActionItems.add(itemId)
+  actionBusy.value = true
+  actionError.value = ''
+}
+function isCurrentAction(itemId: string): boolean {
+  return selectedItem.value?.id === itemId
+}
+
+async function approveSelected(decision: 'APPROVE' | 'REJECT'): Promise<void> {
+  const item = selectedItem.value
+  if (!item || !canApproveSelected.value || actionBusy.value) return
+  if (!approvalReviewer.value.trim() || !approvalComment.value.trim()) {
+    actionError.value = '请填写审批人和审批意见'
+    return
+  }
+  const reviewer = approvalReviewer.value.trim()
+  const comment = approvalComment.value.trim()
+  const previousAttempt = approvalAttempts.get(item.id)
+  const attempt = previousAttempt?.decision === decision
+    && previousAttempt.reviewer === reviewer
+    && previousAttempt.comment === comment
+    ? previousAttempt
+    : {
+        itemId: item.id,
+        decision,
+        reviewer,
+        comment,
+        idempotencyKey: createRequestId(),
+      }
+  approvalAttempts.set(item.id, attempt)
+  beginAction(item.id)
+  try {
+    await submitApproval(item.id.replace(/^ALERT_WORKFLOW:/, ''), {
+      decision,
+      reviewer,
+      comment,
+      idempotencyKey: attempt.idempotencyKey,
+    }, props.role)
+    if (approvalAttempts.get(item.id) === attempt) approvalAttempts.delete(item.id)
+    await load(true)
+  } catch (cause) {
+    await load(true)
+    if (isCurrentAction(item.id)) {
+      actionError.value = cause instanceof Error ? cause.message : '人工处理失败，请稍后重试'
+    }
+  } finally {
+    pendingActionItems.delete(item.id)
+    if (isCurrentAction(item.id)) actionBusy.value = false
+  }
+}
+
+async function advanceSelectedTicket(): Promise<void> {
+  const item = selectedItem.value
+  const nextStatus = customerNextStatus.value
+  if (!item || !nextStatus || actionBusy.value) return
+  beginAction(item.id)
+  try {
+    await updateCustomerTicket(item.id.replace(/^CUSTOMER_TICKET:/, ''), nextStatus, props.role)
+    await load(true)
+  } catch (cause) {
+    await load(true)
+    if (isCurrentAction(item.id)) {
+      actionError.value = cause instanceof Error ? cause.message : '人工处理失败，请稍后重试'
+    }
+  } finally {
+    pendingActionItems.delete(item.id)
+    if (isCurrentAction(item.id)) actionBusy.value = false
+  }
+}
 function handleDrawerKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape') {
     event.preventDefault()
@@ -234,11 +340,11 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
   <main class="main-content collaboration-center" data-collaboration-center>
     <section class="hero-row">
       <div>
-        <span class="eyebrow">智能协同 · 只读队列</span>
+        <span class="eyebrow">智能协同 · 安全处理队列</span>
         <h2>让每个工作项<br /><em>都有清晰的下一步</em></h2>
-        <p class="hero-copy">统一查看告警处置与客服工单，保留原场景的审批、权限和状态边界。</p>
+        <p class="hero-copy">统一查看并安全处理告警处置与客服工单，保留原场景的审批、权限和状态边界。</p>
       </div>
-      <div class="hero-metrics"><div><strong>{{ items.length }}</strong><span>当前工作项</span></div><div><strong>{{ attentionCount }}</strong><span>需要关注</span></div><div><strong>只读</strong><span>执行模式</span></div></div>
+      <div class="hero-metrics"><div><strong>{{ items.length }}</strong><span>当前工作项</span></div><div><strong>{{ attentionCount }}</strong><span>需要关注</span></div><div><strong>受控</strong><span>执行模式</span></div></div>
     </section>
 
     <section v-if="canRead && !failed && (items.length > 0 || !loading)" class="panel collaboration-sla-overview" aria-label="SLA 总览">
@@ -279,10 +385,21 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
     <Teleport to="body">
       <div v-if="selectedItem" class="collaboration-drawer-backdrop" @click.self="handleCloseClick">
         <aside ref="drawer" class="collaboration-drawer" role="dialog" aria-modal="true" aria-labelledby="collaboration-drawer-title" tabindex="-1" @keydown="handleDrawerKeydown">
-          <div class="collaboration-drawer__header"><div><span class="eyebrow">工作项详情 · 只读</span><h2 id="collaboration-drawer-title">{{ selectedItem.title }}</h2></div><button type="button" data-drawer-close aria-label="关闭详情" @click="handleCloseClick">×</button></div>
+          <div class="collaboration-drawer__header"><div><span class="eyebrow">工作项详情 · 安全处理</span><h2 id="collaboration-drawer-title">{{ selectedItem.title }}</h2></div><button type="button" data-drawer-close aria-label="关闭详情" @click="handleCloseClick">×</button></div>
         <dl class="collaboration-drawer__facts"><div><dt>来源</dt><dd>{{ sourceLabel(selectedItem.source) }}</dd></div><div><dt>状态</dt><dd>{{ statusLabel(selectedItem.status) }}</dd></div><div><dt>优先级</dt><dd>{{ selectedItem.priority === 'HIGH' ? '高优先级' : '常规' }}</dd></div><div><dt>位置/设备</dt><dd>{{ locationLabel(selectedItem) }}</dd></div><div><dt>打开时间</dt><dd>{{ formatOptionalTime(selectedItem.openedAt) }}</dd></div><div><dt>更新时间</dt><dd>{{ formatTime(selectedItem.updatedAt) }}</dd></div></dl>
         <section class="collaboration-drawer__summary"><span class="eyebrow">安全摘要</span><p>{{ selectedItem.safeSummary }}</p></section>
         <section class="collaboration-drawer__sla"><div><span class="eyebrow">演示 SLA</span><strong :class="['collaboration-sla', slaClass(selectedItem.slaState)]">{{ slaLabel(selectedItem.slaState) }}</strong></div><small>截止时间：{{ formatOptionalTime(selectedItem.slaDueAt) }}</small></section>
+        <section v-if="canApproveSelected" class="collaboration-drawer__processing" aria-label="告警审批">
+          <span class="eyebrow">人工审批</span>
+          <input v-model="approvalReviewer" data-approval-reviewer placeholder="审批人" aria-label="审批人" />
+          <textarea v-model="approvalComment" data-approval-comment placeholder="审批意见" aria-label="审批意见" rows="2"></textarea>
+          <div class="collaboration-drawer__processing-actions"><button type="button" data-collaboration-action="reject" :disabled="actionBusy" @click="approveSelected('REJECT')">拒绝</button><button type="button" data-collaboration-action="approve" :disabled="actionBusy" @click="approveSelected('APPROVE')">{{ actionBusy ? '提交中…' : '批准并创建工单' }}</button></div>
+        </section>
+        <section v-if="customerNextStatus && (props.role === 'CUSTOMER_AGENT' || props.role === 'ADMIN')" class="collaboration-drawer__processing" aria-label="客服工单处理">
+          <span class="eyebrow">客服处理</span>
+          <button type="button" data-collaboration-action="customer-next" :disabled="actionBusy" @click="advanceSelectedTicket">{{ actionBusy ? '处理中…' : `推进至${statusLabel(customerNextStatus as CollaborationWorkItemStatus)}` }}</button>
+        </section>
+        <p v-if="actionError" class="collaboration-drawer__action-error" data-collaboration-action-error role="alert">{{ actionError }}</p>
         <div class="collaboration-drawer__actions"><button type="button" @click="openScene(selectedItem)">{{ selectedItem.detailPath === 'workflow' ? '打开告警工作流' : '打开客服控制台' }}</button><button type="button" @click="handleCloseClick">关闭</button></div>
         </aside>
       </div>

@@ -561,6 +561,10 @@ describe('OperationsWorkbench', () => {
     await wrapper.get('[data-collaboration-jump]').trigger('click')
     expect(wrapper.get('[data-workbench-view="customer"]').classes()).toContain('active')
 
+    wrapper.getComponent(ImmersiveWorkbenchShell).vm.$emit('update:role', 'APPROVER')
+    await nextTick()
+    expect(wrapper.find('[data-workbench-view="collaboration-center"]').exists()).toBe(true)
+
     wrapper.getComponent(ImmersiveWorkbenchShell).vm.$emit('update:role', 'VIEWER')
     await nextTick()
     expect(wrapper.find('[data-workbench-view="collaboration-center"]').exists()).toBe(false)
