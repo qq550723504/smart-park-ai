@@ -313,6 +313,47 @@ describe('CollaborationCenter', () => {
     wrapper.unmount()
   })
 
+  it('keeps an in-flight approval locked when its drawer is closed and reopened', async () => {
+    let resolveApproval!: (value: Response) => void
+    const pendingApproval = new Promise<Response>(resolve => { resolveApproval = resolve })
+    let approvalCalls = 0
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input)
+      if (url.includes('/sla-trend')) return response([])
+      if (url.includes('/approval')) {
+        approvalCalls += 1
+        return pendingApproval
+      }
+      return response([{
+        id: 'ALERT_WORKFLOW:wf-reopen', source: 'ALERT_WORKFLOW', status: 'WAITING_APPROVAL', priority: 'HIGH',
+        title: '重开后仍锁定的审批项', safeSummary: '审批请求处理中', parkId: null, buildingId: null, deviceId: null,
+        updatedAt: '2026-09-02T09:00:00Z', openedAt: '2026-09-02T08:00:00Z',
+        slaDueAt: '2026-09-02T10:00:00Z', slaState: 'DUE_SOON', detailPath: 'workflow',
+      }])
+    }) as typeof fetch
+
+    const wrapper = mount(CollaborationCenter, { attachTo: document.body, props: { role: 'APPROVER' } })
+    await flushPromises()
+    await wrapper.get('[data-work-item-details]').trigger('click')
+    let drawer = document.body.querySelector('[role="dialog"]') as HTMLElement
+    ;(drawer.querySelector('[data-approval-reviewer]') as HTMLInputElement).value = '审批人'
+    ;(drawer.querySelector('[data-approval-reviewer]') as HTMLInputElement).dispatchEvent(new Event('input'))
+    ;(drawer.querySelector('[data-approval-comment]') as HTMLTextAreaElement).value = '确认'
+    ;(drawer.querySelector('[data-approval-comment]') as HTMLTextAreaElement).dispatchEvent(new Event('input'))
+    ;(drawer.querySelector('[data-collaboration-action="approve"]') as HTMLButtonElement).click()
+    await Promise.resolve()
+
+    ;(drawer.querySelector('[aria-label="关闭详情"]') as HTMLButtonElement).click()
+    await wrapper.get('[data-work-item-details]').trigger('click')
+    drawer = document.body.querySelector('[role="dialog"]') as HTMLElement
+
+    expect((drawer.querySelector('[data-collaboration-action="approve"]') as HTMLButtonElement).disabled).toBe(true)
+    expect(approvalCalls).toBe(1)
+    resolveApproval(response({ status: 'COMPLETED' }))
+    await flushPromises()
+    wrapper.unmount()
+  })
+
   it('shows terminal items as completed SLA state', async () => {
     globalThis.fetch = (async () => response([{
       id: 'CUSTOMER_TICKET:cs-done', source: 'CUSTOMER_TICKET', status: 'CLOSED', priority: 'NORMAL',

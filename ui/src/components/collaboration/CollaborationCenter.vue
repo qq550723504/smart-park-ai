@@ -30,8 +30,8 @@ type ApprovalAttempt = {
   comment: string
   idempotencyKey: string
 }
-let approvalAttempt: ApprovalAttempt | null = null
-let actionGeneration = 0
+const approvalAttempts = new Map<string, ApprovalAttempt>()
+const pendingActionItems = new Set<string>()
 let requestGeneration = 0
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 const drawer = ref<HTMLElement | null>(null)
@@ -113,8 +113,7 @@ async function load(preserveItems = false): Promise<void> {
     trendLoading.value = false
     failed.value = false
     trendFailed.value = false
-    selectedItem.value = null
-    lastTrigger.value = null
+    closeDetails(false)
     return
   }
   if (!preserveItems) {
@@ -179,26 +178,30 @@ function reconcileSelectedItem(nextItems: CollaborationWorkItem[]): void {
   const refreshedItem = nextItems.find(item => item.id === selectedItem.value?.id)
   if (refreshedItem) {
     selectedItem.value = refreshedItem
+    actionBusy.value = pendingActionItems.has(refreshedItem.id)
+    if (refreshedItem.source === 'ALERT_WORKFLOW' && refreshedItem.status !== 'WAITING_APPROVAL') {
+      approvalAttempts.delete(refreshedItem.id)
+    }
   } else {
+    approvalAttempts.delete(selectedItem.value.id)
     closeDetails(false)
     void nextTick(() => queueHeading.value?.focus())
   }
 }
-function invalidateActionState(): void {
-  actionGeneration += 1
-  actionBusy.value = false
+function resetDisplayedActionState(): void {
   actionError.value = ''
-  approvalAttempt = null
+  actionBusy.value = false
 }
 function openDetails(item: CollaborationWorkItem, event: MouseEvent): void {
-  invalidateActionState()
+  resetDisplayedActionState()
   lastTrigger.value = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
   selectedItem.value = item
+  actionBusy.value = pendingActionItems.has(item.id)
   approvalReviewer.value = ''
   approvalComment.value = ''
 }
 function closeDetails(restoreFocus = true): void {
-  invalidateActionState()
+  resetDisplayedActionState()
   const trigger = lastTrigger.value
   selectedItem.value = null
   lastTrigger.value = null
@@ -208,14 +211,13 @@ function closeDetails(restoreFocus = true): void {
 }
 function handleCloseClick(): void { closeDetails() }
 
-function beginAction(itemId: string): number {
-  const generation = ++actionGeneration
+function beginAction(itemId: string): void {
+  pendingActionItems.add(itemId)
   actionBusy.value = true
   actionError.value = ''
-  return generation
 }
-function isCurrentAction(generation: number, itemId: string): boolean {
-  return generation === actionGeneration && selectedItem.value?.id === itemId
+function isCurrentAction(itemId: string): boolean {
+  return selectedItem.value?.id === itemId
 }
 
 async function approveSelected(decision: 'APPROVE' | 'REJECT'): Promise<void> {
@@ -227,11 +229,11 @@ async function approveSelected(decision: 'APPROVE' | 'REJECT'): Promise<void> {
   }
   const reviewer = approvalReviewer.value.trim()
   const comment = approvalComment.value.trim()
-  const attempt = approvalAttempt?.itemId === item.id
-    && approvalAttempt.decision === decision
-    && approvalAttempt.reviewer === reviewer
-    && approvalAttempt.comment === comment
-    ? approvalAttempt
+  const previousAttempt = approvalAttempts.get(item.id)
+  const attempt = previousAttempt?.decision === decision
+    && previousAttempt.reviewer === reviewer
+    && previousAttempt.comment === comment
+    ? previousAttempt
     : {
         itemId: item.id,
         decision,
@@ -239,8 +241,8 @@ async function approveSelected(decision: 'APPROVE' | 'REJECT'): Promise<void> {
         comment,
         idempotencyKey: createRequestId(),
       }
-  approvalAttempt = attempt
-  const generation = beginAction(item.id)
+  approvalAttempts.set(item.id, attempt)
+  beginAction(item.id)
   try {
     await submitApproval(item.id.replace(/^ALERT_WORKFLOW:/, ''), {
       decision,
@@ -248,15 +250,16 @@ async function approveSelected(decision: 'APPROVE' | 'REJECT'): Promise<void> {
       comment,
       idempotencyKey: attempt.idempotencyKey,
     }, props.role)
-    if (approvalAttempt === attempt) approvalAttempt = null
+    if (approvalAttempts.get(item.id) === attempt) approvalAttempts.delete(item.id)
     await load(true)
   } catch (cause) {
     await load(true)
-    if (isCurrentAction(generation, item.id)) {
+    if (isCurrentAction(item.id)) {
       actionError.value = cause instanceof Error ? cause.message : '人工处理失败，请稍后重试'
     }
   } finally {
-    if (isCurrentAction(generation, item.id)) actionBusy.value = false
+    pendingActionItems.delete(item.id)
+    if (isCurrentAction(item.id)) actionBusy.value = false
   }
 }
 
@@ -264,17 +267,18 @@ async function advanceSelectedTicket(): Promise<void> {
   const item = selectedItem.value
   const nextStatus = customerNextStatus.value
   if (!item || !nextStatus || actionBusy.value) return
-  const generation = beginAction(item.id)
+  beginAction(item.id)
   try {
     await updateCustomerTicket(item.id.replace(/^CUSTOMER_TICKET:/, ''), nextStatus, props.role)
     await load(true)
   } catch (cause) {
     await load(true)
-    if (isCurrentAction(generation, item.id)) {
+    if (isCurrentAction(item.id)) {
       actionError.value = cause instanceof Error ? cause.message : '人工处理失败，请稍后重试'
     }
   } finally {
-    if (isCurrentAction(generation, item.id)) actionBusy.value = false
+    pendingActionItems.delete(item.id)
+    if (isCurrentAction(item.id)) actionBusy.value = false
   }
 }
 function handleDrawerKeydown(event: KeyboardEvent): void {
