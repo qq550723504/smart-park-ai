@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executor;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -60,6 +61,9 @@ public class OperationsAnalysisService {
     private UUID activeRunId;
     /** Activity handles are guarded by lifecycleLock so abort can cancel queued work too. */
     private final Map<UUID, FutureTask<OperationsAnalysisGraph.AnalysisRunResult>> activeTasks =
+            new java.util.HashMap<>();
+    /** Futures used by internal orchestrators; guarded by lifecycleLock. */
+    private final Map<UUID, CompletableFuture<AnalysisRunStore.RunRecord>> completionWaiters =
             new java.util.HashMap<>();
 
     /** Pending ambiguity per run: one candidate metric set per clarification question. */
@@ -149,6 +153,31 @@ public class OperationsAnalysisService {
         return store.get(runId);
     }
 
+    /**
+     * Starts one normal analysis run and completes when it reaches a terminal
+     * state or a clarification pause. This is an application-layer seam for
+     * bounded orchestrators; it does not add a second execution path.
+     */
+    public CompletableFuture<AnalysisRunStore.RunRecord> startAndAwait(String question) {
+        CompletableFuture<AnalysisRunStore.RunRecord> future = new CompletableFuture<>();
+        AnalysisRunStore.RunRecord accepted;
+        try {
+            accepted = start(question);
+        } catch (RuntimeException failure) {
+            future.completeExceptionally(failure);
+            return future;
+        }
+        synchronized (lifecycleLock) {
+            AnalysisRunStore.RunRecord current = store.get(accepted.runId());
+            if (current != null && isAwaitableState(current.status())) {
+                future.complete(current);
+            } else {
+                completionWaiters.put(accepted.runId(), future);
+            }
+        }
+        return future;
+    }
+
     /** Terminates an active run that was created by a preflight or other owner. */
     public AnalysisRunStore.RunRecord abort(UUID runId) {
         if (runId == null) return null;
@@ -170,6 +199,7 @@ public class OperationsAnalysisService {
             FutureTask<OperationsAnalysisGraph.AnalysisRunResult> task = activeTasks.remove(runId);
             releaseActiveLocked(runId);
             publishTerminalLocked(aborted);
+            completeWaiterLocked(aborted);
             if (task != null) task.cancel(true);
             return aborted;
         }
@@ -551,6 +581,11 @@ public class OperationsAnalysisService {
                 // a racing timeout can never pair a completed trace with a
                 // failed status record (or vice versa).
                 publishTerminalLocked(record);
+                completeWaiterLocked(record);
+            } else {
+                // Clarification deliberately retains the active run slot until
+                // the caller resumes or aborts the paused run.
+                completeWaiterLocked(record);
             }
             return record;
         }
@@ -572,6 +607,7 @@ public class OperationsAnalysisService {
             pendingClarifications.remove(runId);
             releaseActiveLocked(runId);
             publishTerminalLocked(record);
+            completeWaiterLocked(record);
             return record;
         }
     }
@@ -598,6 +634,18 @@ public class OperationsAnalysisService {
         } catch (IllegalStateException alreadyClosed) {
             // The trace was closed by another terminal path; nothing more to do.
         }
+    }
+
+    private void completeWaiterLocked(AnalysisRunStore.RunRecord record) {
+        if (!isAwaitableState(record.status())) return;
+        CompletableFuture<AnalysisRunStore.RunRecord> waiter = completionWaiters.remove(record.runId());
+        if (waiter != null) waiter.complete(record);
+    }
+
+    private static boolean isAwaitableState(String status) {
+        return "COMPLETED".equals(status)
+                || "FAILED".equals(status)
+                || "NEEDS_CLARIFICATION".equals(status);
     }
 
     /** Registers RUN_STARTED/RESUMED synchronously so the trace resolves before polling starts. */

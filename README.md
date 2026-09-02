@@ -15,12 +15,13 @@
 | 告警处置 | Spring AI Alibaba `StateGraph`、结构化诊断、风险门禁、人工审批、Mock 工单和 SSE 事件 |
 | 能耗分析 | 只读能耗工具、基线偏差和峰值功率分析 |
 | 安防复核 | 只读安防工具、`REDACTED:` 脱敏摘要和强制人工审批 |
-| 园区客服 | 停车、访客、能耗问答，设施报修与知识不足时转人工 |
+| 园区客服 | 停车、访客、能耗问答，设施报修与知识不足时转人工；每次请求可在统一执行轨迹中重放 |
 | 知识管理 | 按客服与告警领域隔离的 Mock 检索或进程内向量 RAG |
 | 运营演示 | 角色边界、指标、审计、反馈和一次性故障注入 |
 | 专家协作 | Supervisor 动态分派领域专家，并行分析、展示证据和汇总结论；需满足在线能力开关 |
 | 运营分析 | 自然语言转真实只读 PostgreSQL 分析，展示查询结果、图表和结论；需显式启用分析链路 |
 | 停车与能耗运营看板 | 以受控问题入口组织停车、能耗和空间指标，点击后复用运营分析只读查询；需显式启用分析链路 |
+| 会话级运营日报 | 手动汇总能耗基线、停车利用率和高风险告警三个固定只读章节；仅 OPERATOR/ADMIN 可用，结果为进程内会话快照 |
 | 实时语音 | 选择性启用的全场景演示模式；需完成在线预检后再进行浏览器端人工语音验收 |
 | AI 治理概览 | 场景就绪度、能力模式、运营计数和安全边界；管理员可查看审计明细 |
 | AI 智能协同中心 | 只读聚合告警工作流与客服工单，按来源/状态筛选，并跳回原场景处理；需要 `CUSTOMER_AGENT` 或 `ADMIN` |
@@ -345,8 +346,8 @@ Remove-Item Env:SERVER_ADDRESS -ErrorAction SilentlyContinue
 | --- | --- | --- |
 | `GET /api/operations/capabilities` | 查看当前运行模式 | 无需演示角色 |
 | `GET /api/showcase/scenarios` | 返回最近在线验证驱动的客户演示场景；未验证或失效场景不可启动。 | 只读，无需演示角色 |
-| `POST /api/customer-service/sessions` | 创建客服会话 | 可传 `Idempotency-Key` |
-| `POST /api/customer-service/sessions/{sessionId}/messages` | 继续提问 | 已转人工的会话停止自动回答 |
+| `POST /api/customer-service/sessions` | 创建客服会话 | 可传 `Idempotency-Key`；响应头返回 `X-Execution-Run-Id` |
+| `POST /api/customer-service/sessions/{sessionId}/messages` | 继续提问 | 已转人工的会话停止自动回答；响应头返回新的 `X-Execution-Run-Id` |
 | `GET /api/customer-service/sessions/{sessionId}/conversation` | 查看对话与安全检索轨迹 | 不返回知识正文 |
 | `GET /api/customer-service/tickets` | 查看人工工单 | 需要 `CUSTOMER_AGENT` 或 `ADMIN` |
 | `GET /api/collaboration/work-items` | 查看安全协同队列 | 只读；需要 `CUSTOMER_AGENT` 或 `ADMIN`，支持 `source`、`status`、`limit`（最多 50） |
@@ -359,6 +360,8 @@ Remove-Item Env:SERVER_ADDRESS -ErrorAction SilentlyContinue
 | `GET /api/operations/metrics` | 查看运营计数 | 内存数据 |
 | `GET /api/governance/overview` | 查看安全聚合治理概览 | 不返回原始业务正文 |
 | `GET /api/audit` | 查看安全审计记录 | 需要 `ADMIN` |
+
+客服两个 POST 接口返回的 `X-Execution-Run-Id` 可直接用于 `GET /api/executions/{runId}/events`，以 SSE 重放本次请求的安全执行轨迹；该运行编号不会写入原有 JSON 响应体。
 
 高风险工作流进入 `WAITING_APPROVAL` 后，可以提交审批：
 

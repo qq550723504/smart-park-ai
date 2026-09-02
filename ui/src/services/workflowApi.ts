@@ -20,6 +20,26 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
+async function customerRequest(url: string, options?: RequestInit): Promise<CustomerServiceResponse> {
+  const response = await fetch(url, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...(options?.headers ?? {}) },
+  })
+  if (!response.ok) {
+    let message = `请求失败（${response.status}）`
+    try {
+      const error = await response.json()
+      message = error.message || error.error || message
+    } catch {
+      // Keep the same status-only fallback as the shared request helper.
+    }
+    throw new Error(message)
+  }
+  const result = await response.json() as CustomerServiceResponse
+  const executionRunId = response.headers.get('X-Execution-Run-Id')
+  return executionRunId ? { ...result, executionRunId } : result
+}
+
 export type ShowcaseScenarioStatus = 'READY' | 'NOT_READY' | 'DISABLED'
 
 export interface ShowcaseScenario {
@@ -47,7 +67,7 @@ export function getShowcaseScenarios() {
 }
 
 export function askCustomerService(question: string, idempotencyKey: string) {
-  return request<CustomerServiceResponse>('/api/customer-service/sessions', {
+  return customerRequest('/api/customer-service/sessions', {
     method: 'POST',
     headers: { 'Idempotency-Key': idempotencyKey },
     body: JSON.stringify({ question }),
@@ -55,7 +75,7 @@ export function askCustomerService(question: string, idempotencyKey: string) {
 }
 
 export function replyCustomerSession(sessionId: string, question: string, idempotencyKey: string) {
-  return request<CustomerServiceResponse>(`/api/customer-service/sessions/${sessionId}/messages`, {
+  return customerRequest(`/api/customer-service/sessions/${sessionId}/messages`, {
     method: 'POST',
     headers: { 'Idempotency-Key': idempotencyKey },
     body: JSON.stringify({ question }),

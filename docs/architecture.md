@@ -4,7 +4,7 @@
 
 ## 1. 项目定位与当前能力
 
-项目是一个基于 Spring Boot、Spring AI Alibaba 和 Vue 3 的智慧园区 AI 工作流示例。当前 `main` 已形成五条可以独立运行的业务链路，其中告警处置、运营分析和专家协作接入统一执行轨迹，客服使用独立的会话与工单状态链路，停车与能耗看板复用运营分析查询链路：
+项目是一个基于 Spring Boot、Spring AI Alibaba 和 Vue 3 的智慧园区 AI 工作流示例。当前 `main` 已形成五条可以独立运行的业务链路，其中告警处置、客服、运营分析和专家协作接入统一执行轨迹，客服仍保留独立的会话与工单状态链路，停车与能耗看板复用运营分析查询链路：
 
 - 告警处置：告警分诊、园区上下文收集、知识检索、AI 诊断、风险门禁、人工审批和工单创建。
 - 园区客服：基于园区知识回答停车、访客和能耗问题；报修、知识不足或策略限制时转人工。
@@ -213,7 +213,7 @@ understandQuestion
 
 ## 6. 统一执行事件与前端控制台
 
-`execution` 包为告警、运营分析和专家协作提供统一的 `ExecutionEvent`：
+`execution` 包为告警、客服、运营分析和专家协作提供统一的 `ExecutionEvent`：
 
 ```text
 eventId / runId / sequence / timestamp
@@ -221,13 +221,13 @@ scenario / actor / stage / eventType / status
 safeSummary / typed displayPayload
 ```
 
-当前事件场景包括 `ALERT_WORKFLOW`、`OPERATIONS_ANALYSIS` 和 `EXPERT_COLLABORATION`。事件类型覆盖运行启动、节点开始/完成、工具调用、专家交接、SQL 生成/校验/拒绝、查询完成、图表规格、暂停/恢复、失败和完成。
+当前事件场景包括 `ALERT_WORKFLOW`、`CUSTOMER_SERVICE`、`OPERATIONS_ANALYSIS` 和 `EXPERT_COLLABORATION`。事件类型覆盖运行启动、节点开始/完成、工具调用、专家交接、SQL 生成/校验/拒绝、查询完成、图表规格、暂停/恢复、失败和完成。客服每个新会话或回复都会单独生成 `runId`，固定记录请求接收、意图识别、知识检索、答复/转人工和终态；事件只携带安全摘要，不携带原始问题、完整答复、Prompt、供应商响应或知识正文。
 
-`InMemoryExecutionEventPublisher` 为每个运行保存历史并支持订阅；统一接口 `GET /api/executions/{runId}/events` 以 SSE 重放历史并继续推送实时事件，直到终态关闭。告警旧 SSE 接口由 `ProjectedWorkflowEventPublisher` 适配到统一事件层，保持兼容。
+`InMemoryExecutionEventPublisher` 为每个运行保存历史并支持订阅；统一接口 `GET /api/executions/{runId}/events` 以 SSE 重放历史并继续推送实时事件，直到终态关闭。客服 POST 接口在响应头返回 `X-Execution-Run-Id`，前端据此订阅并重放完整客服轨迹，JSON 响应体保持原有契约不变。告警旧 SSE 接口由 `ProjectedWorkflowEventPublisher` 适配到统一事件层，保持兼容。
 
 `DisplayPayload` 是受控的类型化展示负载：文本、工具调用、专家交接、SQL、图表、音频状态和错误分别使用不同结构。SQL 只发送经过校验的安全版本；音频负载当前只表示状态元数据。事件模型为语音场景提供 `VOICE` 和音频事件枚举；语音 Session、WebSocket 和前端语音入口只有在对应能力开关与预检通过后才进入可演示目录。
 
-Vue 3 控制台按场景切换页面：告警工作流、园区客服、AI 智能协同中心、专家协作、运营分析、停车与能耗运营看板和治理中心；协同中心只读取应用层 `CollaborationWorkItem` 安全投影，聚合告警工作流与客服工单但不合并两个领域模型。协同中心的详情抽屉只展示来源、位置、状态、安全摘要、时间和演示 SLA 元数据；演示 SLA 使用固定策略（高优先级告警 30 分钟、普通告警 2 小时、客服工单 4 小时），不代表生产调度承诺。协同中心趋势使用应用层内存会话采样（30 秒间隔、最多 120 点），不代表持久化历史报表。点击条目后回到原场景处理。看板点击问题后切换到运营分析页并复用同一只读查询链路。右侧统一执行轨迹栏为告警、专家协作和运营分析通过 `runId` 订阅后端事件。客服当前通过会话消息和工单状态展示进展，不接入统一执行事件流；治理中心读取安全聚合快照，管理员可额外查看审计明细。`X-Demo-Role` 用于本地演示查看者、操作员、审批人、客服坐席和管理员的 UI/API 操作边界，不是生产身份系统。
+Vue 3 控制台按场景切换页面：告警工作流、园区客服、AI 智能协同中心、专家协作、运营分析、停车与能耗运营看板和治理中心；协同中心只读取应用层 `CollaborationWorkItem` 安全投影，聚合告警工作流与客服工单但不合并两个领域模型。协同中心的详情抽屉只展示来源、位置、状态、安全摘要、时间和演示 SLA 元数据；演示 SLA 使用固定策略（高优先级告警 30 分钟、普通告警 2 小时、客服工单 4 小时），不代表生产调度承诺。协同中心趋势使用应用层内存会话采样（30 秒间隔、最多 120 点），不代表持久化历史报表。点击条目后回到原场景处理。看板点击问题后切换到运营分析页并复用同一只读查询链路；看板还可手动启动会话级运营日报，固定顺序编排能耗基线偏差、停车利用率和高风险告警三个章节，章节失败后继续后续章节并以 `PARTIAL` 收束。日报存储有界且仅保留进程内会话快照。右侧统一执行轨迹栏为告警、客服、专家协作、运营分析和运营日报通过 `runId` 订阅后端事件；客服 API 先从 `X-Execution-Run-Id` 取得运行编号，再重放完整安全轨迹。治理中心读取安全聚合快照，管理员可额外查看审计明细。`X-Demo-Role` 用于本地演示查看者、操作员、审批人、客服坐席和管理员的 UI/API 操作边界，不是生产身份系统。
 
 ## 7. 知识、审计、反馈和 MCP
 
@@ -271,8 +271,8 @@ MCP 不提供知识正文、身份数据、工作流变更、工单写入、设�
 | `POST` | `/api/workflows/{workflowId}/approval` | 提交人工审批 |
 | `GET` | `/api/workflows/{workflowId}/events` | 兼容告警工作流 SSE |
 | `GET` | `/api/workflows/{workflowId}/observability` | 查询工具调用和失败节点汇总 |
-| `POST` | `/api/customer-service/sessions` | 创建客服会话 |
-| `POST` | `/api/customer-service/sessions/{sessionId}/messages` | 在会话中继续提问 |
+| `POST` | `/api/customer-service/sessions` | 创建客服会话；响应头返回 `X-Execution-Run-Id` |
+| `POST` | `/api/customer-service/sessions/{sessionId}/messages` | 在会话中继续提问；响应头返回新的 `X-Execution-Run-Id` |
 | `GET` | `/api/customer-service/sessions/{sessionId}/conversation` | 查询对话和安全检索轨迹 |
 | `GET/PATCH` | `/api/customer-service/tickets[/{ticketId}]` | 查询或推进人工客服工单 |
 | `GET` | `/api/collaboration/work-items` | 查询告警与客服工单的安全只读协同投影；需要 `CUSTOMER_AGENT` 或 `ADMIN` |
@@ -281,6 +281,8 @@ MCP 不提供知识正文、身份数据、工作流变更、工单写入、设�
 | `POST` | `/api/operations-analysis/runs` | 发起自然语言运营分析 |
 | `POST` | `/api/operations-analysis/runs/{runId}/clarifications` | 提交指标口径澄清 |
 | `GET` | `/api/operations-analysis/runs/{runId}` | 查询运营分析状态和结果 |
+| `POST` | `/api/operations-reports/runs` | 手动启动固定三章节运营日报；需要 `OPERATOR` 或 `ADMIN`，请求体必须为空对象 |
+| `GET` | `/api/operations-reports/runs/{runId}` | 查询会话级运营日报安全快照；需要 `OPERATOR` 或 `ADMIN` |
 | `GET` | `/api/executions/{runId}` | 查询统一执行运行摘要 |
 | `GET` | `/api/executions/{runId}/events` | 订阅统一执行 SSE |
 
@@ -300,7 +302,9 @@ MCP 不提供知识正文、身份数据、工作流变更、工单写入、设�
 
 ### 10.1 当前存储
 
-当前实现的工作流快照、Graph checkpoint、统一执行事件、客服会话/工单、专家协作运行和反馈审计主要是进程内存储。RAG 使用进程内 `SimpleVectorStore`；运营分析的事实数据可来自独立 PostgreSQL，但分析运行状态本身仍由进程内 Store 管理。
+当前实现的工作流快照、Graph checkpoint、统一执行事件、客服会话/工单、专家协作运行、运营日报和反馈审计主要是进程内存储。RAG 使用进程内 `SimpleVectorStore`；运营分析的事实数据可来自独立 PostgreSQL，但分析运行状态和日报快照本身仍由进程内 Store 管理。日报最多保留 10 个终态快照、终态保留 30 分钟，并限制同一进程同时只有一个日报编排运行；服务重启后清空。
+
+运营日报当前明确是手动、只读、会话级展示能力。生产化的定时生成、历史报表持久化、邮件/消息通知、跨实例一致性或面向设备与工单的联动，都需要单独的数据模型、权限和可靠性设计，不能由当前内存快照直接推导。
 
 因此当前版本适合单进程演示和测试，不保证重启恢复、跨实例幂等或多实例事件一致性。
 

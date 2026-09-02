@@ -46,7 +46,8 @@ class ExecutionEventTest {
                 .containsExactlyInAnyOrder(ExecutionScenario.VOICE,
                         ExecutionScenario.EXPERT_COLLABORATION,
                         ExecutionScenario.OPERATIONS_ANALYSIS,
-                        ExecutionScenario.ALERT_WORKFLOW);
+                        ExecutionScenario.ALERT_WORKFLOW,
+                        ExecutionScenario.CUSTOMER_SERVICE);
     }
 
     @Test

@@ -4,7 +4,7 @@
  * payload union is closed and discriminated by `payloadType`.
  */
 
-export type ExecutionScenario = 'VOICE' | 'EXPERT_COLLABORATION' | 'OPERATIONS_ANALYSIS' | 'ALERT_WORKFLOW'
+export type ExecutionScenario = 'VOICE' | 'EXPERT_COLLABORATION' | 'OPERATIONS_ANALYSIS' | 'ALERT_WORKFLOW' | 'CUSTOMER_SERVICE'
 
 export type ExecutionEventType =
   | 'RUN_STARTED'

@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -49,6 +50,87 @@ class OperationsAnalysisServiceTest {
                 run.runId(), List.of(new MetricSelection("告警", "alert_count"))))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("待澄清");
+    }
+
+    @Test
+    void startAndAwaitCompletesForASynchronousTerminalRun() throws Exception {
+        OperationsAnalysisService service = service(
+                (runId, question, pinned) -> completed(runId), directExecutor());
+
+        CompletableFuture<AnalysisRunStore.RunRecord> future =
+                service.startAndAwait("过去5天各楼宇能耗基线偏差");
+
+        assertThat(future.get(1, TimeUnit.SECONDS).status()).isEqualTo("COMPLETED");
+    }
+
+    @Test
+    void terminalAwaiterCanStartNextRunAfterPreviousRunReleasesActiveSlot() throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch firstStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch secondStarted = new CountDownLatch(1);
+        CountDownLatch callbackFinished = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
+        AtomicReference<AnalysisRunStore.RunRecord> secondAccepted = new AtomicReference<>();
+        AtomicReference<Throwable> callbackFailure = new AtomicReference<>();
+        try {
+            OperationsAnalysisService service = service((runId, question, pinned) -> {
+                if (calls.incrementAndGet() == 1) {
+                    firstStarted.countDown();
+                    try {
+                        releaseFirst.await();
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new AssertionError(interrupted);
+                    }
+                } else {
+                    secondStarted.countDown();
+                }
+                return completed(runId);
+            }, executor);
+
+            CompletableFuture<AnalysisRunStore.RunRecord> first =
+                    service.startAndAwait("第一个分析");
+            assertThat(firstStarted.await(1, TimeUnit.SECONDS)).isTrue();
+            first.thenAccept(ignored -> {
+                try {
+                    secondAccepted.set(service.start("第二个分析"));
+                } catch (Throwable failure) {
+                    callbackFailure.set(failure);
+                } finally {
+                    callbackFinished.countDown();
+                }
+            });
+
+            releaseFirst.countDown();
+
+            assertThat(first.get(1, TimeUnit.SECONDS).status()).isEqualTo("COMPLETED");
+            assertThat(callbackFinished.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(callbackFailure).hasValue(null);
+            assertThat(secondAccepted.get()).isNotNull();
+            assertThat(secondStarted.await(1, TimeUnit.SECONDS)).isTrue();
+        } finally {
+            executor.shutdownNow();
+            executor.awaitTermination(2, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void startAndAwaitReturnsFailedAndClarificationTerminalStates() throws Exception {
+        OperationsAnalysisService failedService = service(
+                (runId, question, pinned) -> new OperationsAnalysisGraph.AnalysisRunResult(
+                        runId, OperationsAnalysisGraph.RunOutcome.FAILED, List.of(), List.of(),
+                        null, null, null, "report"), directExecutor());
+        assertThat(failedService.startAndAwait("失败章节").get(1, TimeUnit.SECONDS).status())
+                .isEqualTo("FAILED");
+
+        OperationsAnalysisService clarificationService = service(
+                (runId, question, pinned) -> clarifying(runId), directExecutor());
+        var paused = clarificationService.startAndAwait("需要澄清章节").get(1, TimeUnit.SECONDS);
+        assertThat(paused.status())
+                .isEqualTo("NEEDS_CLARIFICATION");
+        clarificationService.abort(paused.runId());
+        assertThat(clarificationService.start("后续问题").status()).isEqualTo("NEEDS_CLARIFICATION");
     }
 
     @Test

@@ -50,12 +50,12 @@ const knowledgeEvidence = computed<Pick<WorkbenchEvidenceItem, 'value' | 'tone'>
 const navItems = computed<WorkbenchNavItem[]>(() => [
   { value: 'workflow', label: '告警工作流', available: true },
   { value: 'customer', label: '园区客服', available: true },
-  { value: 'voice', label: '实时语音', available: capabilities.value?.voiceEnabled === true },
-  { value: 'collaboration', label: '专家协作', available: capabilities.value?.collaborationEnabled === true },
   { value: 'collaboration-center', label: '协同中心', available: role.value === 'ADMIN' || role.value === 'CUSTOMER_AGENT' },
-  { value: 'analytics', label: '运营分析', available: capabilities.value?.analyticsEnabled === true },
-  { value: 'governance', label: '治理中心', available: true },
   { value: 'operations', label: '运营看板', available: capabilities.value?.analyticsEnabled === true },
+  { value: 'analytics', label: '运营分析', available: capabilities.value?.analyticsEnabled === true },
+  { value: 'collaboration', label: '专家协作', available: capabilities.value?.collaborationEnabled === true },
+  { value: 'voice', label: '实时语音', available: capabilities.value?.voiceEnabled === true },
+  { value: 'governance', label: '治理中心', available: true },
 ])
 onMounted(() => {
   void getOperationsCapabilities()
@@ -335,6 +335,7 @@ function confidence(value?: number) {
         :active="props.active && activeView === 'customer'"
         :refresh-token="customerQueueRefreshToken"
         :launch-request="props.launchRequest"
+        :trace="trace"
         @launch-status="handleGuidedLaunchUpdate"
       />
     </main>
@@ -366,7 +367,13 @@ function confidence(value?: number) {
 
     <GovernanceCenter v-show="activeView === 'governance'" :role="role" :active="props.active && activeView === 'governance'" />
 
-    <OperationsBoard v-show="activeView === 'operations'" @open-analysis="openAnalysisFromBoard" />
+    <OperationsBoard
+      v-show="activeView === 'operations'"
+      :role="role"
+      :trace="trace"
+      :active="props.active && activeView === 'operations'"
+      @open-analysis="openAnalysisFromBoard"
+    />
 
     <main v-show="activeView === 'workflow'" class="main-content">
       <section class="hero-row">

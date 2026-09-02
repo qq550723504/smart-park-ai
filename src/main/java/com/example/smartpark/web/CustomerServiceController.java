@@ -1,9 +1,12 @@
 package com.example.smartpark.web;
 
 import com.example.smartpark.audit.AuditTrail;
+import com.example.smartpark.customer.CustomerServiceExecutionService;
+import com.example.smartpark.execution.ExecutionEventPublisher;
 import com.example.smartpark.workflow.CustomerServiceWorkflow;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -22,34 +25,43 @@ public class CustomerServiceController {
 
     private final CustomerServiceWorkflow workflow;
     private final AuditTrail auditTrail;
+    private final CustomerServiceExecutionService executionService;
 
     public CustomerServiceController(CustomerServiceWorkflow workflow) {
-        this(workflow, new AuditTrail());
+        this(workflow, new AuditTrail(), null);
+    }
+
+    public CustomerServiceController(CustomerServiceWorkflow workflow, AuditTrail auditTrail) {
+        this(workflow, auditTrail, null);
     }
 
     @Autowired
-    public CustomerServiceController(CustomerServiceWorkflow workflow, AuditTrail auditTrail) {
+    public CustomerServiceController(CustomerServiceWorkflow workflow, AuditTrail auditTrail,
+                                     ExecutionEventPublisher publisher) {
         this.workflow = Objects.requireNonNull(workflow, "workflow");
         this.auditTrail = Objects.requireNonNull(auditTrail, "auditTrail");
+        this.executionService = new CustomerServiceExecutionService(workflow, publisher);
     }
 
     @PostMapping("/sessions")
-    public WebDtos.CustomerServiceResponse ask(
+    public ResponseEntity<WebDtos.CustomerServiceResponse> ask(
             @Valid @RequestBody WebDtos.CustomerServiceRequest request,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
-        WebDtos.CustomerServiceResponse response = WebDtos.from(workflow.handle(request.question(), idempotencyKey));
+        var execution = executionService.handle(request.question(), idempotencyKey);
+        WebDtos.CustomerServiceResponse response = WebDtos.from(execution.result());
         auditTrail.record("ANONYMOUS", "CREATE_CUSTOMER_SESSION", response.sessionId(), "SUCCESS");
-        return response;
+        return ResponseEntity.ok().header("X-Execution-Run-Id", execution.runId().toString()).body(response);
     }
 
     @PostMapping("/sessions/{sessionId}/messages")
-    public WebDtos.CustomerServiceResponse reply(
+    public ResponseEntity<WebDtos.CustomerServiceResponse> reply(
             @PathVariable String sessionId,
             @Valid @RequestBody WebDtos.CustomerServiceRequest request,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
-        WebDtos.CustomerServiceResponse response = WebDtos.from(workflow.reply(sessionId, request.question(), idempotencyKey));
+        var execution = executionService.reply(sessionId, request.question(), idempotencyKey);
+        WebDtos.CustomerServiceResponse response = WebDtos.from(execution.result());
         auditTrail.record("ANONYMOUS", "ADD_CUSTOMER_MESSAGE", sessionId, "SUCCESS");
-        return response;
+        return ResponseEntity.ok().header("X-Execution-Run-Id", execution.runId().toString()).body(response);
     }
 
     @GetMapping("/sessions/{sessionId}/conversation")
