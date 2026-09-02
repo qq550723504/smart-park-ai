@@ -5,6 +5,7 @@ import com.example.smartpark.execution.InMemoryExecutionEventPublisher;
 import com.example.smartpark.execution.model.ExecutionEvent;
 import com.example.smartpark.execution.model.ExecutionEventType;
 import com.example.smartpark.execution.model.ExecutionScenario;
+import com.example.smartpark.execution.model.ExecutionStatus;
 import com.example.smartpark.workflow.CustomerServiceWorkflow;
 import org.junit.jupiter.api.Test;
 
@@ -52,6 +53,25 @@ class CustomerServiceExecutionServiceTest {
         assertThat(second.runId()).isNotEqualTo(first.runId());
         assertThat(publisher.history(second.runId()).get(6).safeSummary()).isEqualTo("已转人工客服");
         assertThat(publisher.status(second.runId())).isEqualTo("COMPLETED");
+    }
+
+    @Test
+    void marksRetrievalOutageAsFailedWithoutLeakingProviderDetails() {
+        String secret = "private vector-store response";
+        var publisher = new InMemoryExecutionEventPublisher();
+        var workflow = new CustomerServiceWorkflow((domain, query) -> {
+            throw new IllegalStateException(secret);
+        });
+        var service = new CustomerServiceExecutionService(workflow, publisher);
+
+        var executed = service.handle("访客停车怎么收费？", "retrieval-outage");
+        ExecutionEvent retrieval = publisher.history(executed.runId()).get(4);
+
+        assertThat(retrieval.eventType()).isEqualTo(ExecutionEventType.NODE_COMPLETED);
+        assertThat(retrieval.status()).isEqualTo(ExecutionStatus.FAILED);
+        assertThat(retrieval.safeSummary())
+                .isEqualTo("园区知识检索不可用，已转人工客服")
+                .doesNotContain(secret);
     }
 
     @Test

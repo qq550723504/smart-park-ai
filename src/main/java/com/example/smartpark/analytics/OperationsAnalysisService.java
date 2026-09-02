@@ -194,12 +194,12 @@ public class OperationsAnalysisService {
                     Math.max(0, java.time.Duration.between(createdAt, now).toMillis()),
                     "PREFLIGHT_ABORTED", createdAt, now, List.of(), List.of(), current.timeResolution());
             store.put(aborted);
-            completeWaiterLocked(aborted);
             pendingClarifications.remove(runId);
             admittingClarifications.remove(runId);
             FutureTask<OperationsAnalysisGraph.AnalysisRunResult> task = activeTasks.remove(runId);
             releaseActiveLocked(runId);
             publishTerminalLocked(aborted);
+            completeWaiterLocked(aborted);
             if (task != null) task.cancel(true);
             return aborted;
         }
@@ -575,13 +575,17 @@ public class OperationsAnalysisService {
                 }
             };
             store.put(record);
-            completeWaiterLocked(record);
             if (!"NEEDS_CLARIFICATION".equals(record.status())) {
                 releaseActiveLocked(runId);
                 // Terminal events are published strictly after persistence so
                 // a racing timeout can never pair a completed trace with a
                 // failed status record (or vice versa).
                 publishTerminalLocked(record);
+                completeWaiterLocked(record);
+            } else {
+                // Clarification deliberately retains the active run slot until
+                // the caller resumes or aborts the paused run.
+                completeWaiterLocked(record);
             }
             return record;
         }
@@ -600,10 +604,10 @@ public class OperationsAnalysisService {
             var record = new AnalysisRunStore.RunRecord(runId, question, "FAILED", List.of(), List.of(),
                     "", 0, false, durationMs, stage, createdAt, Instant.now(clock), List.of(), List.of());
             store.put(record);
-            completeWaiterLocked(record);
             pendingClarifications.remove(runId);
             releaseActiveLocked(runId);
             publishTerminalLocked(record);
+            completeWaiterLocked(record);
             return record;
         }
     }

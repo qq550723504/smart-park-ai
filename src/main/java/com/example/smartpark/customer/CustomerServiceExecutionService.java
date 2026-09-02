@@ -6,6 +6,7 @@ import com.example.smartpark.execution.model.ExecutionEventType;
 import com.example.smartpark.execution.model.ExecutionScenario;
 import com.example.smartpark.execution.model.ExecutionStage;
 import com.example.smartpark.execution.model.ExecutionStatus;
+import com.example.smartpark.model.customer.CustomerAnswer;
 import com.example.smartpark.model.customer.CustomerServiceResult;
 import com.example.smartpark.workflow.CustomerServiceWorkflow;
 import org.slf4j.Logger;
@@ -49,9 +50,11 @@ public final class CustomerServiceExecutionService {
                     ExecutionStatus.SUCCEEDED, "服务意图识别完成");
             emit(runId, ExecutionStage.TOOL_EXECUTION, ExecutionEventType.NODE_STARTED,
                     ExecutionStatus.RUNNING, "开始检索园区知识");
+            boolean retrievalUnavailable = result.reason() == CustomerAnswer.Reason.RETRIEVAL_UNAVAILABLE;
             emit(runId, ExecutionStage.TOOL_EXECUTION, ExecutionEventType.NODE_COMPLETED,
-                    ExecutionStatus.SUCCEEDED,
-                    "知识检索完成，命中 " + result.knowledgeCitations().size() + " 条依据");
+                    retrievalUnavailable ? ExecutionStatus.FAILED : ExecutionStatus.SUCCEEDED,
+                    retrievalUnavailable ? "园区知识检索不可用，已转人工客服"
+                            : "知识检索完成，命中 " + result.knowledgeCitations().size() + " 条依据");
             emit(runId, ExecutionStage.RESPONSE_DELIVERY, ExecutionEventType.NODE_STARTED,
                     ExecutionStatus.RUNNING, "开始生成安全答复");
             emit(runId, ExecutionStage.RESPONSE_DELIVERY, ExecutionEventType.NODE_COMPLETED,

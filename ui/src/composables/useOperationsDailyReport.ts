@@ -10,6 +10,7 @@ export function useOperationsDailyReport(options: {
   maxPolls?: number
 } = {}) {
   const report = ref<OperationsDailyReport | null>(null)
+  const runId = ref<string | null>(null)
   const busy = ref(false)
   const error = ref('')
   const pollIntervalMs = options.pollIntervalMs ?? 500
@@ -21,6 +22,7 @@ export function useOperationsDailyReport(options: {
   function reset(): void {
     generation += 1
     report.value = null
+    runId.value = null
     busy.value = false
     error.value = ''
   }
@@ -30,10 +32,10 @@ export function useOperationsDailyReport(options: {
     const currentGeneration = ++generation
     busy.value = true
     error.value = ''
-    report.value = null
     try {
       const accepted = await startOperationsDailyReport(role)
       if (currentGeneration !== generation) return
+      runId.value = accepted.runId
       options.trace?.subscribe(accepted.runId)
       for (let attempt = 0; attempt < maxPolls; attempt += 1) {
         const current = await getOperationsDailyReport(accepted.runId, role)
@@ -52,5 +54,5 @@ export function useOperationsDailyReport(options: {
   }
 
   onScopeDispose(() => { generation += 1 })
-  return { report, busy, error, start, reset }
+  return { report, runId, busy, error, start, reset }
 }

@@ -64,6 +64,58 @@ class OperationsAnalysisServiceTest {
     }
 
     @Test
+    void terminalAwaiterCanStartNextRunAfterPreviousRunReleasesActiveSlot() throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch firstStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch secondStarted = new CountDownLatch(1);
+        CountDownLatch callbackFinished = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
+        AtomicReference<AnalysisRunStore.RunRecord> secondAccepted = new AtomicReference<>();
+        AtomicReference<Throwable> callbackFailure = new AtomicReference<>();
+        try {
+            OperationsAnalysisService service = service((runId, question, pinned) -> {
+                if (calls.incrementAndGet() == 1) {
+                    firstStarted.countDown();
+                    try {
+                        releaseFirst.await();
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new AssertionError(interrupted);
+                    }
+                } else {
+                    secondStarted.countDown();
+                }
+                return completed(runId);
+            }, executor);
+
+            CompletableFuture<AnalysisRunStore.RunRecord> first =
+                    service.startAndAwait("第一个分析");
+            assertThat(firstStarted.await(1, TimeUnit.SECONDS)).isTrue();
+            first.thenAccept(ignored -> {
+                try {
+                    secondAccepted.set(service.start("第二个分析"));
+                } catch (Throwable failure) {
+                    callbackFailure.set(failure);
+                } finally {
+                    callbackFinished.countDown();
+                }
+            });
+
+            releaseFirst.countDown();
+
+            assertThat(first.get(1, TimeUnit.SECONDS).status()).isEqualTo("COMPLETED");
+            assertThat(callbackFinished.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(callbackFailure).hasValue(null);
+            assertThat(secondAccepted.get()).isNotNull();
+            assertThat(secondStarted.await(1, TimeUnit.SECONDS)).isTrue();
+        } finally {
+            executor.shutdownNow();
+            executor.awaitTermination(2, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
     void startAndAwaitReturnsFailedAndClarificationTerminalStates() throws Exception {
         OperationsAnalysisService failedService = service(
                 (runId, question, pinned) -> new OperationsAnalysisGraph.AnalysisRunResult(
