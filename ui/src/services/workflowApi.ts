@@ -1,6 +1,6 @@
 import type { AuditEntry, CustomerConversationResponse, CustomerServiceResponse, DemoRole, FeedbackRating, KnowledgeMetadata, OperationsMetrics, WorkflowEvent, WorkflowObservability, WorkflowResponse } from '../types/workflow'
 import type { ShowcaseLaunchInput, ShowcaseScenarioId } from '../types/workbench'
-import type { CollaborationWorkItem, CollaborationWorkItemFilters } from '../types/collaborationCenter'
+import type { CollaborationSlaSnapshot, CollaborationWorkItem, CollaborationWorkItemFilters } from '../types/collaborationCenter'
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -121,6 +121,12 @@ export function listCollaborationWorkItems(role: DemoRole, filters: Collaboratio
   if (filters.sort) params.set('sort', filters.sort)
   const query = params.toString()
   return request<CollaborationWorkItem[]>(`/api/collaboration/work-items${query ? `?${query}` : ''}`, {
+    headers: { 'X-Demo-Role': role },
+  })
+}
+
+export function listCollaborationSlaTrend(role: DemoRole, limit = 60) {
+  return request<CollaborationSlaSnapshot[]>(`/api/collaboration/sla-trend?limit=${limit}`, {
     headers: { 'X-Demo-Role': role },
   })
 }
