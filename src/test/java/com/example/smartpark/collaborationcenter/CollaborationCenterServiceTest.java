@@ -72,6 +72,25 @@ class CollaborationCenterServiceTest {
     }
 
     @Test
+    void samplesTheCompleteQueueBeforeApplyingFilters() {
+        WorkflowExecutionStore workflows = mock(WorkflowExecutionStore.class);
+        CustomerTicketPort tickets = mock(CustomerTicketPort.class);
+        when(workflows.snapshots()).thenReturn(List.of(alertSnapshot()));
+        when(tickets.list()).thenReturn(List.of(new CustomerTicket(
+                "cs-1", "session-1", "REPAIR", "WAITING_AGENT", "维修请求一。", Instant.EPOCH)));
+        CollaborationSlaSnapshotStore snapshots = new CollaborationSlaSnapshotStore();
+
+        new CollaborationCenterService(workflows, tickets, TEST_CLOCK, snapshots)
+                .list(new WorkItemQuery(CollaborationWorkItem.Source.CUSTOMER_TICKET, null, 1,
+                        WorkItemQuery.SortMode.SLA));
+
+        assertThat(snapshots.list(60)).singleElement().satisfies(snapshot -> {
+            assertThat(snapshot.total()).isEqualTo(2);
+            assertThat(snapshot.overdue()).isEqualTo(2);
+        });
+    }
+
+    @Test
     void remainsAvailableWhenAlertWorkflowIsDisabled() {
         CustomerTicketPort tickets = mock(CustomerTicketPort.class);
         when(tickets.list()).thenReturn(List.of(new CustomerTicket(

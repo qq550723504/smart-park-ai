@@ -11,8 +11,14 @@ import java.time.Clock;
 public class CollaborationCenterConfiguration {
 
     @Bean
+    CollaborationSlaSnapshotStore collaborationSlaSnapshotStore() {
+        return new CollaborationSlaSnapshotStore();
+    }
+
+    @Bean
     CollaborationCenterService collaborationCenterService(
-            ObjectProvider<WorkflowExecutionStore> workflows, CustomerServiceWorkflow customerService) {
-        return new CollaborationCenterService(workflows.getIfAvailable(), customerService, Clock.systemUTC());
+            ObjectProvider<WorkflowExecutionStore> workflows, CustomerServiceWorkflow customerService,
+            CollaborationSlaSnapshotStore snapshots) {
+        return new CollaborationCenterService(workflows.getIfAvailable(), customerService, Clock.systemUTC(), snapshots);
     }
 }

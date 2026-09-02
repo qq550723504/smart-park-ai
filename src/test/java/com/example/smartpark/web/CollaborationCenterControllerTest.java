@@ -1,6 +1,7 @@
 package com.example.smartpark.web;
 
 import com.example.smartpark.collaborationcenter.CollaborationCenterService;
+import com.example.smartpark.collaborationcenter.CollaborationSlaSnapshot;
 import com.example.smartpark.collaborationcenter.CollaborationWorkItem;
 import com.example.smartpark.collaborationcenter.WorkItemQuery;
 import org.junit.jupiter.api.Test;
@@ -77,6 +78,37 @@ class CollaborationCenterControllerTest {
                         .accept(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value("ALERT_WORKFLOW:wf-1"));
+    }
+
+    @Test
+    void adminCanReadAggregatedSlaTrend() throws Exception {
+        when(service.listTrend(60)).thenReturn(List.of(new CollaborationSlaSnapshot(
+                Instant.parse("2026-09-02T10:00:00Z"), 4, 1, 1, 2, 0, 0)));
+
+        mockMvc.perform(get("/api/collaboration/sla-trend")
+                        .header("X-Demo-Role", "ADMIN")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].capturedAt").value("2026-09-02T10:00:00Z"))
+                .andExpect(jsonPath("$[0].total").value(4))
+                .andExpect(jsonPath("$[0].overdue").value(1))
+                .andExpect(jsonPath("$[0].dueSoon").value(1))
+                .andExpect(jsonPath("$[0].onTrack").value(2))
+                .andExpect(jsonPath("$[0].completed").value(0))
+                .andExpect(jsonPath("$[0].notApplicable").value(0));
+    }
+
+    @Test
+    void validatesSlaTrendLimitAndRole() throws Exception {
+        mockMvc.perform(get("/api/collaboration/sla-trend?limit=0")
+                        .header("X-Demo-Role", "ADMIN"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/collaboration/sla-trend?limit=121")
+                        .header("X-Demo-Role", "ADMIN"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/collaboration/sla-trend")
+                        .header("X-Demo-Role", "VIEWER"))
+                .andExpect(status().isForbidden());
     }
 
     private static CollaborationWorkItem alertItem() {
