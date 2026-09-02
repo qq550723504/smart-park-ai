@@ -71,6 +71,7 @@ async function load(): Promise<void> {
     if (generation !== requestGeneration) return
     items.value = []
     failed.value = true
+    closeDetails(false)
   } finally {
     if (generation === requestGeneration) loading.value = false
   }
@@ -140,8 +141,10 @@ watch([() => props.role, source, status, () => props.active], ([, , , active]) =
     closeDetails(false)
   }
 })
-watch(selectedItem, (item) => {
-  if (item) void nextTick(() => drawer.value?.querySelector<HTMLElement>('[data-drawer-close]')?.focus())
+watch(selectedItem, (item, previousItem) => {
+  if (item && !previousItem) {
+    void nextTick(() => drawer.value?.querySelector<HTMLElement>('[data-drawer-close]')?.focus())
+  }
 })
 onMounted(() => {
   if (props.active) void load()

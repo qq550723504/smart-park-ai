@@ -201,6 +201,9 @@ describe('CollaborationCenter', () => {
       const trigger = wrapper.get('[data-work-item-details]').element as HTMLButtonElement
       await wrapper.get('[data-work-item-details]').trigger('click')
       expect(document.body.querySelector('[role="dialog"]')).not.toBeNull()
+      const dialogBeforeRefresh = document.body.querySelector('[role="dialog"]') as HTMLElement
+      const focusedAction = dialogBeforeRefresh.querySelector('.collaboration-drawer__actions button:last-child') as HTMLButtonElement
+      focusedAction.focus()
 
       vi.advanceTimersByTime(30_000)
       await flushPromises()
@@ -208,6 +211,7 @@ describe('CollaborationCenter', () => {
       const dialog = document.body.querySelector('[role="dialog"]') as HTMLElement
       expect(dialog.textContent).toContain('新摘要')
       expect(dialog.textContent).toContain('即将到期')
+      expect(document.activeElement).toBe(focusedAction)
       ;(dialog.querySelector('[aria-label="关闭详情"]') as HTMLButtonElement).click()
       await flushPromises()
       await wrapper.vm.$nextTick()
@@ -240,6 +244,37 @@ describe('CollaborationCenter', () => {
       vi.advanceTimersByTime(30_000)
       await flushPromises()
 
+      expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('closes the open drawer when a refresh fails', async () => {
+    vi.useFakeTimers()
+    try {
+      let calls = 0
+      globalThis.fetch = (async () => {
+        calls += 1
+        if (calls > 1) throw new Error('offline')
+        return response([{
+          id: 'CUSTOMER_TICKET:cs-refresh-error', source: 'CUSTOMER_TICKET', status: 'WAITING_AGENT', priority: 'NORMAL',
+          title: '客服工单 cs-refresh-error', safeSummary: '刷新失败的工单', parkId: null, buildingId: null, deviceId: null,
+          updatedAt: '2026-09-02T09:00:00Z', openedAt: '2026-09-02T08:00:00Z',
+          slaDueAt: '2026-09-02T12:00:00Z', slaState: 'ON_TRACK', detailPath: 'customer',
+        }])
+      }) as typeof fetch
+
+      const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
+      await flushPromises()
+      await wrapper.get('[data-work-item-details]').trigger('click')
+      expect(document.body.querySelector('[role="dialog"]')).not.toBeNull()
+
+      vi.advanceTimersByTime(30_000)
+      await flushPromises()
+
+      expect(wrapper.text()).toContain('当前无法读取协同队列')
       expect(document.body.querySelector('[role="dialog"]')).toBeNull()
       wrapper.unmount()
     } finally {
