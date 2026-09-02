@@ -88,6 +88,7 @@ async function load(preserveItems = false): Promise<void> {
       source: source.value || undefined,
       status: status.value || undefined,
       limit: 50,
+      sort: sortMode.value,
     })
     if (generation !== requestGeneration) return
     items.value = nextItems
@@ -160,13 +161,18 @@ function handleDrawerKeydown(event: KeyboardEvent): void {
   }
 }
 
-watch([() => props.role, source, status, () => props.active], ([, , , active]) => {
-  if (active) void load()
-  else {
-    requestGeneration++
-    closeDetails(false)
-  }
-})
+watch(
+  [() => props.role, source, status, sortMode, () => props.active],
+  ([role, nextSource, nextStatus, nextSort, active], [previousRole, previousSource, previousStatus, previousSort]) => {
+    const sortOnlyChange = role === previousRole && nextSource === previousSource
+      && nextStatus === previousStatus && nextSort !== previousSort
+    if (active) void load(sortOnlyChange)
+    else {
+      requestGeneration++
+      closeDetails(false)
+    }
+  },
+)
 watch(selectedItem, (item, previousItem) => {
   if (item && !previousItem) {
     void nextTick(() => drawer.value?.querySelector<HTMLElement>('[data-drawer-close]')?.focus())
@@ -192,7 +198,7 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
       <div class="hero-metrics"><div><strong>{{ items.length }}</strong><span>当前工作项</span></div><div><strong>{{ attentionCount }}</strong><span>需要关注</span></div><div><strong>只读</strong><span>执行模式</span></div></div>
     </section>
 
-    <section v-if="canRead && !loading && !failed" class="panel collaboration-sla-overview" aria-label="SLA 总览">
+    <section v-if="canRead && !failed && (items.length > 0 || !loading)" class="panel collaboration-sla-overview" aria-label="SLA 总览">
       <div class="section-heading compact"><div><span class="eyebrow">SLA 总览</span><h2>当前队列的时限健康度</h2></div><span class="count-badge">当前队列 · 最多 50 条</span></div>
       <div class="collaboration-sla-overview__grid">
         <div class="collaboration-sla-card" data-sla-overview="total"><span>工作项总数</span><strong>{{ slaOverview.total }}</strong></div>

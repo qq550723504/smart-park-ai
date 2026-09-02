@@ -2,6 +2,7 @@ package com.example.smartpark.web;
 
 import com.example.smartpark.collaborationcenter.CollaborationCenterService;
 import com.example.smartpark.collaborationcenter.CollaborationWorkItem;
+import com.example.smartpark.collaborationcenter.WorkItemQuery;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -11,6 +12,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -59,6 +61,22 @@ class CollaborationCenterControllerTest {
         mockMvc.perform(get("/api/collaboration/work-items?limit=51")
                         .header("X-Demo-Role", "ADMIN"))
                 .andExpect(status().isBadRequest());
+
+        mockMvc.perform(get("/api/collaboration/work-items?sort=unknown")
+                        .header("X-Demo-Role", "ADMIN"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void forwardsSelectedSortModeToTheService() throws Exception {
+        when(service.list(argThat(query -> query.sortMode() == WorkItemQuery.SortMode.UPDATED_AT)))
+                .thenReturn(List.of(alertItem()));
+
+        mockMvc.perform(get("/api/collaboration/work-items?sort=updatedAt")
+                        .header("X-Demo-Role", "ADMIN")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value("ALERT_WORKFLOW:wf-1"));
     }
 
     private static CollaborationWorkItem alertItem() {

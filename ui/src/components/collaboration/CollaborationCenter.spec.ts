@@ -151,6 +151,22 @@ describe('CollaborationCenter', () => {
     expect(wrapper.find('[data-work-item]').attributes('data-work-item')).toBe('CUSTOMER_TICKET:completed')
   })
 
+  it('sends the selected queue sort mode to the API', async () => {
+    const requests: string[] = []
+    globalThis.fetch = (async (input) => {
+      requests.push(String(input))
+      return response([])
+    }) as typeof fetch
+
+    const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
+    await flushPromises()
+    expect(requests[0]).toContain('sort=sla')
+
+    await wrapper.get('[data-sla-sort]').setValue('updatedAt')
+    await flushPromises()
+    expect(requests[1]).toContain('sort=updatedAt')
+  })
+
   it('closes cached details when read access is revoked', async () => {
     globalThis.fetch = (async () => response([{
       id: 'CUSTOMER_TICKET:cs-access', source: 'CUSTOMER_TICKET', status: 'WAITING_AGENT', priority: 'NORMAL',
@@ -195,6 +211,41 @@ describe('CollaborationCenter', () => {
 
       expect(calls).toBe(2)
       expect(wrapper.text()).toContain('即将到期')
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps the SLA overview visible while a background refresh is pending', async () => {
+    vi.useFakeTimers()
+    try {
+      let calls = 0
+      let resolveRefresh!: (value: Response) => void
+      const pendingRefresh = new Promise<Response>((resolve) => { resolveRefresh = resolve })
+      globalThis.fetch = (async () => {
+        calls += 1
+        if (calls === 1) return response([{
+          id: 'CUSTOMER_TICKET:cs-overview-refresh', source: 'CUSTOMER_TICKET', status: 'WAITING_AGENT', priority: 'NORMAL',
+          title: '客服工单 cs-overview-refresh', safeSummary: '保留概览的工单', parkId: null, buildingId: null, deviceId: null,
+          updatedAt: '2026-09-02T09:00:00Z', openedAt: '2026-09-02T08:00:00Z',
+          slaDueAt: '2026-09-02T12:00:00Z', slaState: 'ON_TRACK', detailPath: 'customer',
+        }])
+        return pendingRefresh
+      }) as typeof fetch
+
+      const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
+      await flushPromises()
+      expect(wrapper.get('[data-sla-overview="total"]')).not.toBeNull()
+
+      vi.advanceTimersByTime(30_000)
+      await Promise.resolve()
+      await wrapper.vm.$nextTick()
+
+      expect(calls).toBe(2)
+      expect(wrapper.get('[data-sla-overview="total"]')).not.toBeNull()
+      resolveRefresh(response([]))
+      await flushPromises()
       wrapper.unmount()
     } finally {
       vi.useRealTimers()

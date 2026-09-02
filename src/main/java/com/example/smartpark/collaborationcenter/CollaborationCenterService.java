@@ -57,10 +57,26 @@ public final class CollaborationCenterService {
                     .filter(requested::accepts).forEach(items::add);
         }
         return items.stream()
-                .sorted(Comparator.comparing(CollaborationWorkItem::updatedAt).reversed()
-                        .thenComparing(CollaborationWorkItem::id))
+                .sorted(comparatorFor(requested.sortMode()))
                 .limit(requested.limit())
                 .toList();
+    }
+
+    private static Comparator<CollaborationWorkItem> comparatorFor(WorkItemQuery.SortMode sortMode) {
+        Comparator<CollaborationWorkItem> byUpdatedAt = Comparator.comparing(CollaborationWorkItem::updatedAt)
+                .reversed().thenComparing(CollaborationWorkItem::id);
+        if (sortMode == WorkItemQuery.SortMode.UPDATED_AT) return byUpdatedAt;
+        return Comparator.comparingInt(CollaborationCenterService::slaRank).thenComparing(byUpdatedAt);
+    }
+
+    private static int slaRank(CollaborationWorkItem item) {
+        return switch (item.slaState()) {
+            case OVERDUE -> 0;
+            case DUE_SOON -> 1;
+            case ON_TRACK -> 2;
+            case NOT_APPLICABLE -> 3;
+            case COMPLETED -> 4;
+        };
     }
 
     private CollaborationWorkItem fromWorkflow(WorkflowSnapshot snapshot) {
