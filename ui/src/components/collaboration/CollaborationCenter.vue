@@ -255,7 +255,7 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
     <p v-else-if="loading && items.length === 0" class="collaboration-state" role="status">正在读取协同队列…</p>
     <p v-else-if="failed" class="collaboration-state is-error" role="alert">当前无法读取协同队列，请稍后重试。</p>
     <template v-else>
-      <section class="panel collaboration-sla-trend" aria-label="SLA 趋势">
+      <section v-if="active" class="panel collaboration-sla-trend" aria-label="SLA 趋势">
         <div class="section-heading compact"><div><span class="eyebrow">本次会话 SLA 趋势</span><h2>队列时限状态变化</h2></div><span class="count-badge" data-sla-trend-count>已采样 {{ trendSnapshots.length }} 个点 · 最多 120 点</span></div>
         <p v-if="trendFailed" class="collaboration-sla-trend__error" role="alert">当前无法读取 SLA 趋势，队列数据仍可正常使用。</p>
         <CollaborationSlaTrendChart v-else :snapshots="trendSnapshots" />

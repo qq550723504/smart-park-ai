@@ -216,7 +216,7 @@ describe('CollaborationCenter', () => {
 
     expect(wrapper.text()).toContain('本次会话 SLA 趋势')
     expect(wrapper.get('[data-sla-trend-count]').text()).toContain('1')
-    expect(wrapper.get('.collaboration-sla-trend__chart').exists()).toBe(true)
+    expect(wrapper.find('.collaboration-sla-trend__chart').exists()).toBe(true)
     expect(requests.some(url => url.includes('/sla-trend?limit=60'))).toBe(true)
   })
 

@@ -25,7 +25,6 @@ export function buildSlaTrendOption(snapshots: CollaborationSlaSnapshot[]): Reco
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { withDarkTheme } from '../analytics/AnalyticsChart.vue'
-import type { CollaborationSlaSnapshot } from '../../types/collaborationCenter'
 
 const props = defineProps<{ snapshots: CollaborationSlaSnapshot[] }>()
 const container = ref<HTMLElement | null>(null)
