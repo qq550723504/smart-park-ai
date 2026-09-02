@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { listCollaborationWorkItems } from '../../services/workflowApi'
 import type { DemoRole } from '../../types/workflow'
-import type { CollaborationWorkItem, CollaborationWorkItemSource, CollaborationWorkItemStatus } from '../../types/collaborationCenter'
+import type { CollaborationWorkItem, CollaborationWorkItemSource, CollaborationWorkItemSlaState, CollaborationWorkItemStatus } from '../../types/collaborationCenter'
 import './collaboration-center.css'
 
 const props = withDefaults(defineProps<{ role: DemoRole; active?: boolean }>(), { active: true })
@@ -12,6 +12,7 @@ const loading = ref(false)
 const failed = ref(false)
 const source = ref<CollaborationWorkItemSource | ''>('')
 const status = ref<CollaborationWorkItemStatus | ''>('')
+const selectedItem = ref<CollaborationWorkItem | null>(null)
 let requestGeneration = 0
 
 const canRead = computed(() => props.role === 'ADMIN' || props.role === 'CUSTOMER_AGENT')
@@ -31,6 +32,16 @@ function formatTime(value: string): string {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? '时间未知' : date.toLocaleString('zh-CN', { hour12: false })
 }
+
+function formatOptionalTime(value: string | null): string { return value ? formatTime(value) : '未提供' }
+function locationLabel(item: CollaborationWorkItem): string {
+  return [item.parkId, item.buildingId, item.deviceId].filter(Boolean).join(' · ') || '未提供'
+}
+const slaLabels: Record<CollaborationWorkItemSlaState, string> = {
+  ON_TRACK: '正常', DUE_SOON: '即将到期', OVERDUE: '已超时', COMPLETED: '已完成', NOT_APPLICABLE: '不适用',
+}
+function slaLabel(value?: CollaborationWorkItemSlaState): string { return value ? (slaLabels[value] ?? '不适用') : '不适用' }
+function slaClass(value?: CollaborationWorkItemSlaState): string { return `sla-${(value ?? 'NOT_APPLICABLE').toLowerCase().replace('_', '-')}` }
 
 async function load(): Promise<void> {
   const generation = ++requestGeneration
@@ -54,7 +65,7 @@ async function load(): Promise<void> {
   }
 }
 
-function open(item: CollaborationWorkItem): void {
+function openScene(item: CollaborationWorkItem): void {
   if (item.detailPath === 'workflow' || item.detailPath === 'customer') {
     if (item.detailPath === 'workflow') {
       emit('open-view', item.detailPath, item.id.replace(/^ALERT_WORKFLOW:/, ''))
@@ -63,6 +74,8 @@ function open(item: CollaborationWorkItem): void {
     }
   }
 }
+function openDetails(item: CollaborationWorkItem): void { selectedItem.value = item }
+function closeDetails(): void { selectedItem.value = null }
 
 watch([() => props.role, source, status, () => props.active], ([, , , active]) => {
   if (active) void load()
@@ -96,10 +109,19 @@ onMounted(() => { if (props.active) void load() })
       <section class="collaboration-list" aria-label="工作项列表">
         <article v-for="item in items" :key="item.id" class="panel collaboration-item" :data-work-item="item.id">
           <div class="collaboration-item__main"><div class="collaboration-item__meta"><span>{{ sourceLabel(item.source) }}</span><span :class="['priority', item.priority === 'HIGH' ? 'is-high' : '']">{{ item.priority === 'HIGH' ? '高优先级' : '常规' }}</span><small>{{ item.id }}</small></div><h3>{{ item.title }}</h3><p>{{ item.safeSummary }}</p></div>
-          <div class="collaboration-item__status"><strong>{{ statusLabel(item.status) }}</strong><small>{{ formatTime(item.updatedAt) }}</small><button type="button" @click="open(item)">{{ item.detailPath === 'workflow' ? '打开告警工作流' : '打开客服控制台' }}</button></div>
+          <div class="collaboration-item__status"><strong>{{ statusLabel(item.status) }}</strong><span :class="['collaboration-sla', slaClass(item.slaState)]">{{ slaLabel(item.slaState) }}</span><small>{{ formatTime(item.updatedAt) }}</small><button type="button" data-work-item-open @click="openScene(item)">{{ item.detailPath === 'workflow' ? '打开告警工作流' : '打开客服控制台' }}</button><button type="button" data-work-item-details @click="openDetails(item)">查看详情</button></div>
         </article>
         <p v-if="items.length === 0" class="panel collaboration-empty">当前没有可展示的工作项。</p>
       </section>
     </template>
+    <div v-if="selectedItem" class="collaboration-drawer-backdrop" @click.self="closeDetails">
+      <aside class="collaboration-drawer" role="dialog" aria-modal="true" aria-labelledby="collaboration-drawer-title">
+        <div class="collaboration-drawer__header"><div><span class="eyebrow">工作项详情 · 只读</span><h2 id="collaboration-drawer-title">{{ selectedItem.title }}</h2></div><button type="button" aria-label="关闭详情" @click="closeDetails">×</button></div>
+        <dl class="collaboration-drawer__facts"><div><dt>来源</dt><dd>{{ sourceLabel(selectedItem.source) }}</dd></div><div><dt>状态</dt><dd>{{ statusLabel(selectedItem.status) }}</dd></div><div><dt>优先级</dt><dd>{{ selectedItem.priority === 'HIGH' ? '高优先级' : '常规' }}</dd></div><div><dt>位置/设备</dt><dd>{{ locationLabel(selectedItem) }}</dd></div><div><dt>打开时间</dt><dd>{{ formatOptionalTime(selectedItem.openedAt) }}</dd></div><div><dt>更新时间</dt><dd>{{ formatTime(selectedItem.updatedAt) }}</dd></div></dl>
+        <section class="collaboration-drawer__summary"><span class="eyebrow">安全摘要</span><p>{{ selectedItem.safeSummary }}</p></section>
+        <section class="collaboration-drawer__sla"><div><span class="eyebrow">演示 SLA</span><strong :class="['collaboration-sla', slaClass(selectedItem.slaState)]">{{ slaLabel(selectedItem.slaState) }}</strong></div><small>截止时间：{{ formatOptionalTime(selectedItem.slaDueAt) }}</small></section>
+        <div class="collaboration-drawer__actions"><button type="button" @click="openScene(selectedItem)">{{ selectedItem.detailPath === 'workflow' ? '打开告警工作流' : '打开客服控制台' }}</button><button type="button" @click="closeDetails">关闭</button></div>
+      </aside>
+    </div>
   </main>
 </template>

@@ -14,6 +14,7 @@ export type CollaborationWorkItemStatus =
   | 'CLOSED'
   | 'CANCELLED'
 export type CollaborationWorkItemPriority = 'HIGH' | 'NORMAL'
+export type CollaborationWorkItemSlaState = 'ON_TRACK' | 'DUE_SOON' | 'OVERDUE' | 'COMPLETED' | 'NOT_APPLICABLE'
 
 export interface CollaborationWorkItem {
   id: string
@@ -26,6 +27,9 @@ export interface CollaborationWorkItem {
   buildingId: string | null
   deviceId: string | null
   updatedAt: string
+  openedAt: string | null
+  slaDueAt: string | null
+  slaState: CollaborationWorkItemSlaState
   detailPath: 'workflow' | 'customer'
 }
 
