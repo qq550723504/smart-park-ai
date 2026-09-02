@@ -151,6 +151,19 @@ describe('OperationsWorkbench', () => {
     globalThis.fetch = originalFetch
   })
 
+  it('orders navigation from core operations to insights, collaboration, and governance', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow' },
+      global: { stubs: operatorStubs },
+    })
+
+    await settleCapabilities()
+
+    expect(wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())).toEqual([
+      '告警工作流', '园区客服', '协同中心', '运营看板', '运营分析', '专家协作', '实时语音', '治理中心',
+    ])
+  })
+
   it('keeps analysis mounted while switching operator views', async () => {
     const wrapper = mount(OperationsWorkbench, {
       props: { initialView: 'workflow' },
