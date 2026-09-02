@@ -47,6 +47,17 @@ class CollaborationCenterControllerTest {
     }
 
     @Test
+    void approverCanReadWorkItemsForHumanApproval() throws Exception {
+        when(service.list(any())).thenReturn(List.of(alertItem()));
+
+        mockMvc.perform(get("/api/collaboration/work-items")
+                        .header("X-Demo-Role", "APPROVER")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].status").value("WAITING_APPROVAL"));
+    }
+
+    @Test
     void viewerCannotReadWorkItems() throws Exception {
         mockMvc.perform(get("/api/collaboration/work-items")
                         .header("X-Demo-Role", "VIEWER"))
@@ -96,6 +107,16 @@ class CollaborationCenterControllerTest {
                 .andExpect(jsonPath("$[0].onTrack").value(2))
                 .andExpect(jsonPath("$[0].completed").value(0))
                 .andExpect(jsonPath("$[0].notApplicable").value(0));
+    }
+
+    @Test
+    void approverCanReadAggregatedSlaTrend() throws Exception {
+        when(service.listTrend(60)).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/collaboration/sla-trend")
+                        .header("X-Demo-Role", "APPROVER")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk());
     }
 
     @Test
