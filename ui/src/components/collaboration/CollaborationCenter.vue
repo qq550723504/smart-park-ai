@@ -17,6 +17,7 @@ let requestGeneration = 0
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 const drawer = ref<HTMLElement | null>(null)
 const lastTrigger = ref<HTMLElement | null>(null)
+const queueHeading = ref<HTMLElement | null>(null)
 const SLA_REFRESH_INTERVAL_MS = 30_000
 
 const canRead = computed(() => props.role === 'ADMIN' || props.role === 'CUSTOMER_AGENT')
@@ -99,6 +100,7 @@ function reconcileSelectedItem(nextItems: CollaborationWorkItem[]): void {
   } else {
     selectedItem.value = null
     lastTrigger.value = null
+    void nextTick(() => queueHeading.value?.focus())
   }
 }
 function openDetails(item: CollaborationWorkItem, event: MouseEvent): void {
@@ -175,7 +177,7 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
     <p v-else-if="failed" class="collaboration-state is-error" role="alert">当前无法读取协同队列，请稍后重试。</p>
     <template v-else>
       <section class="panel collaboration-filters" aria-label="协同队列筛选">
-        <div class="section-heading compact"><div><span class="eyebrow">队列筛选</span><h2>按来源与状态查看</h2></div><span class="count-badge">最多 50 条</span></div>
+        <div class="section-heading compact"><div><span class="eyebrow">队列筛选</span><h2 ref="queueHeading" data-collaboration-queue-heading tabindex="-1">按来源与状态查看</h2></div><span class="count-badge">最多 50 条</span></div>
         <div class="collaboration-filter-row">
           <label>来源<select v-model="source"><option value="">全部来源</option><option value="ALERT_WORKFLOW">告警处置</option><option value="CUSTOMER_TICKET">客服工单</option></select></label>
           <label>状态<select v-model="status"><option value="">全部状态</option><option v-for="(label, key) in statusLabels" :key="key" :value="key">{{ label }}</option></select></label>

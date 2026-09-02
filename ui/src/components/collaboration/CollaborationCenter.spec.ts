@@ -236,7 +236,7 @@ describe('CollaborationCenter', () => {
         }] : [])
       }) as typeof fetch
 
-      const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
+      const wrapper = mount(CollaborationCenter, { attachTo: document.body, props: { role: 'ADMIN' } })
       await flushPromises()
       await wrapper.get('[data-work-item-details]').trigger('click')
       expect(document.body.querySelector('[role="dialog"]')).not.toBeNull()
@@ -245,6 +245,7 @@ describe('CollaborationCenter', () => {
       await flushPromises()
 
       expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+      expect(document.activeElement).toBe(document.body.querySelector('[data-collaboration-queue-heading]'))
       wrapper.unmount()
     } finally {
       vi.useRealTimers()
