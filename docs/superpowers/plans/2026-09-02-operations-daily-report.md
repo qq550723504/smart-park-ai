@@ -141,18 +141,20 @@ git commit -m "feat: expose awaitable operations analysis runs"
 
 **Files:**
 - Create: `src/main/java/com/example/smartpark/analytics/report/OperationsDailyReportService.java`
+- Create: `src/main/java/com/example/smartpark/analytics/report/OperationsReportSectionRunner.java`
 - Create: `src/test/java/com/example/smartpark/analytics/report/OperationsDailyReportServiceTest.java`
 - Modify: `src/main/java/com/example/smartpark/analytics/AnalyticsConfiguration.java`
 
 **Interfaces:**
-- Constructor dependencies: `OperationsAnalysisService`, `OperationsDailyReportStore`, `ExecutionEventPublisher`, `Clock`.
+- `OperationsReportSectionRunner` exposes `CompletableFuture<AnalysisRunStore.RunRecord> run(OperationsReportSection section)`; the production adapter delegates to `OperationsAnalysisService.startAndAwait(section.question())`, while tests inject a deterministic fake.
+- Constructor dependencies: `OperationsReportSectionRunner`, `OperationsDailyReportStore`, `ExecutionEventPublisher`, `Clock`.
 - `public OperationsDailyReport start()` creates a report UUID, stores `RUNNING`, publishes report `RUN_STARTED`, and asynchronously chains the three fixed sections.
 - `public OperationsDailyReport get(UUID runId)` returns the immutable current report or throws `NoSuchElementException`.
-- The service uses `analysisService.startAndAwait(section.question())` sequentially. It maps `COMPLETED` to safe section data, `NEEDS_CLARIFICATION` to `FAILED/REPORT_CLARIFICATION_REQUIRED`, and other terminal/error states to `FAILED` with a stable stage.
+- The service uses `sectionRunner.run(section)` sequentially. It maps `COMPLETED` to safe section data, `NEEDS_CLARIFICATION` to `FAILED/REPORT_CLARIFICATION_REQUIRED`, and other terminal/error states to `FAILED` with a stable stage.
 
 - [ ] **Step 1: Write the failing service tests**
 
-Use a fake analysis service seam to assert:
+Use a fake `OperationsReportSectionRunner` to assert:
 
 ```java
 OperationsDailyReport report = service.start();
@@ -194,7 +196,7 @@ Expected: all report and analysis lifecycle tests pass.
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add src/main/java/com/example/smartpark/analytics/report/OperationsDailyReportService.java src/main/java/com/example/smartpark/analytics/AnalyticsConfiguration.java src/test/java/com/example/smartpark/analytics/report/OperationsDailyReportServiceTest.java
+git add src/main/java/com/example/smartpark/analytics/report/OperationsReportSectionRunner.java src/main/java/com/example/smartpark/analytics/report/OperationsDailyReportService.java src/main/java/com/example/smartpark/analytics/AnalyticsConfiguration.java src/test/java/com/example/smartpark/analytics/report/OperationsDailyReportServiceTest.java
 git commit -m "feat: orchestrate operations daily report"
 ```
 
