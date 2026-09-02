@@ -6,6 +6,7 @@ import com.example.smartpark.securityincident.SecurityIncidentPage;
 import com.example.smartpark.securityincident.SecurityIncidentRisk;
 import com.example.smartpark.securityincident.SecurityIncidentService;
 import com.example.smartpark.securityincident.SecurityIncidentStatus;
+import com.example.smartpark.audit.AuditTrail;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -14,6 +15,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.time.Instant;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -24,7 +26,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class SecurityIncidentControllerTest {
     private final SecurityIncidentService service = mock(SecurityIncidentService.class);
-    private final MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new SecurityIncidentController(service))
+    private final AuditTrail auditTrail = new AuditTrail();
+    private final MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new SecurityIncidentController(service, auditTrail))
             .setControllerAdvice(new ApiExceptionHandler()).build();
 
     @Test
@@ -63,6 +66,9 @@ class SecurityIncidentControllerTest {
                 .andExpect(status().isOk());
         mockMvc.perform(post("/api/security/incidents/INC-1/handoff").header("X-Demo-Role", "ADMIN"))
                 .andExpect(status().isOk());
+
+        assertThat(auditTrail.entries()).extracting(entry -> entry.action())
+                .containsExactly("REVIEW_SECURITY_INCIDENT", "HANDOFF_SECURITY_INCIDENT");
     }
 
     private static SecurityIncident incident() {

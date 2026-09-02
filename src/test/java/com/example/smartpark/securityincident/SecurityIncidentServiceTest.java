@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SecurityIncidentServiceTest {
 
@@ -32,8 +33,8 @@ class SecurityIncidentServiceTest {
         SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
 
         assertThat(page.items()).hasSize(2);
-        assertThat(page.items().get(0).eventIds()).containsExactly("SEC-1", "SEC-2");
-        assertThat(page.items().get(1).eventIds()).containsExactly("SEC-3");
+        assertThat(page.items().get(0).eventIds()).containsExactly("SEC-3");
+        assertThat(page.items().get(1).eventIds()).containsExactly("SEC-1", "SEC-2");
     }
 
     @Test
@@ -71,11 +72,88 @@ class SecurityIncidentServiceTest {
         assertThat(handedOffAgain.handoffWorkItemId()).isEqualTo(handedOff.handoffWorkItemId());
     }
 
+    @Test
+    void preservesReviewedAndHandoffStateWhenAnEarlierEventExpandsTheIncident() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(9 * 60))));
+        SecurityIncidentService service = service(events);
+        String incidentId = service.list(new SecurityIncidentQuery(null, 20)).items().get(0).incidentId();
+        service.review(incidentId);
+        SecurityIncident handedOff = service.handoff(incidentId);
+
+        events.add(event("SEC-1", "A1", "ACCESS", BASE));
+
+        SecurityIncident refreshed = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(refreshed.incidentId()).isEqualTo(incidentId);
+        assertThat(refreshed.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(refreshed.handoffWorkItemId()).isEqualTo(handedOff.handoffWorkItemId());
+        assertThat(refreshed.eventIds()).containsExactly("SEC-1", "SEC-2");
+    }
+
+    @Test
+    void missingRiskInformationDefaultsToMedium() {
+        SecurityIncidentService service = service(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(incident.riskLevel()).isEqualTo(SecurityIncidentRisk.MEDIUM);
+    }
+
+    @Test
+    void keepsCorrelationBucketsDistinctWhenIdentifiersContainDelimiters() {
+        SecurityIncidentService service = service(List.of(
+                event("SEC-1", "P:A", "B", "ACCESS", BASE),
+                event("SEC-2", "P", "A:B", "ACCESS", BASE.plusSeconds(60))));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).hasSize(2);
+        assertThat(page.items()).extracting(SecurityIncident::eventIds)
+                .containsExactlyInAnyOrder(List.of("SEC-1"), List.of("SEC-2"));
+    }
+
+    @Test
+    void generatesOpaqueUrlSafeIncidentIdsForSlashContainingIdentifiers() {
+        SecurityIncidentService service = service(List.of(
+                event("SEC/1", "P/A", "B/A", "ACCESS/ATTEMPT", BASE)));
+
+        String incidentId = service.list(new SecurityIncidentQuery(null, 20)).items().get(0).incidentId();
+
+        assertThat(incidentId).matches("INC:[0-9a-f]{64}");
+    }
+
+    @Test
+    void handoffRequiresACompletedReview() {
+        SecurityIncidentService service = service(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        String incidentId = service.list(new SecurityIncidentQuery(null, 20)).items().get(0).incidentId();
+
+        assertThatThrownBy(() -> service.handoff(incidentId))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("security incident must be reviewed before handoff");
+    }
+
+    @Test
+    void listDoesNotReturnIncidentsEvictedByTheBoundedStore() {
+        SecurityIncidentService service = service(List.of(
+                event("SEC-1", "A1", "ACCESS", BASE),
+                event("SEC-2", "A2", "ACCESS", BASE.plusSeconds(60))), List.of(), 1);
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).hasSize(1);
+        assertThat(service.get(page.items().get(0).incidentId())).isEqualTo(page.items().get(0));
+    }
+
     private static SecurityIncidentService service(List<SecurityEvent> events) {
-        return service(events, List.of());
+        return service(events, List.of(), 50);
     }
 
     private static SecurityIncidentService service(List<SecurityEvent> events, List<Alert> alerts) {
+        return service(events, alerts, 50);
+    }
+
+    private static SecurityIncidentService service(List<SecurityEvent> events, List<Alert> alerts, int capacity) {
         SecurityEventReader security = new SecurityEventReader() {
             @Override
             public SecurityEvent getEvent(String eventId) {
@@ -115,11 +193,15 @@ class SecurityIncidentServiceTest {
                 return List.of();
             }
         };
-        return new SecurityIncidentService(security, alertPort, new SecurityIncidentStore(50), handoffs,
+        return new SecurityIncidentService(security, alertPort, new SecurityIncidentStore(capacity), handoffs,
                 Clock.fixed(BASE.plusSeconds(3600), ZoneOffset.UTC));
     }
 
     private static SecurityEvent event(String id, String buildingId, String type, Instant occurredAt) {
-        return new SecurityEvent(id, "PARK-A", buildingId, type, occurredAt, "REDACTED: safe event summary");
+        return event(id, "PARK-A", buildingId, type, occurredAt);
+    }
+
+    private static SecurityEvent event(String id, String parkId, String buildingId, String type, Instant occurredAt) {
+        return new SecurityEvent(id, parkId, buildingId, type, occurredAt, "REDACTED: safe event summary");
     }
 }

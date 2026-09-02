@@ -76,6 +76,9 @@ let navigationGeneration = 0
 const selectedAnalysisQuestion = ref<string | null>(null)
 const selectedAnalysisQuestionToken = ref(0)
 const customerQueueRefreshToken = ref(0)
+const collaborationTargetWorkItemId = ref<string | null>(null)
+const collaborationRefreshToken = ref(0)
+const securityIncidentTargetId = ref<string | null>(null)
 const hasVisitedWorkflow = ref(props.initialView === 'workflow')
 function switchView(view: WorkbenchView): void {
   navigationGeneration += 1
@@ -92,6 +95,11 @@ watch(activeView, async (view) => {
   if (activeView.value === 'workflow') hasVisitedWorkflow.value = true
 })
 const role = ref<DemoRole>('ADMIN')
+watch(role, (nextRole, previousRole) => {
+  if (nextRole === previousRole) return
+  const currentItem = navItems.value.find((item) => item.value === activeView.value)
+  if (currentItem && !currentItem.available) switchView('workflow')
+})
 const reviewer = ref('')
 const comment = ref('')
 const { workflow, events, loading, approving, error, isTerminal, start, load: loadWorkflow, approve, reset: resetWorkflow, cancelPendingLoad } = useWorkflow()
@@ -171,8 +179,13 @@ function openAnalysisFromBoard(question: string): void {
   switchView('analytics')
 }
 
-async function openCollaborationView(view: 'workflow' | 'customer', workflowId?: string, _ticketId?: string): Promise<void> {
+async function openCollaborationView(view: 'workflow' | 'customer' | 'security-incident', workflowId?: string, _ticketId?: string): Promise<void> {
   const generation = ++navigationGeneration
+  if (view === 'security-incident') {
+    securityIncidentTargetId.value = workflowId ?? null
+    switchView('security-incidents')
+    return
+  }
   if (view === 'customer') {
     cancelPendingLoad()
     customerQueueRefreshToken.value += 1
@@ -187,7 +200,9 @@ async function openCollaborationView(view: 'workflow' | 'customer', workflowId?:
   if (generation !== navigationGeneration) return
   activeView.value = view
 }
-function openCollaborationFromIncident(): void {
+function openCollaborationFromIncident(payload: { incidentId: string; workItemId: string }): void {
+  collaborationTargetWorkItemId.value = payload.workItemId
+  collaborationRefreshToken.value += 1
   switchView('collaboration-center')
 }
 watch(
@@ -368,12 +383,16 @@ function confidence(value?: number) {
       v-show="activeView === 'collaboration-center'"
       :role="role"
       :active="props.active && activeView === 'collaboration-center'"
+      :focus-work-item-id="collaborationTargetWorkItemId"
+      :refresh-token="collaborationRefreshToken"
       @open-view="openCollaborationView"
     />
 
     <SecurityIncidentCenter
       v-show="activeView === 'security-incidents'"
       :role="role"
+      :active="props.active && activeView === 'security-incidents'"
+      :focus-incident-id="securityIncidentTargetId"
       @open-collaboration="openCollaborationFromIncident"
     />
 

@@ -52,8 +52,9 @@ const analysisBoardStub = defineComponent({
 })
 
 const collaborationWorkflowStub = defineComponent({
+  props: { focusWorkItemId: { type: String, default: null } },
   emits: ['open-view'],
-  template: '<div><button type="button" data-open-selected-workflow @click="$emit(\'open-view\', \'workflow\', \'wf-selected\')">打开选中工作流</button><button type="button" data-open-customer @click="$emit(\'open-view\', \'customer\', undefined, \'ticket-1\')">打开客服</button></div>',
+  template: '<div :data-focus-work-item-id="focusWorkItemId"><button type="button" data-open-selected-workflow @click="$emit(\'open-view\', \'workflow\', \'wf-selected\')">打开选中工作流</button><button type="button" data-open-customer @click="$emit(\'open-view\', \'customer\', undefined, \'ticket-1\')">打开客服</button></div>',
 })
 
 const traceRailStub = defineComponent({
@@ -87,9 +88,9 @@ const customerStub = defineComponent({
 })
 
 const collaborationCenterStub = defineComponent({
-  props: { role: { type: String, required: true }, active: { type: Boolean, default: false } },
+  props: { role: { type: String, required: true }, active: { type: Boolean, default: false }, focusWorkItemId: { type: String, default: null } },
   emits: ['open-view'],
-  template: '<div data-testid="collaboration-center-stub"><button type="button" data-collaboration-jump @click="$emit(\'open-view\', \'customer\')">打开客服</button></div>',
+  template: '<div data-testid="collaboration-center-stub" :data-focus-work-item-id="focusWorkItemId"><button type="button" data-collaboration-jump @click="$emit(\'open-view\', \'customer\')">打开客服</button></div>',
 })
 
 const securityIncidentStub = defineComponent({
@@ -179,8 +180,23 @@ describe('OperationsWorkbench', () => {
     expect(wrapper.get('[data-workbench-view="security-incidents"]').classes()).toContain('active')
     await wrapper.get('[data-security-handoff]').trigger('click')
     expect(wrapper.get('[data-workbench-view="collaboration-center"]').classes()).toContain('active')
+    expect(wrapper.get('[data-focus-work-item-id]').attributes('data-focus-work-item-id')).toBe('SECURITY_INCIDENT:INC-1')
     await wrapper.getComponent(ImmersiveWorkbenchShell).vm.$emit('update:role', 'CUSTOMER_AGENT')
     await nextTick()
+    expect(wrapper.find('[data-workbench-view="security-incidents"]').exists()).toBe(false)
+  })
+
+  it('returns to an allowed view when the active security view loses authorization', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'security-incidents' },
+      global: { stubs: operatorStubs },
+    })
+    await settleCapabilities()
+
+    wrapper.getComponent(ImmersiveWorkbenchShell).vm.$emit('update:role', 'CUSTOMER_AGENT')
+    await nextTick()
+
+    expect(wrapper.get('[data-workbench-view="workflow"]').classes()).toContain('active')
     expect(wrapper.find('[data-workbench-view="security-incidents"]').exists()).toBe(false)
   })
 

@@ -46,7 +46,9 @@ class CollaborationCenterServiceTest {
             assertThat(item.id()).isEqualTo(handoff.workItemId());
             assertThat(item.source()).isEqualTo(CollaborationWorkItem.Source.SECURITY_INCIDENT);
             assertThat(item.priority()).isEqualTo(CollaborationWorkItem.Priority.HIGH);
-            assertThat(item.detailPath()).isEqualTo("/security/incidents/INC-1");
+            assertThat(item.status()).isEqualTo(CollaborationWorkItem.Status.COMPLETED);
+            assertThat(item.slaState()).isEqualTo(CollaborationWorkItem.SlaState.COMPLETED);
+            assertThat(item.detailPath()).isEqualTo("security-incident");
         });
     }
 

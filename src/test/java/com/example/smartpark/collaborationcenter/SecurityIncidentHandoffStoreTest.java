@@ -26,11 +26,47 @@ class SecurityIncidentHandoffStoreTest {
         assertThat(store.list()).containsExactly(first);
     }
 
+    @Test
+    void evictsOldestHandoffWhenCapacityIsExceeded() {
+        SecurityIncidentHandoffStore store = new SecurityIncidentHandoffStore(2);
+        Instant now = Instant.parse("2026-09-02T10:00:00Z");
+
+        SecurityIncidentHandoff first = store.createOrGet(incident("INC-1"), now);
+        SecurityIncidentHandoff second = store.createOrGet(incident("INC-2"), now.plusSeconds(1));
+        SecurityIncidentHandoff third = store.createOrGet(incident("INC-3"), now.plusSeconds(2));
+
+        assertThat(store.list()).containsExactly(second, third);
+        assertThat(store.list()).doesNotContain(first);
+    }
+
+    @Test
+    void refreshesAnExistingHandoffWhenIncidentRiskEscalates() {
+        SecurityIncidentHandoffStore store = new SecurityIncidentHandoffStore(10);
+        Instant now = Instant.parse("2026-09-02T10:00:00Z");
+
+        SecurityIncidentHandoff first = store.createOrGet(incident("INC-1", SecurityIncidentRisk.MEDIUM, "REDACTED:中风险"), now);
+        SecurityIncidentHandoff escalated = store.createOrGet(incident("INC-1", SecurityIncidentRisk.HIGH, "REDACTED:高风险"), now.plusSeconds(1));
+
+        assertThat(escalated.workItemId()).isEqualTo(first.workItemId());
+        assertThat(escalated.createdAt()).isEqualTo(first.createdAt());
+        assertThat(escalated.riskLevel()).isEqualTo(SecurityIncidentRisk.HIGH);
+        assertThat(escalated.safeSummary()).isEqualTo("REDACTED:高风险");
+        assertThat(store.list()).containsExactly(escalated);
+    }
+
     private static SecurityIncident incident() {
+        return incident("INC-1");
+    }
+
+    private static SecurityIncident incident(String incidentId) {
+        return incident(incidentId, SecurityIncidentRisk.HIGH, "REDACTED: safe");
+    }
+
+    private static SecurityIncident incident(String incidentId, SecurityIncidentRisk risk, String summary) {
         Instant at = Instant.parse("2026-09-02T08:00:00Z");
-        return new SecurityIncident("INC-1", "PARK-A", "A1", "ACCESS", SecurityIncidentRisk.HIGH,
+        return new SecurityIncident(incidentId, "PARK-A", "A1", "ACCESS", risk,
                 SecurityIncidentStatus.OPEN, at, at, List.of("SEC-1"), List.of("ALT-1"),
-                List.of(new SecurityIncidentEvidence("SEC-1", at, "REDACTED: safe")), List.of(),
+                List.of(new SecurityIncidentEvidence("SEC-1", at, summary)), List.of(),
                 List.of("核对安全处置手册。"), null, null);
     }
 }

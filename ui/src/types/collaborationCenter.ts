@@ -1,4 +1,4 @@
-export type CollaborationWorkItemSource = 'ALERT_WORKFLOW' | 'CUSTOMER_TICKET'
+export type CollaborationWorkItemSource = 'ALERT_WORKFLOW' | 'CUSTOMER_TICKET' | 'SECURITY_INCIDENT'
 export type CollaborationWorkItemStatus =
   | 'RUNNING'
   | 'WAITING_APPROVAL'
@@ -30,7 +30,7 @@ export interface CollaborationWorkItem {
   openedAt: string | null
   slaDueAt: string | null
   slaState: CollaborationWorkItemSlaState
-  detailPath: 'workflow' | 'customer'
+  detailPath: 'workflow' | 'customer' | 'security-incident'
 }
 
 export interface CollaborationSlaSnapshot {
@@ -48,4 +48,5 @@ export interface CollaborationWorkItemFilters {
   status?: CollaborationWorkItemStatus
   limit?: number
   sort?: 'sla' | 'updatedAt'
+  workItemId?: string
 }

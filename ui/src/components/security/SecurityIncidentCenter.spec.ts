@@ -56,6 +56,25 @@ describe('SecurityIncidentCenter', () => {
     expect(wrapper.text()).toContain('仅授权安全角色可查看')
   })
 
+  it('loads incidents when the view becomes active', async () => {
+    let calls = 0
+    globalThis.fetch = (async (input) => {
+      calls += 1
+      return String(input).includes('/api/security/incidents?')
+        ? response({ items: [summary], total: 1 })
+        : response(detail)
+    }) as typeof fetch
+    const wrapper = mount(SecurityIncidentCenter, { props: { role: 'ADMIN', active: false } })
+
+    await flushPromises()
+    expect(calls).toBe(0)
+
+    await wrapper.setProps({ active: true })
+    await flushPromises()
+
+    expect(calls).toBe(2)
+  })
+
   it('ignores a stale detail response after selecting another incident', async () => {
     let resolveFirst!: (value: Response) => void
     const first = new Promise<Response>(resolve => { resolveFirst = resolve })
@@ -75,5 +94,43 @@ describe('SecurityIncidentCenter', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('REDACTED:第二事件')
     expect(wrapper.text()).not.toContain('REDACTED:安全事件摘要')
+  })
+
+  it('shows zero-valued metrics as zero', async () => {
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      if (url.includes('/api/security/incidents?')) return response({ items: [{ ...summary, status: 'REVIEWED' }], total: 1 })
+      return response({ ...detail, status: 'REVIEWED' })
+    }) as typeof fetch
+
+    const wrapper = mount(SecurityIncidentCenter, { props: { role: 'ADMIN' } })
+    await flushPromises()
+
+    expect(wrapper.find('.hero-metrics').text()).toContain('0待研判')
+    expect(wrapper.find('.hero-metrics').text()).toContain('0已转协同')
+  })
+
+  it('ignores a late handoff response after selecting another incident', async () => {
+    let resolveHandoff!: (value: Response) => void
+    const handoff = new Promise<Response>(resolve => { resolveHandoff = resolve })
+    let detailCalls = 0
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input)
+      if (url.includes('/api/security/incidents?')) return response({ items: [summary, { ...summary, incidentId: 'INC-2', summary: 'REDACTED:第二事件' }], total: 2 })
+      if (init?.method === 'POST') return handoff
+      detailCalls += 1
+      return response(detailCalls === 1 ? detail : { ...detail, incidentId: 'INC-2', summary: 'REDACTED:第二事件', evidence: [{ ...detail.evidence[0], summary: 'REDACTED:第二事件' }] })
+    }) as typeof fetch
+
+    const wrapper = mount(SecurityIncidentCenter, { props: { role: 'ADMIN' } })
+    await flushPromises()
+    await wrapper.get('[data-security-action="handoff"]').trigger('click')
+    await wrapper.get('[data-security-incident="INC-2"]').trigger('click')
+    await flushPromises()
+    resolveHandoff(response({ ...detail, status: 'HANDOFF', handoffWorkItemId: 'SECURITY_INCIDENT:INC-1' }))
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('REDACTED:第二事件')
+    expect(wrapper.emitted('open-collaboration')).toBeUndefined()
   })
 })

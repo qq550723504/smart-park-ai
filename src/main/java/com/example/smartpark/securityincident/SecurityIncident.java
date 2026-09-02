@@ -51,7 +51,10 @@ public record SecurityIncident(
     }
 
     public SecurityIncident handoff(String workItemId, Instant at) {
-        return copy(SecurityIncidentStatus.HANDOFF, reviewedAt == null ? at : reviewedAt, requireText(workItemId, "workItemId"));
+        if (status != SecurityIncidentStatus.REVIEWED) {
+            throw new IllegalStateException("security incident must be reviewed before handoff");
+        }
+        return copy(SecurityIncidentStatus.HANDOFF, reviewedAt, requireText(workItemId, "workItemId"));
     }
 
     public String summary() {

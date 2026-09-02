@@ -11,14 +11,19 @@ import com.example.smartpark.port.security.SecurityEventReader;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.Optional;
 
 public final class SecurityIncidentService {
     private static final Duration GROUPING_WINDOW = Duration.ofMinutes(15);
@@ -44,7 +49,10 @@ public final class SecurityIncidentService {
         List<SecurityIncident> correlated = correlate();
         List<SecurityIncident> merged = correlated.stream().map(this::restoreState).toList();
         merged.forEach(store::save);
-        List<SecurityIncident> filtered = merged.stream()
+        java.util.Set<String> currentIds = merged.stream().map(SecurityIncident::incidentId)
+                .collect(java.util.stream.Collectors.toSet());
+        List<SecurityIncident> filtered = store.findAll().stream()
+                .filter(incident -> currentIds.contains(incident.incidentId()))
                 .filter(incident -> query.status() == null || incident.status() == query.status())
                 .sorted(Comparator.comparing(SecurityIncident::riskLevel, Comparator.comparingInt(SecurityIncidentService::riskRank).reversed())
                         .thenComparing(SecurityIncident::lastOccurredAt, Comparator.reverseOrder())
@@ -75,7 +83,7 @@ public final class SecurityIncidentService {
     }
 
     private List<SecurityIncident> correlate() {
-        Map<String, List<SecurityEvent>> buckets = new LinkedHashMap<>();
+        Map<CorrelationKey, List<SecurityEvent>> buckets = new LinkedHashMap<>();
         security.listEvents().stream()
                 .sorted(Comparator.comparing(SecurityEvent::occurredAt).thenComparing(SecurityEvent::eventId))
                 .forEach(event -> buckets.computeIfAbsent(bucketKey(event), ignored -> new ArrayList<>()).add(event));
@@ -110,12 +118,14 @@ public final class SecurityIncidentService {
         events.forEach(event -> timeline.add(new SecurityIncidentTimelineEntry("SECURITY_EVENT", event.eventId(), event.occurredAt(), event.eventType())));
         linkedAlerts.forEach(alert -> timeline.add(new SecurityIncidentTimelineEntry("ALERT", alert.id(), alert.occurredAt(), "关联告警")));
         timeline.sort(Comparator.comparing(SecurityIncidentTimelineEntry::occurredAt).thenComparing(SecurityIncidentTimelineEntry::sourceId));
-        SecurityIncidentRisk risk = linkedAlerts.stream().anyMatch(alert -> alert.riskHint() == RiskLevel.HIGH)
-                ? SecurityIncidentRisk.HIGH : events.size() > 1 ? SecurityIncidentRisk.MEDIUM : SecurityIncidentRisk.LOW;
+        SecurityIncidentRisk risk = linkedAlerts.isEmpty()
+                ? SecurityIncidentRisk.MEDIUM
+                : linkedAlerts.stream().anyMatch(alert -> alert.riskHint() == RiskLevel.HIGH)
+                    ? SecurityIncidentRisk.HIGH : SecurityIncidentRisk.LOW;
         List<String> recommendations = risk == SecurityIncidentRisk.HIGH
-                ? List.of("核对安全处置手册并由授权人员复核。", "必要时转为协同工作项并进入现有审批链。")
+                ? List.of("核对安全处置手册并由授权人员复核。", "必要时记录协同交接并保留人工审计。")
                 : List.of("核对安全处置手册并记录研判结论。");
-        return new SecurityIncident("INC:" + bucketKey(first) + ":" + first.eventId(), first.parkId(), first.buildingId(),
+        return new SecurityIncident(incidentId(first), first.parkId(), first.buildingId(),
                 first.eventType(), risk, SecurityIncidentStatus.OPEN, events.get(0).occurredAt(),
                 events.get(events.size() - 1).occurredAt(), eventIds, alertIds, evidence, timeline, recommendations, null, null);
     }
@@ -131,13 +141,47 @@ public final class SecurityIncidentService {
     }
 
     private SecurityIncident restoreState(SecurityIncident fresh) {
-        return store.get(fresh.incidentId()).map(existing -> new SecurityIncident(fresh.incidentId(), fresh.parkId(), fresh.buildingId(), fresh.eventType(),
-                fresh.riskLevel(), existing.status(), fresh.openedAt(), fresh.lastOccurredAt(), fresh.eventIds(), fresh.alertIds(),
-                fresh.evidence(), fresh.timeline(), fresh.recommendations(), existing.reviewedAt(), existing.handoffWorkItemId())).orElse(fresh);
+        Optional<SecurityIncident> exact = store.get(fresh.incidentId());
+        if (exact.isPresent()) return withStoredState(fresh, exact.get());
+
+        List<SecurityIncident> expanded = store.findAll().stream()
+                .filter(existing -> sameCorrelation(existing, fresh))
+                .filter(existing -> fresh.eventIds().containsAll(existing.eventIds()))
+                .toList();
+        return expanded.size() == 1 ? withStoredState(fresh, expanded.get(0)) : fresh;
     }
 
-    private static String bucketKey(SecurityEvent event) {
-        return event.parkId() + ":" + event.buildingId() + ":" + event.eventType();
+    private static SecurityIncident withStoredState(SecurityIncident fresh, SecurityIncident existing) {
+        return new SecurityIncident(existing.incidentId(), fresh.parkId(), fresh.buildingId(), fresh.eventType(),
+                fresh.riskLevel(), existing.status(), fresh.openedAt(), fresh.lastOccurredAt(), fresh.eventIds(), fresh.alertIds(),
+                fresh.evidence(), fresh.timeline(), fresh.recommendations(), existing.reviewedAt(), existing.handoffWorkItemId());
+    }
+
+    private static boolean sameCorrelation(SecurityIncident left, SecurityIncident right) {
+        return left.parkId().equals(right.parkId())
+                && left.buildingId().equals(right.buildingId())
+                && left.eventType().equals(right.eventType());
+    }
+
+    private static CorrelationKey bucketKey(SecurityEvent event) {
+        return new CorrelationKey(event.parkId(), event.buildingId(), event.eventType());
+    }
+
+    private static String incidentId(SecurityEvent event) {
+        CorrelationKey key = bucketKey(event);
+        String material = encode(key.parkId()) + ":" + encode(key.buildingId()) + ":"
+                + encode(key.eventType()) + ":" + encode(event.eventId());
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(material.getBytes(StandardCharsets.UTF_8));
+            return "INC:" + HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
+    }
+
+    private static String encode(String value) {
+        return value.length() + "#" + value;
     }
 
     private static int riskRank(SecurityIncidentRisk risk) {
@@ -146,5 +190,8 @@ public final class SecurityIncidentService {
             case MEDIUM -> 1;
             case LOW -> 0;
         };
+    }
+
+    private record CorrelationKey(String parkId, String buildingId, String eventType) {
     }
 }

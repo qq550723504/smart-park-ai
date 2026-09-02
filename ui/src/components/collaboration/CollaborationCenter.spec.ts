@@ -30,6 +30,10 @@ describe('CollaborationCenter', () => {
       title: '客服工单 cs-1', safeSummary: 'A1 洗手间漏水，等待客服接入。',
       parkId: null, buildingId: null, deviceId: null,
       updatedAt: '2026-09-01T07:00:00Z', detailPath: 'customer',
+    }, {
+      id: 'SECURITY_INCIDENT:INC-1', source: 'SECURITY_INCIDENT', status: 'COMPLETED', priority: 'HIGH',
+      title: '安全事件研判 INC-1', safeSummary: 'REDACTED:安全事件摘要', parkId: 'PARK-A', buildingId: 'A1', deviceId: null,
+      updatedAt: '2026-09-01T06:00:00Z', detailPath: 'security-incident',
     }])) as typeof fetch
 
     const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
@@ -41,6 +45,32 @@ describe('CollaborationCenter', () => {
     expect(wrapper.emitted('open-view')).toEqual([['customer', undefined, 'cs-1']])
     await wrapper.get('[data-work-item="ALERT_WORKFLOW:wf-1"] button').trigger('click')
     expect(wrapper.emitted('open-view')).toEqual([['customer', undefined, 'cs-1'], ['workflow', 'wf-1']])
+    await wrapper.get('[data-work-item="SECURITY_INCIDENT:INC-1"] button').trigger('click')
+    expect(wrapper.emitted('open-view')).toEqual([
+      ['customer', undefined, 'cs-1'], ['workflow', 'wf-1'], ['security-incident', 'INC-1'],
+    ])
+  })
+
+  it('loads and highlights a focused work item outside the first page', async () => {
+    const focused = {
+      id: 'SECURITY_INCIDENT:INC-1', source: 'SECURITY_INCIDENT', status: 'COMPLETED', priority: 'HIGH',
+      title: '安全事件研判 INC-1', safeSummary: 'REDACTED:安全事件摘要', parkId: 'PARK-A', buildingId: 'A1', deviceId: null,
+      updatedAt: '2026-09-01T06:00:00Z', detailPath: 'security-incident',
+    }
+    const calls: string[] = []
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      calls.push(url)
+      if (url.includes('workItemId=')) return response([focused])
+      if (url.includes('/sla-trend')) return response([])
+      return response([])
+    }) as typeof fetch
+
+    const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN', focusWorkItemId: focused.id } })
+    await flushPromises()
+
+    expect(calls).toContain(`/api/collaboration/work-items?limit=1&sort=updatedAt&workItemId=${encodeURIComponent(focused.id)}`)
+    expect(wrapper.get(`[data-work-item="${focused.id}"]`).classes()).toContain('is-focused')
   })
 
   it('ignores a stale queue response after the filters change', async () => {

@@ -350,7 +350,11 @@ Remove-Item Env:SERVER_ADDRESS -ErrorAction SilentlyContinue
 | `POST /api/customer-service/sessions/{sessionId}/messages` | 继续提问 | 已转人工的会话停止自动回答；响应头返回新的 `X-Execution-Run-Id` |
 | `GET /api/customer-service/sessions/{sessionId}/conversation` | 查看对话与安全检索轨迹 | 不返回知识正文 |
 | `GET /api/customer-service/tickets` | 查看人工工单 | 需要 `CUSTOMER_AGENT` 或 `ADMIN` |
-| `GET /api/collaboration/work-items` | 查看安全协同队列 | 需要 `CUSTOMER_AGENT`、`APPROVER` 或 `ADMIN`，支持 `source`、`status`、`limit`（最多 50）；详情操作复用原审批/工单状态接口 |
+| `GET /api/collaboration/work-items` | 查看安全协同队列 | 需要 `CUSTOMER_AGENT`、`APPROVER` 或 `ADMIN`，支持 `source`、`status`、`limit`（最多 50）和 `workItemId` 精确定位；详情操作复用原审批/工单状态接口 |
+| `GET /api/security/incidents` | 查看安全事件研判队列 | 需要 `APPROVER` 或 `ADMIN`，返回脱敏归并结果 |
+| `GET /api/security/incidents/{incidentId}` | 查看安全事件详情 | 需要 `APPROVER` 或 `ADMIN`，返回脱敏证据与时间线 |
+| `POST /api/security/incidents/{incidentId}/review` | 标记安全事件已研判 | 需要 `APPROVER` 或 `ADMIN`；幂等并写入审计记录 |
+| `POST /api/security/incidents/{incidentId}/handoff` | 将已研判事件记录为协同交接 | 需要 `APPROVER` 或 `ADMIN`；必须先研判，交接工作项为已完成投影并写入审计记录 |
 | `POST /api/alerts/{alertId}/workflows` | 启动告警工作流 | 只在 DashScope 启用时存在 |
 | `GET /api/workflows/{workflowId}` | 查询工作流状态 | 只返回脱敏公开 DTO |
 | `POST /api/workflows/{workflowId}/approval` | 审批或拒绝 | 需要稳定的 `idempotencyKey` |
