@@ -57,7 +57,7 @@ SecurityIncidentController
 | `incidentId` | 服务端生成的稳定 ID |
 | `parkId` / `buildingId` | 园区与区域标识 |
 | `eventType` | 归并使用的稳定事件类型 |
-| `riskLevel` | `LOW`、`MEDIUM`、`HIGH` |
+| `riskLevel` | 安全事件域内的 `SecurityIncidentRisk`：`LOW`、`MEDIUM`、`HIGH` |
 | `status` | `OPEN`、`REVIEWED`、`HANDOFF` |
 | `openedAt` / `lastOccurredAt` | 事件首末发生时间 |
 | `eventIds` | 关联安全事件 ID，稳定排序 |

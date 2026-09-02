@@ -62,6 +62,7 @@ git commit -m "feat: expose safe security event collection"
 
 **Files:**
 - Create: `src/main/java/com/example/smartpark/securityincident/SecurityIncident.java`
+- Create: `src/main/java/com/example/smartpark/securityincident/SecurityIncidentRisk.java`
 - Create: `src/main/java/com/example/smartpark/securityincident/SecurityIncidentQuery.java`
 - Create: `src/main/java/com/example/smartpark/securityincident/SecurityIncidentPage.java`
 - Create: `src/main/java/com/example/smartpark/securityincident/SecurityIncidentEvidence.java`
@@ -83,6 +84,7 @@ git commit -m "feat: expose safe security event collection"
 - `SecurityIncidentStore` exposes `get`, `save`, `findAll`, and `findByHandoff`; all returned models are immutable snapshots.
 - `SecurityIncidentHandoffPort.createOrGet(SecurityIncident incident, Instant now): SecurityIncidentHandoff` is the only write boundary used by the service; `list(): List<SecurityIncidentHandoff>` supplies the collaboration projection.
 - `SecurityIncident` exposes stable IDs, risk/status, counts, safe summary, evidence, timeline, recommendations, `reviewedAt`, and `handoffWorkItemId`.
+- `SecurityIncidentRisk` is local to the security-incident domain (`LOW`, `MEDIUM`, `HIGH`) so the shared alert `RiskLevel` enum remains unchanged.
 - `SecurityIncidentQuery` accepts nullable `SecurityIncidentStatus status` and bounded `int limit`; `SecurityIncidentPage` contains immutable `items` and `total`.
 - `SecurityIncidentEvidence` contains only `sourceId`, `occurredAt`, and validated `summary`; `SecurityIncidentTimelineEntry` contains only `sourceType`, `sourceId`, `occurredAt`, and a safe label.
 
