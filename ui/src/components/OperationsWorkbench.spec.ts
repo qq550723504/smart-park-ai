@@ -92,6 +92,11 @@ const collaborationCenterStub = defineComponent({
   template: '<div data-testid="collaboration-center-stub"><button type="button" data-collaboration-jump @click="$emit(\'open-view\', \'customer\')">打开客服</button></div>',
 })
 
+const securityIncidentStub = defineComponent({
+  emits: ['open-collaboration'],
+  template: '<div data-testid="security-incident-stub"><button type="button" data-security-handoff @click="$emit(\'open-collaboration\', { incidentId: \'INC-1\', workItemId: \'SECURITY_INCIDENT:INC-1\' })">转协同</button></div>',
+})
+
 const guidedStatusStub = defineComponent({
   props: { active: { type: Boolean, default: true }, launchRequest: { type: Object, default: null } },
   emits: ['launch-status'],
@@ -119,6 +124,7 @@ const operatorStubs = {
   DemoConsole: true,
   EventTimeline: true,
   CustomerServiceConsole: customerStub,
+  SecurityIncidentCenter: securityIncidentStub,
   ExecutionTraceRail: true,
   'el-select': true,
   'el-option': true,
@@ -160,8 +166,22 @@ describe('OperationsWorkbench', () => {
     await settleCapabilities()
 
     expect(wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())).toEqual([
-      '告警工作流', '园区客服', '协同中心', '运营看板', '运营分析', '专家协作', '实时语音', '治理中心',
+      '告警工作流', '园区客服', '协同中心', '安全事件研判', '运营看板', '运营分析', '专家协作', '实时语音', '治理中心',
     ])
+  })
+
+  it('shows security incident review only to approver roles and hands off to collaboration center', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'security-incidents' },
+      global: { stubs: { ...operatorStubs, CollaborationCenter: collaborationWorkflowStub } },
+    })
+    await settleCapabilities()
+    expect(wrapper.get('[data-workbench-view="security-incidents"]').classes()).toContain('active')
+    await wrapper.get('[data-security-handoff]').trigger('click')
+    expect(wrapper.get('[data-workbench-view="collaboration-center"]').classes()).toContain('active')
+    await wrapper.getComponent(ImmersiveWorkbenchShell).vm.$emit('update:role', 'CUSTOMER_AGENT')
+    await nextTick()
+    expect(wrapper.find('[data-workbench-view="security-incidents"]').exists()).toBe(false)
   })
 
   it('keeps analysis mounted while switching operator views', async () => {
@@ -528,7 +548,7 @@ describe('OperationsWorkbench', () => {
 
     await settleCapabilities()
 
-    expect(wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())).toEqual(['告警工作流', '园区客服', '协同中心', '治理中心'])
+    expect(wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())).toEqual(['告警工作流', '园区客服', '协同中心', '安全事件研判', '治理中心'])
     expect(wrapper.get('[data-evidence-item="知识检索"] strong').text()).toBe('能力检查失败')
     expect(wrapper.get('[data-evidence-item="知识检索"]').attributes('data-tone')).toBe('warning')
   })

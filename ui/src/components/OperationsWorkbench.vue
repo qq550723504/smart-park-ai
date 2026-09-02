@@ -14,6 +14,7 @@ import VoiceAssistantPage from './voice/VoiceAssistantPage.vue'
 import GovernanceCenter from './governance/GovernanceCenter.vue'
 import OperationsBoard from './operations/OperationsBoard.vue'
 import CollaborationCenter from './collaboration/CollaborationCenter.vue'
+import SecurityIncidentCenter from './security/SecurityIncidentCenter.vue'
 import { demoAlerts, type DemoRole } from '../types/workflow'
 import { useWorkflow } from '../composables/useWorkflow'
 import { useExecutionTrace } from '../composables/useExecutionTrace'
@@ -51,6 +52,7 @@ const navItems = computed<WorkbenchNavItem[]>(() => [
   { value: 'workflow', label: '告警工作流', available: true },
   { value: 'customer', label: '园区客服', available: true },
   { value: 'collaboration-center', label: '协同中心', available: ['ADMIN', 'APPROVER', 'CUSTOMER_AGENT'].includes(role.value) },
+  { value: 'security-incidents', label: '安全事件研判', available: ['ADMIN', 'APPROVER'].includes(role.value) },
   { value: 'operations', label: '运营看板', available: capabilities.value?.analyticsEnabled === true },
   { value: 'analytics', label: '运营分析', available: capabilities.value?.analyticsEnabled === true },
   { value: 'collaboration', label: '专家协作', available: capabilities.value?.collaborationEnabled === true },
@@ -151,6 +153,7 @@ const executionEvidenceByView: Record<WorkbenchView, Pick<WorkbenchEvidenceItem,
   voice: { value: '只读查询 · 实时语音会话', tone: 'verified' },
   collaboration: { value: '只读查询 · 多专家汇总', tone: 'verified' },
   'collaboration-center': { value: '安全处理 · 原场景状态机', tone: 'verified' },
+  'security-incidents': { value: '安全处理 · 脱敏研判后转协同', tone: 'warning' },
   analytics: { value: '真实只读数据', tone: 'verified' },
   governance: { value: '安全聚合 · 只读概览', tone: 'verified' },
   operations: { value: '真实只读数据 · 选择后分析', tone: 'verified' },
@@ -183,6 +186,9 @@ async function openCollaborationView(view: 'workflow' | 'customer', workflowId?:
   }
   if (generation !== navigationGeneration) return
   activeView.value = view
+}
+function openCollaborationFromIncident(): void {
+  switchView('collaboration-center')
 }
 watch(
   () => [workflow.value?.workflowId, activeView.value] as const,
@@ -363,6 +369,12 @@ function confidence(value?: number) {
       :role="role"
       :active="props.active && activeView === 'collaboration-center'"
       @open-view="openCollaborationView"
+    />
+
+    <SecurityIncidentCenter
+      v-show="activeView === 'security-incidents'"
+      :role="role"
+      @open-collaboration="openCollaborationFromIncident"
     />
 
     <GovernanceCenter v-show="activeView === 'governance'" :role="role" :active="props.active && activeView === 'governance'" />
