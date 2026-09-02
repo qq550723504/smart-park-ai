@@ -23,6 +23,7 @@ public final class CollaborationCenterService {
     private final CustomerTicketReader tickets;
     private final Clock clock;
     private final CollaborationSlaPolicy slaPolicy;
+    private final CollaborationSlaSnapshotStore snapshots;
 
     public CollaborationCenterService(WorkflowExecutionStore workflows, CustomerTicketPort tickets) {
         this(workflows, tickets::list);
@@ -37,29 +38,41 @@ public final class CollaborationCenterService {
     }
 
     public CollaborationCenterService(WorkflowExecutionStore workflows, CustomerTicketReader tickets, Clock clock) {
+        this(workflows, tickets, clock, new CollaborationSlaSnapshotStore());
+    }
+
+    public CollaborationCenterService(WorkflowExecutionStore workflows, CustomerTicketPort tickets, Clock clock,
+                                      CollaborationSlaSnapshotStore snapshots) {
+        this(workflows, tickets::list, clock, snapshots);
+    }
+
+    public CollaborationCenterService(WorkflowExecutionStore workflows, CustomerTicketReader tickets, Clock clock,
+                                      CollaborationSlaSnapshotStore snapshots) {
         this.workflows = workflows;
         this.tickets = Objects.requireNonNull(tickets, "tickets");
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.snapshots = Objects.requireNonNull(snapshots, "snapshots");
         this.slaPolicy = new CollaborationSlaPolicy();
     }
 
     public List<CollaborationWorkItem> list(WorkItemQuery query) {
         WorkItemQuery requested = Objects.requireNonNull(query, "query");
         List<CollaborationWorkItem> items = new ArrayList<>();
-        if (requested.source() == null || requested.source() == CollaborationWorkItem.Source.ALERT_WORKFLOW) {
-            if (workflows != null) {
-                currentWorkflowSnapshots(workflows.snapshots()).stream().map(this::fromWorkflow)
-                        .filter(requested::accepts).forEach(items::add);
-            }
+        if (workflows != null) {
+            currentWorkflowSnapshots(workflows.snapshots()).stream().map(this::fromWorkflow)
+                    .forEach(items::add);
         }
-        if (requested.source() == null || requested.source() == CollaborationWorkItem.Source.CUSTOMER_TICKET) {
-            tickets.listActive().stream().map(this::fromTicket)
-                    .filter(requested::accepts).forEach(items::add);
-        }
+        tickets.listActive().stream().map(this::fromTicket).forEach(items::add);
+        snapshots.recordIfDue(clock.instant(), items);
         return items.stream()
+                .filter(requested::accepts)
                 .sorted(comparatorFor(requested.sortMode()))
                 .limit(requested.limit())
                 .toList();
+    }
+
+    public List<CollaborationSlaSnapshot> listTrend(int limit) {
+        return snapshots.list(limit);
     }
 
     private static Comparator<CollaborationWorkItem> comparatorFor(WorkItemQuery.SortMode sortMode) {

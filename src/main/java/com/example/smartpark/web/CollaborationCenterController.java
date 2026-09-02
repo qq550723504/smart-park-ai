@@ -1,6 +1,7 @@
 package com.example.smartpark.web;
 
 import com.example.smartpark.collaborationcenter.CollaborationCenterService;
+import com.example.smartpark.collaborationcenter.CollaborationSlaSnapshotStore;
 import com.example.smartpark.collaborationcenter.CollaborationWorkItem;
 import com.example.smartpark.collaborationcenter.WorkItemQuery;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -33,6 +34,17 @@ public class CollaborationCenterController {
                 parse(status, CollaborationWorkItem.Status.class, "status"), limit,
                 parseSort(sort));
         return service.list(query).stream().map(CollaborationCenterDtos.WorkItemResponse::from).toList();
+    }
+
+    @GetMapping("/api/collaboration/sla-trend")
+    public List<CollaborationCenterDtos.SlaTrendResponse> trend(
+            @RequestParam(defaultValue = "60") int limit,
+            @RequestHeader(value = "X-Demo-Role", required = false) String role) {
+        DemoRole.require(role, DemoRole.CUSTOMER_AGENT, DemoRole.ADMIN);
+        if (limit < 1 || limit > CollaborationSlaSnapshotStore.MAX_SNAPSHOTS) {
+            throw new IllegalArgumentException("limit must be between 1 and " + CollaborationSlaSnapshotStore.MAX_SNAPSHOTS);
+        }
+        return service.listTrend(limit).stream().map(CollaborationCenterDtos.SlaTrendResponse::from).toList();
     }
 
     private static WorkItemQuery.SortMode parseSort(String raw) {

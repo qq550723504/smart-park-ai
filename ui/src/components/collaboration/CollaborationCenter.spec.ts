@@ -2,6 +2,10 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import CollaborationCenter from './CollaborationCenter.vue'
 
+vi.mock('./CollaborationSlaTrendChart.vue', () => ({
+  default: { props: ['snapshots'], template: '<div class="collaboration-sla-trend__chart" />' },
+}))
+
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 }
@@ -184,11 +188,110 @@ describe('CollaborationCenter', () => {
 
     const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
     await flushPromises()
-    expect(requests[0]).toContain('sort=sla')
+    expect(requests.some(url => url.includes('sort=sla'))).toBe(true)
 
     await wrapper.get('[data-sla-sort]').setValue('updatedAt')
     await flushPromises()
-    expect(requests[1]).toContain('sort=updatedAt')
+    expect(requests.some(url => url.includes('sort=updatedAt'))).toBe(true)
+  })
+
+  it('renders the session SLA trend independently from the work-item queue', async () => {
+    const requests: string[] = []
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      requests.push(url)
+      if (url.includes('/sla-trend')) {
+        return response([{ capturedAt: '2026-09-02T10:00:00Z', total: 1, overdue: 1, dueSoon: 0, onTrack: 0, completed: 0, notApplicable: 0 }])
+      }
+      return response([{
+        id: 'ALERT_WORKFLOW:trend', source: 'ALERT_WORKFLOW', status: 'FAILED', priority: 'HIGH',
+        title: '趋势告警', safeSummary: '趋势采样工作项', parkId: null, buildingId: null, deviceId: null,
+        updatedAt: '2026-09-02T10:00:00Z', openedAt: '2026-09-02T09:00:00Z',
+        slaDueAt: '2026-09-02T09:30:00Z', slaState: 'OVERDUE', detailPath: 'workflow',
+      }])
+    }) as typeof fetch
+
+    const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('本次会话 SLA 趋势')
+    expect(wrapper.get('[data-sla-trend-count]').text()).toContain('1')
+    expect(wrapper.find('.collaboration-sla-trend__chart').exists()).toBe(true)
+    expect(requests.some(url => url.includes('/sla-trend?limit=60'))).toBe(true)
+  })
+
+  it('keeps the queue available when the SLA trend request fails', async () => {
+    globalThis.fetch = (async (input) => {
+      if (String(input).includes('/sla-trend')) throw new Error('trend offline')
+      return response([{
+        id: 'CUSTOMER_TICKET:trend-error', source: 'CUSTOMER_TICKET', status: 'WAITING_AGENT', priority: 'NORMAL',
+        title: '趋势失败时仍可用', safeSummary: '队列不应被趋势错误阻断', parkId: null, buildingId: null, deviceId: null,
+        updatedAt: '2026-09-02T10:00:00Z', openedAt: '2026-09-02T09:00:00Z',
+        slaDueAt: '2026-09-02T12:00:00Z', slaState: 'ON_TRACK', detailPath: 'customer',
+      }])
+    }) as typeof fetch
+
+    const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('趋势失败时仍可用')
+    expect(wrapper.text()).toContain('当前无法读取 SLA 趋势')
+  })
+
+  it('does not request SLA trend data for a role without queue access', async () => {
+    const requests: string[] = []
+    globalThis.fetch = (async (input) => {
+      requests.push(String(input))
+      return response([])
+    }) as typeof fetch
+
+    mount(CollaborationCenter, { props: { role: 'VIEWER' } })
+    await flushPromises()
+
+    expect(requests).toEqual([])
+  })
+
+  it('keeps the previous trend visible while a background trend refresh is pending', async () => {
+    vi.useFakeTimers()
+    try {
+      let trendCalls = 0
+      let resolveTrendRefresh!: (value: Response) => void
+      const pendingTrendRefresh = new Promise<Response>(resolve => { resolveTrendRefresh = resolve })
+      globalThis.fetch = (async (input) => {
+        if (String(input).includes('/sla-trend')) {
+          trendCalls += 1
+          if (trendCalls === 1) {
+            return response([{ capturedAt: '2026-09-02T10:00:00Z', total: 1, overdue: 0, dueSoon: 0, onTrack: 1, completed: 0, notApplicable: 0 }])
+          }
+          return pendingTrendRefresh
+        }
+        return response([{
+          id: 'CUSTOMER_TICKET:trend-refresh', source: 'CUSTOMER_TICKET', status: 'WAITING_AGENT', priority: 'NORMAL',
+          title: '趋势刷新工作项', safeSummary: '保留趋势的工作项', parkId: null, buildingId: null, deviceId: null,
+          updatedAt: '2026-09-02T10:00:00Z', openedAt: '2026-09-02T09:00:00Z',
+          slaDueAt: '2026-09-02T12:00:00Z', slaState: 'ON_TRACK', detailPath: 'customer',
+        }])
+      }) as typeof fetch
+
+      const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
+      await flushPromises()
+      expect(wrapper.get('[data-sla-trend-count]').text()).toContain('1')
+
+      await vi.advanceTimersByTimeAsync(30_000)
+      await wrapper.vm.$nextTick()
+      expect(trendCalls).toBe(2)
+      expect(wrapper.get('[data-sla-trend-count]').text()).toContain('1')
+
+      resolveTrendRefresh(response([
+        { capturedAt: '2026-09-02T10:00:00Z', total: 1, overdue: 0, dueSoon: 0, onTrack: 1, completed: 0, notApplicable: 0 },
+        { capturedAt: '2026-09-02T10:00:30Z', total: 1, overdue: 1, dueSoon: 0, onTrack: 0, completed: 0, notApplicable: 0 },
+      ]))
+      await flushPromises()
+      expect(wrapper.get('[data-sla-trend-count]').text()).toContain('2')
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('closes cached details when read access is revoked', async () => {
@@ -215,14 +318,15 @@ describe('CollaborationCenter', () => {
   it('refreshes the active queue so SLA labels do not become stale', async () => {
     vi.useFakeTimers()
     try {
-      let calls = 0
-      globalThis.fetch = (async () => {
-        calls += 1
+      let queueCalls = 0
+      globalThis.fetch = (async (input) => {
+        if (String(input).includes('/sla-trend')) return response([])
+        queueCalls += 1
         return response([{
           id: 'CUSTOMER_TICKET:cs-refresh', source: 'CUSTOMER_TICKET', status: 'WAITING_AGENT', priority: 'NORMAL',
           title: '客服工单 cs-refresh', safeSummary: '需要持续刷新的工单', parkId: null, buildingId: null, deviceId: null,
           updatedAt: '2026-09-02T09:00:00Z', openedAt: '2026-09-02T08:00:00Z',
-          slaDueAt: '2026-09-02T12:00:00Z', slaState: calls === 1 ? 'ON_TRACK' : 'DUE_SOON', detailPath: 'customer',
+          slaDueAt: '2026-09-02T12:00:00Z', slaState: queueCalls === 1 ? 'ON_TRACK' : 'DUE_SOON', detailPath: 'customer',
         }])
       }) as typeof fetch
 
@@ -233,7 +337,7 @@ describe('CollaborationCenter', () => {
       vi.advanceTimersByTime(30_000)
       await flushPromises()
 
-      expect(calls).toBe(2)
+      expect(queueCalls).toBe(2)
       expect(wrapper.text()).toContain('即将到期')
       wrapper.unmount()
     } finally {
@@ -247,7 +351,8 @@ describe('CollaborationCenter', () => {
       let calls = 0
       let resolveRefresh!: (value: Response) => void
       const pendingRefresh = new Promise<Response>((resolve) => { resolveRefresh = resolve })
-      globalThis.fetch = (async () => {
+      globalThis.fetch = (async (input) => {
+        if (String(input).includes('/sla-trend')) return response([])
         calls += 1
         if (calls === 1) return response([{
           id: 'CUSTOMER_TICKET:cs-overview-refresh', source: 'CUSTOMER_TICKET', status: 'WAITING_AGENT', priority: 'NORMAL',
@@ -407,7 +512,8 @@ describe('CollaborationCenter', () => {
     let resolveFilteredRequest!: (value: Response) => void
     const filteredRequest = new Promise<Response>((resolve) => { resolveFilteredRequest = resolve })
     let calls = 0
-    globalThis.fetch = (async () => {
+    globalThis.fetch = (async (input) => {
+      if (String(input).includes('/sla-trend')) return response([])
       calls += 1
       if (calls === 1) return response([{
         id: 'ALERT_WORKFLOW:old-filter-result', source: 'ALERT_WORKFLOW', status: 'WAITING_APPROVAL', priority: 'HIGH',

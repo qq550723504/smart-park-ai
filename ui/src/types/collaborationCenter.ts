@@ -33,6 +33,16 @@ export interface CollaborationWorkItem {
   detailPath: 'workflow' | 'customer'
 }
 
+export interface CollaborationSlaSnapshot {
+  capturedAt: string
+  total: number
+  overdue: number
+  dueSoon: number
+  onTrack: number
+  completed: number
+  notApplicable: number
+}
+
 export interface CollaborationWorkItemFilters {
   source?: CollaborationWorkItemSource
   status?: CollaborationWorkItemStatus

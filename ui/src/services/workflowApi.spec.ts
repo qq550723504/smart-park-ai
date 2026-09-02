@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { getShowcaseScenarios } from './workflowApi'
+import { getShowcaseScenarios, listCollaborationSlaTrend } from './workflowApi'
 import type { ShowcaseScenarioCatalog } from './workflowApi'
 
 const originalFetch = globalThis.fetch
@@ -33,4 +33,15 @@ it('loads the server-owned showcase catalog without manufacturing readiness', as
 
   expect(result).toEqual(catalog)
   expect(fetchMock).toHaveBeenCalledWith('/api/showcase/scenarios', expect.any(Object))
+})
+
+it('loads the read-only collaboration SLA trend with the demo role', async () => {
+  const trend = [{ capturedAt: '2026-09-02T10:00:00Z', total: 4, overdue: 1, dueSoon: 1, onTrack: 2, completed: 0, notApplicable: 0 }]
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(trend), { status: 200 }))
+  globalThis.fetch = fetchMock as typeof fetch
+
+  await expect(listCollaborationSlaTrend('ADMIN', 60)).resolves.toEqual(trend)
+  expect(fetchMock).toHaveBeenCalledWith('/api/collaboration/sla-trend?limit=60', expect.objectContaining({
+    headers: expect.objectContaining({ 'X-Demo-Role': 'ADMIN' }),
+  }))
 })
