@@ -18,7 +18,13 @@ public class CollaborationCenterConfiguration {
     @Bean
     CollaborationCenterService collaborationCenterService(
             ObjectProvider<WorkflowExecutionStore> workflows, CustomerServiceWorkflow customerService,
-            CollaborationSlaSnapshotStore snapshots) {
-        return new CollaborationCenterService(workflows.getIfAvailable(), customerService, Clock.systemUTC(), snapshots);
+            CollaborationSlaSnapshotStore snapshots, SecurityIncidentHandoffStore incidentHandoffs) {
+        return new CollaborationCenterService(workflows.getIfAvailable(), customerService, Clock.systemUTC(), snapshots,
+                incidentHandoffs);
+    }
+
+    @Bean
+    SecurityIncidentHandoffStore securityIncidentHandoffStore() {
+        return new SecurityIncidentHandoffStore(100);
     }
 }

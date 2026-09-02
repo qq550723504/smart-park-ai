@@ -43,7 +43,7 @@ public record CollaborationWorkItem(
         return value.trim();
     }
 
-    public enum Source { ALERT_WORKFLOW, CUSTOMER_TICKET }
+    public enum Source { ALERT_WORKFLOW, CUSTOMER_TICKET, SECURITY_INCIDENT }
 
     public enum Priority { HIGH, NORMAL }
 

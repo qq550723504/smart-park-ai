@@ -106,7 +106,8 @@ class SecurityIncidentServiceTest {
         SecurityIncidentHandoffPort handoffs = new SecurityIncidentHandoffPort() {
             @Override
             public SecurityIncidentHandoff createOrGet(SecurityIncident incident, Instant now) {
-                return new SecurityIncidentHandoff("WI:" + incident.incidentId(), incident.incidentId(), now);
+                return new SecurityIncidentHandoff("WI:" + incident.incidentId(), incident.incidentId(), incident.parkId(),
+                        incident.buildingId(), incident.riskLevel(), incident.summary(), now);
             }
 
             @Override

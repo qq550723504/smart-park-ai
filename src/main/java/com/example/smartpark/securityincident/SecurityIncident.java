@@ -54,6 +54,10 @@ public record SecurityIncident(
         return copy(SecurityIncidentStatus.HANDOFF, reviewedAt == null ? at : reviewedAt, requireText(workItemId, "workItemId"));
     }
 
+    public String summary() {
+        return evidence.isEmpty() ? "REDACTED:安全事件摘要不可用" : evidence.get(0).summary();
+    }
+
     private SecurityIncident copy(SecurityIncidentStatus nextStatus, Instant nextReviewedAt, String nextHandoffId) {
         return new SecurityIncident(incidentId, parkId, buildingId, eventType, riskLevel, nextStatus, openedAt,
                 lastOccurredAt, eventIds, alertIds, evidence, timeline, recommendations, nextReviewedAt, nextHandoffId);

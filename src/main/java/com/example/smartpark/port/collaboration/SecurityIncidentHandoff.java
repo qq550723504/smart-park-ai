@@ -3,10 +3,17 @@ package com.example.smartpark.port.collaboration;
 import java.time.Instant;
 import java.util.Objects;
 
-public record SecurityIncidentHandoff(String workItemId, String incidentId, Instant createdAt) {
+import com.example.smartpark.securityincident.SecurityIncidentRisk;
+
+public record SecurityIncidentHandoff(String workItemId, String incidentId, String parkId, String buildingId,
+                                      SecurityIncidentRisk riskLevel, String safeSummary, Instant createdAt) {
     public SecurityIncidentHandoff {
         workItemId = requireText(workItemId, "workItemId");
         incidentId = requireText(incidentId, "incidentId");
+        parkId = requireText(parkId, "parkId");
+        buildingId = requireText(buildingId, "buildingId");
+        riskLevel = Objects.requireNonNull(riskLevel, "riskLevel");
+        safeSummary = requireText(safeSummary, "safeSummary");
         createdAt = Objects.requireNonNull(createdAt, "createdAt");
     }
 

@@ -7,6 +7,8 @@ import com.example.smartpark.model.customer.CustomerTicket;
 import com.example.smartpark.model.customer.CustomerTicketStatus;
 import com.example.smartpark.port.customer.CustomerTicketPort;
 import com.example.smartpark.port.customer.CustomerTicketReader;
+import com.example.smartpark.port.collaboration.SecurityIncidentHandoff;
+import com.example.smartpark.port.collaboration.SecurityIncidentHandoffPort;
 import com.example.smartpark.workflow.WorkflowExecutionStore;
 import com.example.smartpark.workflow.WorkflowSnapshot;
 
@@ -24,6 +26,7 @@ public final class CollaborationCenterService {
     private final Clock clock;
     private final CollaborationSlaPolicy slaPolicy;
     private final CollaborationSlaSnapshotStore snapshots;
+    private final SecurityIncidentHandoffPort incidentHandoffs;
 
     public CollaborationCenterService(WorkflowExecutionStore workflows, CustomerTicketPort tickets) {
         this(workflows, tickets::list);
@@ -46,12 +49,23 @@ public final class CollaborationCenterService {
         this(workflows, tickets::list, clock, snapshots);
     }
 
+    public CollaborationCenterService(WorkflowExecutionStore workflows, CustomerTicketPort tickets, Clock clock,
+                                      CollaborationSlaSnapshotStore snapshots, SecurityIncidentHandoffPort incidentHandoffs) {
+        this(workflows, tickets::list, clock, snapshots, incidentHandoffs);
+    }
+
     public CollaborationCenterService(WorkflowExecutionStore workflows, CustomerTicketReader tickets, Clock clock,
                                       CollaborationSlaSnapshotStore snapshots) {
+        this(workflows, tickets, clock, snapshots, null);
+    }
+
+    public CollaborationCenterService(WorkflowExecutionStore workflows, CustomerTicketReader tickets, Clock clock,
+                                      CollaborationSlaSnapshotStore snapshots, SecurityIncidentHandoffPort incidentHandoffs) {
         this.workflows = workflows;
         this.tickets = Objects.requireNonNull(tickets, "tickets");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.snapshots = Objects.requireNonNull(snapshots, "snapshots");
+        this.incidentHandoffs = incidentHandoffs;
         this.slaPolicy = new CollaborationSlaPolicy();
     }
 
@@ -63,6 +77,9 @@ public final class CollaborationCenterService {
                     .forEach(items::add);
         }
         tickets.listActive().stream().map(this::fromTicket).forEach(items::add);
+        if (incidentHandoffs != null) {
+            incidentHandoffs.list().stream().map(this::fromIncidentHandoff).forEach(items::add);
+        }
         snapshots.recordIfDue(clock.instant(), items);
         return items.stream()
                 .filter(requested::accepts)
@@ -152,6 +169,19 @@ public final class CollaborationCenterService {
                 CollaborationWorkItem.Priority.NORMAL,
                 "客服工单 " + ticket.id(), ticket.safeSummary(), null, null, null,
                 ticket.updatedAt(), ticket.createdAt(), sla.dueAt(), sla.state(), "customer");
+    }
+
+    private CollaborationWorkItem fromIncidentHandoff(SecurityIncidentHandoff handoff) {
+        CollaborationWorkItem.Priority priority = handoff.riskLevel().isHighRisk()
+                ? CollaborationWorkItem.Priority.HIGH : CollaborationWorkItem.Priority.NORMAL;
+        CollaborationWorkItem.Status status = CollaborationWorkItem.Status.WAITING_APPROVAL;
+        CollaborationSlaPolicy.SlaEvaluation sla = slaPolicy.evaluate(
+                CollaborationWorkItem.Source.SECURITY_INCIDENT, priority, status,
+                handoff.createdAt(), clock.instant());
+        return new CollaborationWorkItem(handoff.workItemId(), CollaborationWorkItem.Source.SECURITY_INCIDENT,
+                status, priority, "安全事件研判 " + handoff.incidentId(), handoff.safeSummary(), handoff.parkId(),
+                handoff.buildingId(), null, handoff.createdAt(), handoff.createdAt(), sla.dueAt(), sla.state(),
+                "/security/incidents/" + handoff.incidentId());
     }
 
     private static CollaborationWorkItem.Priority priorityFor(WorkflowSnapshot snapshot, Map<String, Object> payload,

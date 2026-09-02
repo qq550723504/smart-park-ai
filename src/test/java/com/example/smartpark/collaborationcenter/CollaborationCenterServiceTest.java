@@ -6,6 +6,11 @@ import com.example.smartpark.model.common.RiskLevel;
 import com.example.smartpark.model.customer.CustomerTicket;
 import com.example.smartpark.port.customer.CustomerTicketPort;
 import com.example.smartpark.port.customer.CustomerTicketReader;
+import com.example.smartpark.port.collaboration.SecurityIncidentHandoff;
+import com.example.smartpark.securityincident.SecurityIncident;
+import com.example.smartpark.securityincident.SecurityIncidentEvidence;
+import com.example.smartpark.securityincident.SecurityIncidentRisk;
+import com.example.smartpark.securityincident.SecurityIncidentStatus;
 import com.example.smartpark.workflow.WorkflowExecutionStore;
 import com.example.smartpark.workflow.WorkflowSnapshot;
 import org.junit.jupiter.api.Test;
@@ -23,6 +28,27 @@ import static org.mockito.Mockito.when;
 class CollaborationCenterServiceTest {
 
     private static final Clock TEST_CLOCK = Clock.fixed(Instant.parse("2026-09-02T10:00:00Z"), java.time.ZoneOffset.UTC);
+
+    @Test
+    void projectsSecurityIncidentHandoffWithoutChangingExistingSources() {
+        WorkflowExecutionStore workflows = mock(WorkflowExecutionStore.class);
+        CustomerTicketPort tickets = mock(CustomerTicketPort.class);
+        when(workflows.snapshots()).thenReturn(List.of());
+        when(tickets.list()).thenReturn(List.of());
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncident incident = securityIncident();
+        SecurityIncidentHandoff handoff = handoffs.createOrGet(incident, TEST_CLOCK.instant());
+
+        List<CollaborationWorkItem> items = new CollaborationCenterService(workflows, tickets, TEST_CLOCK,
+                new CollaborationSlaSnapshotStore(), handoffs).list(WorkItemQuery.defaults());
+
+        assertThat(items).singleElement().satisfies(item -> {
+            assertThat(item.id()).isEqualTo(handoff.workItemId());
+            assertThat(item.source()).isEqualTo(CollaborationWorkItem.Source.SECURITY_INCIDENT);
+            assertThat(item.priority()).isEqualTo(CollaborationWorkItem.Priority.HIGH);
+            assertThat(item.detailPath()).isEqualTo("/security/incidents/INC-1");
+        });
+    }
 
     @Test
     void projectsAlertAndCustomerTicketWithoutLeakingDomainObjects() {
@@ -266,5 +292,13 @@ class CollaborationCenterServiceTest {
                         "raw diagnosis", "raw diagnosis", List.of("secret evidence"),
                         "approval comment", 0.9, Instant.EPOCH),
                 Optional.empty(), null, List.of(), 4);
+    }
+
+    private static SecurityIncident securityIncident() {
+        Instant at = Instant.parse("2026-09-02T08:00:00Z");
+        return new SecurityIncident("INC-1", "PARK-A", "A1", "ACCESS", SecurityIncidentRisk.HIGH,
+                SecurityIncidentStatus.OPEN, at, at, List.of("SEC-1"), List.of("ALT-1"),
+                List.of(new SecurityIncidentEvidence("SEC-1", at, "REDACTED: safe")), List.of(),
+                List.of("核对安全处置手册。"), null, null);
     }
 }
