@@ -2,6 +2,8 @@ package com.example.smartpark.web;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.example.smartpark.adapter.mock.MockParkFixture;
+import com.example.smartpark.execution.InMemoryExecutionEventPublisher;
+import com.example.smartpark.audit.AuditTrail;
 import com.example.smartpark.model.common.KnowledgeDomain;
 import com.example.smartpark.model.common.KnowledgeMatch;
 import com.example.smartpark.port.knowledge.KnowledgePort;
@@ -14,6 +16,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class CustomerServiceControllerTest {
@@ -22,6 +25,24 @@ class CustomerServiceControllerTest {
                     new CustomerServiceController(new CustomerServiceWorkflow(new MockParkFixture().knowledge())))
             .setControllerAdvice(new ApiExceptionHandler())
             .build();
+
+    @Test
+    void successfulCustomerRequestReturnsExecutionRunHeaderWithoutChangingJson() throws Exception {
+        var publisher = new InMemoryExecutionEventPublisher();
+        var controller = new CustomerServiceController(
+                new CustomerServiceWorkflow(new MockParkFixture().knowledge()), new AuditTrail(), publisher);
+        MockMvc observedMockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new ApiExceptionHandler())
+                .build();
+
+        observedMockMvc.perform(post("/api/customer-service/sessions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"访客停车怎么收费？\"}"))
+                .andExpect(status().isOk())
+                .andExpect(header().exists("X-Execution-Run-Id"))
+                .andExpect(jsonPath("$.sessionId").isNotEmpty())
+                .andExpect(jsonPath("$.executionRunId").doesNotExist());
+    }
 
     @Test
     void invalidQuestionReturnsBadRequest() throws Exception {
