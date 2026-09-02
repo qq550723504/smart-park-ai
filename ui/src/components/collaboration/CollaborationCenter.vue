@@ -12,6 +12,7 @@ const loading = ref(false)
 const failed = ref(false)
 const source = ref<CollaborationWorkItemSource | ''>('')
 const status = ref<CollaborationWorkItemStatus | ''>('')
+const sortMode = ref<'sla' | 'updatedAt'>('sla')
 const selectedItem = ref<CollaborationWorkItem | null>(null)
 let requestGeneration = 0
 let refreshTimer: ReturnType<typeof setInterval> | undefined
@@ -22,6 +23,25 @@ const SLA_REFRESH_INTERVAL_MS = 30_000
 
 const canRead = computed(() => props.role === 'ADMIN' || props.role === 'CUSTOMER_AGENT')
 const attentionCount = computed(() => items.value.filter(item => ['WAITING_APPROVAL', 'FAILED', 'WORK_ORDER_FAILED', 'WAITING_AGENT'].includes(item.status)).length)
+const slaOverview = computed(() => ({
+  total: items.value.length,
+  overdue: items.value.filter(item => item.slaState === 'OVERDUE').length,
+  dueSoon: items.value.filter(item => item.slaState === 'DUE_SOON').length,
+  onTrack: items.value.filter(item => item.slaState === 'ON_TRACK').length,
+}))
+const slaRank: Record<CollaborationWorkItemSlaState, number> = {
+  OVERDUE: 0, DUE_SOON: 1, ON_TRACK: 2, NOT_APPLICABLE: 3, COMPLETED: 4,
+}
+const sortedItems = computed(() => [...items.value].sort((left, right) => {
+  if (sortMode.value === 'sla') {
+    const rankDifference = (slaRank[left.slaState ?? 'NOT_APPLICABLE'] ?? slaRank.NOT_APPLICABLE)
+      - (slaRank[right.slaState ?? 'NOT_APPLICABLE'] ?? slaRank.NOT_APPLICABLE)
+    if (rankDifference !== 0) return rankDifference
+  }
+  const updatedDifference = new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
+  if (updatedDifference !== 0) return updatedDifference
+  return left.id.localeCompare(right.id)
+}))
 const statusLabels: Record<CollaborationWorkItemStatus, string> = {
   RUNNING: '执行中', WAITING_APPROVAL: '待审批', COMPLETED: '已完成', REJECTED: '已拒绝', FAILED: '执行失败',
   WORK_ORDER_FAILED: '工单失败', WAITING_AGENT: '待客服接入', ASSIGNED: '已分派', IN_PROGRESS: '处理中',
@@ -172,6 +192,16 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
       <div class="hero-metrics"><div><strong>{{ items.length }}</strong><span>当前工作项</span></div><div><strong>{{ attentionCount }}</strong><span>需要关注</span></div><div><strong>只读</strong><span>执行模式</span></div></div>
     </section>
 
+    <section v-if="canRead && !loading && !failed" class="panel collaboration-sla-overview" aria-label="SLA 总览">
+      <div class="section-heading compact"><div><span class="eyebrow">SLA 总览</span><h2>当前队列的时限健康度</h2></div><span class="count-badge">当前队列 · 最多 50 条</span></div>
+      <div class="collaboration-sla-overview__grid">
+        <div class="collaboration-sla-card" data-sla-overview="total"><span>工作项总数</span><strong>{{ slaOverview.total }}</strong></div>
+        <div class="collaboration-sla-card sla-overdue" data-sla-overview="overdue"><span>已超时</span><strong>{{ slaOverview.overdue }}</strong></div>
+        <div class="collaboration-sla-card sla-due-soon" data-sla-overview="due-soon"><span>即将到期</span><strong>{{ slaOverview.dueSoon }}</strong></div>
+        <div class="collaboration-sla-card" data-sla-overview="on-track"><span>正常</span><strong>{{ slaOverview.onTrack }}</strong></div>
+      </div>
+    </section>
+
     <p v-if="!canRead" class="collaboration-state" role="alert">当前角色无权读取协同队列。</p>
     <p v-else-if="loading && items.length === 0" class="collaboration-state" role="status">正在读取协同队列…</p>
     <p v-else-if="failed" class="collaboration-state is-error" role="alert">当前无法读取协同队列，请稍后重试。</p>
@@ -181,10 +211,11 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
         <div class="collaboration-filter-row">
           <label>来源<select v-model="source"><option value="">全部来源</option><option value="ALERT_WORKFLOW">告警处置</option><option value="CUSTOMER_TICKET">客服工单</option></select></label>
           <label>状态<select v-model="status"><option value="">全部状态</option><option v-for="(label, key) in statusLabels" :key="key" :value="key">{{ label }}</option></select></label>
+          <label>排序<select v-model="sortMode" data-sla-sort><option value="sla">SLA 紧急度</option><option value="updatedAt">最近更新</option></select></label>
         </div>
       </section>
       <section class="collaboration-list" aria-label="工作项列表">
-        <article v-for="item in items" :key="item.id" class="panel collaboration-item" :data-work-item="item.id">
+        <article v-for="item in sortedItems" :key="item.id" class="panel collaboration-item" :data-work-item="item.id">
           <div class="collaboration-item__main"><div class="collaboration-item__meta"><span>{{ sourceLabel(item.source) }}</span><span :class="['priority', item.priority === 'HIGH' ? 'is-high' : '']">{{ item.priority === 'HIGH' ? '高优先级' : '常规' }}</span><small>{{ item.id }}</small></div><h3>{{ item.title }}</h3><p>{{ item.safeSummary }}</p></div>
           <div class="collaboration-item__status"><strong>{{ statusLabel(item.status) }}</strong><span :class="['collaboration-sla', slaClass(item.slaState)]">{{ slaLabel(item.slaState) }}</span><small>{{ formatTime(item.updatedAt) }}</small><button type="button" data-work-item-open @click="openScene(item)">{{ item.detailPath === 'workflow' ? '打开告警工作流' : '打开客服控制台' }}</button><button type="button" data-work-item-details @click="openDetails(item, $event)">查看详情</button></div>
         </article>
