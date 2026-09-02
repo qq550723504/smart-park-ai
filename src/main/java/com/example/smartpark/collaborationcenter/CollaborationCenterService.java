@@ -66,7 +66,20 @@ public final class CollaborationCenterService {
         Comparator<CollaborationWorkItem> byUpdatedAt = Comparator.comparing(CollaborationWorkItem::updatedAt)
                 .reversed().thenComparing(CollaborationWorkItem::id);
         if (sortMode == WorkItemQuery.SortMode.UPDATED_AT) return byUpdatedAt;
-        return Comparator.comparingInt(CollaborationCenterService::slaRank).thenComparing(byUpdatedAt);
+        Comparator<CollaborationWorkItem> bySlaDeadline = (left, right) -> {
+            if (!isActiveSla(left.slaState()) || !isActiveSla(right.slaState())) return 0;
+            return Comparator.nullsLast(Comparator.<Instant>naturalOrder())
+                    .compare(left.slaDueAt(), right.slaDueAt());
+        };
+        return Comparator.comparingInt(CollaborationCenterService::slaRank)
+                .thenComparing(bySlaDeadline)
+                .thenComparing(byUpdatedAt);
+    }
+
+    private static boolean isActiveSla(CollaborationWorkItem.SlaState state) {
+        return state == CollaborationWorkItem.SlaState.OVERDUE
+                || state == CollaborationWorkItem.SlaState.DUE_SOON
+                || state == CollaborationWorkItem.SlaState.ON_TRACK;
     }
 
     private static int slaRank(CollaborationWorkItem item) {

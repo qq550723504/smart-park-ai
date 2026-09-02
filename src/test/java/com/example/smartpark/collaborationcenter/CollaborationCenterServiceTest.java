@@ -218,6 +218,26 @@ class CollaborationCenterServiceTest {
                 .containsExactly("ALERT_WORKFLOW:wf-on-track");
     }
 
+    @Test
+    void ordersEqualActiveSlaStatesByDeadlineBeforeLimitingTheQueue() {
+        WorkflowExecutionStore workflows = mock(WorkflowExecutionStore.class);
+        CustomerTicketPort tickets = mock(CustomerTicketPort.class);
+        when(workflows.snapshots()).thenReturn(List.of(
+                new WorkflowSnapshot("wf-due-first", "ALT-DUE-FIRST", WorkflowStatus.RUNNING,
+                        Map.of("createdAt", "2026-09-02T08:05:00Z", "updatedAt", "2026-09-02T09:00:00Z"),
+                        null, Optional.empty(), null, List.of(), 1),
+                new WorkflowSnapshot("wf-due-later", "ALT-DUE-LATER", WorkflowStatus.RUNNING,
+                        Map.of("createdAt", "2026-09-02T08:20:00Z", "updatedAt", "2026-09-02T09:50:00Z"),
+                        null, Optional.empty(), null, List.of(), 2)));
+        when(tickets.list()).thenReturn(List.of());
+
+        List<CollaborationWorkItem> items = new CollaborationCenterService(workflows, tickets, TEST_CLOCK)
+                .list(new WorkItemQuery(null, null, 1, WorkItemQuery.SortMode.SLA));
+
+        assertThat(items).extracting(CollaborationWorkItem::id)
+                .containsExactly("ALERT_WORKFLOW:wf-due-first");
+    }
+
     private static WorkflowSnapshot alertSnapshot() {
         return new WorkflowSnapshot(
                 "wf-1", "ALT-POWER-001", WorkflowStatus.WAITING_APPROVAL,
