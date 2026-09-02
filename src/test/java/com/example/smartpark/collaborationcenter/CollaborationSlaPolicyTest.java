@@ -44,5 +44,6 @@ class CollaborationSlaPolicyTest {
                 Instant.parse("2026-09-02T08:00:00Z"), now);
 
         assertThat(evaluation.state()).isEqualTo(CollaborationWorkItem.SlaState.COMPLETED);
+        assertThat(evaluation.dueAt()).isEqualTo(Instant.parse("2026-09-02T08:30:00Z"));
     }
 }

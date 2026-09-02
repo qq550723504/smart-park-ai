@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { listCollaborationWorkItems } from '../../services/workflowApi'
 import type { DemoRole } from '../../types/workflow'
 import type { CollaborationWorkItem, CollaborationWorkItemSource, CollaborationWorkItemSlaState, CollaborationWorkItemStatus } from '../../types/collaborationCenter'
@@ -14,6 +14,10 @@ const source = ref<CollaborationWorkItemSource | ''>('')
 const status = ref<CollaborationWorkItemStatus | ''>('')
 const selectedItem = ref<CollaborationWorkItem | null>(null)
 let requestGeneration = 0
+let refreshTimer: ReturnType<typeof setInterval> | undefined
+const drawer = ref<HTMLElement | null>(null)
+const lastTrigger = ref<HTMLElement | null>(null)
+const SLA_REFRESH_INTERVAL_MS = 30_000
 
 const canRead = computed(() => props.role === 'ADMIN' || props.role === 'CUSTOMER_AGENT')
 const attentionCount = computed(() => items.value.filter(item => ['WAITING_APPROVAL', 'FAILED', 'WORK_ORDER_FAILED', 'WAITING_AGENT'].includes(item.status)).length)
@@ -45,7 +49,13 @@ function slaClass(value?: CollaborationWorkItemSlaState): string { return `sla-$
 
 async function load(): Promise<void> {
   const generation = ++requestGeneration
-  if (!canRead.value) { items.value = []; failed.value = false; return }
+  if (!canRead.value) {
+    items.value = []
+    failed.value = false
+    selectedItem.value = null
+    lastTrigger.value = null
+    return
+  }
   loading.value = true
   failed.value = false
   try {
@@ -74,14 +84,60 @@ function openScene(item: CollaborationWorkItem): void {
     }
   }
 }
-function openDetails(item: CollaborationWorkItem): void { selectedItem.value = item }
-function closeDetails(): void { selectedItem.value = null }
+function openDetails(item: CollaborationWorkItem, event: MouseEvent): void {
+  lastTrigger.value = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
+  selectedItem.value = item
+}
+function closeDetails(restoreFocus = true): void {
+  const trigger = lastTrigger.value
+  selectedItem.value = null
+  lastTrigger.value = null
+  if (restoreFocus) void nextTick(() => trigger?.focus())
+}
+function handleCloseClick(): void { closeDetails() }
+function handleDrawerKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    closeDetails()
+    return
+  }
+  if (event.key !== 'Tab' || !drawer.value) return
+  const focusable = Array.from(drawer.value.querySelectorAll<HTMLElement>(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+  )).filter(element => !element.hasAttribute('disabled'))
+  if (focusable.length === 0) {
+    event.preventDefault()
+    drawer.value.focus()
+    return
+  }
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
 
 watch([() => props.role, source, status, () => props.active], ([, , , active]) => {
   if (active) void load()
-  else requestGeneration++
+  else {
+    requestGeneration++
+    closeDetails(false)
+  }
 })
-onMounted(() => { if (props.active) void load() })
+watch(selectedItem, (item) => {
+  if (item) void nextTick(() => drawer.value?.querySelector<HTMLElement>('[data-drawer-close]')?.focus())
+})
+onMounted(() => {
+  if (props.active) void load()
+  refreshTimer = setInterval(() => {
+    if (props.active && canRead.value) void load()
+  }, SLA_REFRESH_INTERVAL_MS)
+})
+onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
 </script>
 
 <template>
@@ -109,19 +165,21 @@ onMounted(() => { if (props.active) void load() })
       <section class="collaboration-list" aria-label="工作项列表">
         <article v-for="item in items" :key="item.id" class="panel collaboration-item" :data-work-item="item.id">
           <div class="collaboration-item__main"><div class="collaboration-item__meta"><span>{{ sourceLabel(item.source) }}</span><span :class="['priority', item.priority === 'HIGH' ? 'is-high' : '']">{{ item.priority === 'HIGH' ? '高优先级' : '常规' }}</span><small>{{ item.id }}</small></div><h3>{{ item.title }}</h3><p>{{ item.safeSummary }}</p></div>
-          <div class="collaboration-item__status"><strong>{{ statusLabel(item.status) }}</strong><span :class="['collaboration-sla', slaClass(item.slaState)]">{{ slaLabel(item.slaState) }}</span><small>{{ formatTime(item.updatedAt) }}</small><button type="button" data-work-item-open @click="openScene(item)">{{ item.detailPath === 'workflow' ? '打开告警工作流' : '打开客服控制台' }}</button><button type="button" data-work-item-details @click="openDetails(item)">查看详情</button></div>
+          <div class="collaboration-item__status"><strong>{{ statusLabel(item.status) }}</strong><span :class="['collaboration-sla', slaClass(item.slaState)]">{{ slaLabel(item.slaState) }}</span><small>{{ formatTime(item.updatedAt) }}</small><button type="button" data-work-item-open @click="openScene(item)">{{ item.detailPath === 'workflow' ? '打开告警工作流' : '打开客服控制台' }}</button><button type="button" data-work-item-details @click="openDetails(item, $event)">查看详情</button></div>
         </article>
         <p v-if="items.length === 0" class="panel collaboration-empty">当前没有可展示的工作项。</p>
       </section>
     </template>
-    <div v-if="selectedItem" class="collaboration-drawer-backdrop" @click.self="closeDetails">
-      <aside class="collaboration-drawer" role="dialog" aria-modal="true" aria-labelledby="collaboration-drawer-title">
-        <div class="collaboration-drawer__header"><div><span class="eyebrow">工作项详情 · 只读</span><h2 id="collaboration-drawer-title">{{ selectedItem.title }}</h2></div><button type="button" aria-label="关闭详情" @click="closeDetails">×</button></div>
+    <Teleport to="body">
+      <div v-if="selectedItem" class="collaboration-drawer-backdrop" @click.self="handleCloseClick">
+        <aside ref="drawer" class="collaboration-drawer" role="dialog" aria-modal="true" aria-labelledby="collaboration-drawer-title" tabindex="-1" @keydown="handleDrawerKeydown">
+          <div class="collaboration-drawer__header"><div><span class="eyebrow">工作项详情 · 只读</span><h2 id="collaboration-drawer-title">{{ selectedItem.title }}</h2></div><button type="button" data-drawer-close aria-label="关闭详情" @click="handleCloseClick">×</button></div>
         <dl class="collaboration-drawer__facts"><div><dt>来源</dt><dd>{{ sourceLabel(selectedItem.source) }}</dd></div><div><dt>状态</dt><dd>{{ statusLabel(selectedItem.status) }}</dd></div><div><dt>优先级</dt><dd>{{ selectedItem.priority === 'HIGH' ? '高优先级' : '常规' }}</dd></div><div><dt>位置/设备</dt><dd>{{ locationLabel(selectedItem) }}</dd></div><div><dt>打开时间</dt><dd>{{ formatOptionalTime(selectedItem.openedAt) }}</dd></div><div><dt>更新时间</dt><dd>{{ formatTime(selectedItem.updatedAt) }}</dd></div></dl>
         <section class="collaboration-drawer__summary"><span class="eyebrow">安全摘要</span><p>{{ selectedItem.safeSummary }}</p></section>
         <section class="collaboration-drawer__sla"><div><span class="eyebrow">演示 SLA</span><strong :class="['collaboration-sla', slaClass(selectedItem.slaState)]">{{ slaLabel(selectedItem.slaState) }}</strong></div><small>截止时间：{{ formatOptionalTime(selectedItem.slaDueAt) }}</small></section>
-        <div class="collaboration-drawer__actions"><button type="button" @click="openScene(selectedItem)">{{ selectedItem.detailPath === 'workflow' ? '打开告警工作流' : '打开客服控制台' }}</button><button type="button" @click="closeDetails">关闭</button></div>
-      </aside>
-    </div>
+        <div class="collaboration-drawer__actions"><button type="button" @click="openScene(selectedItem)">{{ selectedItem.detailPath === 'workflow' ? '打开告警工作流' : '打开客服控制台' }}</button><button type="button" @click="handleCloseClick">关闭</button></div>
+        </aside>
+      </div>
+    </Teleport>
   </main>
 </template>

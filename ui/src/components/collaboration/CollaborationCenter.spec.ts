@@ -1,5 +1,5 @@
-import { flushPromises, mount } from '@vue/test-utils'
-import { afterEach, describe, expect, it } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import CollaborationCenter from './CollaborationCenter.vue'
 
 function response(body: unknown, status = 200): Response {
@@ -9,7 +9,11 @@ function response(body: unknown, status = 200): Response {
 describe('CollaborationCenter', () => {
   const originalFetch = globalThis.fetch
 
-  afterEach(() => { globalThis.fetch = originalFetch })
+  enableAutoUnmount(afterEach)
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+    document.body.querySelectorAll('[role="dialog"]').forEach(dialog => dialog.parentElement?.remove())
+  })
 
   it('renders safe work items and opens their existing scene', async () => {
     globalThis.fetch = (async () => response([{
@@ -71,18 +75,19 @@ describe('CollaborationCenter', () => {
       slaDueAt: '2026-09-02T10:05:00Z', slaState: 'DUE_SOON', detailPath: 'workflow',
     }])) as typeof fetch
 
-    const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
+    const wrapper = mount(CollaborationCenter, { attachTo: document.body, props: { role: 'ADMIN' } })
     await flushPromises()
     await wrapper.get('[data-work-item="ALERT_WORKFLOW:wf-detail"] [data-work-item-details]').trigger('click')
 
-    const drawer = wrapper.get('[role="dialog"]')
-    expect(drawer.text()).toContain('演示 SLA')
-    expect(drawer.text()).toContain('即将到期')
-    expect(drawer.text()).toContain('DEV-POWER-001')
-    expect(drawer.text()).not.toContain('诊断正文')
-    expect(drawer.text()).not.toContain('审批意见')
-    await drawer.get('[aria-label="关闭详情"]').trigger('click')
-    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    const drawer = document.body.querySelector('[role="dialog"]') as HTMLElement
+    expect(drawer.textContent).toContain('演示 SLA')
+    expect(drawer.textContent).toContain('即将到期')
+    expect(drawer.textContent).toContain('DEV-POWER-001')
+    expect(drawer.textContent).not.toContain('诊断正文')
+    expect(drawer.textContent).not.toContain('审批意见')
+    ;(drawer.querySelector('[aria-label="关闭详情"]') as HTMLButtonElement).click()
+    await flushPromises()
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull()
   })
 
   it('shows terminal items as completed SLA state', async () => {
@@ -96,8 +101,94 @@ describe('CollaborationCenter', () => {
     const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
     await flushPromises()
     await wrapper.get('[data-work-item="CUSTOMER_TICKET:cs-done"] [data-work-item-details]').trigger('click')
-    expect(wrapper.get('[role="dialog"]').text()).toContain('已完成')
-    expect(wrapper.get('[role="dialog"]').text()).not.toContain('已超时')
+    const drawer = document.body.querySelector('[role="dialog"]') as HTMLElement
+    expect(drawer.textContent).toContain('已完成')
+    expect(drawer.textContent).not.toContain('已超时')
+  })
+
+  it('closes cached details when read access is revoked', async () => {
+    globalThis.fetch = (async () => response([{
+      id: 'CUSTOMER_TICKET:cs-access', source: 'CUSTOMER_TICKET', status: 'WAITING_AGENT', priority: 'NORMAL',
+      title: '客服工单 cs-access', safeSummary: '受保护的工单摘要', parkId: null, buildingId: null, deviceId: null,
+      updatedAt: '2026-09-02T09:00:00Z', openedAt: '2026-09-02T08:00:00Z',
+      slaDueAt: '2026-09-02T12:00:00Z', slaState: 'ON_TRACK', detailPath: 'customer',
+    }])) as typeof fetch
+
+    const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
+    await flushPromises()
+    await wrapper.get('[data-work-item-details]').trigger('click')
+    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull()
+
+    await wrapper.setProps({ role: 'VIEWER' })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('当前角色无权读取协同队列')
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('refreshes the active queue so SLA labels do not become stale', async () => {
+    vi.useFakeTimers()
+    try {
+      let calls = 0
+      globalThis.fetch = (async () => {
+        calls += 1
+        return response([{
+          id: 'CUSTOMER_TICKET:cs-refresh', source: 'CUSTOMER_TICKET', status: 'WAITING_AGENT', priority: 'NORMAL',
+          title: '客服工单 cs-refresh', safeSummary: '需要持续刷新的工单', parkId: null, buildingId: null, deviceId: null,
+          updatedAt: '2026-09-02T09:00:00Z', openedAt: '2026-09-02T08:00:00Z',
+          slaDueAt: '2026-09-02T12:00:00Z', slaState: calls === 1 ? 'ON_TRACK' : 'DUE_SOON', detailPath: 'customer',
+        }])
+      }) as typeof fetch
+
+      const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
+      await flushPromises()
+      expect(wrapper.text()).toContain('正常')
+
+      vi.advanceTimersByTime(30_000)
+      await flushPromises()
+
+      expect(calls).toBe(2)
+      expect(wrapper.text()).toContain('即将到期')
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('teleports the drawer and traps focus with escape and focus restoration', async () => {
+    globalThis.fetch = (async () => response([{
+      id: 'CUSTOMER_TICKET:cs-focus', source: 'CUSTOMER_TICKET', status: 'WAITING_AGENT', priority: 'NORMAL',
+      title: '客服工单 cs-focus', safeSummary: '需要键盘访问的工单', parkId: null, buildingId: null, deviceId: null,
+      updatedAt: '2026-09-02T09:00:00Z', openedAt: '2026-09-02T08:00:00Z',
+      slaDueAt: '2026-09-02T12:00:00Z', slaState: 'ON_TRACK', detailPath: 'customer',
+    }])) as typeof fetch
+
+    const wrapper = mount(CollaborationCenter, { attachTo: document.body, props: { role: 'ADMIN' } })
+    await flushPromises()
+    const trigger = wrapper.get('[data-work-item-details]').element as HTMLButtonElement
+    await wrapper.get('[data-work-item-details]').trigger('click')
+
+    const dialog = document.body.querySelector('[role="dialog"]') as HTMLElement
+    expect(dialog.parentElement?.parentElement).toBe(document.body)
+    const buttons = Array.from(dialog.querySelectorAll('button')) as HTMLButtonElement[]
+    expect(document.activeElement).toBe(buttons[0])
+
+    buttons[0].focus()
+    buttons[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }))
+    await flushPromises()
+    expect(document.activeElement).toBe(buttons[buttons.length - 1])
+    buttons[buttons.length - 1].focus()
+    buttons[buttons.length - 1].dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))
+    await flushPromises()
+    expect(document.activeElement).toBe(buttons[0])
+
+    buttons[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+    expect(document.activeElement).toBe(trigger)
+    wrapper.unmount()
   })
 
   it('fails closed with an explicit empty state when the read API is unavailable', async () => {

@@ -15,12 +15,12 @@ public final class CollaborationSlaPolicy {
         Objects.requireNonNull(priority, "priority");
         Objects.requireNonNull(status, "status");
         Objects.requireNonNull(now, "now");
-        if (isTerminal(status)) return new SlaEvaluation(CollaborationWorkItem.SlaState.COMPLETED, null);
         if (openedAt == null) return new SlaEvaluation(CollaborationWorkItem.SlaState.NOT_APPLICABLE, null);
         Duration window = source == CollaborationWorkItem.Source.CUSTOMER_TICKET
                 ? CUSTOMER_TICKET_WINDOW
                 : priority == CollaborationWorkItem.Priority.HIGH ? HIGH_ALERT_WINDOW : NORMAL_ALERT_WINDOW;
         Instant dueAt = openedAt.plus(window);
+        if (isTerminal(status)) return new SlaEvaluation(CollaborationWorkItem.SlaState.COMPLETED, dueAt);
         Duration remaining = Duration.between(now, dueAt);
         CollaborationWorkItem.SlaState state = remaining.isNegative() || remaining.isZero()
                 ? CollaborationWorkItem.SlaState.OVERDUE

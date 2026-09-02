@@ -124,6 +124,24 @@ class CollaborationCenterServiceTest {
     }
 
     @Test
+    void usesWorkflowCreationTimeAsOpenedAtBeforeAlertOccurrenceExists() {
+        WorkflowExecutionStore workflows = mock(WorkflowExecutionStore.class);
+        CustomerTicketPort tickets = mock(CustomerTicketPort.class);
+        Instant createdAt = Instant.parse("2026-09-01T08:00:00Z");
+        when(workflows.snapshots()).thenReturn(List.of(new WorkflowSnapshot(
+                "wf-created", "ALT-CREATED", WorkflowStatus.RUNNING,
+                Map.of("createdAt", createdAt.toString(), "updatedAt", "2026-09-01T09:00:00Z"),
+                null, Optional.empty(), null, List.of(), 1)));
+        when(tickets.list()).thenReturn(List.of());
+
+        CollaborationWorkItem item = new CollaborationCenterService(workflows, tickets, TEST_CLOCK)
+                .list(WorkItemQuery.defaults()).get(0);
+
+        assertThat(item.openedAt()).isEqualTo(createdAt);
+        assertThat(item.slaDueAt()).isEqualTo(Instant.parse("2026-09-01T10:00:00Z"));
+    }
+
+    @Test
     void preservesHighPriorityFromOriginalAlertAndClassificationSignals() {
         WorkflowExecutionStore workflows = mock(WorkflowExecutionStore.class);
         CustomerTicketPort tickets = mock(CustomerTicketPort.class);

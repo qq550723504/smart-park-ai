@@ -87,14 +87,15 @@ public final class CollaborationCenterService {
         Instant updatedAt = workflowUpdatedAt(snapshot, payload, diagnosis);
         CollaborationWorkItem.Status status = CollaborationWorkItem.Status.valueOf(snapshot.status().name());
         CollaborationWorkItem.Priority priority = priorityFor(snapshot, payload, diagnosis);
+        Instant openedAt = workflowOpenedAt(snapshot, payload);
         CollaborationSlaPolicy.SlaEvaluation sla = slaPolicy.evaluate(
                 CollaborationWorkItem.Source.ALERT_WORKFLOW, priority, status,
-                workflowOpenedAt(snapshot, payload), clock.instant());
+                openedAt, clock.instant());
         return new CollaborationWorkItem(
                 "ALERT_WORKFLOW:" + snapshot.workflowId(),
                 CollaborationWorkItem.Source.ALERT_WORKFLOW,
                 status, priority, "告警处置 " + snapshot.alertId(), summary, parkId, buildingId, deviceId, updatedAt,
-                workflowOpenedAt(snapshot, payload), sla.dueAt(), sla.state(), "workflow");
+                openedAt, sla.dueAt(), sla.state(), "workflow");
     }
 
     private CollaborationWorkItem fromTicket(CustomerTicket ticket) {
@@ -120,6 +121,8 @@ public final class CollaborationCenterService {
     private static Instant workflowOpenedAt(WorkflowSnapshot snapshot, Map<String, Object> payload) {
         Instant occurredAt = instantValue(payload, "alert", "occurredAt");
         if (occurredAt != null) return occurredAt;
+        Instant createdAt = instantValue(payload, "createdAt");
+        if (createdAt != null) return createdAt;
         Instant updatedAt = instantValue(payload, "updatedAt");
         return updatedAt != null ? updatedAt : workflowUpdatedAt(snapshot);
     }
