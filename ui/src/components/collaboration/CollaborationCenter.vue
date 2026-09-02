@@ -47,7 +47,7 @@ const slaLabels: Record<CollaborationWorkItemSlaState, string> = {
 function slaLabel(value?: CollaborationWorkItemSlaState): string { return value ? (slaLabels[value] ?? '不适用') : '不适用' }
 function slaClass(value?: CollaborationWorkItemSlaState): string { return `sla-${(value ?? 'NOT_APPLICABLE').toLowerCase().replace('_', '-')}` }
 
-async function load(): Promise<void> {
+async function load(preserveItems = false): Promise<void> {
   const generation = ++requestGeneration
   if (!canRead.value) {
     items.value = []
@@ -55,6 +55,10 @@ async function load(): Promise<void> {
     selectedItem.value = null
     lastTrigger.value = null
     return
+  }
+  if (!preserveItems) {
+    items.value = []
+    closeDetails(false)
   }
   loading.value = true
   failed.value = false
@@ -149,7 +153,7 @@ watch(selectedItem, (item, previousItem) => {
 onMounted(() => {
   if (props.active) void load()
   refreshTimer = setInterval(() => {
-    if (props.active && canRead.value && !loading.value) void load()
+    if (props.active && canRead.value && !loading.value) void load(true)
   }, SLA_REFRESH_INTERVAL_MS)
 })
 onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })

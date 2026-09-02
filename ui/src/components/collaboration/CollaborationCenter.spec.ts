@@ -282,6 +282,39 @@ describe('CollaborationCenter', () => {
     }
   })
 
+  it('hides old rows while a filter request is still loading', async () => {
+    let resolveFilteredRequest!: (value: Response) => void
+    const filteredRequest = new Promise<Response>((resolve) => { resolveFilteredRequest = resolve })
+    let calls = 0
+    globalThis.fetch = (async () => {
+      calls += 1
+      if (calls === 1) return response([{
+        id: 'ALERT_WORKFLOW:old-filter-result', source: 'ALERT_WORKFLOW', status: 'WAITING_APPROVAL', priority: 'HIGH',
+        title: '旧告警结果', safeSummary: '不应在新筛选下继续显示', parkId: null, buildingId: null, deviceId: null,
+        updatedAt: '2026-09-02T09:00:00Z', openedAt: '2026-09-02T08:00:00Z',
+        slaDueAt: '2026-09-02T08:30:00Z', slaState: 'OVERDUE', detailPath: 'workflow',
+      }])
+      return filteredRequest
+    }) as typeof fetch
+
+    const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('旧告警结果')
+
+    await wrapper.get('select').setValue('CUSTOMER_TICKET')
+    expect(wrapper.text()).not.toContain('旧告警结果')
+    expect(wrapper.text()).toContain('正在读取协同队列')
+
+    resolveFilteredRequest(response([{
+      id: 'CUSTOMER_TICKET:new-filter-result', source: 'CUSTOMER_TICKET', status: 'WAITING_AGENT', priority: 'NORMAL',
+      title: '新筛选结果', safeSummary: '筛选后的工单', parkId: null, buildingId: null, deviceId: null,
+      updatedAt: '2026-09-02T09:00:00Z', openedAt: '2026-09-02T08:00:00Z',
+      slaDueAt: '2026-09-02T12:00:00Z', slaState: 'ON_TRACK', detailPath: 'customer',
+    }]))
+    await flushPromises()
+    expect(wrapper.text()).toContain('新筛选结果')
+  })
+
   it('teleports the drawer and traps focus with escape and focus restoration', async () => {
     globalThis.fetch = (async () => response([{
       id: 'CUSTOMER_TICKET:cs-focus', source: 'CUSTOMER_TICKET', status: 'WAITING_AGENT', priority: 'NORMAL',
