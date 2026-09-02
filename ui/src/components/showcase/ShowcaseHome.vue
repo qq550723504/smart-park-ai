@@ -193,6 +193,9 @@ watch(() => props.active, (active) => {
         <p id="showcase-home-subtitle" class="showcase-home__subtitle">
           从真实问题开始，看见 Agent 如何形成可信结论
         </p>
+        <p class="showcase-home__tagline" data-showcase-tagline>
+          让园区会思考、能协同、可执行，以 AI 驱动运营升级，让每一份数据都创造价值
+        </p>
         <p class="showcase-home__chain">
           <DocumentChecked aria-hidden="true" />
           <span>真实只读数据 · 执行证据可追溯 · 高风险动作由人工确认</span>

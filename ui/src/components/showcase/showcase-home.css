@@ -138,6 +138,17 @@
   text-shadow: 0 10px 30px rgba(0, 0, 0, 0.78);
 }
 
+.showcase-home__tagline {
+  max-width: 680px;
+  margin-bottom: 0;
+  color: var(--showcase-cyan);
+  font-size: clamp(1.05rem, 1.8vw, 1.5rem);
+  font-weight: 700;
+  line-height: 1.5;
+  letter-spacing: 0.01em;
+  text-shadow: 0 8px 28px rgba(0, 0, 0, 0.72);
+}
+
 .showcase-home__promise {
   max-width: 680px;
   margin-bottom: 0;

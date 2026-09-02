@@ -101,6 +101,18 @@ beforeEach(() => {
 })
 
 describe('ShowcaseHome truthful catalog selection', () => {
+  it('renders the platform positioning tagline on the homepage', async () => {
+    vi.mocked(getShowcaseScenarios).mockResolvedValue(catalog([
+      scenario('CUSTOMER_SERVICE', 'READY', true, null),
+    ]))
+
+    const wrapper = await mountLoaded()
+
+    expect(wrapper.get('[data-showcase-tagline]').text()).toBe(
+      '让园区会思考、能协同、可执行，以 AI 驱动运营升级，让每一份数据都创造价值',
+    )
+  })
+
   it('selects verified collaboration and emits its exact scenario id', async () => {
     vi.mocked(getShowcaseScenarios).mockResolvedValue(catalog([
       scenario('ALERT_WORKFLOW', 'NOT_READY', false, '最近一次在线检查未通过'),
