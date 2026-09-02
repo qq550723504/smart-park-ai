@@ -1,4 +1,13 @@
 <script setup lang="ts">
+import OperationsDailyReport from './OperationsDailyReport.vue'
+import type { ExecutionTraceLike } from '../../composables/useOperationsAnalysis'
+import type { DemoRole } from '../../types/workflow'
+
+const props = withDefaults(defineProps<{
+  role: DemoRole
+  trace?: ExecutionTraceLike
+  active?: boolean
+}>(), { active: true })
 const emit = defineEmits<{ 'open-analysis': [question: string] }>()
 
 const groups = [
@@ -25,6 +34,7 @@ const groups = [
       </div>
       <div class="hero-metrics"><div><strong>05</strong><span>受控问题</span></div><div><strong>只读</strong><span>执行模式</span></div></div>
     </section>
+    <OperationsDailyReport :role="props.role" :trace="props.trace" :active="props.active" />
     <section v-for="group in groups" :key="group.title" class="panel operations-board__group" :aria-label="group.title">
       <div class="section-heading compact"><div><span class="eyebrow">指标分组</span><h2>{{ group.title }}</h2></div><span class="count-badge">{{ group.questions.length }} 个入口</span></div>
       <p>{{ group.description }}</p>

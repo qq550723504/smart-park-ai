@@ -366,7 +366,13 @@ function confidence(value?: number) {
 
     <GovernanceCenter v-show="activeView === 'governance'" :role="role" :active="props.active && activeView === 'governance'" />
 
-    <OperationsBoard v-show="activeView === 'operations'" @open-analysis="openAnalysisFromBoard" />
+    <OperationsBoard
+      v-show="activeView === 'operations'"
+      :role="role"
+      :trace="trace"
+      :active="props.active && activeView === 'operations'"
+      @open-analysis="openAnalysisFromBoard"
+    />
 
     <main v-show="activeView === 'workflow'" class="main-content">
       <section class="hero-row">
