@@ -11,12 +11,14 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
 @RestController
+@ConditionalOnBean(SecurityIncidentService.class)
 public class SecurityIncidentController {
     private final SecurityIncidentService service;
     private final AuditTrail auditTrail;

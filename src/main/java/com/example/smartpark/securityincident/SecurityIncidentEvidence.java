@@ -1,5 +1,7 @@
 package com.example.smartpark.securityincident;
 
+import com.example.smartpark.model.security.RedactedEvidencePolicy;
+
 import java.time.Instant;
 import java.util.Objects;
 
@@ -7,7 +9,7 @@ public record SecurityIncidentEvidence(String sourceId, Instant occurredAt, Stri
     public SecurityIncidentEvidence {
         sourceId = requireText(sourceId, "sourceId");
         occurredAt = Objects.requireNonNull(occurredAt, "occurredAt");
-        summary = requireRedacted(summary);
+        summary = RedactedEvidencePolicy.require(summary, "summary");
     }
 
     private static String requireText(String value, String field) {
@@ -15,11 +17,4 @@ public record SecurityIncidentEvidence(String sourceId, Instant occurredAt, Stri
         return value.trim();
     }
 
-    private static String requireRedacted(String value) {
-        String normalized = requireText(value, "summary");
-        if (!normalized.startsWith("REDACTED:")) {
-            throw new IllegalArgumentException("summary must start with REDACTED:");
-        }
-        return normalized;
-    }
 }
