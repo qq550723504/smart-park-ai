@@ -6,6 +6,8 @@
 .collaboration-sla-card strong { color: var(--showcase-ivory); font-size: 1.8rem; line-height: 1; }
 .collaboration-sla-card.sla-due-soon strong { color: var(--showcase-amber); }
 .collaboration-sla-card.sla-overdue strong { color: #ff7a7a; }
+.collaboration-sla-trend { padding: 24px; }
+.collaboration-sla-trend__error { margin: 0; padding: 20px 0 4px; color: var(--showcase-amber); }
 .collaboration-filters { padding: 24px; }
 .collaboration-filter-row { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 16px; }
 .collaboration-filter-row label { display: grid; gap: 6px; color: var(--showcase-muted); font-size: .78rem; }

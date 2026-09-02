@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { listCollaborationWorkItems } from '../../services/workflowApi'
+import { listCollaborationSlaTrend, listCollaborationWorkItems } from '../../services/workflowApi'
 import type { DemoRole } from '../../types/workflow'
-import type { CollaborationWorkItem, CollaborationWorkItemSource, CollaborationWorkItemSlaState, CollaborationWorkItemStatus } from '../../types/collaborationCenter'
+import type { CollaborationSlaSnapshot, CollaborationWorkItem, CollaborationWorkItemSource, CollaborationWorkItemSlaState, CollaborationWorkItemStatus } from '../../types/collaborationCenter'
+import CollaborationSlaTrendChart from './CollaborationSlaTrendChart.vue'
 import './collaboration-center.css'
 
 const props = withDefaults(defineProps<{ role: DemoRole; active?: boolean }>(), { active: true })
@@ -14,6 +15,9 @@ const source = ref<CollaborationWorkItemSource | ''>('')
 const status = ref<CollaborationWorkItemStatus | ''>('')
 const sortMode = ref<'sla' | 'updatedAt'>('sla')
 const selectedItem = ref<CollaborationWorkItem | null>(null)
+const trendSnapshots = ref<CollaborationSlaSnapshot[]>([])
+const trendLoading = ref(false)
+const trendFailed = ref(false)
 let requestGeneration = 0
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 const drawer = ref<HTMLElement | null>(null)
@@ -84,13 +88,18 @@ async function load(preserveItems = false): Promise<void> {
   const generation = ++requestGeneration
   if (!canRead.value) {
     items.value = []
+    trendSnapshots.value = []
+    trendLoading.value = false
     failed.value = false
+    trendFailed.value = false
     selectedItem.value = null
     lastTrigger.value = null
     return
   }
   if (!preserveItems) {
     items.value = []
+    trendSnapshots.value = []
+    trendFailed.value = false
     closeDetails(false)
   }
   loading.value = true
@@ -105,13 +114,32 @@ async function load(preserveItems = false): Promise<void> {
     if (generation !== requestGeneration) return
     items.value = nextItems
     reconcileSelectedItem(nextItems)
+    void loadTrend(generation)
   } catch {
     if (generation !== requestGeneration) return
     items.value = []
+    trendSnapshots.value = []
+    trendLoading.value = false
+    trendFailed.value = false
     failed.value = true
     closeDetails(false)
   } finally {
     if (generation === requestGeneration) loading.value = false
+  }
+}
+
+async function loadTrend(generation: number): Promise<void> {
+  trendLoading.value = true
+  trendFailed.value = false
+  try {
+    const nextTrend = await listCollaborationSlaTrend(props.role, 60)
+    if (generation !== requestGeneration) return
+    trendSnapshots.value = nextTrend
+  } catch {
+    if (generation !== requestGeneration) return
+    trendFailed.value = true
+  } finally {
+    if (generation === requestGeneration) trendLoading.value = false
   }
 }
 
@@ -181,6 +209,9 @@ watch(
     if (active) void load(sortOnlyChange)
     else {
       requestGeneration++
+      trendLoading.value = false
+      trendSnapshots.value = []
+      trendFailed.value = false
       closeDetails(false)
     }
   },
@@ -224,6 +255,11 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
     <p v-else-if="loading && items.length === 0" class="collaboration-state" role="status">正在读取协同队列…</p>
     <p v-else-if="failed" class="collaboration-state is-error" role="alert">当前无法读取协同队列，请稍后重试。</p>
     <template v-else>
+      <section class="panel collaboration-sla-trend" aria-label="SLA 趋势">
+        <div class="section-heading compact"><div><span class="eyebrow">本次会话 SLA 趋势</span><h2>队列时限状态变化</h2></div><span class="count-badge" data-sla-trend-count>已采样 {{ trendSnapshots.length }} 个点 · 最多 120 点</span></div>
+        <p v-if="trendFailed" class="collaboration-sla-trend__error" role="alert">当前无法读取 SLA 趋势，队列数据仍可正常使用。</p>
+        <CollaborationSlaTrendChart v-else :snapshots="trendSnapshots" />
+      </section>
       <section class="panel collaboration-filters" aria-label="协同队列筛选">
         <div class="section-heading compact"><div><span class="eyebrow">队列筛选</span><h2 ref="queueHeading" data-collaboration-queue-heading tabindex="-1">按来源与状态查看</h2></div><span class="count-badge">最多 50 条</span></div>
         <div class="collaboration-filter-row">
