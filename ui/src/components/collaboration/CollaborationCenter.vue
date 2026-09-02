@@ -66,6 +66,7 @@ async function load(): Promise<void> {
     })
     if (generation !== requestGeneration) return
     items.value = nextItems
+    reconcileSelectedItem(nextItems)
   } catch {
     if (generation !== requestGeneration) return
     items.value = []
@@ -82,6 +83,17 @@ function openScene(item: CollaborationWorkItem): void {
     } else {
       emit('open-view', item.detailPath, undefined, item.id.replace(/^CUSTOMER_TICKET:/, ''))
     }
+  }
+}
+
+function reconcileSelectedItem(nextItems: CollaborationWorkItem[]): void {
+  if (!selectedItem.value) return
+  const refreshedItem = nextItems.find(item => item.id === selectedItem.value?.id)
+  if (refreshedItem) {
+    selectedItem.value = refreshedItem
+  } else {
+    selectedItem.value = null
+    lastTrigger.value = null
   }
 }
 function openDetails(item: CollaborationWorkItem, event: MouseEvent): void {
@@ -134,7 +146,7 @@ watch(selectedItem, (item) => {
 onMounted(() => {
   if (props.active) void load()
   refreshTimer = setInterval(() => {
-    if (props.active && canRead.value) void load()
+    if (props.active && canRead.value && !loading.value) void load()
   }, SLA_REFRESH_INTERVAL_MS)
 })
 onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
@@ -152,7 +164,7 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
     </section>
 
     <p v-if="!canRead" class="collaboration-state" role="alert">当前角色无权读取协同队列。</p>
-    <p v-else-if="loading" class="collaboration-state" role="status">正在读取协同队列…</p>
+    <p v-else-if="loading && items.length === 0" class="collaboration-state" role="status">正在读取协同队列…</p>
     <p v-else-if="failed" class="collaboration-state is-error" role="alert">当前无法读取协同队列，请稍后重试。</p>
     <template v-else>
       <section class="panel collaboration-filters" aria-label="协同队列筛选">

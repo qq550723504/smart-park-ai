@@ -156,6 +156,97 @@ describe('CollaborationCenter', () => {
     }
   })
 
+  it('does not overlap a periodic refresh with an in-flight request', async () => {
+    vi.useFakeTimers()
+    try {
+      let calls = 0
+      let resolveRequest!: (value: Response) => void
+      const pending = new Promise<Response>((resolve) => { resolveRequest = resolve })
+      globalThis.fetch = (async () => {
+        calls += 1
+        return pending
+      }) as typeof fetch
+
+      const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
+      expect(calls).toBe(1)
+
+      vi.advanceTimersByTime(30_000)
+      await Promise.resolve()
+      expect(calls).toBe(1)
+
+      resolveRequest(response([]))
+      await flushPromises()
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('refreshes the open drawer item without losing its focus trigger', async () => {
+    vi.useFakeTimers()
+    try {
+      let calls = 0
+      globalThis.fetch = (async () => {
+        calls += 1
+        return response([{
+          id: 'CUSTOMER_TICKET:cs-open-refresh', source: 'CUSTOMER_TICKET', status: 'WAITING_AGENT', priority: 'NORMAL',
+          title: '客服工单 cs-open-refresh', safeSummary: calls === 1 ? '旧摘要' : '新摘要', parkId: null, buildingId: null, deviceId: null,
+          updatedAt: '2026-09-02T09:00:00Z', openedAt: '2026-09-02T08:00:00Z',
+          slaDueAt: '2026-09-02T12:00:00Z', slaState: calls === 1 ? 'ON_TRACK' : 'DUE_SOON', detailPath: 'customer',
+        }])
+      }) as typeof fetch
+
+      const wrapper = mount(CollaborationCenter, { attachTo: document.body, props: { role: 'ADMIN' } })
+      await flushPromises()
+      const trigger = wrapper.get('[data-work-item-details]').element as HTMLButtonElement
+      await wrapper.get('[data-work-item-details]').trigger('click')
+      expect(document.body.querySelector('[role="dialog"]')).not.toBeNull()
+
+      vi.advanceTimersByTime(30_000)
+      await flushPromises()
+
+      const dialog = document.body.querySelector('[role="dialog"]') as HTMLElement
+      expect(dialog.textContent).toContain('新摘要')
+      expect(dialog.textContent).toContain('即将到期')
+      ;(dialog.querySelector('[aria-label="关闭详情"]') as HTMLButtonElement).click()
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+      expect(document.activeElement).toBe(trigger)
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('closes the open drawer when its item disappears during refresh', async () => {
+    vi.useFakeTimers()
+    try {
+      let calls = 0
+      globalThis.fetch = (async () => {
+        calls += 1
+        return response(calls === 1 ? [{
+          id: 'CUSTOMER_TICKET:cs-removed', source: 'CUSTOMER_TICKET', status: 'WAITING_AGENT', priority: 'NORMAL',
+          title: '客服工单 cs-removed', safeSummary: '将被移除的工单', parkId: null, buildingId: null, deviceId: null,
+          updatedAt: '2026-09-02T09:00:00Z', openedAt: '2026-09-02T08:00:00Z',
+          slaDueAt: '2026-09-02T12:00:00Z', slaState: 'ON_TRACK', detailPath: 'customer',
+        }] : [])
+      }) as typeof fetch
+
+      const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
+      await flushPromises()
+      await wrapper.get('[data-work-item-details]').trigger('click')
+      expect(document.body.querySelector('[role="dialog"]')).not.toBeNull()
+
+      vi.advanceTimersByTime(30_000)
+      await flushPromises()
+
+      expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('teleports the drawer and traps focus with escape and focus restoration', async () => {
     globalThis.fetch = (async () => response([{
       id: 'CUSTOMER_TICKET:cs-focus', source: 'CUSTOMER_TICKET', status: 'WAITING_AGENT', priority: 'NORMAL',
