@@ -78,18 +78,15 @@ public final class OperationsAnomalyService {
         OperationsAnomalyQuery query = normalized(input);
         OperationsAnomalyQuery scoped = new OperationsAnomalyQuery(query.from(), query.to(), buildingId,
                 query.riskLevel(), query.category(), query.status(), query.deviceType());
-        AlertAnalyticsReader.Snapshot alertSnapshot = alerts.read(scoped);
-        DeviceAnalyticsReader.Snapshot deviceSnapshot = devices.read(scoped);
-        EnergyAnalyticsReader.Snapshot energySnapshot = energy.read(scoped);
         EvidenceResult<AlertAnalyticsReader.AlertReference> alertEvidence = alerts.evidence(buildingId, scoped);
         EvidenceResult<DeviceAnalyticsReader.DeviceReference> deviceEvidence = devices.evidence(buildingId, scoped);
         EvidenceResult<EnergyAnalyticsReader.EnergyReference> energyEvidence = energy.evidence(buildingId, scoped);
         return new OperationsAnomalyDtos.Evidence(buildingId,
                 new OperationsAnomalyDtos.Window(query.from(), query.to(), "Asia/Shanghai"),
-                deviceSnapshot.asOf(), alertEvidence.items(), deviceEvidence.items(), energyEvidence.items(),
-                Map.of("alerts", evidenceStatus(alertSnapshot.available(), alertSnapshot.failureCode(), alertEvidence),
-                        "devices", evidenceStatus(deviceSnapshot.available(), deviceSnapshot.failureCode(), deviceEvidence),
-                        "energy", evidenceStatus(energySnapshot.available(), energySnapshot.failureCode(), energyEvidence)));
+                latestDeviceSnapshot(deviceEvidence), alertEvidence.items(), deviceEvidence.items(), energyEvidence.items(),
+                Map.of("alerts", evidenceStatus(alertEvidence),
+                        "devices", evidenceStatus(deviceEvidence),
+                        "energy", evidenceStatus(energyEvidence)));
     }
 
     private OperationsAnomalyQuery normalized(OperationsAnomalyQuery input) {
@@ -108,10 +105,17 @@ public final class OperationsAnomalyService {
         return failureCode == null ? "OK" : "PARTIAL";
     }
 
-    private static String evidenceStatus(boolean snapshotAvailable, String snapshotFailureCode,
-                                         EvidenceResult<?> evidence) {
-        if (!snapshotAvailable || !evidence.available()) return "UNAVAILABLE";
-        return snapshotFailureCode == null && evidence.failureCode() == null ? "OK" : "PARTIAL";
+    private static String evidenceStatus(EvidenceResult<?> evidence) {
+        if (!evidence.available()) return "UNAVAILABLE";
+        return evidence.failureCode() == null ? "OK" : "PARTIAL";
+    }
+
+    private static Instant latestDeviceSnapshot(EvidenceResult<DeviceAnalyticsReader.DeviceReference> evidence) {
+        return evidence.items().stream()
+                .map(DeviceAnalyticsReader.DeviceReference::snapshotAt)
+                .filter(java.util.Objects::nonNull)
+                .max(Instant::compareTo)
+                .orElse(null);
     }
 
     private static boolean hasEnergyAnomalySignal(Double deviation) {

@@ -91,6 +91,53 @@ class OperationsAnomalyServiceTest {
         assertThat(evidence.domainStatus().get("alerts")).isEqualTo("UNAVAILABLE");
     }
 
+    @Test
+    void buildsEvidenceFromDetailReadersWithoutRerunningOverviewAggregates() {
+        AlertAnalyticsReader alerts = new AlertAnalyticsReader() {
+            @Override
+            public Snapshot read(OperationsAnomalyQuery query) {
+                throw new AssertionError("evidence must not rerun alert overview aggregates");
+            }
+
+            @Override
+            public EvidenceResult<AlertReference> evidence(String buildingId, OperationsAnomalyQuery query) {
+                return EvidenceResult.available(List.of());
+            }
+        };
+        DeviceAnalyticsReader devices = new DeviceAnalyticsReader() {
+            @Override
+            public Snapshot read(OperationsAnomalyQuery query) {
+                throw new AssertionError("evidence must not rerun device overview aggregates");
+            }
+
+            @Override
+            public EvidenceResult<DeviceReference> evidence(String buildingId, OperationsAnomalyQuery query) {
+                return EvidenceResult.available(List.of(new DeviceReference(
+                        "DEV-1", buildingId, "HVAC", "OFFLINE", NOW, 1,
+                        "REDACTED: 设备状态 · OFFLINE", null)));
+            }
+        };
+        EnergyAnalyticsReader energy = new EnergyAnalyticsReader() {
+            @Override
+            public Snapshot read(OperationsAnomalyQuery query) {
+                throw new AssertionError("evidence must not rerun energy overview aggregates");
+            }
+
+            @Override
+            public EvidenceResult<EnergyReference> evidence(String buildingId, OperationsAnomalyQuery query) {
+                return EvidenceResult.available(List.of());
+            }
+        };
+
+        OperationsAnomalyDtos.Evidence evidence = new OperationsAnomalyService(
+                alerts, devices, energy, Clock.fixed(NOW, ZoneOffset.UTC)).evidence("B1", query());
+
+        assertThat(evidence.asOf()).isEqualTo(NOW);
+        assertThat(evidence.domainStatus()).containsEntry("alerts", "OK")
+                .containsEntry("devices", "OK")
+                .containsEntry("energy", "OK");
+    }
+
     private static OperationsAnomalyQuery query() {
         return new OperationsAnomalyQuery(null, null, null, null, null, null, null);
     }

@@ -52,4 +52,23 @@ describe('AnomalyEvidenceDrawer', () => {
     expect(wrapper.text()).not.toContain('REDACTED: POWER · OPEN')
     resolveSecond(new Response(JSON.stringify({ ...evidence, buildingId: 'B2' }), { status: 200 }))
   })
+
+  it('keeps the selected building and filters when entering analysis', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(evidence), { status: 200 })))
+    const wrapper = mount(AnomalyEvidenceDrawer, {
+      props: {
+        role: 'ADMIN',
+        buildingId: 'B1',
+        filters: { riskLevel: 'HIGH', category: 'POWER', status: 'OPEN', deviceType: 'HVAC' },
+        open: true,
+      },
+    })
+    await vi.waitFor(() => expect(wrapper.text()).toContain('REDACTED: POWER · OPEN'))
+
+    await wrapper.get('.anomaly-evidence__actions button').trigger('click')
+
+    expect(wrapper.emitted('open-analysis')).toEqual([[
+      '过去7天楼宇 B1 的离线设备数量（风险等级：HIGH；告警类别：POWER；告警状态：OPEN；设备类型：HVAC）',
+    ]])
+  })
 })

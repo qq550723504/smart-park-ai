@@ -52,6 +52,21 @@ function value(item: Record<string, unknown>, key: string): string {
   return raw == null ? '—' : String(raw)
 }
 
+function analysisQuestion(): string {
+  const filterLabels: Array<[keyof AnomalyFilters, string]> = [
+    ['riskLevel', '风险等级'],
+    ['category', '告警类别'],
+    ['status', '告警状态'],
+    ['deviceType', '设备类型'],
+  ]
+  const activeFilters = filterLabels
+    .filter(([key]) => props.filters[key])
+    .map(([key, label]) => `${label}：${props.filters[key]}`)
+  const metric = props.filters.deviceType ? '离线设备数量' : '告警数量'
+  const context = activeFilters.length > 0 ? `（${activeFilters.join('；')}）` : ''
+  return `过去7天楼宇 ${props.buildingId} 的${metric}${context}`
+}
+
 watch([() => props.open, () => props.buildingId, () => props.role, () => JSON.stringify(props.filters)], ([open]) => {
   if (open) void load()
 })
@@ -76,7 +91,7 @@ onMounted(() => { void load() })
       <section class="anomaly-evidence__section"><h3>告警证据</h3><article v-for="item in evidence.alerts" :key="value(item, 'alertId')"><strong>{{ value(item, 'category') }} · {{ value(item, 'riskLevel') }}</strong><small>{{ value(item, 'occurredAt') }} · {{ value(item, 'status') }}</small><p>{{ value(item, 'redactedSummary') }}</p><button v-if="value(item, 'executionRunId') !== '—'" type="button" :data-evidence-trace="value(item, 'executionRunId')" @click="emit('open-trace', value(item, 'executionRunId'))">打开执行轨迹</button></article><small v-if="evidence.alerts.length === 0">暂无告警引用</small></section>
       <section class="anomaly-evidence__section"><h3>设备证据</h3><article v-for="item in evidence.devices" :key="value(item, 'deviceId')"><strong>{{ value(item, 'deviceType') }} · {{ value(item, 'status') }}</strong><small>{{ value(item, 'deviceId') }} · {{ value(item, 'snapshotAt') }}</small><p>{{ value(item, 'redactedSummary') }}</p></article><small v-if="evidence.devices.length === 0">暂无设备引用</small></section>
       <section class="anomaly-evidence__section"><h3>能耗证据</h3><article v-for="item in evidence.energy" :key="value(item, 'meterId') + value(item, 'measuredAt')"><strong>偏差 {{ value(item, 'deviationPct') }}%</strong><small>{{ value(item, 'meterId') }} · {{ value(item, 'measuredAt') }}</small><p>{{ value(item, 'redactedSummary') }}</p></article><small v-if="evidence.energy.length === 0">暂无能耗引用</small></section>
-      <div class="anomaly-evidence__actions"><button type="button" @click="emit('open-analysis', '过去7天各楼宇告警数量排行')">进入楼宇分析</button></div>
+      <div class="anomaly-evidence__actions"><button type="button" @click="emit('open-analysis', analysisQuestion())">进入楼宇分析</button></div>
     </template>
   </aside>
 </template>
