@@ -1,5 +1,6 @@
 package com.example.smartpark.web;
 
+import com.example.smartpark.audit.AuditTrail;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoffPort;
 import com.example.smartpark.port.security.SecurityEventReader;
@@ -38,6 +39,11 @@ public class SecurityIncidentWebConfiguration {
             RootBeanDefinition controller = new RootBeanDefinition(SecurityIncidentController.class);
             controller.getConstructorArgumentValues().addIndexedArgumentValue(0,
                     new RuntimeBeanReference(serviceBeanName));
+            String auditTrailBeanName = beanNameFor(registry, AuditTrail.class);
+            if (auditTrailBeanName != null) {
+                controller.getConstructorArgumentValues().addIndexedArgumentValue(1,
+                        new RuntimeBeanReference(auditTrailBeanName));
+            }
             registry.registerBeanDefinition("securityIncidentController", controller);
         }
 

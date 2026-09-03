@@ -139,8 +139,6 @@ async function load(preserveItems = false): Promise<void> {
     if (props.focusWorkItemId && !nextItems.some(item => item.id === props.focusWorkItemId)) {
       const focusedItems = await listCollaborationWorkItems(props.role, {
         workItemId: props.focusWorkItemId,
-        source: source.value || undefined,
-        status: status.value || undefined,
         limit: 1,
         sort: 'updatedAt',
       })

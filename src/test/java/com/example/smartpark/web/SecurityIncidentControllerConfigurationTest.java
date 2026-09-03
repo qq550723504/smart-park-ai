@@ -11,6 +11,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.beans.factory.config.RuntimeBeanReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -71,6 +72,19 @@ class SecurityIncidentControllerConfigurationTest {
                         .hasNotFailed()
                         .hasSingleBean(SecurityIncidentService.class)
                         .hasSingleBean(SecurityIncidentController.class));
+    }
+
+    @Test
+    void injectsTheSharedAuditTrailIntoTheRegisteredController() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(SecurityIncidentWebConfiguration.class, SecurityIncidentConfiguration.class,
+                        ProviderConfiguration.class)
+                .run(context -> {
+                    Object argument = context.getBeanFactory().getBeanDefinition("securityIncidentController")
+                            .getConstructorArgumentValues().getIndexedArgumentValue(1, Object.class).getValue();
+                    assertThat(argument).isInstanceOf(RuntimeBeanReference.class);
+                    assertThat(((RuntimeBeanReference) argument).getBeanName()).isEqualTo("auditTrail");
+                });
     }
 
     @TestConfiguration(proxyBeanMethods = false)

@@ -494,14 +494,33 @@ class SecurityIncidentServiceTest {
         assertThat(split.items()).extracting(SecurityIncident::incidentId)
                 .doesNotHaveDuplicates();
         assertThat(split.items()).extracting(SecurityIncident::handoffWorkItemId)
-                .doesNotHaveDuplicates();
-        assertThat(split.items()).extracting(SecurityIncident::handoffWorkItemId)
                 .doesNotContainNull();
         assertThat(split.items()).extracting(SecurityIncident::handoffWorkItemId)
                 .contains(completed.handoffWorkItemId());
         assertThat(handoffs.list()).extracting(SecurityIncidentHandoff::workItemId)
-                .containsExactlyInAnyOrderElementsOf(split.items().stream()
-                        .map(SecurityIncident::handoffWorkItemId).toList());
+                .containsExactly(completed.handoffWorkItemId());
+        assertThat(split.items()).extracting(SecurityIncident::handoffWorkItemId)
+                .containsOnly(completed.handoffWorkItemId());
+    }
+
+    @Test
+    void removesStoredCorrelationsThatDisappearBeforeSavingCurrentIncidents() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-OLD", "A1", "ACCESS", BASE),
+                event("SEC-VANISHED", "A1", "ACCESS", BASE.plusSeconds(16 * 60))));
+        SecurityIncidentService service = service(events, List.of(), 2);
+        String oldIncidentId = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.eventIds().contains("SEC-OLD"))
+                .findFirst().orElseThrow().incidentId();
+
+        events.removeIf(event -> event.eventId().equals("SEC-VANISHED"));
+        events.add(event("SEC-NEW", "A1", "ACCESS", BASE.plusSeconds(32 * 60)));
+
+        SecurityIncidentPage current = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(current.items()).extracting(SecurityIncident::incidentId).contains(oldIncidentId);
+        assertThat(current.items()).extracting(SecurityIncident::eventIds)
+                .noneMatch(ids -> ids.contains("SEC-VANISHED"));
     }
 
     @Test

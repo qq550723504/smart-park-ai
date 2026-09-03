@@ -175,7 +175,6 @@ public final class SecurityIncidentService {
         List<SecurityIncident> stored = store.findAll();
         List<SecurityIncidentHandoff> retainedHandoffs = handoffs.list();
         Set<String> assignedStoredIncidentIds = new HashSet<>();
-        Set<String> assignedHandoffWorkItemIds = new HashSet<>();
         Set<String> correlatedRetainedHandoffWorkItemIds = new HashSet<>();
         List<SecurityIncident> candidatesForRetirement = new ArrayList<>();
         List<SecurityIncidentHandoff> retainedHandoffsForRetirement = new ArrayList<>();
@@ -199,19 +198,12 @@ public final class SecurityIncidentService {
                     .map(SecurityIncidentHandoff::workItemId)
                     .forEach(correlatedRetainedHandoffWorkItemIds::add);
             restored = restoreHandoffProjection(fresh, restored, matchingRetainedHandoffs);
-            if (restored.handoffWorkItemId() != null
-                    && !assignedHandoffWorkItemIds.add(restored.handoffWorkItemId())) {
-                SecurityIncidentHandoff fork = handoffs.fork(restored, clock.instant());
-                restored = withStoredState(restored, restored.incidentId(), restored.status(), restored.reviewedAt(),
-                        fork.workItemId());
-                assignedHandoffWorkItemIds.add(fork.workItemId());
-            }
             restoredIncidents.add(restored);
         }
         Set<String> retainedRestoredIncidentIds = restoredIncidents.stream()
                 .map(SecurityIncident::incidentId)
                 .collect(java.util.stream.Collectors.toSet());
-        candidatesForRetirement.stream()
+        stored.stream()
                 .map(SecurityIncident::incidentId)
                 .filter(incidentId -> !retainedRestoredIncidentIds.contains(incidentId))
                 .distinct()

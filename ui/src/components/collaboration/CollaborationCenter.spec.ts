@@ -89,7 +89,7 @@ describe('CollaborationCenter', () => {
     expect(wrapper.get(`[data-work-item="${focused.id}"]`).classes()).toContain('is-focused')
   })
 
-  it('does not append a focused item that does not match the active source filter', async () => {
+  it('keeps an explicitly focused item visible despite active queue filters', async () => {
     const focused = {
       id: 'SECURITY_INCIDENT:INC-1', source: 'SECURITY_INCIDENT', status: 'COMPLETED', priority: 'HIGH',
       title: '安全事件研判 INC-1', safeSummary: 'REDACTED:安全事件摘要', parkId: 'PARK-A', buildingId: 'A1', deviceId: null,
@@ -97,7 +97,7 @@ describe('CollaborationCenter', () => {
     }
     globalThis.fetch = (async (input) => {
       const url = String(input)
-      if (url.includes('workItemId=') && !url.includes('source=')) return response([focused])
+      if (url.includes('workItemId=') && !url.includes('source=') && !url.includes('status=')) return response([focused])
       return response([])
     }) as typeof fetch
 
@@ -106,7 +106,7 @@ describe('CollaborationCenter', () => {
     await wrapper.get('select').setValue('ALERT_WORKFLOW')
     await flushPromises()
 
-    expect(wrapper.find(`[data-work-item="${focused.id}"]`).exists()).toBe(false)
+    expect(wrapper.get(`[data-work-item="${focused.id}"]`).classes()).toContain('is-focused')
   })
 
   it('ignores a stale queue response after the filters change', async () => {
