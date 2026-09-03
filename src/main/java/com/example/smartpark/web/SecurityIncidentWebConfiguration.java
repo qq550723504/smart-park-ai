@@ -28,9 +28,10 @@ public class SecurityIncidentWebConfiguration {
                         && (!hasBean(registry, SecurityIncidentConfiguration.class)
                         || !runtimeDependenciesPresent))
                         || registry.containsBeanDefinition("securityIncidentController")) return;
+                String serviceBeanName = beanNameFor(registry, SecurityIncidentService.class);
                 RootBeanDefinition controller = new RootBeanDefinition(SecurityIncidentController.class);
                 controller.getConstructorArgumentValues().addIndexedArgumentValue(0,
-                        new RuntimeBeanReference("securityIncidentService"));
+                        new RuntimeBeanReference(serviceBeanName));
                 registry.registerBeanDefinition("securityIncidentController", controller);
             }
 
@@ -42,11 +43,15 @@ public class SecurityIncidentWebConfiguration {
     }
 
     private static boolean hasBean(BeanDefinitionRegistry registry, Class<?> type) {
+        return beanNameFor(registry, type) != null;
+    }
+
+    private static String beanNameFor(BeanDefinitionRegistry registry, Class<?> type) {
         for (String name : registry.getBeanDefinitionNames()) {
             BeanDefinition definition = registry.getBeanDefinition(name);
             if (definition.getResolvableType() != org.springframework.core.ResolvableType.NONE
-                    && type.isAssignableFrom(definition.getResolvableType().toClass())) return true;
+                    && type.isAssignableFrom(definition.getResolvableType().toClass())) return name;
         }
-        return false;
+        return null;
     }
 }

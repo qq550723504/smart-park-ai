@@ -5,6 +5,7 @@ import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoffPort;
 import com.example.smartpark.port.security.SecurityEventReader;
 import com.example.smartpark.securityincident.SecurityIncidentConfiguration;
+import com.example.smartpark.securityincident.SecurityIncidentService;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -38,6 +39,17 @@ class SecurityIncidentControllerConfigurationTest {
                         .hasSingleBean(SecurityIncidentController.class));
     }
 
+    @Test
+    void resolvesAControllerAgainstAnIncidentServiceWithACustomBeanName() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(SecurityIncidentConfiguration.class, SecurityIncidentWebConfiguration.class,
+                        CustomServiceConfiguration.class)
+                .run(context -> assertThat(context)
+                        .hasNotFailed()
+                        .hasBean("customIncidentService")
+                        .hasSingleBean(SecurityIncidentController.class));
+    }
+
     @TestConfiguration(proxyBeanMethods = false)
     static class ProviderConfiguration {
         @Bean
@@ -58,5 +70,16 @@ class SecurityIncidentControllerConfigurationTest {
     @TestConfiguration(proxyBeanMethods = false)
     @Import(SecurityIncidentController.class)
     static class ControllerConfiguration {
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class CustomServiceConfiguration {
+        @Bean("customIncidentService")
+        SecurityIncidentService customIncidentService() {
+            return org.mockito.Mockito.mock(SecurityIncidentService.class);
+        }
+
+        @Bean
+        AuditTrail auditTrail() { return new AuditTrail(); }
     }
 }

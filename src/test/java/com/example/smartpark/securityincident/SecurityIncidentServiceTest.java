@@ -52,6 +52,28 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void doesNotExposeHandedOffIncidentsWhoseWorkItemsWereEvicted() {
+        List<SecurityEvent> events = new ArrayList<>();
+        for (int index = 0; index < 101; index++) {
+            events.add(event("SEC-" + index, "B" + index, "ACCESS", BASE.plusSeconds(index * 60L)));
+        }
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(100);
+        SecurityIncidentService service = service(events, List.of(), 200, handoffs);
+        List<SecurityIncident> incidents = new ArrayList<>(service.list(new SecurityIncidentQuery(null, 0, 100)).items());
+        incidents.addAll(service.list(new SecurityIncidentQuery(null, 100, 100)).items());
+        for (SecurityIncident incident : incidents) {
+            service.review(incident.incidentId());
+            service.handoff(incident.incidentId());
+        }
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 0, 100));
+
+        assertThat(page.total()).isEqualTo(100);
+        assertThat(page.items()).allMatch(incident -> handoffs.list().stream()
+                .anyMatch(handoff -> handoff.workItemId().equals(incident.handoffWorkItemId())));
+    }
+
+    @Test
     void correlationIsStableForShuffledInputAndHighAlert() {
         List<SecurityEvent> events = List.of(
                 event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(9 * 60)),
@@ -68,6 +90,29 @@ class SecurityIncidentServiceTest {
         assertThat(left.incidentId()).isEqualTo(right.incidentId());
         assertThat(left.eventIds()).containsExactly("SEC-1", "SEC-2");
         assertThat(left.riskLevel()).isEqualTo(SecurityIncidentRisk.HIGH);
+    }
+
+    @Test
+    void onlyLinksAlertsToEventsInTheSameLocation() {
+        Alert foreignAlert = new Alert("ALT-FOREIGN", "PARK-B", "B1", "DEV-1", AlertClassification.ACCESS,
+                RiskLevel.HIGH, "REDACTED: foreign alert", BASE, List.of("security-event:SEC-DUP"));
+        SecurityIncidentService service = service(List.of(
+                event("SEC-DUP", "PARK-A", "A1", "ACCESS", BASE),
+                event("SEC-DUP", "PARK-B", "B1", "ACCESS", BASE.plusSeconds(60))),
+                List.of(foreignAlert));
+
+        List<SecurityIncident> incidents = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        assertThat(incidents).filteredOn(incident -> incident.parkId().equals("PARK-A"))
+                .singleElement().satisfies(incident -> {
+                    assertThat(incident.alertIds()).isEmpty();
+                    assertThat(incident.riskLevel()).isEqualTo(SecurityIncidentRisk.MEDIUM);
+                });
+        assertThat(incidents).filteredOn(incident -> incident.parkId().equals("PARK-B"))
+                .singleElement().satisfies(incident -> {
+                    assertThat(incident.alertIds()).containsExactly("ALT-FOREIGN");
+                    assertThat(incident.riskLevel()).isEqualTo(SecurityIncidentRisk.HIGH);
+                });
     }
 
     @Test
@@ -477,16 +522,20 @@ class SecurityIncidentServiceTest {
     }
 
     private static SecurityIncidentService service(List<SecurityEvent> events, List<Alert> alerts, int capacity) {
+        List<SecurityIncidentHandoff> created = new ArrayList<>();
         return service(events, alerts, capacity, new SecurityIncidentHandoffPort() {
             @Override
             public SecurityIncidentHandoff createOrGet(SecurityIncident incident, Instant now) {
-                return new SecurityIncidentHandoff("WI:" + incident.incidentId(), incident.incidentId(), incident.parkId(),
+                SecurityIncidentHandoff handoff = new SecurityIncidentHandoff("WI:" + incident.incidentId(), incident.incidentId(), incident.parkId(),
                         incident.buildingId(), incident.riskLevel(), incident.summary(), now);
+                created.removeIf(existing -> existing.workItemId().equals(handoff.workItemId()));
+                created.add(handoff);
+                return handoff;
             }
 
             @Override
             public List<SecurityIncidentHandoff> list() {
-                return List.of();
+                return List.copyOf(created);
             }
         });
     }

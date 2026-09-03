@@ -72,12 +72,14 @@ public final class SecurityIncidentService {
         });
         Set<String> retainedIncidentIds = store.findAll().stream().map(SecurityIncident::incidentId)
                 .collect(java.util.stream.Collectors.toSet());
-        Set<String> retainedHandoffIncidentIds = handoffs.list().stream()
-                .map(SecurityIncidentHandoff::incidentId)
+        Set<String> retainedHandoffWorkItemIds = handoffs.list().stream()
+                .map(SecurityIncidentHandoff::workItemId)
                 .collect(java.util.stream.Collectors.toSet());
         List<SecurityIncident> filtered = merged.stream()
-                .filter(incident -> retainedIncidentIds.contains(incident.incidentId())
-                        || retainedHandoffIncidentIds.contains(incident.incidentId()))
+                .filter(incident -> incident.status() == SecurityIncidentStatus.HANDOFF
+                        ? incident.handoffWorkItemId() != null
+                        && retainedHandoffWorkItemIds.contains(incident.handoffWorkItemId())
+                        : retainedIncidentIds.contains(incident.incidentId()))
                 .filter(incident -> status == null || incident.status() == status)
                 .sorted(Comparator.comparing(SecurityIncident::riskLevel, Comparator.comparingInt(SecurityIncidentService::riskRank).reversed())
                         .thenComparing(SecurityIncident::lastOccurredAt, Comparator.reverseOrder())
@@ -113,13 +115,13 @@ public final class SecurityIncidentService {
         security.listEvents().stream()
                 .sorted(Comparator.comparing(SecurityEvent::occurredAt).thenComparing(SecurityEvent::eventId))
                 .forEach(event -> buckets.computeIfAbsent(bucketKey(event), ignored -> new ArrayList<>()).add(event));
-        Map<String, List<Alert>> alertsByEvent = alertsByEvent();
+        Map<AlertEventKey, List<Alert>> alertsByEvent = alertsByEvent();
         List<SecurityIncident> incidents = new ArrayList<>();
         buckets.values().forEach(events -> splitBucket(events, alertsByEvent, incidents));
         return incidents;
     }
 
-    private void splitBucket(List<SecurityEvent> events, Map<String, List<Alert>> alertsByEvent,
+    private void splitBucket(List<SecurityEvent> events, Map<AlertEventKey, List<Alert>> alertsByEvent,
                              List<SecurityIncident> target) {
         List<SecurityEvent> current = new ArrayList<>();
         for (SecurityEvent event : events) {
@@ -132,9 +134,11 @@ public final class SecurityIncidentService {
         if (!current.isEmpty()) target.add(build(current, alertsByEvent));
     }
 
-    private SecurityIncident build(List<SecurityEvent> events, Map<String, List<Alert>> alertsByEvent) {
+    private SecurityIncident build(List<SecurityEvent> events, Map<AlertEventKey, List<Alert>> alertsByEvent) {
         SecurityEvent first = events.get(0);
-        List<Alert> linkedAlerts = events.stream().flatMap(event -> alertsByEvent.getOrDefault(event.eventId(), List.of()).stream())
+        List<Alert> linkedAlerts = events.stream()
+                .flatMap(event -> alertsByEvent.getOrDefault(
+                        new AlertEventKey(event.eventId(), event.parkId(), event.buildingId()), List.of()).stream())
                 .distinct().sorted(Comparator.comparing(Alert::occurredAt).thenComparing(Alert::id)).toList();
         List<String> eventIds = events.stream().map(SecurityEvent::eventId).toList();
         List<String> alertIds = linkedAlerts.stream().map(Alert::id).toList();
@@ -156,13 +160,14 @@ public final class SecurityIncidentService {
                 events.get(events.size() - 1).occurredAt(), eventIds, alertIds, evidence, timeline, recommendations, null, null);
     }
 
-    private Map<String, List<Alert>> alertsByEvent() {
-        Map<String, List<Alert>> result = new HashMap<>();
+    private Map<AlertEventKey, List<Alert>> alertsByEvent() {
+        Map<AlertEventKey, List<Alert>> result = new HashMap<>();
         alerts.listActive().forEach(alert -> alert.evidence().stream()
                 .filter(token -> token.startsWith(SECURITY_EVENT_PREFIX))
                 .map(token -> token.substring(SECURITY_EVENT_PREFIX.length()))
                 .filter(id -> !id.isBlank())
-                .forEach(id -> result.computeIfAbsent(id, ignored -> new ArrayList<>()).add(alert)));
+                .forEach(id -> result.computeIfAbsent(new AlertEventKey(id, alert.parkId(), alert.buildingId()),
+                        ignored -> new ArrayList<>()).add(alert)));
         return result;
     }
 
@@ -331,5 +336,8 @@ public final class SecurityIncidentService {
     }
 
     private record CorrelationKey(String parkId, String buildingId, String eventType) {
+    }
+
+    private record AlertEventKey(String eventId, String parkId, String buildingId) {
     }
 }
