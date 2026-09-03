@@ -8,7 +8,7 @@ describe('OperationsBoard', () => {
 
     expect(wrapper.get('[data-operations-board]').text()).toContain('停车与交通')
     expect(wrapper.get('[data-operations-board]').text()).toContain('能耗与空间')
-    expect(wrapper.findAll('[data-board-question]')).toHaveLength(9)
+    expect(wrapper.findAll('[data-board-question]')).toHaveLength(14)
     expect(wrapper.text()).toContain('过去5天各停车区域停车利用率')
     expect(wrapper.text()).toContain('过去5天各楼宇平均占用人数')
     expect(wrapper.text()).not.toMatch(/\d+\s*(kWh|辆|%|人)/)
@@ -21,11 +21,16 @@ describe('OperationsBoard', () => {
     const wrapper = mount(OperationsBoard)
 
     expect(wrapper.get('[data-operations-board]').text()).toContain('告警与设备')
-    expect(wrapper.findAll('[data-board-question]')).toHaveLength(9)
+    expect(wrapper.findAll('[data-board-question]')).toHaveLength(14)
     expect(wrapper.text()).toContain('过去7天告警数量')
     expect(wrapper.text()).toContain('过去7天高风险告警数量')
     expect(wrapper.text()).toContain('各楼宇离线设备数')
     expect(wrapper.text()).toContain('各设备类型离线设备数')
+    expect(wrapper.text()).toContain('过去7天各风险等级告警数量')
+    expect(wrapper.text()).toContain('过去7天各类别告警数量')
+    expect(wrapper.text()).toContain('过去7天各状态告警数量')
+    expect(wrapper.text()).toContain('过去7天各楼宇告警数量排行')
+    expect(wrapper.text()).toContain('过去7天各楼宇高风险告警排行')
     expect(wrapper.text()).not.toMatch(/\d+\s*(kWh|辆|%|人|条|台)/)
 
     await wrapper.find('[data-board-question][data-question="过去7天告警数量"]').trigger('click')

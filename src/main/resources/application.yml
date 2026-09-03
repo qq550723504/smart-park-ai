@@ -21,7 +21,7 @@ spring:
       chat:
         completions-path: ${SPRING_AI_DASHSCOPE_CHAT_COMPLETIONS_PATH:/api/v1/services/aigc/text-generation/generation}
         options:
-          model: qwen-plus
+          model: ${SPRING_AI_DASHSCOPE_CHAT_OPTIONS_MODEL:qwen3.7-flash}
       audio:
         transcription:
           options:
