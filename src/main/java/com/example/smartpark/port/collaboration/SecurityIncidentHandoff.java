@@ -7,10 +7,16 @@ import com.example.smartpark.securityincident.SecurityIncidentRisk;
 
 public record SecurityIncidentHandoff(String workItemId, String incidentId, String parkId, String buildingId,
                                       SecurityIncidentRisk riskLevel, String safeSummary, Instant createdAt,
-                                      Instant reviewedAt) {
+                                      Instant reviewedAt, Instant updatedAt) {
     public SecurityIncidentHandoff(String workItemId, String incidentId, String parkId, String buildingId,
                                    SecurityIncidentRisk riskLevel, String safeSummary, Instant createdAt) {
-        this(workItemId, incidentId, parkId, buildingId, riskLevel, safeSummary, createdAt, null);
+        this(workItemId, incidentId, parkId, buildingId, riskLevel, safeSummary, createdAt, null, createdAt);
+    }
+
+    public SecurityIncidentHandoff(String workItemId, String incidentId, String parkId, String buildingId,
+                                   SecurityIncidentRisk riskLevel, String safeSummary, Instant createdAt,
+                                   Instant reviewedAt) {
+        this(workItemId, incidentId, parkId, buildingId, riskLevel, safeSummary, createdAt, reviewedAt, createdAt);
     }
 
     public SecurityIncidentHandoff {
@@ -21,6 +27,7 @@ public record SecurityIncidentHandoff(String workItemId, String incidentId, Stri
         riskLevel = Objects.requireNonNull(riskLevel, "riskLevel");
         safeSummary = requireText(safeSummary, "safeSummary");
         createdAt = Objects.requireNonNull(createdAt, "createdAt");
+        updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
     }
 
     private static String requireText(String value, String field) {

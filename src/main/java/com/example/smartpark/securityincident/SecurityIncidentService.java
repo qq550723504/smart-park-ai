@@ -47,6 +47,18 @@ public final class SecurityIncidentService {
 
     public synchronized SecurityIncidentPage list(SecurityIncidentQuery query) {
         Objects.requireNonNull(query, "query");
+        List<SecurityIncident> filtered = currentIncidents(query.status());
+        return new SecurityIncidentPage(filtered.stream().limit(query.limit()).toList(), filtered.size());
+    }
+
+    public synchronized SecurityIncident get(String incidentId) {
+        return currentIncidents(null).stream()
+                .filter(incident -> incident.incidentId().equals(incidentId))
+                .findFirst()
+                .orElseThrow(() -> new NoSuchElementException("security incident not found"));
+    }
+
+    private List<SecurityIncident> currentIncidents(SecurityIncidentStatus status) {
         List<SecurityIncident> correlated = correlate();
         List<SecurityIncident> merged = restoreStates(correlated);
         Set<String> refreshedHandoffs = new HashSet<>();
@@ -66,19 +78,12 @@ public final class SecurityIncidentService {
         List<SecurityIncident> filtered = merged.stream()
                 .filter(incident -> retainedIncidentIds.contains(incident.incidentId())
                         || retainedHandoffIncidentIds.contains(incident.incidentId()))
-                .filter(incident -> query.status() == null || incident.status() == query.status())
+                .filter(incident -> status == null || incident.status() == status)
                 .sorted(Comparator.comparing(SecurityIncident::riskLevel, Comparator.comparingInt(SecurityIncidentService::riskRank).reversed())
                         .thenComparing(SecurityIncident::lastOccurredAt, Comparator.reverseOrder())
                         .thenComparing(SecurityIncident::incidentId))
                 .toList();
-        return new SecurityIncidentPage(filtered.stream().limit(query.limit()).toList(), filtered.size());
-    }
-
-    public synchronized SecurityIncident get(String incidentId) {
-        return list(new SecurityIncidentQuery(null, SecurityIncidentQuery.MAX_LIMIT)).items().stream()
-                .filter(incident -> incident.incidentId().equals(incidentId))
-                .findFirst()
-                .orElseThrow(() -> new NoSuchElementException("security incident not found"));
+        return filtered;
     }
 
     public synchronized SecurityIncident review(String incidentId) {
@@ -165,26 +170,43 @@ public final class SecurityIncidentService {
         List<SecurityIncident> stored = store.findAll();
         List<SecurityIncidentHandoff> retainedHandoffs = handoffs.list();
         Set<String> assignedStoredIncidentIds = new HashSet<>();
-        return freshIncidents.stream().map(fresh -> {
+        Set<String> assignedHandoffWorkItemIds = new HashSet<>();
+        List<SecurityIncident> candidatesForRetirement = new ArrayList<>();
+        List<SecurityIncident> restoredIncidents = new ArrayList<>();
+        for (SecurityIncident fresh : freshIncidents) {
             List<SecurityIncident> candidates = stored.stream()
                     .filter(existing -> sameCorrelation(existing, fresh))
                     .filter(existing -> overlaps(existing, fresh))
                     .toList();
+            candidatesForRetirement.addAll(candidates);
             SecurityIncident canonical = candidates.stream()
                     .min(Comparator.comparing(SecurityIncident::openedAt).thenComparing(SecurityIncident::incidentId))
                     .orElse(null);
             boolean retainStoredIdentity = canonical != null
                     && assignedStoredIncidentIds.add(canonical.incidentId());
             SecurityIncident restored = restoreState(fresh, candidates, retainStoredIdentity);
-            retireSupersededHandoffs(restored, candidates);
-            return restoreHandoffProjection(fresh, restored, retainedHandoffs);
-        }).toList();
+            restored = restoreHandoffProjection(fresh, restored, retainedHandoffs);
+            if (restored.handoffWorkItemId() != null
+                    && !assignedHandoffWorkItemIds.add(restored.handoffWorkItemId())) {
+                SecurityIncidentHandoff fork = handoffs.fork(restored, clock.instant());
+                restored = withStoredState(restored, restored.incidentId(), restored.status(), restored.reviewedAt(),
+                        fork.workItemId());
+                assignedHandoffWorkItemIds.add(fork.workItemId());
+            }
+            restoredIncidents.add(restored);
+        }
+        retireSupersededHandoffs(restoredIncidents, candidatesForRetirement);
+        return List.copyOf(restoredIncidents);
     }
 
-    private void retireSupersededHandoffs(SecurityIncident restored, List<SecurityIncident> candidates) {
+    private void retireSupersededHandoffs(List<SecurityIncident> restored, List<SecurityIncident> candidates) {
+        Set<String> retainedWorkItemIds = restored.stream()
+                .map(SecurityIncident::handoffWorkItemId)
+                .filter(Objects::nonNull)
+                .collect(java.util.stream.Collectors.toSet());
         candidates.stream()
                 .filter(existing -> existing.handoffWorkItemId() != null)
-                .filter(existing -> !existing.handoffWorkItemId().equals(restored.handoffWorkItemId()))
+                .filter(existing -> !retainedWorkItemIds.contains(existing.handoffWorkItemId()))
                 .forEach(existing -> handoffs.retire(existing.incidentId()));
     }
 

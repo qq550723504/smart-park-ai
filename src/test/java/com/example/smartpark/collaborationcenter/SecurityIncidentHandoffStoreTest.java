@@ -49,9 +49,24 @@ class SecurityIncidentHandoffStoreTest {
 
         assertThat(escalated.workItemId()).isEqualTo(first.workItemId());
         assertThat(escalated.createdAt()).isEqualTo(first.createdAt());
+        assertThat(escalated.updatedAt()).isEqualTo(now.plusSeconds(1));
         assertThat(escalated.riskLevel()).isEqualTo(SecurityIncidentRisk.HIGH);
         assertThat(escalated.safeSummary()).isEqualTo("REDACTED:高风险");
         assertThat(store.list()).containsExactly(escalated);
+    }
+
+    @Test
+    void preservesProjectionUpdateTimeWhenTheProjectedDataDoesNotChange() {
+        SecurityIncidentHandoffStore store = new SecurityIncidentHandoffStore(10);
+        Instant now = Instant.parse("2026-09-02T10:00:00Z");
+
+        SecurityIncidentHandoff first = store.createOrGet(incident("INC-1", SecurityIncidentRisk.MEDIUM, "REDACTED:中风险"), now);
+        SecurityIncidentHandoff changed = store.createOrGet(incident("INC-1", SecurityIncidentRisk.HIGH, "REDACTED:高风险"), now.plusSeconds(1));
+        SecurityIncidentHandoff unchanged = store.createOrGet(incident("INC-1", SecurityIncidentRisk.HIGH, "REDACTED:高风险"), now.plusSeconds(2));
+
+        assertThat(changed.createdAt()).isEqualTo(first.createdAt());
+        assertThat(changed.updatedAt()).isEqualTo(now.plusSeconds(1));
+        assertThat(unchanged.updatedAt()).isEqualTo(changed.updatedAt());
     }
 
     @Test

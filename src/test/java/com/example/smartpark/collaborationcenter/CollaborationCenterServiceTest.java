@@ -53,6 +53,29 @@ class CollaborationCenterServiceTest {
     }
 
     @Test
+    void projectsHandoffCreationAndProjectionUpdateTimesSeparately() {
+        WorkflowExecutionStore workflows = mock(WorkflowExecutionStore.class);
+        CustomerTicketPort tickets = mock(CustomerTicketPort.class);
+        when(workflows.snapshots()).thenReturn(List.of());
+        when(tickets.list()).thenReturn(List.of());
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        Instant createdAt = Instant.parse("2026-09-02T08:00:00Z");
+        Instant updatedAt = Instant.parse("2026-09-02T09:00:00Z");
+        handoffs.createOrGet(securityIncident(), createdAt);
+        handoffs.createOrGet(new SecurityIncident("INC-1", "PARK-A", "A1", "ACCESS", SecurityIncidentRisk.HIGH,
+                SecurityIncidentStatus.HANDOFF, createdAt, updatedAt, List.of("SEC-1"), List.of("ALT-1"),
+                List.of(new SecurityIncidentEvidence("SEC-1", updatedAt, "REDACTED: changed")), List.of(),
+                List.of("核对安全处置手册。"), createdAt, "SECURITY_INCIDENT:INC-1"), updatedAt);
+
+        CollaborationWorkItem item = new CollaborationCenterService(workflows, tickets, TEST_CLOCK,
+                new CollaborationSlaSnapshotStore(), handoffs).list(WorkItemQuery.defaults()).get(0);
+
+        assertThat(item.openedAt()).isEqualTo(createdAt);
+        assertThat(item.updatedAt()).isEqualTo(updatedAt);
+        assertThat(item.safeSummary()).isEqualTo("REDACTED: changed");
+    }
+
+    @Test
     void projectsAlertAndCustomerTicketWithoutLeakingDomainObjects() {
         WorkflowExecutionStore workflows = mock(WorkflowExecutionStore.class);
         CustomerTicketPort tickets = mock(CustomerTicketPort.class);

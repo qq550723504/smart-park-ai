@@ -180,7 +180,7 @@ public final class CollaborationCenterService {
                 handoff.createdAt(), clock.instant());
         return new CollaborationWorkItem(handoff.workItemId(), CollaborationWorkItem.Source.SECURITY_INCIDENT,
                 status, priority, "安全事件研判 " + handoff.incidentId(), handoff.safeSummary(), handoff.parkId(),
-                handoff.buildingId(), null, handoff.createdAt(), handoff.createdAt(), sla.dueAt(), sla.state(),
+                handoff.buildingId(), null, handoff.updatedAt(), handoff.createdAt(), sla.dueAt(), sla.state(),
                 "security-incident", handoff.incidentId());
     }
 

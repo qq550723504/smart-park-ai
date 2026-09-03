@@ -346,7 +346,34 @@ class SecurityIncidentServiceTest {
         assertThat(split.items()).extracting(SecurityIncident::incidentId)
                 .doesNotHaveDuplicates();
         assertThat(split.items()).extracting(SecurityIncident::handoffWorkItemId)
-                .containsOnly(completed.handoffWorkItemId());
+                .doesNotHaveDuplicates();
+        assertThat(split.items()).extracting(SecurityIncident::handoffWorkItemId)
+                .doesNotContainNull();
+        assertThat(split.items()).extracting(SecurityIncident::handoffWorkItemId)
+                .contains(completed.handoffWorkItemId());
+        assertThat(handoffs.list()).extracting(SecurityIncidentHandoff::workItemId)
+                .containsExactlyInAnyOrderElementsOf(split.items().stream()
+                        .map(SecurityIncident::handoffWorkItemId).toList());
+    }
+
+    @Test
+    void findsAHandedOffIncidentEvenWhenItFallsBeyondTheListPage() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-OLD", "A1", "ACCESS", BASE)));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(200);
+        SecurityIncidentService service = service(events, List.of(), 100, handoffs);
+        SecurityIncident old = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(old.incidentId());
+        service.handoff(old.incidentId());
+        for (int index = 1; index <= 100; index++) {
+            events.add(event("SEC-NEW-" + index, "NEW-" + index, "ACCESS", BASE.plusSeconds(index * 60L)));
+        }
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, SecurityIncidentQuery.MAX_LIMIT));
+
+        assertThat(handoffs.list()).extracting(SecurityIncidentHandoff::incidentId).contains(old.incidentId());
+        assertThat(page.total()).isEqualTo(101);
+        assertThat(page.items()).extracting(SecurityIncident::incidentId).doesNotContain(old.incidentId());
+        assertThat(service.get(old.incidentId()).incidentId()).isEqualTo(old.incidentId());
     }
 
     @Test
