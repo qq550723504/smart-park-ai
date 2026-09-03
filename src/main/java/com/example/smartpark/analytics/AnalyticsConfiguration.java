@@ -20,6 +20,12 @@ import com.example.smartpark.analytics.agent.OperationsAnalysisGraph;
 import com.example.smartpark.analytics.agent.TimeIntentProvider;
 import com.example.smartpark.analytics.agent.time.JioNlpClient;
 import com.example.smartpark.analytics.agent.time.JioNlpTimeIntentProvider;
+import com.example.smartpark.analytics.anomaly.JdbcAlertAnalyticsReader;
+import com.example.smartpark.analytics.anomaly.JdbcDeviceAnalyticsReader;
+import com.example.smartpark.analytics.anomaly.JdbcEnergyAnalyticsReader;
+import com.example.smartpark.analytics.anomaly.AlertAnalyticsReader;
+import com.example.smartpark.analytics.anomaly.DeviceAnalyticsReader;
+import com.example.smartpark.analytics.anomaly.EnergyAnalyticsReader;
 import com.example.smartpark.analytics.catalog.MetricCatalog;
 import com.example.smartpark.analytics.sql.QueryCostGuard;
 import com.example.smartpark.analytics.sql.ReadOnlyQueryExecutor;
@@ -156,6 +162,21 @@ public class AnalyticsConfiguration {
                 properties.getMaxRows(),
                 properties.getMaxResultBytes(),
                 properties.getMaxPlanCost()));
+    }
+
+    @Bean
+    AlertAnalyticsReader alertAnalyticsReader(ReadOnlyQueryExecutor readOnlyQueryExecutor) {
+        return new JdbcAlertAnalyticsReader(readOnlyQueryExecutor);
+    }
+
+    @Bean
+    DeviceAnalyticsReader deviceAnalyticsReader(ReadOnlyQueryExecutor readOnlyQueryExecutor) {
+        return new JdbcDeviceAnalyticsReader(readOnlyQueryExecutor);
+    }
+
+    @Bean
+    EnergyAnalyticsReader energyAnalyticsReader(ReadOnlyQueryExecutor readOnlyQueryExecutor) {
+        return new JdbcEnergyAnalyticsReader(readOnlyQueryExecutor);
     }
 
     @Bean
