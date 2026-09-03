@@ -198,7 +198,7 @@ onMounted(() => { void load() })
         </div>
         <div class="anomaly-radar__buildings">
           <strong>异常楼宇排行</strong>
-          <button v-for="building in overview.buildings" :key="building.buildingId" type="button" :data-anomaly-building="building.buildingId" @click="emit('open-building', building.buildingId, evidenceFilters())">
+          <button v-for="building in overview.buildings" :key="building.buildingId" type="button" :data-anomaly-building="building.buildingId" :disabled="loading" :data-domain-status="loading ? 'LOADING' : undefined" @click="emit('open-building', building.buildingId, evidenceFilters())">
             <span>{{ building.buildingId }}</span><small>告警 {{ valueOrDash(building.alertCount, 'alerts') }} · 离线 {{ valueOrDash(building.offlineDeviceCount, 'devices') }} · 能耗偏差 {{ energyLabel(building.energyDeviationPct) }}</small>
           </button>
           <small v-if="overview.buildings.length === 0">当前窗口暂无异常楼宇</small>

@@ -38,15 +38,16 @@ public final class JdbcDeviceAnalyticsReader implements DeviceAnalyticsReader {
     }
 
     @Override
-    public Instant latestSnapshotAt(String buildingId, OperationsAnomalyQuery query) {
-        if (buildingId == null || buildingId.isBlank()) return null;
+    public EvidenceResult<Instant> latestSnapshotAt(String buildingId, OperationsAnomalyQuery query) {
+        if (buildingId == null || buildingId.isBlank()) return EvidenceResult.available(List.of());
         try {
             OperationsAnomalyQuery recentQuery = recentQuery(query);
             TabularResult result = execute("SELECT MAX(snapshot_at) AS as_of FROM analytics.v_device_snapshot " + FILTERS, new OperationsAnomalyQuery(recentQuery.from(), recentQuery.to(), buildingId, null, null, null, recentQuery.deviceType()));
             List<Object> row = result.rows().isEmpty() ? List.of() : result.rows().get(0);
-            return JdbcAnomalyReaderSupport.instant(result, row, "as_of");
-        } catch (Exception ignored) {
-            return null;
+            Instant value = JdbcAnomalyReaderSupport.instant(result, row, "as_of");
+            return value == null ? EvidenceResult.available(List.of()) : EvidenceResult.available(List.of(value));
+        } catch (Exception exception) {
+            return EvidenceResult.unavailable(JdbcAnomalyReaderSupport.failureCode(exception));
         }
     }
 

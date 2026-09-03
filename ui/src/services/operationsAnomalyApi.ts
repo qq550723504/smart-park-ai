@@ -37,6 +37,9 @@ function assertEvidence(value: unknown): asserts value is AnomalyEvidence {
     || !Array.isArray(value.alerts)
     || !Array.isArray(value.devices)
     || !Array.isArray(value.energy)
+    || !value.alerts.every(isRecord)
+    || !value.devices.every(isRecord)
+    || !value.energy.every(isRecord)
     || !isRecord(value.domainStatus)) {
     throw new Error('异常证据响应格式无效')
   }

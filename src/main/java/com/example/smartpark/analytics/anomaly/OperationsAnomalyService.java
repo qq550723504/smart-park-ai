@@ -86,16 +86,21 @@ public final class OperationsAnomalyService {
     public OperationsAnomalyDtos.Evidence evidence(String buildingId, OperationsAnomalyQuery input) {
         if (buildingId == null || buildingId.isBlank()) throw new IllegalArgumentException("buildingId must not be blank");
         OperationsAnomalyQuery query = normalized(input);
-        OperationsAnomalyQuery scoped = new OperationsAnomalyQuery(query.from(), query.to(), buildingId,
+        String normalizedBuildingId = query.buildingId();
+        if (normalizedBuildingId == null || normalizedBuildingId.isBlank()) {
+            normalizedBuildingId = buildingId.trim();
+        }
+        OperationsAnomalyQuery scoped = new OperationsAnomalyQuery(query.from(), query.to(), normalizedBuildingId,
                 query.riskLevel(), query.category(), query.status(), query.deviceType());
-        EvidenceResult<AlertAnalyticsReader.AlertReference> alertEvidence = alerts.evidence(buildingId, scoped);
-        EvidenceResult<DeviceAnalyticsReader.DeviceReference> deviceEvidence = devices.evidence(buildingId, scoped);
-        EvidenceResult<EnergyAnalyticsReader.EnergyReference> energyEvidence = energy.evidence(buildingId, scoped);
-        return new OperationsAnomalyDtos.Evidence(buildingId,
+        EvidenceResult<AlertAnalyticsReader.AlertReference> alertEvidence = alerts.evidence(normalizedBuildingId, scoped);
+        EvidenceResult<DeviceAnalyticsReader.DeviceReference> deviceEvidence = devices.evidence(normalizedBuildingId, scoped);
+        EvidenceResult<EnergyAnalyticsReader.EnergyReference> energyEvidence = energy.evidence(normalizedBuildingId, scoped);
+        EvidenceResult<Instant> snapshotEvidence = devices.latestSnapshotAt(buildingId, query);
+        return new OperationsAnomalyDtos.Evidence(normalizedBuildingId,
                 new OperationsAnomalyDtos.Window(query.from(), query.to(), "Asia/Shanghai"),
-                latestDeviceSnapshot(buildingId, query, deviceEvidence), alertEvidence.items(), deviceEvidence.items(), energyEvidence.items(),
+                latestDeviceSnapshot(snapshotEvidence, deviceEvidence), alertEvidence.items(), deviceEvidence.items(), energyEvidence.items(),
                 Map.of("alerts", evidenceStatus(alertEvidence),
-                        "devices", evidenceStatus(deviceEvidence),
+                        "devices", combinedDeviceStatus(deviceEvidence, snapshotEvidence),
                         "energy", evidenceStatus(energyEvidence)));
     }
 
@@ -120,11 +125,15 @@ public final class OperationsAnomalyService {
         return evidence.failureCode() == null ? "OK" : "PARTIAL";
     }
 
-    private Instant latestDeviceSnapshot(String buildingId, OperationsAnomalyQuery query,
+    private static String combinedDeviceStatus(EvidenceResult<?> evidence, EvidenceResult<?> snapshot) {
+        if (!evidence.available() || !snapshot.available()) return "UNAVAILABLE";
+        return evidence.failureCode() == null && snapshot.failureCode() == null ? "OK" : "PARTIAL";
+    }
+
+    private Instant latestDeviceSnapshot(EvidenceResult<Instant> snapshot,
                                          EvidenceResult<DeviceAnalyticsReader.DeviceReference> evidence) {
-        Instant latest = devices.latestSnapshotAt(buildingId, query);
-        if (latest != null) return latest;
-        return evidence.items().stream()
+        if (!snapshot.items().isEmpty()) return snapshot.items().get(0);
+        return evidence.items().stream
                 .map(DeviceAnalyticsReader.DeviceReference::snapshotAt)
                 .filter(java.util.Objects::nonNull)
                 .max(Instant::compareTo)
