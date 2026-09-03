@@ -141,6 +141,8 @@ class SecurityIncidentServiceTest {
 
         assertThat(restored.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
         assertThat(restored.riskLevel()).isEqualTo(SecurityIncidentRisk.HIGH);
+        assertThat(restored.recommendations()).containsExactly(
+                "核对安全处置手册并由授权人员复核。", "必要时记录协同交接并保留人工审计。");
     }
 
     @Test

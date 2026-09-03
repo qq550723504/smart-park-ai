@@ -37,6 +37,7 @@ describe('SecurityIncidentCenter', () => {
     const wrapper = mount(SecurityIncidentCenter, { props: { role: 'APPROVER' } })
     await flushPromises()
     expect(wrapper.text()).toContain('REDACTED:安全事件摘要')
+    expect(wrapper.get('[data-correlation-times]').text()).toContain('2026')
     await wrapper.get('[data-security-action="review"]').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('已研判')
@@ -108,6 +109,31 @@ describe('SecurityIncidentCenter', () => {
 
     expect(wrapper.find('.hero-metrics').text()).toContain('0待研判')
     expect(wrapper.find('.hero-metrics').text()).toContain('0已转协同')
+  })
+
+  it('clears the previous queue when a refreshed list request fails', async () => {
+    let listCalls = 0
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      if (url.includes('/api/security/incidents?')) {
+        listCalls += 1
+        return listCalls === 1
+          ? response({ items: [summary], total: 1 })
+          : response({ message: '安全事件读取失败' }, 503)
+      }
+      return response(detail)
+    }) as typeof fetch
+
+    const wrapper = mount(SecurityIncidentCenter, { props: { role: 'ADMIN' } })
+    await flushPromises()
+    expect(wrapper.findAll('[data-security-incident]')).toHaveLength(1)
+
+    await wrapper.setProps({ focusIncidentId: 'INC-REFRESHED' })
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-security-incident]')).toHaveLength(0)
+    expect(wrapper.get('.count-badge').text()).toBe('0')
+    expect(wrapper.text()).toContain('安全事件读取失败')
   })
 
   it('loads every incident page so retained incidents remain reachable and metrics stay complete', async () => {

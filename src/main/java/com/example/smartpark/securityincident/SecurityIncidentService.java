@@ -152,12 +152,10 @@ public final class SecurityIncidentService {
                 ? SecurityIncidentRisk.MEDIUM
                 : linkedAlerts.stream().anyMatch(alert -> alert.riskHint() == RiskLevel.HIGH)
                     ? SecurityIncidentRisk.HIGH : SecurityIncidentRisk.LOW;
-        List<String> recommendations = risk == SecurityIncidentRisk.HIGH
-                ? List.of("核对安全处置手册并由授权人员复核。", "必要时记录协同交接并保留人工审计。")
-                : List.of("核对安全处置手册并记录研判结论。");
         return new SecurityIncident(incidentId(first), first.parkId(), first.buildingId(),
                 first.eventType(), risk, SecurityIncidentStatus.OPEN, events.get(0).occurredAt(),
-                events.get(events.size() - 1).occurredAt(), eventIds, alertIds, evidence, timeline, recommendations, null, null);
+                events.get(events.size() - 1).occurredAt(), eventIds, alertIds, evidence, timeline,
+                recommendationsFor(risk), null, null);
     }
 
     private Map<AlertEventKey, List<Alert>> alertsByEvent() {
@@ -322,7 +320,14 @@ public final class SecurityIncidentService {
                                                     SecurityIncidentRisk riskLevel) {
         return new SecurityIncident(incidentId, fresh.parkId(), fresh.buildingId(), fresh.eventType(),
                 riskLevel, status, fresh.openedAt(), fresh.lastOccurredAt(), fresh.eventIds(), fresh.alertIds(),
-                fresh.evidence(), fresh.timeline(), fresh.recommendations(), reviewedAt, handoffWorkItemId);
+                fresh.evidence(), fresh.timeline(), status == SecurityIncidentStatus.HANDOFF
+                        ? recommendationsFor(riskLevel) : fresh.recommendations(), reviewedAt, handoffWorkItemId);
+    }
+
+    private static List<String> recommendationsFor(SecurityIncidentRisk risk) {
+        return risk == SecurityIncidentRisk.HIGH
+                ? List.of("核对安全处置手册并由授权人员复核。", "必要时记录协同交接并保留人工审计。")
+                : List.of("核对安全处置手册并记录研判结论。");
     }
 
     private static SecurityIncidentRisk higherRisk(SecurityIncidentRisk left, SecurityIncidentRisk right) {
