@@ -133,7 +133,7 @@ public final class OperationsAnomalyService {
     private Instant latestDeviceSnapshot(EvidenceResult<Instant> snapshot,
                                          EvidenceResult<DeviceAnalyticsReader.DeviceReference> evidence) {
         if (!snapshot.items().isEmpty()) return snapshot.items().get(0);
-        return evidence.items().stream
+        return evidence.items().stream()
                 .map(DeviceAnalyticsReader.DeviceReference::snapshotAt)
                 .filter(java.util.Objects::nonNull)
                 .max(Instant::compareTo)
