@@ -322,6 +322,15 @@ def resolve_question(request: ResolveRequest) -> ResolveResponse:
                 provider=PROVIDER, providerVersion=EXPECTED_VERSION,
                 referenceInstant=canonical_reference, timezone=request.timezone,
                 status="UNSUPPORTED", mentions=[], reasonCode="INVALID_DATE")
+        residual = [item for item in (jio.ner.extract_time(question) or [])
+                    if not any(item["offset"][0] < match.end()
+                               and match.start() < item["offset"][1]
+                               for match in atomic_matches)]
+        if residual:
+            return ResolveResponse(
+                provider=PROVIDER, providerVersion=EXPECTED_VERSION,
+                referenceInstant=canonical_reference, timezone=request.timezone,
+                status="MULTIPLE", mentions=mentions, reasonCode="MULTIPLE_DISTINCT_RANGES")
         if len({(mention.fromInclusive, mention.toExclusive) for mention in mentions}) > 1:
             return ResolveResponse(
                 provider=PROVIDER, providerVersion=EXPECTED_VERSION,

@@ -79,7 +79,10 @@ const supportedCategories = new Set(['TEMPERATURE', 'POWER', 'HUMIDITY', 'ACCESS
 
 function filterOptions(breakdown: string): string[] {
   const options = facetOptions.value[breakdown] ?? []
-  return breakdown === 'categories' ? options.filter((option) => supportedCategories.has(option)) : options
+  if (breakdown === 'categories') return options.filter((option) => supportedCategories.has(option))
+  if (breakdown === 'riskLevels') return options.filter((option) => ['LOW', 'MEDIUM', 'HIGH'].includes(option))
+  if (breakdown === 'statuses') return options.filter((option) => ['OPEN', 'RESOLVED'].includes(option))
+  return options
 }
 
 function rememberFacetOptions(value: AnomalyOverview): void {
