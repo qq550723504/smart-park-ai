@@ -34,9 +34,11 @@ public final class JdbcAlertAnalyticsReader implements AlertAnalyticsReader {
         try {
             return executor.executeInConsistentSnapshot(() -> {
                 TabularResult summary = execute("SELECT COUNT(*) AS alert_count, COUNT(*) FILTER (WHERE risk_level = 'HIGH') AS high_risk_alert_count FROM analytics.v_alert_fact " + FILTERS, query);
-                QueryResult<Breakdown> riskLevels = breakdown("risk_level", query);
-                QueryResult<Breakdown> categories = breakdown("category", query);
-                QueryResult<Breakdown> statuses = breakdown("status", query);
+                // Facets describe the available choices, not just the current result set.
+                OperationsAnomalyQuery facets = query.withoutAlertFilters();
+                QueryResult<Breakdown> riskLevels = breakdown("risk_level", facets);
+                QueryResult<Breakdown> categories = breakdown("category", facets);
+                QueryResult<Breakdown> statuses = breakdown("status", facets);
                 QueryResult<BuildingSummary> buildings = buildings(query);
                 List<Object> row = summary.rows().isEmpty() ? List.of() : summary.rows().get(0);
                 return new Snapshot(JdbcAnomalyReaderSupport.longValue(summary, row, "alert_count"),
@@ -67,7 +69,9 @@ public final class JdbcAlertAnalyticsReader implements AlertAnalyticsReader {
                         JdbcAnomalyReaderSupport.text(result, row, "risk_level"), status,
                         JdbcAnomalyReaderSupport.instant(result, row, "occurred_at"),
                         "REDACTED: " + (category == null ? "告警" : category) + " · " + (status == null ? "未知状态" : status),
-                        executionRunId(alertId)));
+                        executionRunId(alertId,
+                                JdbcAnomalyReaderSupport.text(result, row, "building_id"),
+                                JdbcAnomalyReaderSupport.text(result, row, "device_id"))));
             }
             return result.truncated()
                     ? EvidenceResult.partial(references, "RESULT_TRUNCATED")
@@ -77,15 +81,29 @@ public final class JdbcAlertAnalyticsReader implements AlertAnalyticsReader {
         }
     }
 
-    private String executionRunId(String alertId) {
+    private String executionRunId(String alertId, String buildingId, String deviceId) {
         try {
             return workflowStore.flatMap(store -> store.findByAlertId(alertId))
+                    .filter(snapshot -> belongsTo(snapshot, buildingId, deviceId))
                     .map(WorkflowSnapshot::workflowId)
                     .map(LegacyWorkflowEventAdapter::runIdFor)
                     .map(java.util.UUID::toString)
                     .orElse(null);
         } catch (RuntimeException ignored) {
             return null;
+        }
+    }
+
+    private static boolean belongsTo(WorkflowSnapshot snapshot, String buildingId, String deviceId) {
+        try {
+            // Older stores may not expose the serialized alert payload; retain
+            // their existing trace behavior, while validating whenever it is available.
+            if (snapshot.statePayload() == null || snapshot.statePayload().isEmpty()) return true;
+            return snapshot.statePayload().get("alert") instanceof com.example.smartpark.model.alert.Alert alert
+                    && alert.buildingId().equals(buildingId)
+                    && alert.deviceId().equals(deviceId);
+        } catch (RuntimeException ignored) {
+            return false;
         }
     }
 

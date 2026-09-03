@@ -63,7 +63,11 @@ function analysisQuestion(): string {
     ['status', '告警状态'],
     ['deviceType', '设备类型'],
   ]
-  const metric = props.filters.deviceType ? '离线设备数量' : '告警数量'
+  const energyOnly = !props.filters.deviceType
+    && (evidence.value?.alerts.length ?? 0) === 0
+    && (evidence.value?.devices.length ?? 0) === 0
+    && (evidence.value?.energy.length ?? 0) > 0
+  const metric = props.filters.deviceType ? '离线设备数量' : energyOnly ? '能耗偏差' : '告警数量'
   const activeFilters = filterLabels
     .filter(([key]) => metric === '离线设备数量' ? key === 'deviceType' : key !== 'deviceType')
     .filter(([key]) => props.filters[key])
@@ -94,9 +98,9 @@ onMounted(() => { void load() })
       <p v-if="evidence.domainStatus.alerts === 'UNAVAILABLE'" class="anomaly-evidence__state anomaly-evidence__state--warning">告警数据暂不可用</p>
       <p v-if="evidence.domainStatus.devices === 'UNAVAILABLE'" class="anomaly-evidence__state anomaly-evidence__state--warning">设备数据暂不可用</p>
       <p v-if="evidence.domainStatus.energy === 'UNAVAILABLE'" class="anomaly-evidence__state anomaly-evidence__state--warning">能耗数据暂不可用</p>
-      <section class="anomaly-evidence__section"><h3>告警证据</h3><article v-for="item in evidence.alerts" :key="value(item, 'alertId')"><strong>{{ value(item, 'category') }} · {{ value(item, 'riskLevel') }}</strong><small>{{ value(item, 'occurredAt') }} · {{ value(item, 'status') }}</small><p>{{ value(item, 'redactedSummary') }}</p><button v-if="value(item, 'executionRunId') !== '—'" type="button" :data-evidence-trace="value(item, 'executionRunId')" @click="emit('open-trace', value(item, 'executionRunId'))">打开执行轨迹</button></article><small v-if="evidence.alerts.length === 0">暂无告警引用</small></section>
-      <section class="anomaly-evidence__section"><h3>设备证据</h3><article v-for="item in evidence.devices" :key="value(item, 'deviceId')"><strong>{{ value(item, 'deviceType') }} · {{ value(item, 'status') }}</strong><small>{{ value(item, 'deviceId') }} · {{ value(item, 'snapshotAt') }}</small><p>{{ value(item, 'redactedSummary') }}</p></article><small v-if="evidence.devices.length === 0">暂无设备引用</small></section>
-      <section class="anomaly-evidence__section"><h3>能耗证据</h3><article v-for="item in evidence.energy" :key="value(item, 'meterId') + value(item, 'measuredAt')"><strong>偏差 {{ value(item, 'deviationPct') }}%</strong><small>{{ value(item, 'meterId') }} · {{ value(item, 'measuredAt') }}</small><p>{{ value(item, 'redactedSummary') }}</p></article><small v-if="evidence.energy.length === 0">暂无能耗引用</small></section>
+      <section class="anomaly-evidence__section"><h3>告警证据</h3><article v-for="item in evidence.alerts" :key="value(item, 'alertId')"><strong>{{ value(item, 'category') }} · {{ value(item, 'riskLevel') }}</strong><small>{{ value(item, 'occurredAt') }} · {{ value(item, 'status') }}</small><p>{{ value(item, 'redactedSummary') }}</p><button v-if="value(item, 'executionRunId') !== '—'" type="button" :data-evidence-trace="value(item, 'executionRunId')" @click="emit('open-trace', value(item, 'executionRunId'))">打开执行轨迹</button></article><small v-if="evidence.alerts.length === 0 && evidence.domainStatus.alerts !== 'UNAVAILABLE'">暂无告警引用</small></section>
+      <section class="anomaly-evidence__section"><h3>设备证据</h3><article v-for="item in evidence.devices" :key="value(item, 'deviceId')"><strong>{{ value(item, 'deviceType') }} · {{ value(item, 'status') }}</strong><small>{{ value(item, 'deviceId') }} · {{ value(item, 'snapshotAt') }}</small><p>{{ value(item, 'redactedSummary') }}</p></article><small v-if="evidence.devices.length === 0 && evidence.domainStatus.devices !== 'UNAVAILABLE'">暂无设备引用</small></section>
+      <section class="anomaly-evidence__section"><h3>能耗证据</h3><article v-for="item in evidence.energy" :key="value(item, 'meterId') + value(item, 'measuredAt')"><strong>偏差 {{ value(item, 'deviationPct') }}%</strong><small>{{ value(item, 'meterId') }} · {{ value(item, 'measuredAt') }}</small><p>{{ value(item, 'redactedSummary') }}</p></article><small v-if="evidence.energy.length === 0 && evidence.domainStatus.energy !== 'UNAVAILABLE'">暂无能耗引用</small></section>
       <div class="anomaly-evidence__actions"><button type="button" @click="emit('open-analysis', analysisQuestion())">进入楼宇分析</button></div>
     </template>
   </aside>

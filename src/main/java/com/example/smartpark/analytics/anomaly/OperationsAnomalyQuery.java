@@ -30,6 +30,10 @@ public record OperationsAnomalyQuery(
                 normalizeFilter(deviceType));
     }
 
+    public OperationsAnomalyQuery withoutAlertFilters() {
+        return new OperationsAnomalyQuery(from, to, buildingId, null, null, null, deviceType);
+    }
+
     public void validate(Duration maxWindow) {
         if (from == null || to == null) {
             throw new IllegalArgumentException("from and to must be provided before validation");

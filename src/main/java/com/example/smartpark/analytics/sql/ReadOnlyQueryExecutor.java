@@ -29,6 +29,7 @@ public class ReadOnlyQueryExecutor {
     private final DataSource dataSource;
     private final QueryLimits limits;
     private final TransactionTemplate readOnlyTransaction;
+    private final TransactionTemplate snapshotTransaction;
 
     public ReadOnlyQueryExecutor(DataSource dataSource, QueryLimits limits) {
         this.dataSource = dataSource;
@@ -38,6 +39,11 @@ public class ReadOnlyQueryExecutor {
         definition.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
         definition.setTimeout((int) Math.max(1, limits.statementTimeout().toSeconds()));
         this.readOnlyTransaction = new TransactionTemplate(new DataSourceTransactionManager(dataSource), definition);
+        DefaultTransactionDefinition snapshotDefinition = new DefaultTransactionDefinition();
+        snapshotDefinition.setReadOnly(true);
+        snapshotDefinition.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        snapshotDefinition.setTimeout((int) Math.max(1, limits.statementTimeout().toSeconds() * 6));
+        this.snapshotTransaction = new TransactionTemplate(new DataSourceTransactionManager(dataSource), snapshotDefinition);
     }
 
     @FunctionalInterface
@@ -48,7 +54,7 @@ public class ReadOnlyQueryExecutor {
     /** Runs several read-only statements against one repeatable-read snapshot. */
     public <T> T executeInConsistentSnapshot(SnapshotWork<T> work) throws Exception {
         try {
-            return readOnlyTransaction.execute(status -> {
+            return snapshotTransaction.execute(status -> {
                 try {
                     return work.call();
                 } catch (Exception exception) {
