@@ -39,6 +39,58 @@ class OperationsAnomalyServiceTest {
         assertThat(overview.buildings().get(1).energyDeviationPct()).isNull();
     }
 
+    @Test
+    void ignoresEnergyRowsWithoutANonZeroDeviationSignal() {
+        EnergyAnalyticsReader energy = query -> new EnergyAnalyticsReader.Snapshot(List.of(
+                new EnergyAnalyticsReader.BuildingSummary("B1", null, 100.0, null, NOW),
+                new EnergyAnalyticsReader.BuildingSummary("B2", 0.0, 100.0, 100.0, NOW),
+                new EnergyAnalyticsReader.BuildingSummary("B3", 12.5, 112.5, 100.0, NOW)), true, null);
+
+        OperationsAnomalyDtos.Overview overview = new OperationsAnomalyService(
+                query -> new AlertAnalyticsReader.Snapshot(0, 0, List.of(), List.of(), List.of(), List.of(), true, null),
+                query -> new DeviceAnalyticsReader.Snapshot(0, List.of(), List.of(), NOW, true, null),
+                energy, Clock.fixed(NOW, ZoneOffset.UTC)).overview(query());
+
+        assertThat(overview.summary().affectedBuildingCount()).isEqualTo(1);
+        assertThat(overview.buildings()).extracting(OperationsAnomalyDtos.BuildingSummary::buildingId)
+                .containsExactly("B3");
+    }
+
+    @Test
+    void preservesMissingDeviceAsOfInsteadOfInventingTheWindowEnd() {
+        OperationsAnomalyDtos.Overview overview = new OperationsAnomalyService(
+                query -> new AlertAnalyticsReader.Snapshot(1, 0, List.of(), List.of(), List.of(),
+                        List.of(new AlertAnalyticsReader.BuildingSummary("B1", 1, 0)), true, null),
+                query -> DeviceAnalyticsReader.Snapshot.unavailable("QUERY_TIMEOUT"),
+                query -> EnergyAnalyticsReader.Snapshot.unavailable("QUERY_TIMEOUT"),
+                Clock.fixed(NOW, ZoneOffset.UTC)).overview(query());
+
+        assertThat(overview.asOf()).isNull();
+    }
+
+    @Test
+    void marksEvidenceDomainUnavailableWhenItsEvidenceReadFails() {
+        AlertAnalyticsReader alerts = new AlertAnalyticsReader() {
+            @Override
+            public Snapshot read(OperationsAnomalyQuery query) {
+                return new Snapshot(1, 0, List.of(), List.of(), List.of(),
+                        List.of(new BuildingSummary("B1", 1, 0)), true, null);
+            }
+
+            @Override
+            public EvidenceResult<AlertReference> evidence(String buildingId, OperationsAnomalyQuery query) {
+                return EvidenceResult.unavailable("QUERY_TIMEOUT");
+            }
+        };
+        OperationsAnomalyDtos.Evidence evidence = new OperationsAnomalyService(
+                alerts,
+                query -> new DeviceAnalyticsReader.Snapshot(0, List.of(), List.of(), NOW, true, null),
+                query -> new EnergyAnalyticsReader.Snapshot(List.of(), true, null),
+                Clock.fixed(NOW, ZoneOffset.UTC)).evidence("B1", query());
+
+        assertThat(evidence.domainStatus().get("alerts")).isEqualTo("UNAVAILABLE");
+    }
+
     private static OperationsAnomalyQuery query() {
         return new OperationsAnomalyQuery(null, null, null, null, null, null, null);
     }

@@ -3,15 +3,20 @@ package com.example.smartpark.analytics.anomaly;
 import com.example.smartpark.analytics.model.TabularResult;
 import com.example.smartpark.analytics.model.ValidatedSql;
 import com.example.smartpark.analytics.sql.ReadOnlyQueryExecutor;
+import com.example.smartpark.workflow.WorkflowExecutionStore;
+import com.example.smartpark.workflow.WorkflowSnapshot;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class JdbcAnalyticsReaderTest {
@@ -69,6 +74,70 @@ class JdbcAnalyticsReaderTest {
             assertThat(building.buildingId()).isEqualTo("B1");
             assertThat(building.deviationPct()).isEqualTo(20.0);
         });
+    }
+
+    @Test
+    void readersPassDeclaredSqlLimitsToTheExecutor() throws Exception {
+        ReadOnlyQueryExecutor executor = mock(ReadOnlyQueryExecutor.class);
+        when(executor.execute(any(), anyMap())).thenAnswer(invocation -> {
+            ValidatedSql sql = invocation.getArgument(0, ValidatedSql.class);
+            if (sql.sql().contains("v_alert_fact") && sql.sql().contains("alert_id")) {
+                assertThat(sql.maxRows()).isEqualTo(10);
+            } else if (sql.sql().contains("v_device_snapshot") && sql.sql().contains("device_id")) {
+                assertThat(sql.maxRows()).isEqualTo(20);
+            } else if (sql.sql().contains("v_energy_hourly") && sql.sql().contains("meter_id")) {
+                assertThat(sql.maxRows()).isEqualTo(10);
+            } else if (sql.sql().contains("LIMIT")) {
+                assertThat(sql.maxRows()).isEqualTo(50);
+            } else {
+                assertThat(sql.maxRows()).isEqualTo(500);
+            }
+            return rows(List.of("key", "count"), List.of());
+        });
+
+        new JdbcAlertAnalyticsReader(executor).read(query());
+        new JdbcAlertAnalyticsReader(executor).evidence("B1", query());
+        new JdbcDeviceAnalyticsReader(executor).read(query());
+        new JdbcDeviceAnalyticsReader(executor).evidence("B1", query());
+        new JdbcEnergyAnalyticsReader(executor).read(query());
+        new JdbcEnergyAnalyticsReader(executor).evidence("B1", query());
+    }
+
+    @Test
+    void deviceReaderBindsOnlyTheRecentOneDayForEveryQuery() throws Exception {
+        ReadOnlyQueryExecutor executor = mock(ReadOnlyQueryExecutor.class);
+        Instant expectedFrom = Instant.parse("2026-09-02T00:00:00Z");
+        when(executor.execute(any(), anyMap())).thenAnswer(invocation -> {
+            Map<String, Object> parameters = invocation.getArgument(1, Map.class);
+            assertThat(parameters.get("from")).isEqualTo(expectedFrom);
+            return rows(List.of("key", "count"), List.of());
+        });
+
+        new JdbcDeviceAnalyticsReader(executor).read(query());
+        new JdbcDeviceAnalyticsReader(executor).evidence("B1", query());
+    }
+
+    @Test
+    void alertEvidenceIncludesTheExistingWorkflowRunId() throws Exception {
+        ReadOnlyQueryExecutor executor = mock(ReadOnlyQueryExecutor.class);
+        WorkflowExecutionStore workflowStore = mock(WorkflowExecutionStore.class);
+        WorkflowSnapshot snapshot = mock(WorkflowSnapshot.class);
+        when(snapshot.workflowId()).thenReturn("run-1");
+        when(workflowStore.findByAlertId("ALT-1")).thenReturn(Optional.of(snapshot));
+        when(executor.execute(any(), anyMap())).thenAnswer(invocation -> {
+            String sql = invocation.getArgument(0, ValidatedSql.class).sql();
+            if (sql.contains("alert_id")) {
+                return rows(List.of("alert_id", "building_id", "device_id", "category", "risk_level", "status", "occurred_at"),
+                        List.of(List.of("ALT-1", "B1", "DEV-1", "POWER", "HIGH", "OPEN", Instant.parse("2026-09-03T01:00:00Z"))));
+            }
+            return rows(List.of("key", "count"), List.of());
+        });
+
+        var result = new JdbcAlertAnalyticsReader(executor, workflowStore).evidence("B1", query());
+
+        assertThat(result.items()).singleElement().extracting(AlertAnalyticsReader.AlertReference::executionRunId)
+                .isEqualTo("run-1");
+        verify(workflowStore).findByAlertId("ALT-1");
     }
 
     private static OperationsAnomalyQuery query() {
