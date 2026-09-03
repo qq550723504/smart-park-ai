@@ -82,8 +82,28 @@ function onFilterChange(key: FilterKey, event: Event): void {
   const next = { ...filters.value }
   if (value) next[key] = value
   else delete next[key]
+  if (value && key === 'deviceType') {
+    delete next.riskLevel
+    delete next.category
+    delete next.status
+  } else if (value) {
+    delete next.deviceType
+  }
   filters.value = next
   void load()
+}
+
+function breakdownDomain(name: string): string | null {
+  return name === 'deviceTypes' ? 'devices' : ['riskLevels', 'categories', 'statuses'].includes(name) ? 'alerts' : null
+}
+
+function breakdownUnavailable(name: string): boolean {
+  const domain = breakdownDomain(name)
+  return domain ? domainUnavailable(domain) : false
+}
+
+function breakdownUnavailableLabel(name: string): string {
+  return breakdownDomain(name) === 'devices' ? '设备数据暂不可用' : '告警数据暂不可用'
 }
 
 const hasPartialData = computed(() => Object.values(overview.value?.domainStatus ?? {})
@@ -130,7 +150,8 @@ onMounted(() => { void load() })
           <div v-for="(items, name) in overview.breakdowns" :key="name" class="anomaly-radar__breakdown">
             <strong>{{ name === 'riskLevels' ? '风险等级' : name === 'categories' ? '告警类别' : name === 'statuses' ? '告警状态' : '离线设备类型' }}</strong>
             <span v-for="item in items" :key="item.key"><i>{{ item.key }}</i><b>{{ item.count }}</b></span>
-            <small v-if="items.length === 0">暂无数据</small>
+            <small v-if="items.length === 0 && breakdownUnavailable(name)">{{ breakdownUnavailableLabel(name) }}</small>
+            <small v-else-if="items.length === 0">暂无数据</small>
           </div>
         </div>
         <div class="anomaly-radar__buildings">

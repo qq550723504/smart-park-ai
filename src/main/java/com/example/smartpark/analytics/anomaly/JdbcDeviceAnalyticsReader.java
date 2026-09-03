@@ -22,14 +22,16 @@ public final class JdbcDeviceAnalyticsReader implements DeviceAnalyticsReader {
     @Override
     public Snapshot read(OperationsAnomalyQuery query) {
         try {
-            OperationsAnomalyQuery recentQuery = recentQuery(query);
-            TabularResult summary = execute("SELECT COUNT(*) FILTER (WHERE status = 'OFFLINE') AS offline_device_count, MAX(snapshot_at) AS as_of FROM analytics.v_device_snapshot " + FILTERS, recentQuery);
-            QueryResult<AlertAnalyticsReader.Breakdown> deviceTypes = breakdown("device_type", recentQuery);
-            QueryResult<BuildingSummary> buildings = buildings(recentQuery);
-            List<Object> row = summary.rows().isEmpty() ? List.of() : summary.rows().get(0);
-            return new Snapshot(JdbcAnomalyReaderSupport.longValue(summary, row, "offline_device_count"), deviceTypes.values(),
-                    buildings.values(), JdbcAnomalyReaderSupport.instant(summary, row, "as_of"), true,
-                    truncated(summary, deviceTypes, buildings) ? "RESULT_TRUNCATED" : null);
+            return executor.executeInConsistentSnapshot(() -> {
+                OperationsAnomalyQuery recentQuery = recentQuery(query);
+                TabularResult summary = execute("SELECT COUNT(*) FILTER (WHERE status = 'OFFLINE') AS offline_device_count, MAX(snapshot_at) AS as_of FROM analytics.v_device_snapshot " + FILTERS, recentQuery);
+                QueryResult<AlertAnalyticsReader.Breakdown> deviceTypes = breakdown("device_type", recentQuery);
+                QueryResult<BuildingSummary> buildings = buildings(recentQuery);
+                List<Object> row = summary.rows().isEmpty() ? List.of() : summary.rows().get(0);
+                return new Snapshot(JdbcAnomalyReaderSupport.longValue(summary, row, "offline_device_count"), deviceTypes.values(),
+                        buildings.values(), JdbcAnomalyReaderSupport.instant(summary, row, "as_of"), true,
+                        truncated(summary, deviceTypes, buildings) ? "RESULT_TRUNCATED" : null);
+            });
         } catch (Exception exception) {
             return Snapshot.unavailable(JdbcAnomalyReaderSupport.failureCode(exception));
         }

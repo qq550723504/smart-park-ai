@@ -17,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -24,6 +25,7 @@ class JdbcAnalyticsReaderTest {
     @Test
     void alertReaderMapsGroupedFactsAndKeepsQueryOnAlertView() throws Exception {
         ReadOnlyQueryExecutor executor = mock(ReadOnlyQueryExecutor.class);
+        consistentSnapshot(executor);
         when(executor.execute(any(), anyMap())).thenAnswer(invocation -> {
             String sql = invocation.getArgument(0, ValidatedSql.class).sql();
             if (!sql.contains("analytics.v_alert_fact")) throw new AssertionError("alert reader crossed view boundary");
@@ -45,6 +47,7 @@ class JdbcAnalyticsReaderTest {
     @Test
     void deviceReaderMapsOfflineSnapshotAndAsOf() throws Exception {
         ReadOnlyQueryExecutor executor = mock(ReadOnlyQueryExecutor.class);
+        consistentSnapshot(executor);
         when(executor.execute(any(), anyMap())).thenAnswer(invocation -> {
             String sql = invocation.getArgument(0, ValidatedSql.class).sql();
             if (!sql.contains("analytics.v_device_snapshot")) throw new AssertionError("device reader crossed view boundary");
@@ -80,6 +83,7 @@ class JdbcAnalyticsReaderTest {
     @Test
     void readersPassDeclaredSqlLimitsToTheExecutor() throws Exception {
         ReadOnlyQueryExecutor executor = mock(ReadOnlyQueryExecutor.class);
+        consistentSnapshot(executor);
         when(executor.execute(any(), anyMap())).thenAnswer(invocation -> {
             ValidatedSql sql = invocation.getArgument(0, ValidatedSql.class);
             if (sql.sql().contains("v_alert_fact") && sql.sql().contains("alert_id")) {
@@ -107,6 +111,7 @@ class JdbcAnalyticsReaderTest {
     @Test
     void deviceReaderBindsOnlyTheRecentOneDayForEveryQuery() throws Exception {
         ReadOnlyQueryExecutor executor = mock(ReadOnlyQueryExecutor.class);
+        consistentSnapshot(executor);
         Instant expectedFrom = Instant.parse("2026-09-02T00:00:00Z");
         when(executor.execute(any(), anyMap())).thenAnswer(invocation -> {
             Map<String, Object> parameters = invocation.getArgument(1, Map.class);
@@ -116,6 +121,18 @@ class JdbcAnalyticsReaderTest {
 
         new JdbcDeviceAnalyticsReader(executor).read(query());
         new JdbcDeviceAnalyticsReader(executor).evidence("B1", query());
+    }
+
+    @Test
+    void overviewReadersExecuteAllAggregatesInsideOneConsistentSnapshot() throws Exception {
+        ReadOnlyQueryExecutor executor = mock(ReadOnlyQueryExecutor.class);
+        consistentSnapshot(executor);
+        when(executor.execute(any(), anyMap())).thenReturn(rows(List.of("key", "count"), List.of()));
+
+        new JdbcAlertAnalyticsReader(executor).read(query());
+        new JdbcDeviceAnalyticsReader(executor).read(query());
+
+        verify(executor, times(2)).executeInConsistentSnapshot(any());
     }
 
     @Test
@@ -144,6 +161,7 @@ class JdbcAnalyticsReaderTest {
     @Test
     void alertReaderPropagatesTruncationFromGroupedQueries() throws Exception {
         ReadOnlyQueryExecutor executor = mock(ReadOnlyQueryExecutor.class);
+        consistentSnapshot(executor);
         when(executor.execute(any(), anyMap())).thenAnswer(invocation -> {
             String sql = invocation.getArgument(0, ValidatedSql.class).sql();
             if (sql.contains("COUNT(*) AS alert_count")) {
@@ -161,6 +179,7 @@ class JdbcAnalyticsReaderTest {
     @Test
     void deviceReaderPropagatesTruncationFromGroupedQueries() throws Exception {
         ReadOnlyQueryExecutor executor = mock(ReadOnlyQueryExecutor.class);
+        consistentSnapshot(executor);
         when(executor.execute(any(), anyMap())).thenAnswer(invocation -> {
             String sql = invocation.getArgument(0, ValidatedSql.class).sql();
             if (sql.contains("MAX(snapshot_at)")) {
@@ -185,5 +204,10 @@ class JdbcAnalyticsReaderTest {
 
     private static TabularResult truncatedRows(List<String> columns) {
         return new TabularResult(columns, List.of(), true, 50);
+    }
+
+    private static void consistentSnapshot(ReadOnlyQueryExecutor executor) throws Exception {
+        when(executor.executeInConsistentSnapshot(any())).thenAnswer(invocation ->
+                invocation.getArgument(0, ReadOnlyQueryExecutor.SnapshotWork.class).call());
     }
 }

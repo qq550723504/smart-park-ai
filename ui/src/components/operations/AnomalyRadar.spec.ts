@@ -108,4 +108,32 @@ describe('AnomalyRadar', () => {
 
     resolveSecond(new Response(JSON.stringify(overview), { status: 200 }))
   })
+
+  it('keeps alert and device filters in separate domains', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => new Response(JSON.stringify(overview), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const wrapper = mount(AnomalyRadar, { props: { role: 'ADMIN', active: true } })
+    await vi.waitFor(() => expect(wrapper.find('[data-anomaly-building="B1"]').exists()).toBe(true))
+    await wrapper.get('[data-anomaly-filter="riskLevel"]').setValue('HIGH')
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(wrapper.find('[data-anomaly-filter="deviceType"]').exists()).toBe(true))
+    await wrapper.get('[data-anomaly-filter="deviceType"]').setValue('HVAC')
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+
+    expect(fetchMock.mock.calls[2][0]).toContain('deviceType=HVAC')
+    expect(fetchMock.mock.calls[2][0]).not.toContain('riskLevel=HIGH')
+  })
+
+  it('labels unavailable alert breakdowns as unavailable instead of empty', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      ...overview,
+      breakdowns: { riskLevels: [], categories: [], statuses: [], deviceTypes: [] },
+      domainStatus: { alerts: 'UNAVAILABLE', devices: 'OK', energy: 'OK' },
+    }), { status: 200 })))
+
+    const wrapper = mount(AnomalyRadar, { props: { role: 'ADMIN', active: true } })
+    await vi.waitFor(() => expect(wrapper.text()).toContain('告警数据暂不可用'))
+    expect(wrapper.text()).not.toContain('风险等级暂无数据')
+  })
 })

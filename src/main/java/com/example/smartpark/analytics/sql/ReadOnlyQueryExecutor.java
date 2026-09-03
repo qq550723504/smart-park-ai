@@ -9,9 +9,14 @@ import org.springframework.transaction.support.DefaultTransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import javax.sql.DataSource;
+import java.sql.Types;
+import java.sql.Timestamp;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -30,8 +35,29 @@ public class ReadOnlyQueryExecutor {
         this.limits = limits;
         DefaultTransactionDefinition definition = new DefaultTransactionDefinition();
         definition.setReadOnly(true);
+        definition.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
         definition.setTimeout((int) Math.max(1, limits.statementTimeout().toSeconds()));
         this.readOnlyTransaction = new TransactionTemplate(new DataSourceTransactionManager(dataSource), definition);
+    }
+
+    @FunctionalInterface
+    public interface SnapshotWork<T> {
+        T call() throws Exception;
+    }
+
+    /** Runs several read-only statements against one repeatable-read snapshot. */
+    public <T> T executeInConsistentSnapshot(SnapshotWork<T> work) throws Exception {
+        try {
+            return readOnlyTransaction.execute(status -> {
+                try {
+                    return work.call();
+                } catch (Exception exception) {
+                    throw new SnapshotWorkFailure(exception);
+                }
+            });
+        } catch (SnapshotWorkFailure failure) {
+            throw failure.cause;
+        }
     }
 
     public TabularResult execute(ValidatedSql validated, Map<String, Object> parameters) throws UnsafeSqlException {
@@ -74,7 +100,7 @@ public class ReadOnlyQueryExecutor {
         List<List<Object>> rows = new ArrayList<>();
         boolean[] truncated = {false};
 
-        return template.query(boundedProbe, new MapSqlParameterSource(parameters), rs -> {
+        return template.query(boundedProbe, parameterSource(parameters), rs -> {
             for (int c = 1; c <= rs.getMetaData().getColumnCount(); c++) {
                 columns.add(rs.getMetaData().getColumnLabel(c));
             }
@@ -100,6 +126,30 @@ public class ReadOnlyQueryExecutor {
             }
             return new TabularResult(columns, rows, truncated[0], System.currentTimeMillis() - start);
         });
+    }
+
+    private static MapSqlParameterSource parameterSource(Map<String, Object> parameters) {
+        MapSqlParameterSource source = new MapSqlParameterSource();
+        if (parameters == null) return source;
+        parameters.forEach((name, value) -> {
+            if (value instanceof Instant instant) {
+                source.addValue(name, Timestamp.from(instant), Types.TIMESTAMP);
+            } else if (value instanceof OffsetDateTime offsetDateTime) {
+                source.addValue(name, offsetDateTime, Types.TIMESTAMP_WITH_TIMEZONE);
+            } else if (value == null) {
+                source.addValue(name, null, temporalParameter(name) ? Types.TIMESTAMP : Types.VARCHAR);
+            } else {
+                source.addValue(name, value);
+            }
+        });
+        return source;
+    }
+
+    private static boolean temporalParameter(String name) {
+        String normalized = name.toLowerCase(Locale.ROOT);
+        return normalized.equals("from") || normalized.equals("to")
+                || normalized.endsWith("from") || normalized.endsWith("to")
+                || normalized.contains("time") || normalized.contains("date");
     }
 
     /**
@@ -136,6 +186,15 @@ public class ReadOnlyQueryExecutor {
         PolicyViolation(String errorCode, String message) {
             super(message);
             this.errorCode = errorCode;
+        }
+    }
+
+    private static final class SnapshotWorkFailure extends RuntimeException {
+        private final Exception cause;
+
+        private SnapshotWorkFailure(Exception cause) {
+            super(cause);
+            this.cause = cause;
         }
     }
 

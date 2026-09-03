@@ -68,7 +68,7 @@ describe('AnomalyEvidenceDrawer', () => {
     await wrapper.get('.anomaly-evidence__actions button').trigger('click')
 
     expect(wrapper.emitted('open-analysis')).toEqual([[
-      '过去7天楼宇 B1 的离线设备数量（风险等级：HIGH；告警类别：POWER；告警状态：OPEN；设备类型：HVAC）',
+      '过去7天楼宇 B1 的离线设备数量（设备类型：HVAC）',
     ]])
   })
 })

@@ -59,10 +59,11 @@ function analysisQuestion(): string {
     ['status', '告警状态'],
     ['deviceType', '设备类型'],
   ]
+  const metric = props.filters.deviceType ? '离线设备数量' : '告警数量'
   const activeFilters = filterLabels
+    .filter(([key]) => metric === '离线设备数量' ? key === 'deviceType' : key !== 'deviceType')
     .filter(([key]) => props.filters[key])
     .map(([key, label]) => `${label}：${props.filters[key]}`)
-  const metric = props.filters.deviceType ? '离线设备数量' : '告警数量'
   const context = activeFilters.length > 0 ? `（${activeFilters.join('；')}）` : ''
   return `过去7天楼宇 ${props.buildingId} 的${metric}${context}`
 }

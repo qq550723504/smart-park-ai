@@ -32,16 +32,18 @@ public final class JdbcAlertAnalyticsReader implements AlertAnalyticsReader {
     @Override
     public Snapshot read(OperationsAnomalyQuery query) {
         try {
-            TabularResult summary = execute("SELECT COUNT(*) AS alert_count, COUNT(*) FILTER (WHERE risk_level = 'HIGH') AS high_risk_alert_count FROM analytics.v_alert_fact " + FILTERS, query);
-            QueryResult<Breakdown> riskLevels = breakdown("risk_level", query);
-            QueryResult<Breakdown> categories = breakdown("category", query);
-            QueryResult<Breakdown> statuses = breakdown("status", query);
-            QueryResult<BuildingSummary> buildings = buildings(query);
-            List<Object> row = summary.rows().isEmpty() ? List.of() : summary.rows().get(0);
-            return new Snapshot(JdbcAnomalyReaderSupport.longValue(summary, row, "alert_count"),
-                    JdbcAnomalyReaderSupport.longValue(summary, row, "high_risk_alert_count"),
-                    riskLevels.values(), categories.values(), statuses.values(), buildings.values(), true,
-                    truncated(summary, riskLevels, categories, statuses, buildings) ? "RESULT_TRUNCATED" : null);
+            return executor.executeInConsistentSnapshot(() -> {
+                TabularResult summary = execute("SELECT COUNT(*) AS alert_count, COUNT(*) FILTER (WHERE risk_level = 'HIGH') AS high_risk_alert_count FROM analytics.v_alert_fact " + FILTERS, query);
+                QueryResult<Breakdown> riskLevels = breakdown("risk_level", query);
+                QueryResult<Breakdown> categories = breakdown("category", query);
+                QueryResult<Breakdown> statuses = breakdown("status", query);
+                QueryResult<BuildingSummary> buildings = buildings(query);
+                List<Object> row = summary.rows().isEmpty() ? List.of() : summary.rows().get(0);
+                return new Snapshot(JdbcAnomalyReaderSupport.longValue(summary, row, "alert_count"),
+                        JdbcAnomalyReaderSupport.longValue(summary, row, "high_risk_alert_count"),
+                        riskLevels.values(), categories.values(), statuses.values(), buildings.values(), true,
+                        truncated(summary, riskLevels, categories, statuses, buildings) ? "RESULT_TRUNCATED" : null);
+            });
         } catch (Exception exception) {
             return Snapshot.unavailable(JdbcAnomalyReaderSupport.failureCode(exception));
         }
