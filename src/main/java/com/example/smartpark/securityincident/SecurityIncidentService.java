@@ -208,6 +208,14 @@ public final class SecurityIncidentService {
             }
             restoredIncidents.add(restored);
         }
+        Set<String> retainedRestoredIncidentIds = restoredIncidents.stream()
+                .map(SecurityIncident::incidentId)
+                .collect(java.util.stream.Collectors.toSet());
+        candidatesForRetirement.stream()
+                .map(SecurityIncident::incidentId)
+                .filter(incidentId -> !retainedRestoredIncidentIds.contains(incidentId))
+                .distinct()
+                .forEach(store::remove);
         retireSupersededHandoffs(restoredIncidents, candidatesForRetirement, retainedHandoffsForRetirement);
         retainedHandoffs.stream()
                 .filter(handoff -> !correlatedRetainedHandoffWorkItemIds.contains(handoff.workItemId()))

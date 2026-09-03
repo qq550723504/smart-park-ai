@@ -39,6 +39,23 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void removesSupersededStatesBeforeSavingNewIncidents() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-A-1", "A1", "ACCESS", BASE),
+                event("SEC-C-1", "C1", "ACCESS", BASE.plusSeconds(10 * 60)),
+                event("SEC-A-2", "A1", "ACCESS", BASE.plusSeconds(16 * 60))));
+        SecurityIncidentService service = service(events, List.of(), 3);
+        service.list(new SecurityIncidentQuery(null, 20));
+        events.add(event("SEC-A-BRIDGE", "A1", "ACCESS", BASE.plusSeconds(8 * 60)));
+        events.add(event("SEC-D-1", "D1", "ACCESS", BASE.plusSeconds(2 * 60 * 60)));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).extracting(SecurityIncident::buildingId)
+                .contains("A1", "C1", "D1");
+    }
+
+    @Test
     void returnsAnOffsetPageWhileKeepingTheFullIncidentTotal() {
         SecurityIncidentService service = service(List.of(
                 event("SEC-1", "A1", "ACCESS", BASE),

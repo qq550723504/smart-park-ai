@@ -30,6 +30,10 @@ public final class SecurityIncidentStore {
         }
     }
 
+    public synchronized void remove(String incidentId) {
+        incidents.remove(incidentId);
+    }
+
     public synchronized List<SecurityIncident> findAll() {
         return List.copyOf(new ArrayList<>(incidents.values()));
     }
