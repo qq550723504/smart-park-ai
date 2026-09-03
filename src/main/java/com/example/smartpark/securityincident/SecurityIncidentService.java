@@ -215,12 +215,21 @@ public final class SecurityIncidentService {
         if (restored.handoffWorkItemId() != null) return restored;
         SecurityIncidentHandoff handoff = retainedHandoffs.stream()
                 .filter(existing -> existing.incidentId().equals(restored.incidentId())
-                        || existing.incidentId().equals(fresh.incidentId()))
+                        || existing.incidentId().equals(fresh.incidentId())
+                        || matchesCorrelation(existing, fresh))
                 .findFirst()
                 .orElse(null);
         if (handoff == null) return restored;
         return withStoredState(fresh, fresh.incidentId(), SecurityIncidentStatus.HANDOFF, handoff.reviewedAt(),
                 handoff.workItemId());
+    }
+
+    private static boolean matchesCorrelation(SecurityIncidentHandoff handoff, SecurityIncident incident) {
+        return Objects.equals(handoff.eventType(), incident.eventType())
+                && handoff.parkId().equals(incident.parkId())
+                && handoff.buildingId().equals(incident.buildingId())
+                && !handoff.eventIds().isEmpty()
+                && handoff.eventIds().stream().anyMatch(incident.eventIds()::contains);
     }
 
     private SecurityIncident restoreState(SecurityIncident fresh, List<SecurityIncident> candidates,

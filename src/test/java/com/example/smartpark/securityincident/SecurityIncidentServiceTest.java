@@ -326,6 +326,30 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void restoresAHandedOffIncidentWhenItsDerivedIdChangesAfterStateEviction() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(9 * 60))));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 1, handoffs);
+        SecurityIncident initial = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(initial.incidentId());
+        SecurityIncident completed = service.handoff(initial.incidentId());
+        events.add(event("SEC-OTHER", "B1", "ACCESS", BASE.plusSeconds(2 * 60 * 60)));
+        service.list(new SecurityIncidentQuery(null, 20));
+        events.add(event("SEC-1", "A1", "ACCESS", BASE));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).anyMatch(incident -> incident.buildingId().equals("A1"));
+        SecurityIncident restored = page.items().stream()
+                .filter(incident -> incident.buildingId().equals("A1"))
+                .findFirst().orElseThrow();
+        assertThat(restored.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(restored.incidentId()).isNotEqualTo(initial.incidentId());
+        assertThat(restored.handoffWorkItemId()).isEqualTo(completed.handoffWorkItemId());
+        assertThat(service.get(restored.incidentId()).status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+    }
+
+    @Test
     void preservesFinalizedStateForEveryGroupAfterACorrelationResplit() {
         List<SecurityEvent> events = new ArrayList<>(List.of(
                 event("SEC-1", "A1", "ACCESS", BASE),
