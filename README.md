@@ -351,6 +351,9 @@ Remove-Item Env:SERVER_ADDRESS -ErrorAction SilentlyContinue
 | `GET /api/customer-service/sessions/{sessionId}/conversation` | 查看对话与安全检索轨迹 | 不返回知识正文 |
 | `GET /api/customer-service/tickets` | 查看人工工单 | 需要 `CUSTOMER_AGENT` 或 `ADMIN` |
 | `GET /api/collaboration/work-items` | 查看安全协同队列 | 需要 `CUSTOMER_AGENT`、`APPROVER` 或 `ADMIN`，支持 `source`、`status`、`limit`（最多 50）；详情操作复用原审批/工单状态接口 |
+| `GET /api/security/incidents[/{incidentId}]` | 查看安全事件研判 | 需要 `APPROVER` 或 `ADMIN`；返回按 15 分钟窗口归并的脱敏事件、关联告警和时间线 |
+| `POST /api/security/incidents/{incidentId}/review` | 标记安全事件已研判 | 需要 `APPROVER` 或 `ADMIN`；重复调用幂等 |
+| `POST /api/security/incidents/{incidentId}/handoff` | 转为安全协同工作项 | 需要 `APPROVER` 或 `ADMIN`；不直接关闭告警、控制设备或发送通知 |
 | `POST /api/alerts/{alertId}/workflows` | 启动告警工作流 | 只在 DashScope 启用时存在 |
 | `GET /api/workflows/{workflowId}` | 查询工作流状态 | 只返回脱敏公开 DTO |
 | `POST /api/workflows/{workflowId}/approval` | 审批或拒绝 | 需要稳定的 `idempotencyKey` |
