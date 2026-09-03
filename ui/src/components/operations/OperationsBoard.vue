@@ -21,6 +21,11 @@ const groups = [
     description: '从楼宇、占用人数和基线偏差理解空间运营。',
     questions: ['过去5天各楼宇能耗基线偏差', '过去5天各楼宇平均占用人数', '过去5天各楼宇能耗与占用人数关系'],
   },
+  {
+    title: '告警与设备',
+    description: '从风险趋势和设备在线状态识别需要关注的运营异常。',
+    questions: ['过去7天告警数量趋势', '过去7天高风险告警数量趋势', '各楼宇离线设备数', '各设备类型离线设备数'],
+  },
 ]
 </script>
 
@@ -29,10 +34,10 @@ const groups = [
     <section class="hero-row">
       <div>
         <span class="eyebrow">运营看板 · 只读</span>
-        <h2>停车与能耗，<br /><em>从同一套证据出发</em></h2>
+        <h2>停车、能耗与风险，<br /><em>从同一套证据出发</em></h2>
         <p class="hero-copy">选择一个指标卡进入自然语言分析。看板不缓存或编造业务数字，结果始终来自后端登记的只读指标。</p>
       </div>
-      <div class="hero-metrics"><div><strong>05</strong><span>受控问题</span></div><div><strong>只读</strong><span>执行模式</span></div></div>
+      <div class="hero-metrics"><div><strong>09</strong><span>受控问题</span></div><div><strong>只读</strong><span>执行模式</span></div></div>
     </section>
     <OperationsDailyReport :role="props.role" :trace="props.trace" :active="props.active" />
     <section v-for="group in groups" :key="group.title" class="panel operations-board__group" :aria-label="group.title">
