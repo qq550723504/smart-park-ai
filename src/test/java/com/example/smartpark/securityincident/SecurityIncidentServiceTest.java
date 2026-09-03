@@ -178,6 +178,42 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void doesNotPublishAHandoffForAnOpenIncident() {
+        List<SecurityIncidentHandoff> created = new ArrayList<>();
+        SecurityIncidentHandoffPort handoffs = new SecurityIncidentHandoffPort() {
+            @Override
+            public SecurityIncidentHandoff createOrGet(SecurityIncident incident, Instant now) {
+                SecurityIncidentHandoff result = new SecurityIncidentHandoff("WI:" + incident.incidentId(), incident.incidentId(),
+                        incident.parkId(), incident.buildingId(), incident.riskLevel(), incident.summary(), now);
+                created.add(result);
+                return result;
+            }
+
+            @Override
+            public List<SecurityIncidentHandoff> list() { return List.copyOf(created); }
+        };
+        SecurityIncidentService service = service(List.of(event("SEC-1", "A1", "ACCESS", BASE)), List.of(), 50, handoffs);
+        String incidentId = service.list(new SecurityIncidentQuery(null, 20)).items().get(0).incidentId();
+
+        assertThatThrownBy(() -> service.handoff(incidentId))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("security incident must be reviewed before handoff");
+        assertThat(created).isEmpty();
+    }
+
+    @Test
+    void rejectsAnIncidentIdThatIsAbsentFromTheCurrentCorrelation() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        SecurityIncidentService service = service(events);
+        String incidentId = service.list(new SecurityIncidentQuery(null, 20)).items().get(0).incidentId();
+        events.clear();
+
+        assertThatThrownBy(() -> service.get(incidentId))
+                .isInstanceOf(java.util.NoSuchElementException.class)
+                .hasMessage("security incident not found");
+    }
+
+    @Test
     void listDoesNotReturnIncidentsEvictedByTheBoundedStore() {
         SecurityIncidentService service = service(List.of(
                 event("SEC-1", "A1", "ACCESS", BASE),

@@ -66,8 +66,10 @@ public final class SecurityIncidentService {
     }
 
     public synchronized SecurityIncident get(String incidentId) {
-        list(new SecurityIncidentQuery(null, SecurityIncidentQuery.MAX_LIMIT));
-        return store.get(incidentId).orElseThrow(() -> new NoSuchElementException("security incident not found"));
+        return list(new SecurityIncidentQuery(null, SecurityIncidentQuery.MAX_LIMIT)).items().stream()
+                .filter(incident -> incident.incidentId().equals(incidentId))
+                .findFirst()
+                .orElseThrow(() -> new NoSuchElementException("security incident not found"));
     }
 
     public synchronized SecurityIncident review(String incidentId) {
@@ -82,6 +84,9 @@ public final class SecurityIncidentService {
         if (current.handoffWorkItemId() != null) {
             handoffs.refresh(current, clock.instant());
             return current;
+        }
+        if (current.status() != SecurityIncidentStatus.REVIEWED) {
+            throw new IllegalStateException("security incident must be reviewed before handoff");
         }
         SecurityIncidentHandoff handoff = handoffs.createOrGet(current, clock.instant());
         SecurityIncident result = current.handoff(handoff.workItemId(), clock.instant());

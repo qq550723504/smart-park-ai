@@ -54,6 +54,24 @@ class SecurityIncidentHandoffStoreTest {
         assertThat(store.list()).containsExactly(escalated);
     }
 
+    @Test
+    void migratesAnExistingWorkItemWhenTheCanonicalIncidentIdChanges() {
+        SecurityIncidentHandoffStore store = new SecurityIncidentHandoffStore(10);
+        Instant now = Instant.parse("2026-09-02T10:00:00Z");
+        SecurityIncidentHandoff first = store.createOrGet(incident("INC-OLD"), now);
+        SecurityIncident merged = new SecurityIncident("INC-NEW", "PARK-A", "A1", "ACCESS",
+                SecurityIncidentRisk.HIGH, SecurityIncidentStatus.HANDOFF, now, now, List.of("SEC-1"), List.of("ALT-1"),
+                List.of(new SecurityIncidentEvidence("SEC-1", now, "REDACTED:merged")), List.of(),
+                List.of("核对安全处置手册。"), now, first.workItemId());
+
+        SecurityIncidentHandoff migrated = store.refresh(merged, now.plusSeconds(1));
+
+        assertThat(migrated.workItemId()).isEqualTo(first.workItemId());
+        assertThat(migrated.incidentId()).isEqualTo("INC-NEW");
+        assertThat(migrated.createdAt()).isEqualTo(first.createdAt());
+        assertThat(store.list()).containsExactly(migrated);
+    }
+
     private static SecurityIncident incident() {
         return incident("INC-1");
     }

@@ -43,8 +43,16 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
                     .filter(id -> !id.equals(incident.incidentId()))
                     .findFirst()
                     .orElse(null);
-            if (existingIncidentId != null) handoffs.remove(existingIncidentId);
-            if (existingIncidentId == null && !handoffs.containsKey(incident.incidentId())) {
+            if (existingIncidentId != null) {
+                SecurityIncidentHandoff existing = handoffs.remove(existingIncidentId);
+                SecurityIncidentHandoff migrated = new SecurityIncidentHandoff(existing.workItemId(),
+                        incident.incidentId(), incident.parkId(), incident.buildingId(),
+                        higherRisk(existing.riskLevel(), incident.riskLevel()), incident.summary(), existing.createdAt());
+                handoffs.put(incident.incidentId(), migrated);
+                trimToCapacity();
+                return migrated;
+            }
+            if (!handoffs.containsKey(incident.incidentId())) {
                 SecurityIncidentHandoff restored = new SecurityIncidentHandoff(incident.handoffWorkItemId(),
                         incident.incidentId(), incident.parkId(), incident.buildingId(), incident.riskLevel(),
                         incident.summary(), now);
