@@ -62,6 +62,11 @@ const traceRailStub = defineComponent({
   template: '<div data-testid="trace-status">{{ status }}</div>',
 })
 
+const operationsBoardStub = defineComponent({
+  emits: ['open-trace'],
+  template: '<button type="button" data-board-trace @click="$emit(\'open-trace\', \'run-board-1\')">打开看板轨迹</button>',
+})
+
 const workflowStub = defineComponent({
   setup() {
     onMounted(() => { mounts.workflow += 1 })
@@ -126,7 +131,7 @@ const operatorStubs = {
   EventTimeline: true,
   CustomerServiceConsole: customerStub,
   SecurityIncidentCenter: securityIncidentStub,
-  ExecutionTraceRail: true,
+  ExecutionTraceRail: traceRailStub,
   'el-select': true,
   'el-option': true,
   'el-tag': true,
@@ -169,6 +174,25 @@ describe('OperationsWorkbench', () => {
     expect(wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())).toEqual([
       '告警工作流', '园区客服', '协同中心', '安全事件研判', '运营看板', '运营分析', '专家协作', '实时语音', '治理中心',
     ])
+  })
+
+  it('subscribes the unified trace when the operations board provides a run id', async () => {
+    vi.stubGlobal('EventSource', class {
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+      addEventListener(): void {}
+      close(): void {}
+    })
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'operations' },
+      global: { stubs: { ...operatorStubs, OperationsBoard: operationsBoardStub } },
+    })
+    await settleCapabilities()
+
+    await wrapper.get('[data-board-trace]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.get('[data-testid="trace-status"]').text()).toBe('streaming')
   })
 
   it('shows security incident review only to approver roles and hands off to collaboration center', async () => {

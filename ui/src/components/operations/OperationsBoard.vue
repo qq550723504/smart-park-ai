@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import OperationsDailyReport from './OperationsDailyReport.vue'
 import AnomalyRadar from './AnomalyRadar.vue'
+import AnomalyEvidenceDrawer from './AnomalyEvidenceDrawer.vue'
 import type { ExecutionTraceLike } from '../../composables/useOperationsAnalysis'
 import type { DemoRole } from '../../types/workflow'
 import type { AnomalyFilters } from '../../types/operationsAnomaly'
+import { ref, watch } from 'vue'
 
 const props = withDefaults(defineProps<{
   role: DemoRole
@@ -43,6 +45,22 @@ const groups = [
     ],
   },
 ]
+const selectedBuildingId = ref<string | null>(null)
+const selectedFilters = ref<AnomalyFilters>({})
+
+function openBuilding(buildingId: string, filters: AnomalyFilters): void {
+  selectedBuildingId.value = buildingId
+  selectedFilters.value = filters
+  emit('open-building', buildingId, filters)
+}
+
+function closeEvidence(): void {
+  selectedBuildingId.value = null
+}
+
+watch(() => props.active, (active) => {
+  if (!active) closeEvidence()
+})
 </script>
 
 <template>
@@ -59,7 +77,16 @@ const groups = [
       :role="props.role"
       :active="props.active"
       @open-analysis="(question) => emit('open-analysis', question)"
-      @open-building="(buildingId, filters) => emit('open-building', buildingId, filters)"
+      @open-building="openBuilding"
+      @open-trace="(runId) => emit('open-trace', runId)"
+    />
+    <AnomalyEvidenceDrawer
+      :role="props.role"
+      :building-id="selectedBuildingId"
+      :filters="selectedFilters"
+      :open="selectedBuildingId !== null"
+      @close="closeEvidence"
+      @open-analysis="(question) => emit('open-analysis', question)"
       @open-trace="(runId) => emit('open-trace', runId)"
     />
     <OperationsDailyReport :role="props.role" :trace="props.trace" :active="props.active" />

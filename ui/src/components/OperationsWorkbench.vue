@@ -179,6 +179,12 @@ function openAnalysisFromBoard(question: string): void {
   switchView('analytics')
 }
 
+function openTraceFromBoard(runId: string): void {
+  const normalized = runId.trim()
+  if (!normalized) return
+  trace.subscribe(normalized)
+}
+
 async function openCollaborationView(view: 'workflow' | 'customer' | 'security-incident', workflowId?: string, _ticketId?: string): Promise<void> {
   const generation = ++navigationGeneration
   if (view === 'security-incident') {
@@ -405,6 +411,7 @@ function confidence(value?: number) {
       :trace="trace"
       :active="props.active && activeView === 'operations'"
       @open-analysis="openAnalysisFromBoard"
+      @open-trace="openTraceFromBoard"
     />
 
     <main v-show="activeView === 'workflow'" class="main-content">

@@ -15,12 +15,21 @@ function queryString(filters: AnomalyFilters = {}): string {
   return encoded ? `?${encoded}` : ''
 }
 
+function assertOverview(value: unknown): asserts value is AnomalyOverview {
+  const candidate = value as Partial<AnomalyOverview> | null
+  if (!candidate || typeof candidate !== 'object' || !candidate.window || !candidate.summary || !candidate.breakdowns || !candidate.domainStatus || !Array.isArray(candidate.buildings)) {
+    throw new Error('异常雷达响应格式无效')
+  }
+}
+
 export async function getAnomalyOverview(role: DemoRole, filters: AnomalyFilters = {}): Promise<AnomalyOverview> {
   const response = await fetch(`/api/operations/anomaly-overview${queryString(filters)}`, {
     headers: { 'X-Demo-Role': role },
   })
   if (!response.ok) throw await readError(response)
-  return response.json() as Promise<AnomalyOverview>
+  const value = await response.json() as unknown
+  assertOverview(value)
+  return value
 }
 
 export async function getAnomalyEvidence(role: DemoRole, buildingId: string, filters: AnomalyFilters = {}): Promise<AnomalyEvidence> {
