@@ -19,14 +19,21 @@ public final class JdbcAlertAnalyticsReader implements AlertAnalyticsReader {
             + "AND (:status IS NULL OR status = :status)";
     private final ReadOnlyQueryExecutor executor;
     private final Optional<WorkflowExecutionStore> workflowStore;
+    private final Optional<com.example.smartpark.execution.ExecutionEventPublisher> events;
 
     public JdbcAlertAnalyticsReader(ReadOnlyQueryExecutor executor) {
-        this(executor, null);
+        this(executor, null, null);
     }
 
     public JdbcAlertAnalyticsReader(ReadOnlyQueryExecutor executor, WorkflowExecutionStore workflowStore) {
+        this(executor, workflowStore, null);
+    }
+
+    public JdbcAlertAnalyticsReader(ReadOnlyQueryExecutor executor, WorkflowExecutionStore workflowStore,
+                                   com.example.smartpark.execution.ExecutionEventPublisher events) {
         this.executor = java.util.Objects.requireNonNull(executor, "executor");
         this.workflowStore = Optional.ofNullable(workflowStore);
+        this.events = Optional.ofNullable(events);
     }
 
     @Override
@@ -88,9 +95,20 @@ public final class JdbcAlertAnalyticsReader implements AlertAnalyticsReader {
                     .map(WorkflowSnapshot::workflowId)
                     .map(LegacyWorkflowEventAdapter::runIdFor)
                     .map(java.util.UUID::toString)
+                    .filter(this::isReplayable)
                     .orElse(null);
         } catch (RuntimeException ignored) {
             return null;
+        }
+    }
+
+    private boolean isReplayable(String runId) {
+        if (events.isEmpty()) return true;
+        try {
+            java.util.UUID id = java.util.UUID.fromString(runId);
+            return !events.get().history(id).isEmpty() && !"UNKNOWN".equals(events.get().status(id));
+        } catch (RuntimeException ignored) {
+            return false;
         }
     }
 

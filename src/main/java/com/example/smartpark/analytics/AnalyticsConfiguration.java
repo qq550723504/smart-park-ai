@@ -168,8 +168,9 @@ public class AnalyticsConfiguration {
 
     @Bean
     AlertAnalyticsReader alertAnalyticsReader(ReadOnlyQueryExecutor readOnlyQueryExecutor,
-                                              ObjectProvider<WorkflowExecutionStore> workflowStore) {
-        return new JdbcAlertAnalyticsReader(readOnlyQueryExecutor, workflowStore.getIfAvailable());
+                                              ObjectProvider<WorkflowExecutionStore> workflowStore,
+                                              com.example.smartpark.execution.ExecutionEventPublisher events) {
+        return new JdbcAlertAnalyticsReader(readOnlyQueryExecutor, workflowStore.getIfAvailable(), events);
     }
 
     @Bean
