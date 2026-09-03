@@ -63,11 +63,14 @@ function analysisQuestion(): string {
     ['status', '告警状态'],
     ['deviceType', '设备类型'],
   ]
-  const energyOnly = !props.filters.deviceType
-    && (evidence.value?.alerts.length ?? 0) === 0
-    && (evidence.value?.devices.length ?? 0) === 0
-    && (evidence.value?.energy.length ?? 0) > 0
-  const metric = props.filters.deviceType ? '离线设备数量' : energyOnly ? '能耗偏差' : '告警数量'
+  const hasAlerts = (evidence.value?.alerts.length ?? 0) > 0
+  const hasDevices = (evidence.value?.devices.length ?? 0) > 0
+  const hasEnergy = (evidence.value?.energy.length ?? 0) > 0
+  const energyOnly = !hasAlerts && !hasDevices && hasEnergy
+  // Evidence, rather than only explicit filters, determines the anomaly domain.
+  // This keeps device-only rows and energy-only rows on the matching analysis.
+  const deviceDriven = !hasAlerts && hasDevices
+  const metric = props.filters.deviceType || deviceDriven ? '离线设备数量' : energyOnly ? '能耗偏差' : '告警数量'
   const activeFilters = filterLabels
     .filter(([key]) => metric === '离线设备数量' ? key === 'deviceType' : key !== 'deviceType')
     .filter(([key]) => props.filters[key])

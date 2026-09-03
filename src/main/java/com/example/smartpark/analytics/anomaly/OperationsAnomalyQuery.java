@@ -34,6 +34,18 @@ public record OperationsAnomalyQuery(
         return new OperationsAnomalyQuery(from, to, buildingId, null, null, null, deviceType);
     }
 
+    public OperationsAnomalyQuery withoutRiskLevel() {
+        return new OperationsAnomalyQuery(from, to, buildingId, null, category, status, deviceType);
+    }
+
+    public OperationsAnomalyQuery withoutCategory() {
+        return new OperationsAnomalyQuery(from, to, buildingId, riskLevel, null, status, deviceType);
+    }
+
+    public OperationsAnomalyQuery withoutStatus() {
+        return new OperationsAnomalyQuery(from, to, buildingId, riskLevel, category, null, deviceType);
+    }
+
     public void validate(Duration maxWindow) {
         if (from == null || to == null) {
             throw new IllegalArgumentException("from and to must be provided before validation");

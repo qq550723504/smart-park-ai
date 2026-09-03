@@ -54,7 +54,17 @@ public final class OperationsAnomalyService {
 
         List<OperationsAnomalyDtos.BuildingSummary> buildings = byBuilding.values().stream()
                 .map(BuildingAccumulator::toDto)
-                .sorted(Comparator.comparingLong(OperationsAnomalyDtos.BuildingSummary::signalCount).reversed()
+                // These metrics have different units. Use a documented domain-priority
+                // tuple instead of adding alert and device counts together.
+                .sorted(Comparator
+                        .comparing((OperationsAnomalyDtos.BuildingSummary row) -> row.energyDeviationPct() != null,
+                                Comparator.reverseOrder())
+                        .thenComparing(row -> row.energyDeviationPct() == null ? 0.0 : Math.abs(row.energyDeviationPct()),
+                                Comparator.reverseOrder())
+                        .thenComparing(OperationsAnomalyDtos.BuildingSummary::alertCount,
+                                Comparator.reverseOrder())
+                        .thenComparing(OperationsAnomalyDtos.BuildingSummary::offlineDeviceCount,
+                                Comparator.reverseOrder())
                         .thenComparing(OperationsAnomalyDtos.BuildingSummary::buildingId))
                 .toList();
         Map<String, List<OperationsAnomalyDtos.Breakdown>> breakdowns = new LinkedHashMap<>();

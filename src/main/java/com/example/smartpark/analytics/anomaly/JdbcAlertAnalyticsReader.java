@@ -34,11 +34,11 @@ public final class JdbcAlertAnalyticsReader implements AlertAnalyticsReader {
         try {
             return executor.executeInConsistentSnapshot(() -> {
                 TabularResult summary = execute("SELECT COUNT(*) AS alert_count, COUNT(*) FILTER (WHERE risk_level = 'HIGH') AS high_risk_alert_count FROM analytics.v_alert_fact " + FILTERS, query);
-                // Facets describe the available choices, not just the current result set.
-                OperationsAnomalyQuery facets = query.withoutAlertFilters();
-                QueryResult<Breakdown> riskLevels = breakdown("risk_level", facets);
-                QueryResult<Breakdown> categories = breakdown("category", facets);
-                QueryResult<Breakdown> statuses = breakdown("status", facets);
+                // Enumerate each selector without its own predicate, while retaining
+                // the other active filters so displayed counts describe the selected slice.
+                QueryResult<Breakdown> riskLevels = breakdown("risk_level", query.withoutRiskLevel());
+                QueryResult<Breakdown> categories = breakdown("category", query.withoutCategory());
+                QueryResult<Breakdown> statuses = breakdown("status", query.withoutStatus());
                 QueryResult<BuildingSummary> buildings = buildings(query);
                 List<Object> row = summary.rows().isEmpty() ? List.of() : summary.rows().get(0);
                 return new Snapshot(JdbcAnomalyReaderSupport.longValue(summary, row, "alert_count"),
@@ -99,9 +99,15 @@ public final class JdbcAlertAnalyticsReader implements AlertAnalyticsReader {
             // Older stores may not expose the serialized alert payload; retain
             // their existing trace behavior, while validating whenever it is available.
             if (snapshot.statePayload() == null || snapshot.statePayload().isEmpty()) return true;
-            return snapshot.statePayload().get("alert") instanceof com.example.smartpark.model.alert.Alert alert
-                    && alert.buildingId().equals(buildingId)
-                    && alert.deviceId().equals(deviceId);
+            Object serialized = snapshot.statePayload().get("alert");
+            if (serialized instanceof com.example.smartpark.model.alert.Alert alert) {
+                return alert.buildingId().equals(buildingId) && alert.deviceId().equals(deviceId);
+            }
+            if (serialized instanceof java.util.Map<?, ?> alert) {
+                return java.util.Objects.equals(String.valueOf(alert.get("buildingId")), buildingId)
+                        && java.util.Objects.equals(String.valueOf(alert.get("deviceId")), deviceId);
+            }
+            return false;
         } catch (RuntimeException ignored) {
             return false;
         }
