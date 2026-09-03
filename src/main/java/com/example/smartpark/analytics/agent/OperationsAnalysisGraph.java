@@ -685,7 +685,8 @@ public class OperationsAnalysisGraph {
             case "area_sqm" -> containsAny(normalized, "按面积", "单位面积", "面积");
             case "map_x", "map_y" -> containsAny(normalized, "空间分布", "地图", "平面图", "位置分布");
             case "risk_level" -> containsAny(normalized, "按风险", "各风险", "按风险等级");
-            case "category" -> containsAny(normalized, "按类别", "各类别", "按分类", "各分类", "按类型", "各类型");
+            case "category" -> containsAny(normalized, "按类别", "各类别", "按分类", "各分类", "按类型", "各类型",
+                    "按告警类型", "各告警类型", "按告警类别", "各告警类别");
             case "status" -> containsAny(normalized, "按状态", "各状态");
             case "device_type" -> containsAny(normalized, "按设备类型", "各设备类型");
             case "parking_zone" -> containsAny(normalized, "按区域", "各区域", "按车区", "各车区", "各停车区域");

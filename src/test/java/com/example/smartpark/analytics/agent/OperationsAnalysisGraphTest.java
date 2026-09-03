@@ -71,6 +71,7 @@ class OperationsAnalysisGraphTest {
         adminDataSource.setUsername(postgres.getUsername());
         adminDataSource.setPassword(postgres.getPassword());
         seedFixedClockEnergyFacts(adminDataSource);
+        seedFixedClockAlertFacts(adminDataSource);
         com.example.smartpark.analytics.AnalyticsRoleCredentials.sync(
                 postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword(), "test-ro-pass");
 
@@ -120,6 +121,22 @@ class OperationsAnalysisGraphTest {
                 new Object[] {"B1", "GRAPH-TEST-B1", Timestamp.from(TEST_NOW.minus(Duration.ofDays(4))), 10.0, 8.0, 20.0},
                 new Object[] {"B2", "GRAPH-TEST-B2", Timestamp.from(TEST_NOW.minus(Duration.ofDays(4))), 11.0, 8.0, 21.0},
                 new Object[] {"B3", "GRAPH-TEST-B3", Timestamp.from(TEST_NOW.minus(Duration.ofDays(4))), 12.0, 8.0, 22.0}));
+    }
+
+    /** Same fixed-clock fixture for alert facts, e.g. for category grouping runs. */
+    private void seedFixedClockAlertFacts(DataSource dataSource) {
+        new JdbcTemplate(dataSource).batchUpdate("""
+                INSERT INTO analytics.alert_fact_raw
+                    (alert_id, building_id, device_id, category, risk_level, occurred_at, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT DO NOTHING
+                """, List.of(
+                new Object[] {"GRAPH-TEST-ALT-001", "B1", "AC-B1-07", "TEMPERATURE", "HIGH",
+                        Timestamp.from(TEST_NOW.minus(Duration.ofDays(4))), "OPEN"},
+                new Object[] {"GRAPH-TEST-ALT-002", "B2", "HUM-B2-11", "TEMPERATURE", "MEDIUM",
+                        Timestamp.from(TEST_NOW.minus(Duration.ofDays(4))), "OPEN"},
+                new Object[] {"GRAPH-TEST-ALT-003", "B3", "DR-B2-01", "POWER", "LOW",
+                        Timestamp.from(TEST_NOW.minus(Duration.ofDays(4))), "RESOLVED"}));
     }
 
     @AfterAll
@@ -304,6 +321,25 @@ class OperationsAnalysisGraphTest {
 
         assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
         assertThat(modelClient.lastPlan().dimensions()).containsExactly("hour_ts");
+    }
+
+    @Test
+    void infersAlertCategoryGroupingFromAlertTypePresetQuestion() {
+        String alertSql = """
+                SELECT category, COUNT(*) AS alert_count FROM analytics.v_alert_fact
+                WHERE occurred_at >= :fromTs AND occurred_at < :toTs
+                GROUP BY category LIMIT 200""";
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("过去7天按告警类型分布", List.of("告警数量"), List.of()),
+                List.of(alertSql),
+                new ChartSpec.Proposal("BAR", "告警类型分布", "category", List.of("alert_count"), "", "条"),
+                "共 2 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "过去7天按告警类型分布");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().dimensions()).containsExactly("category");
+        assertThat(outcome.result().rowCount()).isEqualTo(2);
     }
 
     @Test
