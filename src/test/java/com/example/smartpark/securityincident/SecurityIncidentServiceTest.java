@@ -74,6 +74,21 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void retiresAHandoffWhenItsEntireCorrelationDisappears() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 10, handoffs);
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(incident.incidentId());
+        service.handoff(incident.incidentId());
+        events.clear();
+
+        service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(handoffs.list()).isEmpty();
+    }
+
+    @Test
     void correlationIsStableForShuffledInputAndHighAlert() {
         List<SecurityEvent> events = List.of(
                 event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(9 * 60)),

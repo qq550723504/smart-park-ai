@@ -176,6 +176,7 @@ public final class SecurityIncidentService {
         List<SecurityIncidentHandoff> retainedHandoffs = handoffs.list();
         Set<String> assignedStoredIncidentIds = new HashSet<>();
         Set<String> assignedHandoffWorkItemIds = new HashSet<>();
+        Set<String> correlatedRetainedHandoffWorkItemIds = new HashSet<>();
         List<SecurityIncident> candidatesForRetirement = new ArrayList<>();
         List<SecurityIncidentHandoff> retainedHandoffsForRetirement = new ArrayList<>();
         List<SecurityIncident> restoredIncidents = new ArrayList<>();
@@ -194,6 +195,9 @@ public final class SecurityIncidentService {
             List<SecurityIncidentHandoff> matchingRetainedHandoffs = matchingRetainedHandoffs(fresh, restored,
                     retainedHandoffs);
             retainedHandoffsForRetirement.addAll(matchingRetainedHandoffs);
+            matchingRetainedHandoffs.stream()
+                    .map(SecurityIncidentHandoff::workItemId)
+                    .forEach(correlatedRetainedHandoffWorkItemIds::add);
             restored = restoreHandoffProjection(fresh, restored, matchingRetainedHandoffs);
             if (restored.handoffWorkItemId() != null
                     && !assignedHandoffWorkItemIds.add(restored.handoffWorkItemId())) {
@@ -205,6 +209,9 @@ public final class SecurityIncidentService {
             restoredIncidents.add(restored);
         }
         retireSupersededHandoffs(restoredIncidents, candidatesForRetirement, retainedHandoffsForRetirement);
+        retainedHandoffs.stream()
+                .filter(handoff -> !correlatedRetainedHandoffWorkItemIds.contains(handoff.workItemId()))
+                .forEach(handoff -> handoffs.retire(handoff.incidentId()));
         return List.copyOf(restoredIncidents);
     }
 
