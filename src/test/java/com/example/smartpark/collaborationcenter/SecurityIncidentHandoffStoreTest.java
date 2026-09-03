@@ -11,8 +11,17 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SecurityIncidentHandoffStoreTest {
+    @Test
+    void rejectsHandoffSummariesThatAreNotRedacted() {
+        assertThatThrownBy(() -> new SecurityIncidentHandoff("WI:UNSAFE", "INC-1", "PARK-A", "A1",
+                SecurityIncidentRisk.HIGH, "raw adapter summary", Instant.parse("2026-09-02T08:00:00Z")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("safeSummary");
+    }
+
     @Test
     void createsOneStableHandoffAndProjectsItAsHighPriorityWorkItem() {
         SecurityIncidentHandoffStore store = new SecurityIncidentHandoffStore(10);

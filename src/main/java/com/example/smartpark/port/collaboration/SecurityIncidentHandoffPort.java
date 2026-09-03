@@ -12,12 +12,7 @@ public interface SecurityIncidentHandoffPort {
         return createOrGet(incident, now);
     }
 
-    default SecurityIncidentHandoff fork(SecurityIncident incident, Instant now) {
-        return createOrGet(incident, now);
-    }
-
-    default void retire(String incidentId) {
-    }
+    void retire(String incidentId);
 
     List<SecurityIncidentHandoff> list();
 }

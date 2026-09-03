@@ -54,6 +54,10 @@ class CollaborationCenterConfigurationTest {
                     return List.of(handoff());
                 }
 
+                @Override
+                public void retire(String incidentId) {
+                }
+
                 private SecurityIncidentHandoff handoff() {
                     return new SecurityIncidentHandoff("WI:CUSTOM", "INC-1", "PARK-A", "A1",
                             SecurityIncidentRisk.HIGH, "REDACTED: incident", Instant.parse("2026-09-02T08:00:00Z"));

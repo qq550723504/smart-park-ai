@@ -7,9 +7,7 @@ import java.util.List;
 public interface AlertPort {
     Alert getAlert(String alertId);
 
-    default List<Alert> listActive() {
-        return List.of();
-    }
+    List<Alert> listActive();
 
     List<Alert> findHistory(String deviceId);
 }

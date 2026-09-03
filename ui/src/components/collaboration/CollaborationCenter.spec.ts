@@ -67,6 +67,26 @@ describe('CollaborationCenter', () => {
     expect(wrapper.emitted('open-view')).toEqual([['security-incident', 'INC-NEW']])
   })
 
+  it('hides security-detail navigation from customer agents', async () => {
+    globalThis.fetch = (async (input) => {
+      return String(input).includes('/sla-trend') ? response([]) : response([{
+        id: 'SECURITY_INCIDENT:INC-CUSTOMER', incidentId: 'INC-CUSTOMER', source: 'SECURITY_INCIDENT', status: 'COMPLETED', priority: 'HIGH',
+        title: '安全事件研判 INC-CUSTOMER', safeSummary: 'REDACTED:安全事件摘要', parkId: 'PARK-A', buildingId: 'A1', deviceId: null,
+        updatedAt: '2026-09-01T06:00:00Z', detailPath: 'security-incident',
+      }])
+    }) as typeof fetch
+
+    const wrapper = mount(CollaborationCenter, { props: { role: 'CUSTOMER_AGENT' } })
+    await flushPromises()
+
+    const item = wrapper.get('[data-work-item="SECURITY_INCIDENT:INC-CUSTOMER"]')
+    expect(item.find('[data-work-item-open]').exists()).toBe(false)
+    await item.get('[data-work-item-details]').trigger('click')
+    const drawer = document.body.querySelector('[role="dialog"]') as HTMLElement
+    expect(drawer.querySelector('[data-work-item-open]')).toBeNull()
+    expect(wrapper.emitted('open-view')).toBeUndefined()
+  })
+
   it('loads and highlights a focused work item outside the first page', async () => {
     const focused = {
       id: 'SECURITY_INCIDENT:INC-1', source: 'SECURITY_INCIDENT', status: 'COMPLETED', priority: 'HIGH',

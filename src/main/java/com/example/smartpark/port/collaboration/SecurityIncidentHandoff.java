@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 
+import com.example.smartpark.model.security.RedactedEvidencePolicy;
 import com.example.smartpark.securityincident.SecurityIncidentRisk;
 
 public record SecurityIncidentHandoff(String workItemId, String incidentId, String parkId, String buildingId,
@@ -35,7 +36,7 @@ public record SecurityIncidentHandoff(String workItemId, String incidentId, Stri
         parkId = requireText(parkId, "parkId");
         buildingId = requireText(buildingId, "buildingId");
         riskLevel = Objects.requireNonNull(riskLevel, "riskLevel");
-        safeSummary = requireText(safeSummary, "safeSummary");
+        safeSummary = RedactedEvidencePolicy.require(safeSummary, "safeSummary");
         createdAt = Objects.requireNonNull(createdAt, "createdAt");
         updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
         eventType = eventType == null || eventType.isBlank() ? null : eventType.trim();

@@ -281,6 +281,11 @@ class SecurityIncidentServiceTest {
 
             @Override
             public List<SecurityIncidentHandoff> list() { return List.copyOf(created); }
+
+            @Override
+            public void retire(String incidentId) {
+                created.removeIf(handoff -> handoff.incidentId().equals(incidentId));
+            }
         };
         SecurityIncidentService service = service(List.of(event("SEC-1", "A1", "ACCESS", BASE)), List.of(), 50, handoffs);
         String incidentId = service.list(new SecurityIncidentQuery(null, 20)).items().get(0).incidentId();
@@ -585,8 +590,27 @@ class SecurityIncidentServiceTest {
             }
 
             @Override
+            public SecurityIncidentHandoff refresh(SecurityIncident incident, Instant now) {
+                SecurityIncidentHandoff existing = created.stream()
+                        .filter(handoff -> handoff.workItemId().equals(incident.handoffWorkItemId()))
+                        .findFirst().orElse(null);
+                if (existing == null) return createOrGet(incident, now);
+                SecurityIncidentHandoff refreshed = new SecurityIncidentHandoff(existing.workItemId(), incident.incidentId(),
+                        incident.parkId(), incident.buildingId(), incident.riskLevel(), incident.summary(),
+                        existing.createdAt(), existing.reviewedAt(), now, incident.eventType(), incident.eventIds());
+                created.removeIf(handoff -> handoff.workItemId().equals(existing.workItemId()));
+                created.add(refreshed);
+                return refreshed;
+            }
+
+            @Override
             public List<SecurityIncidentHandoff> list() {
                 return List.copyOf(created);
+            }
+
+            @Override
+            public void retire(String incidentId) {
+                created.removeIf(handoff -> handoff.incidentId().equals(incidentId));
             }
         });
     }

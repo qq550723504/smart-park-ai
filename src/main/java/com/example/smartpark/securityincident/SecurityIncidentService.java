@@ -198,6 +198,9 @@ public final class SecurityIncidentService {
                     .map(SecurityIncidentHandoff::workItemId)
                     .forEach(correlatedRetainedHandoffWorkItemIds::add);
             restored = restoreHandoffProjection(fresh, restored, matchingRetainedHandoffs);
+            if (restored.handoffWorkItemId() != null) {
+                correlatedRetainedHandoffWorkItemIds.add(restored.handoffWorkItemId());
+            }
             restoredIncidents.add(restored);
         }
         Set<String> retainedRestoredIncidentIds = restoredIncidents.stream()

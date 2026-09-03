@@ -93,6 +93,9 @@ function sourceLabel(value: CollaborationWorkItemSource): string { return source
 function detailLabel(value: CollaborationWorkItem['detailPath']): string {
   return ({ workflow: '打开告警工作流', customer: '打开客服控制台', 'security-incident': '打开安全事件' } as Record<CollaborationWorkItem['detailPath'], string>)[value]
 }
+function canOpenScene(item: CollaborationWorkItem): boolean {
+  return item.detailPath !== 'security-incident' || props.role === 'ADMIN' || props.role === 'APPROVER'
+}
 function formatTime(value: string): string {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? '时间未知' : date.toLocaleString('zh-CN', { hour12: false })
@@ -177,6 +180,7 @@ async function loadTrend(generation: number): Promise<void> {
 }
 
 function openScene(item: CollaborationWorkItem): void {
+  if (!canOpenScene(item)) return
   if (item.detailPath === 'workflow' || item.detailPath === 'customer' || item.detailPath === 'security-incident') {
     if (item.detailPath === 'workflow') {
       emit('open-view', item.detailPath, item.id.replace(/^ALERT_WORKFLOW:/, ''))
@@ -392,7 +396,7 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
       <section class="collaboration-list" aria-label="工作项列表">
         <article v-for="item in sortedItems" :key="item.id" class="panel collaboration-item" :class="{ 'is-focused': item.id === props.focusWorkItemId }" :data-work-item="item.id">
           <div class="collaboration-item__main"><div class="collaboration-item__meta"><span>{{ sourceLabel(item.source) }}</span><span :class="['priority', item.priority === 'HIGH' ? 'is-high' : '']">{{ item.priority === 'HIGH' ? '高优先级' : '常规' }}</span><small>{{ item.id }}</small></div><h3>{{ item.title }}</h3><p>{{ item.safeSummary }}</p></div>
-          <div class="collaboration-item__status"><strong>{{ statusLabel(item.status) }}</strong><span :class="['collaboration-sla', slaClass(item.slaState)]">{{ slaLabel(item.slaState) }}</span><small>{{ formatTime(item.updatedAt) }}</small><button type="button" data-work-item-open @click="openScene(item)">{{ detailLabel(item.detailPath) }}</button><button type="button" data-work-item-details @click="openDetails(item, $event)">查看详情</button></div>
+          <div class="collaboration-item__status"><strong>{{ statusLabel(item.status) }}</strong><span :class="['collaboration-sla', slaClass(item.slaState)]">{{ slaLabel(item.slaState) }}</span><small>{{ formatTime(item.updatedAt) }}</small><button v-if="canOpenScene(item)" type="button" data-work-item-open @click="openScene(item)">{{ detailLabel(item.detailPath) }}</button><button type="button" data-work-item-details @click="openDetails(item, $event)">查看详情</button></div>
         </article>
         <p v-if="items.length === 0" class="panel collaboration-empty">当前没有可展示的工作项。</p>
       </section>
@@ -415,7 +419,7 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
           <button type="button" data-collaboration-action="customer-next" :disabled="actionBusy" @click="advanceSelectedTicket">{{ actionBusy ? '处理中…' : `推进至${statusLabel(customerNextStatus as CollaborationWorkItemStatus)}` }}</button>
         </section>
         <p v-if="actionError" class="collaboration-drawer__action-error" data-collaboration-action-error role="alert">{{ actionError }}</p>
-        <div class="collaboration-drawer__actions"><button type="button" @click="openScene(selectedItem)">{{ detailLabel(selectedItem.detailPath) }}</button><button type="button" @click="handleCloseClick">关闭</button></div>
+        <div class="collaboration-drawer__actions"><button v-if="canOpenScene(selectedItem)" type="button" data-work-item-open @click="openScene(selectedItem)">{{ detailLabel(selectedItem.detailPath) }}</button><button type="button" @click="handleCloseClick">关闭</button></div>
         </aside>
       </div>
     </Teleport>
