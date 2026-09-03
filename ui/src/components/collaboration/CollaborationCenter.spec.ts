@@ -129,6 +129,35 @@ describe('CollaborationCenter', () => {
     expect(wrapper.find(`[data-work-item="${focused.id}"]`).exists()).toBe(false)
   })
 
+  it('reconsumes the focused-item override when navigation refreshes', async () => {
+    const focused = {
+      id: 'SECURITY_INCIDENT:INC-REVISIT', source: 'SECURITY_INCIDENT', status: 'COMPLETED', priority: 'HIGH',
+      title: '安全事件研判 INC-REVISIT', safeSummary: 'REDACTED:安全事件摘要', parkId: 'PARK-A', buildingId: 'A1', deviceId: null,
+      updatedAt: '2026-09-01T06:00:00Z', detailPath: 'security-incident',
+    }
+    const focusCalls: string[] = []
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      if (url.includes('workItemId=')) {
+        focusCalls.push(url)
+        return response([focused])
+      }
+      return response([])
+    }) as typeof fetch
+
+    const wrapper = mount(CollaborationCenter, {
+      props: { role: 'ADMIN', focusWorkItemId: focused.id, refreshToken: 0 },
+    })
+    await flushPromises()
+    expect(focusCalls).toHaveLength(1)
+
+    await wrapper.setProps({ refreshToken: 1 })
+    await flushPromises()
+
+    expect(focusCalls).toHaveLength(2)
+    expect(wrapper.get(`[data-work-item="${focused.id}"]`).classes()).toContain('is-focused')
+  })
+
   it('ignores a stale queue response after the filters change', async () => {
     let resolveFirst!: (value: Response) => void
     let resolveSecond!: (value: Response) => void
