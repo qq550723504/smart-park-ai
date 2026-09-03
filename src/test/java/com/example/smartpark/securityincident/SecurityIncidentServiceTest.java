@@ -262,6 +262,66 @@ class SecurityIncidentServiceTest {
         assertThat(service.get(page.items().get(0).incidentId())).isEqualTo(page.items().get(0));
     }
 
+    @Test
+    void keepsHandedOffIncidentsReachableAfterStateEviction() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 1, handoffs);
+        SecurityIncident handedOff = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(handedOff.incidentId());
+        SecurityIncident completed = service.handoff(handedOff.incidentId());
+        events.add(event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(16 * 60)));
+
+        service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(service.get(handedOff.incidentId()).status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(service.get(handedOff.incidentId()).handoffWorkItemId())
+                .isEqualTo(completed.handoffWorkItemId());
+    }
+
+    @Test
+    void preservesFinalizedStateForEveryGroupAfterACorrelationResplit() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-1", "A1", "ACCESS", BASE),
+                event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(16 * 60)),
+                event("SEC-BRIDGE", "A1", "ACCESS", BASE.plusSeconds(8 * 60))));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 50, handoffs);
+        SecurityIncident merged = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(merged.incidentId());
+        SecurityIncident completed = service.handoff(merged.incidentId());
+        events.removeIf(event -> event.eventId().equals("SEC-BRIDGE"));
+
+        SecurityIncidentPage split = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(split.items()).hasSize(2);
+        assertThat(split.items()).extracting(SecurityIncident::status)
+                .containsOnly(SecurityIncidentStatus.HANDOFF);
+        assertThat(split.items()).extracting(SecurityIncident::handoffWorkItemId)
+                .containsOnly(completed.handoffWorkItemId());
+    }
+
+    @Test
+    void retiresSupersededHandoffsWhenCorrelationWindowsMerge() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-1", "A1", "ACCESS", BASE),
+                event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(16 * 60))));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 50, handoffs);
+        List<SecurityIncident> separated = service.list(new SecurityIncidentQuery(null, 20)).items();
+        for (SecurityIncident incident : separated) {
+            service.review(incident.incidentId());
+            service.handoff(incident.incidentId());
+        }
+        events.add(event("SEC-BRIDGE", "A1", "ACCESS", BASE.plusSeconds(8 * 60)));
+
+        SecurityIncident merged = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(handoffs.list()).singleElement()
+                .extracting(SecurityIncidentHandoff::workItemId)
+                .isEqualTo(merged.handoffWorkItemId());
+    }
+
     private static SecurityIncidentService service(List<SecurityEvent> events) {
         return service(events, List.of(), 50);
     }

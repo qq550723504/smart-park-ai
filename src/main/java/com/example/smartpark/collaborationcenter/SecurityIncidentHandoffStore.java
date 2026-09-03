@@ -64,6 +64,12 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
         return createOrGet(incident, now);
     }
 
+    @Override
+    public synchronized void retire(String incidentId) {
+        handoffs.entrySet().removeIf(entry -> entry.getKey().equals(incidentId)
+                || entry.getValue().incidentId().equals(incidentId));
+    }
+
     private void trimToCapacity() {
         while (handoffs.size() > capacity) {
             String oldest = handoffs.entrySet().stream()

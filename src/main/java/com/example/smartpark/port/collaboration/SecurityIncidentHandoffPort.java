@@ -12,5 +12,8 @@ public interface SecurityIncidentHandoffPort {
         return createOrGet(incident, now);
     }
 
+    default void retire(String incidentId) {
+    }
+
     List<SecurityIncidentHandoff> list();
 }

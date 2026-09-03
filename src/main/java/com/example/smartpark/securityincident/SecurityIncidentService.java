@@ -49,16 +49,23 @@ public final class SecurityIncidentService {
         Objects.requireNonNull(query, "query");
         List<SecurityIncident> correlated = correlate();
         List<SecurityIncident> merged = restoreStates(correlated);
+        Set<String> refreshedHandoffs = new HashSet<>();
         merged.forEach(incident -> {
             store.save(incident);
-            if (incident.status() == SecurityIncidentStatus.HANDOFF) {
+            if (incident.status() == SecurityIncidentStatus.HANDOFF
+                    && incident.handoffWorkItemId() != null
+                    && refreshedHandoffs.add(incident.handoffWorkItemId())) {
                 handoffs.refresh(incident, clock.instant());
             }
         });
-        java.util.Set<String> currentIds = merged.stream().map(SecurityIncident::incidentId)
+        Set<String> retainedIncidentIds = store.findAll().stream().map(SecurityIncident::incidentId)
                 .collect(java.util.stream.Collectors.toSet());
-        List<SecurityIncident> filtered = store.findAll().stream()
-                .filter(incident -> currentIds.contains(incident.incidentId()))
+        Set<String> retainedHandoffIncidentIds = handoffs.list().stream()
+                .map(SecurityIncidentHandoff::incidentId)
+                .collect(java.util.stream.Collectors.toSet());
+        List<SecurityIncident> filtered = merged.stream()
+                .filter(incident -> retainedIncidentIds.contains(incident.incidentId())
+                        || retainedHandoffIncidentIds.contains(incident.incidentId()))
                 .filter(incident -> query.status() == null || incident.status() == query.status())
                 .sorted(Comparator.comparing(SecurityIncident::riskLevel, Comparator.comparingInt(SecurityIncidentService::riskRank).reversed())
                         .thenComparing(SecurityIncident::lastOccurredAt, Comparator.reverseOrder())
@@ -155,18 +162,37 @@ public final class SecurityIncidentService {
     }
 
     private List<SecurityIncident> restoreStates(List<SecurityIncident> freshIncidents) {
-        Set<String> consumed = new HashSet<>();
         List<SecurityIncident> stored = store.findAll();
+        List<SecurityIncidentHandoff> retainedHandoffs = handoffs.list();
         return freshIncidents.stream().map(fresh -> {
             List<SecurityIncident> candidates = stored.stream()
-                    .filter(existing -> !consumed.contains(existing.incidentId()))
                     .filter(existing -> sameCorrelation(existing, fresh))
                     .filter(existing -> overlaps(existing, fresh))
                     .toList();
             SecurityIncident restored = restoreState(fresh, candidates);
-            candidates.forEach(existing -> consumed.add(existing.incidentId()));
-            return restored;
+            retireSupersededHandoffs(restored, candidates);
+            return restoreHandoffProjection(fresh, restored, retainedHandoffs);
         }).toList();
+    }
+
+    private void retireSupersededHandoffs(SecurityIncident restored, List<SecurityIncident> candidates) {
+        candidates.stream()
+                .filter(existing -> existing.handoffWorkItemId() != null)
+                .filter(existing -> !existing.handoffWorkItemId().equals(restored.handoffWorkItemId()))
+                .forEach(existing -> handoffs.retire(existing.incidentId()));
+    }
+
+    private static SecurityIncident restoreHandoffProjection(SecurityIncident fresh, SecurityIncident restored,
+                                                             List<SecurityIncidentHandoff> retainedHandoffs) {
+        if (restored.handoffWorkItemId() != null) return restored;
+        SecurityIncidentHandoff handoff = retainedHandoffs.stream()
+                .filter(existing -> existing.incidentId().equals(restored.incidentId())
+                        || existing.incidentId().equals(fresh.incidentId()))
+                .findFirst()
+                .orElse(null);
+        if (handoff == null) return restored;
+        return withStoredState(fresh, fresh.incidentId(), SecurityIncidentStatus.HANDOFF, restored.reviewedAt(),
+                handoff.workItemId());
     }
 
     private SecurityIncident restoreState(SecurityIncident fresh, List<SecurityIncident> candidates) {
