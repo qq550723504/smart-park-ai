@@ -1,14 +1,20 @@
 <script setup lang="ts">
 import OperationsDailyReport from './OperationsDailyReport.vue'
+import AnomalyRadar from './AnomalyRadar.vue'
 import type { ExecutionTraceLike } from '../../composables/useOperationsAnalysis'
 import type { DemoRole } from '../../types/workflow'
+import type { AnomalyFilters } from '../../types/operationsAnomaly'
 
 const props = withDefaults(defineProps<{
   role: DemoRole
   trace?: ExecutionTraceLike
   active?: boolean
 }>(), { active: true })
-const emit = defineEmits<{ 'open-analysis': [question: string] }>()
+const emit = defineEmits<{
+  'open-analysis': [question: string]
+  'open-building': [buildingId: string, filters: AnomalyFilters]
+  'open-trace': [runId: string]
+}>()
 
 const groups = [
   {
@@ -49,6 +55,13 @@ const groups = [
       </div>
       <div class="hero-metrics"><div><strong>14</strong><span>受控问题</span></div><div><strong>只读</strong><span>执行模式</span></div></div>
     </section>
+    <AnomalyRadar
+      :role="props.role"
+      :active="props.active"
+      @open-analysis="(question) => emit('open-analysis', question)"
+      @open-building="(buildingId, filters) => emit('open-building', buildingId, filters)"
+      @open-trace="(runId) => emit('open-trace', runId)"
+    />
     <OperationsDailyReport :role="props.role" :trace="props.trace" :active="props.active" />
     <section v-for="group in groups" :key="group.title" class="panel operations-board__group" :aria-label="group.title">
       <div class="section-heading compact"><div><span class="eyebrow">指标分组</span><h2>{{ group.title }}</h2></div><span class="count-badge">{{ group.questions.length }} 个入口</span></div>

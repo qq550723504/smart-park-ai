@@ -1,0 +1,132 @@
+<script setup lang="ts">
+import { onMounted, ref, watch } from 'vue'
+import type { DemoRole } from '../../types/workflow'
+import type { AnomalyFilters, AnomalyOverview } from '../../types/operationsAnomaly'
+import { getAnomalyOverview } from '../../services/operationsAnomalyApi'
+
+const props = withDefaults(defineProps<{ role: DemoRole; active?: boolean }>(), { active: true })
+const emit = defineEmits<{
+  'open-building': [buildingId: string, filters: AnomalyFilters]
+  'open-analysis': [question: string]
+  'open-trace': [runId: string]
+}>()
+
+const overview = ref<AnomalyOverview | null>(null)
+const loading = ref(false)
+const error = ref('')
+let requestGeneration = 0
+
+async function load(): Promise<void> {
+  if (!props.active) return
+  const generation = ++requestGeneration
+  loading.value = true
+  error.value = ''
+  try {
+    const value = await getAnomalyOverview(props.role)
+    if (generation !== requestGeneration) return
+    overview.value = value
+  } catch (cause) {
+    if (generation !== requestGeneration) return
+    overview.value = null
+    error.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    if (generation === requestGeneration) loading.value = false
+  }
+}
+
+function dateLabel(value: string): string {
+  const date = new Date(value)
+  return Number.isNaN(date.valueOf()) ? value : date.toISOString().slice(0, 10).replaceAll('-', '/')
+}
+
+function domainUnavailable(domain: string): boolean {
+  return overview.value?.domainStatus[domain] === 'UNAVAILABLE'
+}
+
+function valueOrDash(value: number, domain: string): string {
+  return domainUnavailable(domain) ? '—' : String(value)
+}
+
+function energyLabel(value: number | null): string {
+  return value == null ? '—' : `${value}%`
+}
+
+watch([() => props.active, () => props.role], ([active]) => {
+  if (active) void load()
+})
+onMounted(() => { void load() })
+</script>
+
+<template>
+  <section class="panel anomaly-radar" data-anomaly-radar>
+    <div class="section-heading compact">
+      <div><span class="eyebrow">异常雷达 · 只读聚合</span><h2>运营异常总览</h2></div>
+      <button type="button" class="anomaly-radar__retry" :disabled="loading || !props.active" @click="load">{{ loading ? '同步中…' : '刷新' }}</button>
+    </div>
+    <p v-if="overview" class="anomaly-radar__window">数据窗口：{{ dateLabel(overview.window.from) }} ~ {{ dateLabel(overview.window.to) }} · 设备快照：{{ dateLabel(overview.asOf) }}</p>
+    <p v-if="error" class="anomaly-radar__state anomaly-radar__state--error">{{ error }} <button type="button" @click="load">重试</button></p>
+    <p v-else-if="loading && !overview" class="anomaly-radar__state">正在读取异常聚合…</p>
+    <p v-else-if="!overview" class="anomaly-radar__state">异常雷达暂不可用，请确认运营分析能力已启用。</p>
+    <template v-else>
+      <div class="anomaly-radar__cards">
+        <article class="anomaly-radar__card"><span>近 7 天告警</span><strong>{{ valueOrDash(overview.summary.alertCount, 'alerts') }}</strong></article>
+        <article class="anomaly-radar__card anomaly-radar__card--danger"><span>近 7 天高风险告警</span><strong>{{ valueOrDash(overview.summary.highRiskAlertCount, 'alerts') }}</strong></article>
+        <article class="anomaly-radar__card"><span>最近 1 天离线设备</span><strong>{{ valueOrDash(overview.summary.offlineDeviceCount, 'devices') }}</strong></article>
+        <article class="anomaly-radar__card"><span>受影响楼宇</span><strong>{{ valueOrDash(overview.summary.affectedBuildingCount, 'alerts') }}</strong></article>
+      </div>
+      <div class="anomaly-radar__status" aria-label="数据域状态">
+        <span v-for="(status, domain) in overview.domainStatus" :key="domain" :data-domain-status="status">{{ domain }}：{{ status }}</span>
+      </div>
+      <p v-if="domainUnavailable('energy')" class="anomaly-radar__state anomaly-radar__state--warning">能耗数据暂不可用</p>
+      <div class="anomaly-radar__body">
+        <div class="anomaly-radar__breakdowns">
+          <div v-for="(items, name) in overview.breakdowns" :key="name" class="anomaly-radar__breakdown">
+            <strong>{{ name === 'riskLevels' ? '风险等级' : name === 'categories' ? '告警类别' : name === 'statuses' ? '告警状态' : '离线设备类型' }}</strong>
+            <span v-for="item in items" :key="item.key"><i>{{ item.key }}</i><b>{{ item.count }}</b></span>
+            <small v-if="items.length === 0">暂无数据</small>
+          </div>
+        </div>
+        <div class="anomaly-radar__buildings">
+          <strong>异常楼宇排行</strong>
+          <button v-for="building in overview.buildings" :key="building.buildingId" type="button" :data-anomaly-building="building.buildingId" @click="emit('open-building', building.buildingId, {})">
+            <span>{{ building.buildingId }}</span><small>告警 {{ building.alertCount }} · 离线 {{ building.offlineDeviceCount }} · 能耗偏差 {{ energyLabel(building.energyDeviationPct) }}</small>
+          </button>
+          <small v-if="overview.buildings.length === 0">当前窗口暂无异常楼宇</small>
+        </div>
+      </div>
+    </template>
+  </section>
+</template>
+
+<style scoped>
+.anomaly-radar { margin-bottom: 18px; padding: 24px; }
+.anomaly-radar__retry { border: 1px solid var(--showcase-cyan); color: var(--showcase-cyan); background: transparent; padding: 8px 13px; cursor: pointer; }
+.anomaly-radar__retry:disabled { opacity: .55; cursor: not-allowed; }
+.anomaly-radar__window, .anomaly-radar__state { color: var(--showcase-muted); }
+.anomaly-radar__state--error { color: var(--showcase-danger, #ff8a8a); }
+.anomaly-radar__state--warning { color: #f4c46b; }
+.anomaly-radar__state button { margin-left: 8px; color: var(--showcase-cyan); border: 0; background: transparent; cursor: pointer; }
+.anomaly-radar__cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.anomaly-radar__card { padding: 14px; border: 1px solid var(--showcase-border-soft); background: rgba(12, 17, 26, .42); }
+.anomaly-radar__card span, .anomaly-radar__card strong { display: block; }
+.anomaly-radar__card span { color: var(--showcase-muted); font-size: .82rem; }
+.anomaly-radar__card strong { margin-top: 6px; color: var(--showcase-cyan); font-size: 1.55rem; }
+.anomaly-radar__card--danger strong { color: var(--showcase-danger, #ff8a8a); }
+.anomaly-radar__status { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; color: var(--showcase-muted); font-size: .78rem; }
+.anomaly-radar__status span { padding: 4px 8px; border: 1px solid var(--showcase-border-soft); }
+.anomaly-radar__status span[data-domain-status="UNAVAILABLE"] { color: #f4c46b; }
+.anomaly-radar__body { display: grid; grid-template-columns: 1.25fr .75fr; gap: 14px; }
+.anomaly-radar__breakdowns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.anomaly-radar__breakdown, .anomaly-radar__buildings { border: 1px solid var(--showcase-border-soft); padding: 13px; background: rgba(12, 17, 26, .28); }
+.anomaly-radar__breakdown > strong, .anomaly-radar__buildings > strong { display: block; margin-bottom: 8px; }
+.anomaly-radar__breakdown span { display: flex; justify-content: space-between; padding: 5px 0; color: var(--showcase-muted); border-bottom: 1px solid var(--showcase-border-soft); }
+.anomaly-radar__breakdown i { font-style: normal; }
+.anomaly-radar__breakdown b { color: var(--showcase-ivory); }
+.anomaly-radar__breakdown small, .anomaly-radar__buildings > small { color: var(--showcase-muted); }
+.anomaly-radar__buildings button { display: block; width: 100%; padding: 9px 0; color: var(--showcase-ivory); text-align: left; border: 0; border-bottom: 1px solid var(--showcase-border-soft); background: transparent; cursor: pointer; }
+.anomaly-radar__buildings button:hover { color: var(--showcase-cyan); }
+.anomaly-radar__buildings button span, .anomaly-radar__buildings button small { display: block; }
+.anomaly-radar__buildings button small { margin-top: 3px; color: var(--showcase-muted); }
+@media (max-width: 850px) { .anomaly-radar__cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .anomaly-radar__body { grid-template-columns: 1fr; } }
+@media (max-width: 520px) { .anomaly-radar__cards, .anomaly-radar__breakdowns { grid-template-columns: 1fr; } }
+</style>
