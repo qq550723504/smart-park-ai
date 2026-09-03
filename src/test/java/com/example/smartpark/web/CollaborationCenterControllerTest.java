@@ -139,6 +139,6 @@ class CollaborationCenterControllerTest {
                 "告警处置 ALT-POWER-001", "告警 ALT-POWER-001 · A2 · DEV-POWER-001",
                 "PARK-A", "A2", "DEV-POWER-001", Instant.parse("2026-09-01T08:30:00Z"),
                 Instant.parse("2026-09-01T08:00:00Z"), Instant.parse("2026-09-01T08:30:00Z"),
-                CollaborationWorkItem.SlaState.DUE_SOON, "workflow");
+                CollaborationWorkItem.SlaState.DUE_SOON, "workflow", null);
     }
 }

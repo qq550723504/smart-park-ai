@@ -23,6 +23,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.HashSet;
+import java.util.Set;
 
 public final class SecurityIncidentService {
     private static final Duration GROUPING_WINDOW = Duration.ofMinutes(15);
@@ -46,7 +48,7 @@ public final class SecurityIncidentService {
     public synchronized SecurityIncidentPage list(SecurityIncidentQuery query) {
         Objects.requireNonNull(query, "query");
         List<SecurityIncident> correlated = correlate();
-        List<SecurityIncident> merged = correlated.stream().map(this::restoreState).toList();
+        List<SecurityIncident> merged = restoreStates(correlated);
         merged.forEach(incident -> {
             store.save(incident);
             if (incident.status() == SecurityIncidentStatus.HANDOFF) {
@@ -152,34 +154,48 @@ public final class SecurityIncidentService {
         return result;
     }
 
-    private SecurityIncident restoreState(SecurityIncident fresh) {
-        List<SecurityIncident> candidates = store.findAll().stream()
-                .filter(existing -> sameCorrelation(existing, fresh))
-                .filter(existing -> fresh.eventIds().containsAll(existing.eventIds()))
-                .toList();
+    private List<SecurityIncident> restoreStates(List<SecurityIncident> freshIncidents) {
+        Set<String> consumed = new HashSet<>();
+        List<SecurityIncident> stored = store.findAll();
+        return freshIncidents.stream().map(fresh -> {
+            List<SecurityIncident> candidates = stored.stream()
+                    .filter(existing -> !consumed.contains(existing.incidentId()))
+                    .filter(existing -> sameCorrelation(existing, fresh))
+                    .filter(existing -> overlaps(existing, fresh))
+                    .toList();
+            SecurityIncident restored = restoreState(fresh, candidates);
+            candidates.forEach(existing -> consumed.add(existing.incidentId()));
+            return restored;
+        }).toList();
+    }
+
+    private SecurityIncident restoreState(SecurityIncident fresh, List<SecurityIncident> candidates) {
         if (candidates.isEmpty()) return fresh;
 
-        SecurityIncident state = candidates.stream()
-                .max(Comparator.comparingInt(existing -> statusRank(existing.status())))
+        SecurityIncident canonical = candidates.stream()
+                .min(Comparator.comparing(SecurityIncident::openedAt).thenComparing(SecurityIncident::incidentId))
                 .orElseThrow();
         List<String> handoffIds = candidates.stream()
                 .map(SecurityIncident::handoffWorkItemId)
                 .filter(Objects::nonNull)
                 .distinct()
                 .toList();
-        if (handoffIds.size() > 1) {
-            throw new IllegalStateException("cannot merge security incidents with conflicting handoff work items");
-        }
-        SecurityIncident canonical = candidates.stream()
-                .min(Comparator.comparing(SecurityIncident::openedAt).thenComparing(SecurityIncident::incidentId))
+        boolean conflictingHandoffs = handoffIds.size() > 1;
+        SecurityIncident state = conflictingHandoffs ? canonical : candidates.stream()
+                .max(Comparator.comparingInt(existing -> statusRank(existing.status())))
                 .orElseThrow();
-        Instant reviewedAt = candidates.stream()
+        Instant reviewedAt = conflictingHandoffs ? canonical.reviewedAt() : candidates.stream()
                 .map(SecurityIncident::reviewedAt)
                 .filter(Objects::nonNull)
                 .max(Comparator.naturalOrder())
                 .orElse(null);
-        return withStoredState(fresh, canonical.incidentId(), state.status(), reviewedAt,
-                handoffIds.isEmpty() ? null : handoffIds.get(0));
+        String handoffWorkItemId = conflictingHandoffs ? canonical.handoffWorkItemId()
+                : handoffIds.isEmpty() ? null : handoffIds.get(0);
+        return withStoredState(fresh, canonical.incidentId(), state.status(), reviewedAt, handoffWorkItemId);
+    }
+
+    private static boolean overlaps(SecurityIncident left, SecurityIncident right) {
+        return left.eventIds().stream().anyMatch(right.eventIds()::contains);
     }
 
     private static SecurityIncident withStoredState(SecurityIncident fresh, String incidentId, SecurityIncidentStatus status,

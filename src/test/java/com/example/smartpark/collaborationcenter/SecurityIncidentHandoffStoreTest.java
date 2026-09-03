@@ -72,6 +72,23 @@ class SecurityIncidentHandoffStoreTest {
         assertThat(store.list()).containsExactly(migrated);
     }
 
+    @Test
+    void evictsByCreationTimeAfterAHandOffIsRekeyed() {
+        SecurityIncidentHandoffStore store = new SecurityIncidentHandoffStore(2);
+        Instant now = Instant.parse("2026-09-02T10:00:00Z");
+        SecurityIncidentHandoff old = store.createOrGet(incident("INC-OLD"), now);
+        SecurityIncidentHandoff newer = store.createOrGet(incident("INC-NEW"), now.plusSeconds(1));
+        SecurityIncident migratedIncident = new SecurityIncident("INC-MIGRATED", "PARK-A", "A1", "ACCESS",
+                SecurityIncidentRisk.HIGH, SecurityIncidentStatus.HANDOFF, now, now, List.of("SEC-1"), List.of("ALT-1"),
+                List.of(new SecurityIncidentEvidence("SEC-1", now, "REDACTED:migrated")), List.of(),
+                List.of("核对安全处置手册。"), now, old.workItemId());
+        store.refresh(migratedIncident, now.plusSeconds(2));
+        SecurityIncidentHandoff latest = store.createOrGet(incident("INC-LATEST"), now.plusSeconds(3));
+
+        assertThat(store.list()).extracting(SecurityIncidentHandoff::workItemId)
+                .containsExactly(newer.workItemId(), latest.workItemId());
+    }
+
     private static SecurityIncident incident() {
         return incident("INC-1");
     }

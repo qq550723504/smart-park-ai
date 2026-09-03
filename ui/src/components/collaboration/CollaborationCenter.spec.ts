@@ -51,6 +51,22 @@ describe('CollaborationCenter', () => {
     ])
   })
 
+  it('opens a migrated security handoff using its current incident id', async () => {
+    globalThis.fetch = (async (input) => {
+      return String(input).includes('/sla-trend') ? response([]) : response([{
+        id: 'SECURITY_INCIDENT:INC-OLD', incidentId: 'INC-NEW', source: 'SECURITY_INCIDENT', status: 'COMPLETED', priority: 'HIGH',
+        title: '安全事件研判 INC-NEW', safeSummary: 'REDACTED:安全事件摘要', parkId: 'PARK-A', buildingId: 'A1', deviceId: null,
+        updatedAt: '2026-09-01T06:00:00Z', detailPath: 'security-incident',
+      }])
+    }) as typeof fetch
+
+    const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
+    await flushPromises()
+    await wrapper.get('[data-work-item="SECURITY_INCIDENT:INC-OLD"] button').trigger('click')
+
+    expect(wrapper.emitted('open-view')).toEqual([['security-incident', 'INC-NEW']])
+  })
+
   it('loads and highlights a focused work item outside the first page', async () => {
     const focused = {
       id: 'SECURITY_INCIDENT:INC-1', source: 'SECURITY_INCIDENT', status: 'COMPLETED', priority: 'HIGH',

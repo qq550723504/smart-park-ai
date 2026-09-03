@@ -31,6 +31,7 @@ export interface CollaborationWorkItem {
   slaDueAt: string | null
   slaState: CollaborationWorkItemSlaState
   detailPath: 'workflow' | 'customer' | 'security-incident'
+  incidentId?: string | null
 }
 
 export interface CollaborationSlaSnapshot {

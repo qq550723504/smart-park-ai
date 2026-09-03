@@ -9,7 +9,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Iterator;
+import java.util.Comparator;
 
 public final class SecurityIncidentHandoffStore implements SecurityIncidentHandoffPort {
     private final int capacity;
@@ -66,9 +66,12 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
 
     private void trimToCapacity() {
         while (handoffs.size() > capacity) {
-            Iterator<String> ids = handoffs.keySet().iterator();
-            ids.next();
-            ids.remove();
+            String oldest = handoffs.entrySet().stream()
+                    .min(Comparator.comparing((Map.Entry<String, SecurityIncidentHandoff> entry) -> entry.getValue().createdAt())
+                            .thenComparing(Map.Entry::getKey))
+                    .map(Map.Entry::getKey)
+                    .orElseThrow();
+            handoffs.remove(oldest);
         }
     }
 

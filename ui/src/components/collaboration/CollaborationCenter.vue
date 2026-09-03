@@ -185,7 +185,7 @@ function openScene(item: CollaborationWorkItem): void {
     } else if (item.detailPath === 'customer') {
       emit('open-view', item.detailPath, undefined, item.id.replace(/^CUSTOMER_TICKET:/, ''))
     } else {
-      emit('open-view', item.detailPath, item.id.replace(/^SECURITY_INCIDENT:/, ''))
+      emit('open-view', item.detailPath, item.incidentId ?? item.id.replace(/^SECURITY_INCIDENT:/, ''))
     }
   }
 }

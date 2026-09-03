@@ -154,7 +154,7 @@ public final class CollaborationCenterService {
                 "ALERT_WORKFLOW:" + snapshot.workflowId(),
                 CollaborationWorkItem.Source.ALERT_WORKFLOW,
                 status, priority, "告警处置 " + snapshot.alertId(), summary, parkId, buildingId, deviceId, updatedAt,
-                openedAt, sla.dueAt(), sla.state(), "workflow");
+                openedAt, sla.dueAt(), sla.state(), "workflow", null);
     }
 
     private CollaborationWorkItem fromTicket(CustomerTicket ticket) {
@@ -168,7 +168,7 @@ public final class CollaborationCenterService {
                 status,
                 CollaborationWorkItem.Priority.NORMAL,
                 "客服工单 " + ticket.id(), ticket.safeSummary(), null, null, null,
-                ticket.updatedAt(), ticket.createdAt(), sla.dueAt(), sla.state(), "customer");
+                ticket.updatedAt(), ticket.createdAt(), sla.dueAt(), sla.state(), "customer", null);
     }
 
     private CollaborationWorkItem fromIncidentHandoff(SecurityIncidentHandoff handoff) {
@@ -181,7 +181,7 @@ public final class CollaborationCenterService {
         return new CollaborationWorkItem(handoff.workItemId(), CollaborationWorkItem.Source.SECURITY_INCIDENT,
                 status, priority, "安全事件研判 " + handoff.incidentId(), handoff.safeSummary(), handoff.parkId(),
                 handoff.buildingId(), null, handoff.createdAt(), handoff.createdAt(), sla.dueAt(), sla.state(),
-                "security-incident");
+                "security-incident", handoff.incidentId());
     }
 
     private static CollaborationWorkItem.Priority priorityFor(WorkflowSnapshot snapshot, Map<String, Object> payload,

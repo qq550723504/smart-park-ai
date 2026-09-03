@@ -214,6 +214,43 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void preservesStateWhenTheFiniteEventWindowShrinks() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-1", "A1", "ACCESS", BASE),
+                event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(8 * 60)),
+                event("SEC-3", "A1", "ACCESS", BASE.plusSeconds(16 * 60))));
+        SecurityIncidentService service = service(events);
+        SecurityIncident initial = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(initial.incidentId());
+        SecurityIncident handedOff = service.handoff(initial.incidentId());
+        events.removeIf(event -> event.eventId().equals("SEC-1"));
+
+        SecurityIncident refreshed = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(refreshed.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(refreshed.handoffWorkItemId()).isEqualTo(handedOff.handoffWorkItemId());
+    }
+
+    @Test
+    void keepsReadingWhenMergedWindowsContainConflictingHandoffs() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-1", "A1", "ACCESS", BASE),
+                event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(16 * 60))));
+        SecurityIncidentService service = service(events);
+        List<SecurityIncident> initial = service.list(new SecurityIncidentQuery(null, 20)).items();
+        for (SecurityIncident incident : initial) {
+            service.review(incident.incidentId());
+            service.handoff(incident.incidentId());
+        }
+        events.add(event("SEC-BRIDGE", "A1", "ACCESS", BASE.plusSeconds(8 * 60)));
+
+        SecurityIncidentPage merged = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(merged.items()).hasSize(1);
+        assertThat(merged.items().get(0).status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+    }
+
+    @Test
     void listDoesNotReturnIncidentsEvictedByTheBoundedStore() {
         SecurityIncidentService service = service(List.of(
                 event("SEC-1", "A1", "ACCESS", BASE),
