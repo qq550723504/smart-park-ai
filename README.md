@@ -20,7 +20,7 @@
 | 运营演示 | 角色边界、指标、审计、反馈和一次性故障注入 |
 | 专家协作 | Supervisor 动态分派领域专家，并行分析、展示证据和汇总结论；需满足在线能力开关 |
 | 运营分析 | 自然语言转真实只读 PostgreSQL 分析，展示查询结果、图表和结论；需显式启用分析链路 |
-| 停车与能耗运营看板 | 以受控问题入口组织停车、能耗、空间、告警和设备指标，点击后复用运营分析只读查询；需显式启用分析链路 |
+| 停车与能耗运营看板 | 以受控问题入口组织停车、能耗、空间、告警和设备指标，增加真实只读异常雷达与楼宇证据链，点击后复用运营分析只读查询；需显式启用分析链路 |
 | 会话级运营日报 | 手动汇总能耗基线、停车利用率和高风险告警三个固定只读章节；仅 OPERATOR/ADMIN 可用，结果为进程内会话快照 |
 | 实时语音 | 选择性启用的全场景演示模式；需完成在线预检后再进行浏览器端人工语音验收 |
 | AI 治理概览 | 场景就绪度、能力模式、运营计数和安全边界；管理员可查看审计明细 |
@@ -362,6 +362,8 @@ Remove-Item Env:SERVER_ADDRESS -ErrorAction SilentlyContinue
 | `GET /api/workflows/{workflowId}/observability` | 查看安全观测摘要 | 不暴露内部 Graph 状态 |
 | `GET /api/knowledge` | 查看知识元数据 | 需要 `ADMIN`，不返回知识正文 |
 | `GET /api/operations/metrics` | 查看运营计数 | 内存数据 |
+| `GET /api/operations/anomaly-overview` | 查看告警、离线设备、能耗偏差的只读异常聚合 | `VIEWER`/`OPERATOR`/`APPROVER`/`ADMIN`；默认近 7 天，设备显示最近快照口径 |
+| `GET /api/operations/anomaly-evidence/{buildingId}` | 查看楼宇告警、设备、能耗和执行轨迹安全摘要 | 同上；仅返回白名单字段和脱敏摘要 |
 | `GET /api/governance/overview` | 查看安全聚合治理概览 | 不返回原始业务正文 |
 | `GET /api/audit` | 查看安全审计记录 | 需要 `ADMIN` |
 
