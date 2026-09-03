@@ -125,6 +125,25 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void preservesTheHistoricalHandoffRiskWhenTheAlertLeavesTheActiveFeed() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        List<Alert> alerts = new ArrayList<>(List.of(new Alert("ALT-1", "PARK-A", "A1", "DEV-ACCESS-001",
+                AlertClassification.ACCESS, RiskLevel.HIGH, "REDACTED: access alert", BASE,
+                List.of("security-event:SEC-1"))));
+        SecurityIncidentService service = service(events, alerts);
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        assertThat(incident.riskLevel()).isEqualTo(SecurityIncidentRisk.HIGH);
+        service.review(incident.incidentId());
+        service.handoff(incident.incidentId());
+        alerts.clear();
+
+        SecurityIncident restored = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(restored.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(restored.riskLevel()).isEqualTo(SecurityIncidentRisk.HIGH);
+    }
+
+    @Test
     void onlyLinksAlertsToEventsInTheSameLocation() {
         Alert foreignAlert = new Alert("ALT-FOREIGN", "PARK-B", "B1", "DEV-1", AlertClassification.ACCESS,
                 RiskLevel.HIGH, "REDACTED: foreign alert", BASE, List.of("security-event:SEC-DUP"));

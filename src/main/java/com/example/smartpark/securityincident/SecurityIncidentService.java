@@ -198,6 +198,7 @@ public final class SecurityIncidentService {
                     .map(SecurityIncidentHandoff::workItemId)
                     .forEach(correlatedRetainedHandoffWorkItemIds::add);
             restored = restoreHandoffProjection(fresh, restored, matchingRetainedHandoffs);
+            restored = restoreRiskProjection(restored, candidates, matchingRetainedHandoffs);
             if (restored.handoffWorkItemId() != null) {
                 correlatedRetainedHandoffWorkItemIds.add(restored.handoffWorkItemId());
             }
@@ -243,6 +244,22 @@ public final class SecurityIncidentService {
         if (handoff == null) return restored;
         return withStoredState(fresh, fresh.incidentId(), SecurityIncidentStatus.HANDOFF, handoff.reviewedAt(),
                 handoff.workItemId());
+    }
+
+    private static SecurityIncident restoreRiskProjection(SecurityIncident restored,
+                                                           List<SecurityIncident> storedCandidates,
+                                                           List<SecurityIncidentHandoff> retainedHandoffs) {
+        if (restored.status() != SecurityIncidentStatus.HANDOFF) return restored;
+        SecurityIncidentRisk risk = restored.riskLevel();
+        for (SecurityIncident candidate : storedCandidates) {
+            risk = higherRisk(risk, candidate.riskLevel());
+        }
+        for (SecurityIncidentHandoff handoff : retainedHandoffs) {
+            risk = higherRisk(risk, handoff.riskLevel());
+        }
+        if (risk == restored.riskLevel()) return restored;
+        return withStoredState(restored, restored.incidentId(), restored.status(), restored.reviewedAt(),
+                restored.handoffWorkItemId(), risk);
     }
 
     private static List<SecurityIncidentHandoff> matchingRetainedHandoffs(SecurityIncident fresh,
@@ -297,9 +314,19 @@ public final class SecurityIncidentService {
 
     private static SecurityIncident withStoredState(SecurityIncident fresh, String incidentId, SecurityIncidentStatus status,
                                                     Instant reviewedAt, String handoffWorkItemId) {
+        return withStoredState(fresh, incidentId, status, reviewedAt, handoffWorkItemId, fresh.riskLevel());
+    }
+
+    private static SecurityIncident withStoredState(SecurityIncident fresh, String incidentId, SecurityIncidentStatus status,
+                                                    Instant reviewedAt, String handoffWorkItemId,
+                                                    SecurityIncidentRisk riskLevel) {
         return new SecurityIncident(incidentId, fresh.parkId(), fresh.buildingId(), fresh.eventType(),
-                fresh.riskLevel(), status, fresh.openedAt(), fresh.lastOccurredAt(), fresh.eventIds(), fresh.alertIds(),
+                riskLevel, status, fresh.openedAt(), fresh.lastOccurredAt(), fresh.eventIds(), fresh.alertIds(),
                 fresh.evidence(), fresh.timeline(), fresh.recommendations(), reviewedAt, handoffWorkItemId);
+    }
+
+    private static SecurityIncidentRisk higherRisk(SecurityIncidentRisk left, SecurityIncidentRisk right) {
+        return riskRank(right) > riskRank(left) ? right : left;
     }
 
     private static int statusRank(SecurityIncidentStatus status) {

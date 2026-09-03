@@ -32,6 +32,7 @@ type ApprovalAttempt = {
 }
 const approvalAttempts = new Map<string, ApprovalAttempt>()
 const pendingActionItems = new Set<string>()
+const consumedFocusWorkItemId = ref<string | null>(null)
 let requestGeneration = 0
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 const drawer = ref<HTMLElement | null>(null)
@@ -113,6 +114,8 @@ function slaClass(value?: CollaborationWorkItemSlaState): string { return `sla-$
 
 async function load(preserveItems = false): Promise<void> {
   const generation = ++requestGeneration
+  const focusWorkItemId = props.focusWorkItemId
+  if (!focusWorkItemId) consumedFocusWorkItemId.value = null
   if (!canRead.value) {
     items.value = []
     trendSnapshots.value = []
@@ -139,9 +142,10 @@ async function load(preserveItems = false): Promise<void> {
     })
     if (generation !== requestGeneration) return
     let visibleItems = nextItems
-    if (props.focusWorkItemId && !nextItems.some(item => item.id === props.focusWorkItemId)) {
+    if (focusWorkItemId && consumedFocusWorkItemId.value !== focusWorkItemId
+      && !nextItems.some(item => item.id === focusWorkItemId)) {
       const focusedItems = await listCollaborationWorkItems(props.role, {
-        workItemId: props.focusWorkItemId,
+        workItemId: focusWorkItemId,
         limit: 1,
         sort: 'updatedAt',
       })
@@ -149,6 +153,7 @@ async function load(preserveItems = false): Promise<void> {
       visibleItems = [...nextItems, ...focusedItems.filter(item => !nextItems.some(existing => existing.id === item.id))]
     }
     items.value = visibleItems
+    if (focusWorkItemId) consumedFocusWorkItemId.value = focusWorkItemId
     reconcileSelectedItem(visibleItems)
     void loadTrend(generation)
   } catch {
