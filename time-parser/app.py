@@ -58,6 +58,14 @@ _QUALIFIERS = sorted(
     key=len, reverse=True)
 
 _SPLIT = re.compile(r"到|至|~|～")
+# Structured handoffs use exact UTC instants. Treat the complete expression as
+# one atomic range before JioNLP sees it; otherwise NER splits each timestamp
+# into independent date/time mentions and reports MULTIPLE.
+_ISO_RANGE = re.compile(
+    r"(?P<from>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z)"
+    r"\s*(?:至|到|~|～)\s*"
+    r"(?P<to>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z)"
+)
 _DATE_SHAPES = [
     re.compile(r"(?<![\d])(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?![\d])"),
     re.compile(r"(\d{4})年(\d{1,2})月(\d{1,2})[日号]"),
@@ -290,6 +298,48 @@ def resolve_question(request: ResolveRequest) -> ResolveResponse:
             provider=PROVIDER, providerVersion=EXPECTED_VERSION,
             referenceInstant=canonical_reference, timezone=request.timezone,
             status="UNSUPPORTED", mentions=[], reasonCode="INVALID_DATE")
+
+    atomic_matches = [match for match in _ISO_RANGE.finditer(question)
+                      if not any(match.start() < ex_end and ex_start < match.end()
+                                 for ex_start, ex_end in excluded)]
+    if atomic_matches:
+        mentions = []
+        try:
+            for atomic in atomic_matches:
+                start = datetime.fromisoformat(atomic.group("from").replace("Z", "+00:00"))
+                end = datetime.fromisoformat(atomic.group("to").replace("Z", "+00:00"))
+                if start >= end:
+                    return ResolveResponse(
+                        provider=PROVIDER, providerVersion=EXPECTED_VERSION,
+                        referenceInstant=canonical_reference, timezone=request.timezone,
+                        status="UNSUPPORTED", mentions=[], reasonCode="REVERSED_RANGE")
+                mentions.append(Mention(
+                    text=atomic.group(0), start=atomic.start(), end=atomic.end(),
+                    type="time_point", definition="accurate",
+                    fromInclusive=_utc(start), toExclusive=_utc(end), empty=False))
+        except ValueError:
+            return ResolveResponse(
+                provider=PROVIDER, providerVersion=EXPECTED_VERSION,
+                referenceInstant=canonical_reference, timezone=request.timezone,
+                status="UNSUPPORTED", mentions=[], reasonCode="INVALID_DATE")
+        residual = [item for item in (jio.ner.extract_time(question) or [])
+                    if not any(item["offset"][0] < match.end()
+                               and match.start() < item["offset"][1]
+                               for match in atomic_matches)]
+        if residual:
+            return ResolveResponse(
+                provider=PROVIDER, providerVersion=EXPECTED_VERSION,
+                referenceInstant=canonical_reference, timezone=request.timezone,
+                status="MULTIPLE", mentions=mentions, reasonCode="MULTIPLE_DISTINCT_RANGES")
+        if len({(mention.fromInclusive, mention.toExclusive) for mention in mentions}) > 1:
+            return ResolveResponse(
+                provider=PROVIDER, providerVersion=EXPECTED_VERSION,
+                referenceInstant=canonical_reference, timezone=request.timezone,
+                status="MULTIPLE", mentions=mentions, reasonCode="MULTIPLE_DISTINCT_RANGES")
+        return ResolveResponse(
+            provider=PROVIDER, providerVersion=EXPECTED_VERSION,
+            referenceInstant=canonical_reference, timezone=request.timezone,
+            status="PARSED", mentions=mentions, reasonCode=None)
 
     raw_mentions = jio.ner.extract_time(question) or []
     eligible = []

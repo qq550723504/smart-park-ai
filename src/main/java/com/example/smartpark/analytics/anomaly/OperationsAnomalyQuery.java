@@ -2,6 +2,7 @@ package com.example.smartpark.analytics.anomaly;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Set;
 
 /** Immutable, bounded filters shared by the anomaly overview and evidence reads. */
 public record OperationsAnomalyQuery(
@@ -29,6 +30,22 @@ public record OperationsAnomalyQuery(
                 normalizeFilter(deviceType));
     }
 
+    public OperationsAnomalyQuery withoutAlertFilters() {
+        return new OperationsAnomalyQuery(from, to, buildingId, null, null, null, deviceType);
+    }
+
+    public OperationsAnomalyQuery withoutRiskLevel() {
+        return new OperationsAnomalyQuery(from, to, buildingId, null, category, status, deviceType);
+    }
+
+    public OperationsAnomalyQuery withoutCategory() {
+        return new OperationsAnomalyQuery(from, to, buildingId, riskLevel, null, status, deviceType);
+    }
+
+    public OperationsAnomalyQuery withoutStatus() {
+        return new OperationsAnomalyQuery(from, to, buildingId, riskLevel, category, null, deviceType);
+    }
+
     public void validate(Duration maxWindow) {
         if (from == null || to == null) {
             throw new IllegalArgumentException("from and to must be provided before validation");
@@ -42,6 +59,8 @@ public record OperationsAnomalyQuery(
         if (Duration.between(from, to).compareTo(maxWindow) > 0) {
             throw new IllegalArgumentException("anomaly query window is too large");
         }
+        validateChoice("riskLevel", riskLevel, Set.of("LOW", "MEDIUM", "HIGH"));
+        validateChoice("status", status, Set.of("OPEN", "RESOLVED"));
     }
 
     private static String normalizeFilter(String value) {
@@ -50,5 +69,12 @@ public record OperationsAnomalyQuery(
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private static void validateChoice(String name, String value, Set<String> choices) {
+        String normalized = normalizeFilter(value);
+        if (normalized != null && !choices.contains(normalized)) {
+            throw new IllegalArgumentException(name + " must be one of " + String.join(", ", choices));
+        }
     }
 }

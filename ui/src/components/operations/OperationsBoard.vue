@@ -1,14 +1,22 @@
 <script setup lang="ts">
 import OperationsDailyReport from './OperationsDailyReport.vue'
+import AnomalyRadar from './AnomalyRadar.vue'
+import AnomalyEvidenceDrawer from './AnomalyEvidenceDrawer.vue'
 import type { ExecutionTraceLike } from '../../composables/useOperationsAnalysis'
 import type { DemoRole } from '../../types/workflow'
+import type { AnomalyFilters } from '../../types/operationsAnomaly'
+import { ref, watch } from 'vue'
 
 const props = withDefaults(defineProps<{
   role: DemoRole
   trace?: ExecutionTraceLike
   active?: boolean
 }>(), { active: true })
-const emit = defineEmits<{ 'open-analysis': [question: string] }>()
+const emit = defineEmits<{
+  'open-analysis': [question: string]
+  'open-building': [buildingId: string, filters: AnomalyFilters]
+  'open-trace': [runId: string]
+}>()
 
 const groups = [
   {
@@ -37,6 +45,22 @@ const groups = [
     ],
   },
 ]
+const selectedBuildingId = ref<string | null>(null)
+const selectedFilters = ref<AnomalyFilters>({})
+
+function openBuilding(buildingId: string, filters: AnomalyFilters): void {
+  selectedBuildingId.value = buildingId
+  selectedFilters.value = filters
+  emit('open-building', buildingId, filters)
+}
+
+function closeEvidence(): void {
+  selectedBuildingId.value = null
+}
+
+watch(() => props.active, (active) => {
+  if (!active) closeEvidence()
+})
 </script>
 
 <template>
@@ -49,6 +73,22 @@ const groups = [
       </div>
       <div class="hero-metrics"><div><strong>14</strong><span>受控问题</span></div><div><strong>只读</strong><span>执行模式</span></div></div>
     </section>
+    <AnomalyRadar
+      :role="props.role"
+      :active="props.active"
+      @open-analysis="(question) => emit('open-analysis', question)"
+      @open-building="openBuilding"
+      @open-trace="(runId) => emit('open-trace', runId)"
+    />
+    <AnomalyEvidenceDrawer
+      :role="props.role"
+      :building-id="selectedBuildingId"
+      :filters="selectedFilters"
+      :open="selectedBuildingId !== null"
+      @close="closeEvidence"
+      @open-analysis="(question) => emit('open-analysis', question)"
+      @open-trace="(runId) => emit('open-trace', runId)"
+    />
     <OperationsDailyReport :role="props.role" :trace="props.trace" :active="props.active" />
     <section v-for="group in groups" :key="group.title" class="panel operations-board__group" :aria-label="group.title">
       <div class="section-heading compact"><div><span class="eyebrow">指标分组</span><h2>{{ group.title }}</h2></div><span class="count-badge">{{ group.questions.length }} 个入口</span></div>

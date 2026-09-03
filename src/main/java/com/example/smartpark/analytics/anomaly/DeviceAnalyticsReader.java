@@ -7,7 +7,14 @@ import java.util.List;
 public interface DeviceAnalyticsReader {
     Snapshot read(OperationsAnomalyQuery query);
 
-    List<DeviceReference> evidence(String buildingId, OperationsAnomalyQuery query);
+    default EvidenceResult<DeviceReference> evidence(String buildingId, OperationsAnomalyQuery query) {
+        return EvidenceResult.available(List.of());
+    }
+
+    /** Latest snapshot timestamp for a building, including online devices. */
+    default EvidenceResult<Instant> latestSnapshotAt(String buildingId, OperationsAnomalyQuery query) {
+        return EvidenceResult.available(List.of());
+    }
 
     record Snapshot(
             long offlineDeviceCount,

@@ -53,8 +53,8 @@ const navItems = computed<WorkbenchNavItem[]>(() => [
   { value: 'customer', label: '园区客服', available: true },
   { value: 'collaboration-center', label: '协同中心', available: ['ADMIN', 'APPROVER', 'CUSTOMER_AGENT'].includes(role.value) },
   { value: 'security-incidents', label: '安全事件研判', available: ['ADMIN', 'APPROVER'].includes(role.value) && capabilities.value?.securityIncidentEnabled === true },
-  { value: 'operations', label: '运营看板', available: capabilities.value?.analyticsEnabled === true },
-  { value: 'analytics', label: '运营分析', available: capabilities.value?.analyticsEnabled === true },
+  { value: 'operations', label: '运营看板', available: ['VIEWER', 'OPERATOR', 'APPROVER', 'ADMIN'].includes(role.value) && capabilities.value?.analyticsEnabled === true },
+  { value: 'analytics', label: '运营分析', available: ['VIEWER', 'OPERATOR', 'APPROVER', 'ADMIN'].includes(role.value) && capabilities.value?.analyticsEnabled === true },
   { value: 'collaboration', label: '专家协作', available: capabilities.value?.collaborationEnabled === true },
   { value: 'voice', label: '实时语音', available: capabilities.value?.voiceEnabled === true },
   { value: 'governance', label: '治理中心', available: true },
@@ -177,6 +177,12 @@ function openAnalysisFromBoard(question: string): void {
   selectedAnalysisQuestion.value = question
   selectedAnalysisQuestionToken.value += 1
   switchView('analytics')
+}
+
+function openTraceFromBoard(runId: string): void {
+  const normalized = runId.trim()
+  if (!normalized) return
+  trace.subscribe(normalized)
 }
 
 async function openCollaborationView(view: 'workflow' | 'customer' | 'security-incident', workflowId?: string, _ticketId?: string): Promise<void> {
@@ -405,6 +411,7 @@ function confidence(value?: number) {
       :trace="trace"
       :active="props.active && activeView === 'operations'"
       @open-analysis="openAnalysisFromBoard"
+      @open-trace="openTraceFromBoard"
     />
 
     <main v-show="activeView === 'workflow'" class="main-content">

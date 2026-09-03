@@ -37,4 +37,21 @@ class OperationsAnomalyQueryTest {
         assertThat(normalized.buildingId()).isEqualTo("B1");
         assertThat(normalized.riskLevel()).isEqualTo("HIGH");
     }
+
+    @Test
+    void rejectsUnsupportedEnumLikeFilters() {
+        OperationsAnomalyQuery invalidRisk = new OperationsAnomalyQuery(
+                Instant.parse("2026-09-01T00:00:00Z"), Instant.parse("2026-09-03T00:00:00Z"),
+                null, "HGIH", null, null, null);
+        OperationsAnomalyQuery invalidStatus = new OperationsAnomalyQuery(
+                Instant.parse("2026-09-01T00:00:00Z"), Instant.parse("2026-09-03T00:00:00Z"),
+                null, null, null, "PENDING", null);
+
+        assertThatThrownBy(() -> invalidRisk.validate(Duration.ofDays(31)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("riskLevel");
+        assertThatThrownBy(() -> invalidStatus.validate(Duration.ofDays(31)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("status");
+    }
 }

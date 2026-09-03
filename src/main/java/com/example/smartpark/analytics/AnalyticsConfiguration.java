@@ -20,6 +20,14 @@ import com.example.smartpark.analytics.agent.OperationsAnalysisGraph;
 import com.example.smartpark.analytics.agent.TimeIntentProvider;
 import com.example.smartpark.analytics.agent.time.JioNlpClient;
 import com.example.smartpark.analytics.agent.time.JioNlpTimeIntentProvider;
+import com.example.smartpark.analytics.anomaly.JdbcAlertAnalyticsReader;
+import com.example.smartpark.analytics.anomaly.JdbcDeviceAnalyticsReader;
+import com.example.smartpark.analytics.anomaly.JdbcEnergyAnalyticsReader;
+import com.example.smartpark.analytics.anomaly.AlertAnalyticsReader;
+import com.example.smartpark.analytics.anomaly.DeviceAnalyticsReader;
+import com.example.smartpark.analytics.anomaly.EnergyAnalyticsReader;
+import com.example.smartpark.analytics.anomaly.OperationsAnomalyService;
+import com.example.smartpark.workflow.WorkflowExecutionStore;
 import com.example.smartpark.analytics.catalog.MetricCatalog;
 import com.example.smartpark.analytics.sql.QueryCostGuard;
 import com.example.smartpark.analytics.sql.ReadOnlyQueryExecutor;
@@ -159,6 +167,23 @@ public class AnalyticsConfiguration {
     }
 
     @Bean
+    AlertAnalyticsReader alertAnalyticsReader(ReadOnlyQueryExecutor readOnlyQueryExecutor,
+                                              ObjectProvider<WorkflowExecutionStore> workflowStore,
+                                              com.example.smartpark.execution.ExecutionEventPublisher events) {
+        return new JdbcAlertAnalyticsReader(readOnlyQueryExecutor, workflowStore.getIfAvailable(), events);
+    }
+
+    @Bean
+    DeviceAnalyticsReader deviceAnalyticsReader(ReadOnlyQueryExecutor readOnlyQueryExecutor) {
+        return new JdbcDeviceAnalyticsReader(readOnlyQueryExecutor);
+    }
+
+    @Bean
+    EnergyAnalyticsReader energyAnalyticsReader(ReadOnlyQueryExecutor readOnlyQueryExecutor) {
+        return new JdbcEnergyAnalyticsReader(readOnlyQueryExecutor);
+    }
+
+    @Bean
     AnalyticsModelClient llmAnalyticsModelClient(ObjectProvider<ChatModel> chatModelProvider,
                                                  MetricCatalog metricCatalog,
                                                  Clock analyticsClock) {
@@ -209,6 +234,15 @@ public class AnalyticsConfiguration {
                                                         com.example.smartpark.execution.ExecutionEventPublisher publisher) {
         return new OperationsAnalysisService(metricCatalog, graph::run, analyticsExecutor,
                 properties.getAnalysisTimeout(), properties.getClarificationTimeout(), analyticsClock, publisher);
+    }
+
+    @Bean
+    OperationsAnomalyService operationsAnomalyService(AlertAnalyticsReader alertAnalyticsReader,
+                                                      DeviceAnalyticsReader deviceAnalyticsReader,
+                                                      EnergyAnalyticsReader energyAnalyticsReader,
+                                                      Clock analyticsClock) {
+        return new OperationsAnomalyService(alertAnalyticsReader, deviceAnalyticsReader,
+                energyAnalyticsReader, analyticsClock);
     }
 
     @Bean

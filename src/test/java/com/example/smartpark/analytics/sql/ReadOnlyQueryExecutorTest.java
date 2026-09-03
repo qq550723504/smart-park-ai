@@ -16,7 +16,9 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.time.LocalDate;
+import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -98,6 +100,25 @@ class ReadOnlyQueryExecutorTest {
         assertThat(result.rowCount()).isEqualTo(3);
         assertThat(result.truncated()).isFalse();
         assertThat(result.durationMs()).isGreaterThanOrEqualTo(0);
+    }
+
+    @Test
+    void bindsInstantAndNullAnomalyFiltersWithPostgresCompatibleTypes() throws UnsafeSqlException {
+        ValidatedSql sql = new ValidatedSql("""
+                SELECT COUNT(*) AS alert_count FROM analytics.v_alert_fact
+                WHERE occurred_at >= :from AND occurred_at < :to
+                  AND (:buildingId IS NULL OR building_id = :buildingId)
+                  AND (:riskLevel IS NULL OR risk_level = :riskLevel)
+                LIMIT 1""", List.of("from", "to", "buildingId", "riskLevel"), 1);
+        Map<String, Object> parameters = new HashMap<>();
+        parameters.put("from", Instant.parse("2026-08-27T00:00:00Z"));
+        parameters.put("to", Instant.parse("2026-09-04T00:00:00Z"));
+        parameters.put("buildingId", null);
+        parameters.put("riskLevel", null);
+
+        TabularResult result = executor.execute(sql, parameters);
+
+        assertThat(result.rowCount()).isEqualTo(1);
     }
 
     @Test

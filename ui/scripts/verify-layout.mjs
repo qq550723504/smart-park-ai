@@ -70,23 +70,37 @@ const fixture = `<!doctype html>
   </script>
 </body></html>`
 
-const chromeUserDataDir = mkdtempSync(join(tmpdir(), 'smart-park-layout-'))
-
 function capture(chrome, width, layoutWidth = width) {
   const layoutFixture = fixture.replace(
     '<div class="immersive-workbench">',
     `<div class="immersive-workbench" style="width:${layoutWidth}px">`,
   )
   const page = `data:text/html;base64,${Buffer.from(layoutFixture).toString('base64')}`
-  const output = execFileSync(chrome, [
-    '--headless=new', '--disable-gpu', '--no-sandbox', '--hide-scrollbars',
-    '--no-first-run', '--disable-extensions', `--user-data-dir=${chromeUserDataDir}`,
-    `--window-size=${width},900`, '--dump-dom', page,
-  ], { encoding: 'utf8', maxBuffer: 2 * 1024 * 1024, timeout: 30000 })
-  const matches = [...output.matchAll(/<pre id="layout">([\s\S]*?)<\/pre>/g)]
-  const match = matches.at(-1)
-  if (!match) throw new Error(`Layout fixture did not produce measurements for ${width}px`) 
-  return JSON.parse(match[1])
+  let lastError
+  // Chrome occasionally takes longer to exit on shared GitHub-hosted runners
+  // (usually while emitting harmless DBus errors). Use a fresh profile and a
+  // bounded retry so this smoke test does not fail due to runner noise.
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const chromeUserDataDir = mkdtempSync(join(tmpdir(), 'smart-park-layout-'))
+    try {
+      const output = execFileSync(chrome, [
+        '--headless=new', '--disable-gpu', '--disable-dev-shm-usage', '--no-sandbox', '--hide-scrollbars',
+        '--no-first-run', '--disable-extensions', '--disable-background-networking',
+        `--user-data-dir=${chromeUserDataDir}`, `--window-size=${width},900`, '--dump-dom', page,
+      ], { encoding: 'utf8', maxBuffer: 2 * 1024 * 1024, timeout: 45000 })
+      const matches = [...output.matchAll(/<pre id="layout">([\s\S]*?)<\/pre>/g)]
+      const match = matches.at(-1)
+      if (!match) throw new Error(`Layout fixture did not produce measurements for ${width}px`)
+      return JSON.parse(match[1])
+    } catch (error) {
+      lastError = error
+      if (attempt < 3) continue
+      throw error
+    } finally {
+      rmSync(chromeUserDataDir, { recursive: true, force: true })
+    }
+  }
+  throw lastError
 }
 
 const chrome = findChrome()
@@ -113,5 +127,5 @@ try {
 
   console.log('Layout smoke test passed: wide fill, <=1250px stacking, and 320px actions verified')
 } finally {
-  rmSync(chromeUserDataDir, { recursive: true, force: true })
+  // Each capture owns and removes its temporary Chrome profile.
 }
