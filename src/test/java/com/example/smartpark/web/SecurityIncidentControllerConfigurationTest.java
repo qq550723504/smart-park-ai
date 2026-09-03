@@ -50,6 +50,29 @@ class SecurityIncidentControllerConfigurationTest {
                         .hasSingleBean(SecurityIncidentController.class));
     }
 
+    @Test
+    void doesNotRegisterASecondIncidentServiceForAnExistingCustomBean() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(SecurityIncidentConfiguration.class, SecurityIncidentWebConfiguration.class,
+                        ProviderConfiguration.class, CustomServiceOnlyConfiguration.class)
+                .run(context -> assertThat(context)
+                        .hasNotFailed()
+                        .hasBean("customIncidentService")
+                        .doesNotHaveBean("securityIncidentService")
+                        .hasSingleBean(SecurityIncidentService.class));
+    }
+
+    @Test
+    void registersTheIncidentServiceBeforeTheControllerRegardlessOfConfigurationOrder() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(SecurityIncidentWebConfiguration.class, SecurityIncidentConfiguration.class,
+                        ProviderConfiguration.class)
+                .run(context -> assertThat(context)
+                        .hasNotFailed()
+                        .hasSingleBean(SecurityIncidentService.class)
+                        .hasSingleBean(SecurityIncidentController.class));
+    }
+
     @TestConfiguration(proxyBeanMethods = false)
     static class ProviderConfiguration {
         @Bean
@@ -81,5 +104,13 @@ class SecurityIncidentControllerConfigurationTest {
 
         @Bean
         AuditTrail auditTrail() { return new AuditTrail(); }
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class CustomServiceOnlyConfiguration {
+        @Bean("customIncidentService")
+        SecurityIncidentService customIncidentService() {
+            return org.mockito.Mockito.mock(SecurityIncidentService.class);
+        }
     }
 }
