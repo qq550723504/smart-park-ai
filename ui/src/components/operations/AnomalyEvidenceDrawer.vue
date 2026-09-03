@@ -65,7 +65,8 @@ function analysisQuestion(): string {
     .filter(([key]) => props.filters[key])
     .map(([key, label]) => `${label}：${props.filters[key]}`)
   const context = activeFilters.length > 0 ? `（${activeFilters.join('；')}）` : ''
-  return `过去7天楼宇 ${props.buildingId} 的${metric}${context}`
+  const windowLabel = metric === '离线设备数量' ? '1天' : '7天'
+  return `过去${windowLabel}楼宇 ${props.buildingId} 的${metric}${context}`
 }
 
 watch([() => props.open, () => props.buildingId, () => props.role, () => JSON.stringify(props.filters)], ([open]) => {

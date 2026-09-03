@@ -136,4 +136,31 @@ describe('AnomalyRadar', () => {
     await vi.waitFor(() => expect(wrapper.text()).toContain('告警数据暂不可用'))
     expect(wrapper.text()).not.toContain('风险等级暂无数据')
   })
+
+  it('preserves alternative filter values after applying a facet', async () => {
+    const initialOverview = {
+      ...overview,
+      breakdowns: {
+        ...overview.breakdowns,
+        riskLevels: [{ key: 'HIGH', count: 1 }, { key: 'LOW', count: 1 }],
+      },
+    }
+    const filteredOverview = {
+      ...initialOverview,
+      breakdowns: {
+        ...initialOverview.breakdowns,
+        riskLevels: [{ key: 'HIGH', count: 1 }],
+      },
+    }
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => new Response(JSON.stringify(initialOverview), { status: 200 }))
+      .mockImplementationOnce(() => new Response(JSON.stringify(filteredOverview), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const wrapper = mount(AnomalyRadar, { props: { role: 'ADMIN', active: true } })
+    await vi.waitFor(() => expect(wrapper.find('[data-anomaly-filter="riskLevel"] option[value="LOW"]').exists()).toBe(true))
+    await wrapper.get('[data-anomaly-filter="riskLevel"]').setValue('HIGH')
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(wrapper.find('[data-anomaly-filter="riskLevel"] option[value="LOW"]').exists()).toBe(true))
+  })
 })

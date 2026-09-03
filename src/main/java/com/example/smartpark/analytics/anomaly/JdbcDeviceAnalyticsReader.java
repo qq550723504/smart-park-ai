@@ -44,7 +44,7 @@ public final class JdbcDeviceAnalyticsReader implements DeviceAnalyticsReader {
             OperationsAnomalyQuery recentQuery = recentQuery(query);
             OperationsAnomalyQuery scoped = new OperationsAnomalyQuery(recentQuery.from(), recentQuery.to(), buildingId,
                     query.riskLevel(), query.category(), query.status(), query.deviceType());
-            TabularResult result = execute("SELECT device_id, building_id, device_type, status, snapshot_at, open_alert_count FROM analytics.v_device_snapshot " + FILTERS + " AND status <> 'ONLINE' ORDER BY snapshot_at DESC, device_id ASC LIMIT 20", scoped);
+            TabularResult result = execute("SELECT device_id, building_id, device_type, status, snapshot_at, open_alert_count FROM analytics.v_device_snapshot " + FILTERS + " AND status = 'OFFLINE' ORDER BY snapshot_at DESC, device_id ASC LIMIT 20", scoped);
             List<DeviceReference> references = new ArrayList<>();
             for (List<Object> row : result.rows()) {
                 String status = JdbcAnomalyReaderSupport.text(result, row, "status");

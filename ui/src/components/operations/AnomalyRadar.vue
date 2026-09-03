@@ -22,6 +22,7 @@ const filterDefinitions: Array<{ key: FilterKey; label: string; breakdown: strin
   { key: 'deviceType', label: '设备类型', breakdown: 'deviceTypes' },
 ]
 const filters = ref<AnomalyFilters>({})
+const facetOptions = ref<Record<string, string[]>>({})
 let requestGeneration = 0
 
 async function load(): Promise<void> {
@@ -33,6 +34,7 @@ async function load(): Promise<void> {
   try {
     const value = await getAnomalyOverview(props.role, filters.value)
     if (generation !== requestGeneration) return
+    rememberFacetOptions(value)
     overview.value = value
   } catch (cause) {
     if (generation !== requestGeneration) return
@@ -74,7 +76,14 @@ function energyLabel(value: number | null): string {
 }
 
 function filterOptions(breakdown: string): string[] {
-  return overview.value?.breakdowns[breakdown]?.map((item) => item.key) ?? []
+  return facetOptions.value[breakdown] ?? []
+}
+
+function rememberFacetOptions(value: AnomalyOverview): void {
+  Object.entries(value.breakdowns).forEach(([name, items]) => {
+    const known = facetOptions.value[name] ?? []
+    facetOptions.value[name] = [...new Set([...known, ...items.map((item) => item.key)])]
+  })
 }
 
 function onFilterChange(key: FilterKey, event: Event): void {
@@ -109,6 +118,9 @@ function breakdownUnavailableLabel(name: string): string {
 const hasPartialData = computed(() => Object.values(overview.value?.domainStatus ?? {})
   .some((status) => status === 'UNAVAILABLE' || status === 'PARTIAL'))
 
+watch(() => props.role, () => {
+  facetOptions.value = {}
+})
 watch([() => props.active, () => props.role], ([active]) => {
   if (active) void load()
 })

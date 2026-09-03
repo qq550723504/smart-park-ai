@@ -124,6 +124,21 @@ class JdbcAnalyticsReaderTest {
     }
 
     @Test
+    void deviceEvidenceContainsOnlyOfflineSnapshots() throws Exception {
+        ReadOnlyQueryExecutor executor = mock(ReadOnlyQueryExecutor.class);
+        when(executor.execute(any(), anyMap())).thenAnswer(invocation -> {
+            ValidatedSql sql = invocation.getArgument(0, ValidatedSql.class);
+            if (sql.sql().contains("device_id")) {
+                assertThat(sql.sql()).contains("status = 'OFFLINE'");
+                assertThat(sql.sql()).doesNotContain("status <> 'ONLINE'");
+            }
+            return rows(List.of("device_id", "building_id", "device_type", "status", "snapshot_at", "open_alert_count"), List.of());
+        });
+
+        new JdbcDeviceAnalyticsReader(executor).evidence("B1", query());
+    }
+
+    @Test
     void overviewReadersExecuteAllAggregatesInsideOneConsistentSnapshot() throws Exception {
         ReadOnlyQueryExecutor executor = mock(ReadOnlyQueryExecutor.class);
         consistentSnapshot(executor);
