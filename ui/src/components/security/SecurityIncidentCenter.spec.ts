@@ -110,6 +110,32 @@ describe('SecurityIncidentCenter', () => {
     expect(wrapper.find('.hero-metrics').text()).toContain('0已转协同')
   })
 
+  it('loads every incident page so retained incidents remain reachable and metrics stay complete', async () => {
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      ...summary,
+      incidentId: `INC-${index + 1}`,
+      status: index === 0 ? 'OPEN' : 'REVIEWED',
+    }))
+    const lastPage = { ...summary, incidentId: 'INC-101', status: 'HANDOFF' }
+    const requests: string[] = []
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      requests.push(url)
+      if (url.includes('offset=100')) return response({ items: [lastPage], total: 101 })
+      if (url.includes('/api/security/incidents?')) return response({ items: firstPage, total: 101 })
+      return response({ ...detail, incidentId: 'INC-1' })
+    }) as typeof fetch
+
+    const wrapper = mount(SecurityIncidentCenter, { props: { role: 'ADMIN' } })
+    await flushPromises()
+
+    expect(requests.filter(url => url.includes('/api/security/incidents?'))).toHaveLength(2)
+    expect(wrapper.get('.count-badge').text()).toBe('101')
+    expect(wrapper.findAll('[data-security-incident]')).toHaveLength(101)
+    expect(wrapper.find('.hero-metrics').text()).toContain('1待研判')
+    expect(wrapper.find('.hero-metrics').text()).toContain('1已转协同')
+  })
+
   it('offers navigation to an already completed handoff without creating another handoff', async () => {
     const completed = { ...detail, status: 'HANDOFF', handoffWorkItemId: 'SECURITY_INCIDENT:INC-1' }
     globalThis.fetch = (async (input, init) => {

@@ -39,6 +39,19 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void returnsAnOffsetPageWhileKeepingTheFullIncidentTotal() {
+        SecurityIncidentService service = service(List.of(
+                event("SEC-1", "A1", "ACCESS", BASE),
+                event("SEC-2", "A2", "ACCESS", BASE.plusSeconds(60))));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 1, 1));
+
+        assertThat(page.total()).isEqualTo(2);
+        assertThat(page.items()).hasSize(1);
+        assertThat(page.items().get(0).buildingId()).isEqualTo("A1");
+    }
+
+    @Test
     void correlationIsStableForShuffledInputAndHighAlert() {
         List<SecurityEvent> events = List.of(
                 event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(9 * 60)),
@@ -347,6 +360,40 @@ class SecurityIncidentServiceTest {
         assertThat(restored.incidentId()).isNotEqualTo(initial.incidentId());
         assertThat(restored.handoffWorkItemId()).isEqualTo(completed.handoffWorkItemId());
         assertThat(service.get(restored.incidentId()).status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+    }
+
+    @Test
+    void reconcilesEveryRetainedHandoffWhenEvictedWindowsMerge() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-1", "A1", "ACCESS", BASE)
+        ));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 1, handoffs);
+
+        SecurityIncident first = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(first.incidentId());
+        SecurityIncident firstHandoff = service.handoff(first.incidentId());
+
+        events.add(event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(16 * 60)));
+        SecurityIncident second = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.eventIds().contains("SEC-2"))
+                .findFirst().orElseThrow();
+        service.review(second.incidentId());
+        SecurityIncident secondHandoff = service.handoff(second.incidentId());
+
+        events.add(event("SEC-OTHER", "B1", "ACCESS", BASE.plusSeconds(2 * 60 * 60)));
+        service.list(new SecurityIncidentQuery(null, 20));
+        events.add(event("SEC-BRIDGE", "A1", "ACCESS", BASE.plusSeconds(8 * 60)));
+
+        SecurityIncident merged = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.buildingId().equals("A1"))
+                .findFirst().orElseThrow();
+
+        assertThat(merged.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(merged.eventIds()).containsExactly("SEC-1", "SEC-BRIDGE", "SEC-2");
+        assertThat(merged.handoffWorkItemId()).isIn(firstHandoff.handoffWorkItemId(), secondHandoff.handoffWorkItemId());
+        assertThat(handoffs.list()).extracting(SecurityIncidentHandoff::workItemId)
+                .containsExactly(merged.handoffWorkItemId());
     }
 
     @Test

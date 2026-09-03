@@ -35,10 +35,11 @@ public class SecurityIncidentController {
 
     @GetMapping("/api/security/incidents")
     public Map<String, Object> list(@RequestParam(required = false) String status,
+                                    @RequestParam(defaultValue = "0") int offset,
                                     @RequestParam(defaultValue = "20") int limit,
                                     @RequestHeader(value = "X-Demo-Role", required = false) String role) {
         DemoRole.require(role, DemoRole.APPROVER, DemoRole.ADMIN);
-        return SecurityIncidentDtos.page(service.list(new SecurityIncidentQuery(parseStatus(status), limit)));
+        return SecurityIncidentDtos.page(service.list(new SecurityIncidentQuery(parseStatus(status), offset, limit)));
     }
 
     @GetMapping("/api/security/incidents/{incidentId}")

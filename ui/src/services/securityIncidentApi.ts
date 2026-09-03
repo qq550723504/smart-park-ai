@@ -12,8 +12,19 @@ async function parse<T>(response: Response): Promise<T> {
 function headers(role: DemoRole): HeadersInit { return { 'X-Demo-Role': role } }
 
 export async function listSecurityIncidents(role: DemoRole, status?: SecurityIncidentStatus): Promise<SecurityIncidentPage> {
-  const query = status ? `?status=${encodeURIComponent(status)}&limit=100` : '?limit=100'
-  return parse(await fetch(`/api/security/incidents${query}`, { headers: headers(role) }))
+  const items: SecurityIncidentPage['items'] = []
+  let offset = 0
+  let total = 0
+  do {
+    const params = new URLSearchParams({ offset: String(offset), limit: '100' })
+    if (status) params.set('status', status)
+    const page = await parse<SecurityIncidentPage>(await fetch(`/api/security/incidents?${params}`, { headers: headers(role) }))
+    total = page.total
+    items.push(...page.items)
+    offset += page.items.length
+    if (!page.items.length || items.length >= total) break
+  } while (offset < total)
+  return { items: items.slice(0, total), total }
 }
 
 export async function getSecurityIncident(role: DemoRole, incidentId: string): Promise<SecurityIncident> {
