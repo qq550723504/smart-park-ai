@@ -28,11 +28,12 @@ public class CollaborationCenterController {
             @RequestParam(required = false) String status,
             @RequestParam(defaultValue = "50") int limit,
             @RequestParam(defaultValue = "sla") String sort,
+            @RequestParam(required = false) String workItemId,
             @RequestHeader(value = "X-Demo-Role", required = false) String role) {
         DemoRole.require(role, DemoRole.CUSTOMER_AGENT, DemoRole.APPROVER, DemoRole.ADMIN);
         WorkItemQuery query = new WorkItemQuery(parse(source, CollaborationWorkItem.Source.class, "source"),
                 parse(status, CollaborationWorkItem.Status.class, "status"), limit,
-                parseSort(sort));
+                parseSort(sort), workItemId);
         return service.list(query).stream().map(CollaborationCenterDtos.WorkItemResponse::from).toList();
     }
 

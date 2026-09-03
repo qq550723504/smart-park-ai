@@ -7,8 +7,8 @@ import CollaborationSlaTrendChart from './CollaborationSlaTrendChart.vue'
 import { createRequestId } from '../../utils/requestId'
 import './collaboration-center.css'
 
-const props = withDefaults(defineProps<{ role: DemoRole; active?: boolean }>(), { active: true })
-const emit = defineEmits<{ 'open-view': [view: 'workflow' | 'customer', workflowId?: string, ticketId?: string] }>()
+const props = withDefaults(defineProps<{ role: DemoRole; active?: boolean; focusWorkItemId?: string | null; refreshToken?: number }>(), { active: true, focusWorkItemId: null, refreshToken: 0 })
+const emit = defineEmits<{ 'open-view': [view: 'workflow' | 'customer' | 'security-incident', workflowId?: string, ticketId?: string] }>()
 const items = ref<CollaborationWorkItem[]>([])
 const loading = ref(false)
 const failed = ref(false)
@@ -32,6 +32,7 @@ type ApprovalAttempt = {
 }
 const approvalAttempts = new Map<string, ApprovalAttempt>()
 const pendingActionItems = new Set<string>()
+const consumedFocus = ref<{ workItemId: string; refreshToken: number } | null>(null)
 let requestGeneration = 0
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 const drawer = ref<HTMLElement | null>(null)
@@ -85,11 +86,17 @@ const statusLabels: Record<CollaborationWorkItemStatus, string> = {
   WAITING_CUSTOMER: '待用户回复', RESOLVED: '已解决', CLOSED: '已关闭', CANCELLED: '已取消',
 }
 const sourceLabels: Record<CollaborationWorkItemSource, string> = {
-  ALERT_WORKFLOW: '告警处置', CUSTOMER_TICKET: '客服工单',
+  ALERT_WORKFLOW: '告警处置', CUSTOMER_TICKET: '客服工单', SECURITY_INCIDENT: '安全事件',
 }
 
 function statusLabel(value: CollaborationWorkItemStatus): string { return statusLabels[value] ?? '无法识别' }
 function sourceLabel(value: CollaborationWorkItemSource): string { return sourceLabels[value] ?? '无法识别' }
+function detailLabel(value: CollaborationWorkItem['detailPath']): string {
+  return ({ workflow: '打开告警工作流', customer: '打开客服控制台', 'security-incident': '打开安全事件' } as Record<CollaborationWorkItem['detailPath'], string>)[value]
+}
+function canOpenScene(item: CollaborationWorkItem): boolean {
+  return item.detailPath !== 'security-incident' || props.role === 'ADMIN' || props.role === 'APPROVER'
+}
 function formatTime(value: string): string {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? '时间未知' : date.toLocaleString('zh-CN', { hour12: false })
@@ -107,6 +114,9 @@ function slaClass(value?: CollaborationWorkItemSlaState): string { return `sla-$
 
 async function load(preserveItems = false): Promise<void> {
   const generation = ++requestGeneration
+  const focusWorkItemId = props.focusWorkItemId
+  const refreshToken = props.refreshToken
+  if (!focusWorkItemId) consumedFocus.value = null
   if (!canRead.value) {
     items.value = []
     trendSnapshots.value = []
@@ -132,8 +142,21 @@ async function load(preserveItems = false): Promise<void> {
       sort: sortMode.value,
     })
     if (generation !== requestGeneration) return
-    items.value = nextItems
-    reconcileSelectedItem(nextItems)
+    let visibleItems = nextItems
+    if (focusWorkItemId && (consumedFocus.value?.workItemId !== focusWorkItemId
+      || consumedFocus.value?.refreshToken !== refreshToken)
+      && !nextItems.some(item => item.id === focusWorkItemId)) {
+      const focusedItems = await listCollaborationWorkItems(props.role, {
+        workItemId: focusWorkItemId,
+        limit: 1,
+        sort: 'updatedAt',
+      })
+      if (generation !== requestGeneration) return
+      visibleItems = [...nextItems, ...focusedItems.filter(item => !nextItems.some(existing => existing.id === item.id))]
+    }
+    items.value = visibleItems
+    if (focusWorkItemId) consumedFocus.value = { workItemId: focusWorkItemId, refreshToken }
+    reconcileSelectedItem(visibleItems)
     void loadTrend(generation)
   } catch {
     if (generation !== requestGeneration) return
@@ -164,11 +187,14 @@ async function loadTrend(generation: number): Promise<void> {
 }
 
 function openScene(item: CollaborationWorkItem): void {
-  if (item.detailPath === 'workflow' || item.detailPath === 'customer') {
+  if (!canOpenScene(item)) return
+  if (item.detailPath === 'workflow' || item.detailPath === 'customer' || item.detailPath === 'security-incident') {
     if (item.detailPath === 'workflow') {
       emit('open-view', item.detailPath, item.id.replace(/^ALERT_WORKFLOW:/, ''))
-    } else {
+    } else if (item.detailPath === 'customer') {
       emit('open-view', item.detailPath, undefined, item.id.replace(/^CUSTOMER_TICKET:/, ''))
+    } else {
+      emit('open-view', item.detailPath, item.incidentId ?? item.id.replace(/^SECURITY_INCIDENT:/, ''))
     }
   }
 }
@@ -308,7 +334,7 @@ function handleDrawerKeydown(event: KeyboardEvent): void {
 }
 
 watch(
-  [() => props.role, source, status, sortMode, () => props.active],
+  [() => props.role, source, status, sortMode, () => props.active, () => props.focusWorkItemId, () => props.refreshToken],
   ([role, nextSource, nextStatus, nextSort, active], [previousRole, previousSource, previousStatus, previousSort]) => {
     const sortOnlyChange = role === previousRole && nextSource === previousSource
       && nextStatus === previousStatus && nextSort !== previousSort
@@ -369,15 +395,15 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
       <section class="panel collaboration-filters" aria-label="协同队列筛选">
         <div class="section-heading compact"><div><span class="eyebrow">队列筛选</span><h2 ref="queueHeading" data-collaboration-queue-heading tabindex="-1">按来源与状态查看</h2></div><span class="count-badge">最多 50 条</span></div>
         <div class="collaboration-filter-row">
-          <label>来源<select v-model="source"><option value="">全部来源</option><option value="ALERT_WORKFLOW">告警处置</option><option value="CUSTOMER_TICKET">客服工单</option></select></label>
+          <label>来源<select v-model="source"><option value="">全部来源</option><option value="ALERT_WORKFLOW">告警处置</option><option value="CUSTOMER_TICKET">客服工单</option><option value="SECURITY_INCIDENT">安全事件</option></select></label>
           <label>状态<select v-model="status"><option value="">全部状态</option><option v-for="(label, key) in statusLabels" :key="key" :value="key">{{ label }}</option></select></label>
           <label>排序<select v-model="sortMode" data-sla-sort><option value="sla">SLA 紧急度</option><option value="updatedAt">最近更新</option></select></label>
         </div>
       </section>
       <section class="collaboration-list" aria-label="工作项列表">
-        <article v-for="item in sortedItems" :key="item.id" class="panel collaboration-item" :data-work-item="item.id">
+        <article v-for="item in sortedItems" :key="item.id" class="panel collaboration-item" :class="{ 'is-focused': item.id === props.focusWorkItemId }" :data-work-item="item.id">
           <div class="collaboration-item__main"><div class="collaboration-item__meta"><span>{{ sourceLabel(item.source) }}</span><span :class="['priority', item.priority === 'HIGH' ? 'is-high' : '']">{{ item.priority === 'HIGH' ? '高优先级' : '常规' }}</span><small>{{ item.id }}</small></div><h3>{{ item.title }}</h3><p>{{ item.safeSummary }}</p></div>
-          <div class="collaboration-item__status"><strong>{{ statusLabel(item.status) }}</strong><span :class="['collaboration-sla', slaClass(item.slaState)]">{{ slaLabel(item.slaState) }}</span><small>{{ formatTime(item.updatedAt) }}</small><button type="button" data-work-item-open @click="openScene(item)">{{ item.detailPath === 'workflow' ? '打开告警工作流' : '打开客服控制台' }}</button><button type="button" data-work-item-details @click="openDetails(item, $event)">查看详情</button></div>
+          <div class="collaboration-item__status"><strong>{{ statusLabel(item.status) }}</strong><span :class="['collaboration-sla', slaClass(item.slaState)]">{{ slaLabel(item.slaState) }}</span><small>{{ formatTime(item.updatedAt) }}</small><button v-if="canOpenScene(item)" type="button" data-work-item-open @click="openScene(item)">{{ detailLabel(item.detailPath) }}</button><button type="button" data-work-item-details @click="openDetails(item, $event)">查看详情</button></div>
         </article>
         <p v-if="items.length === 0" class="panel collaboration-empty">当前没有可展示的工作项。</p>
       </section>
@@ -400,7 +426,7 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
           <button type="button" data-collaboration-action="customer-next" :disabled="actionBusy" @click="advanceSelectedTicket">{{ actionBusy ? '处理中…' : `推进至${statusLabel(customerNextStatus as CollaborationWorkItemStatus)}` }}</button>
         </section>
         <p v-if="actionError" class="collaboration-drawer__action-error" data-collaboration-action-error role="alert">{{ actionError }}</p>
-        <div class="collaboration-drawer__actions"><button type="button" @click="openScene(selectedItem)">{{ selectedItem.detailPath === 'workflow' ? '打开告警工作流' : '打开客服控制台' }}</button><button type="button" @click="handleCloseClick">关闭</button></div>
+        <div class="collaboration-drawer__actions"><button v-if="canOpenScene(selectedItem)" type="button" data-work-item-open @click="openScene(selectedItem)">{{ detailLabel(selectedItem.detailPath) }}</button><button type="button" @click="handleCloseClick">关闭</button></div>
         </aside>
       </div>
     </Teleport>

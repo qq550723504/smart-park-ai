@@ -55,7 +55,17 @@ public class MockParkDataStore {
     Device getDevice(String deviceId) { return require(devices, deviceId, "device"); }
     EnergyReading getLatestEnergyReading(String meterId) { return require(energyReadings, meterId, "energy meter"); }
     SecurityEvent getSecurityEvent(String eventId) { return require(securityEvents, eventId, "security event"); }
+    List<SecurityEvent> listSecurityEvents() {
+        return securityEvents.values().stream()
+                .sorted(java.util.Comparator.comparing(SecurityEvent::occurredAt).thenComparing(SecurityEvent::eventId))
+                .toList();
+    }
     Alert getAlert(String alertId) { return require(alerts, alertId, "alert"); }
+    List<Alert> listAlerts() {
+        return alerts.values().stream()
+                .sorted(java.util.Comparator.comparing(Alert::occurredAt).thenComparing(Alert::id))
+                .toList();
+    }
     List<Alert> findHistory(String deviceId) { return historyByDevice.getOrDefault(deviceId, List.of()); }
 
     List<WorkOrder> findByWorkflowId(String workflowId) {

@@ -47,6 +47,22 @@ class CollaborationCenterControllerTest {
     }
 
     @Test
+    void serializesCurrentIncidentIdForSecurityWorkItems() throws Exception {
+        when(service.list(any())).thenReturn(List.of(new CollaborationWorkItem(
+                "SECURITY_INCIDENT:INC-OLD", CollaborationWorkItem.Source.SECURITY_INCIDENT,
+                CollaborationWorkItem.Status.COMPLETED, CollaborationWorkItem.Priority.HIGH,
+                "安全事件研判 INC-NEW", "REDACTED:安全事件摘要", "PARK-A", "A1", null,
+                Instant.parse("2026-09-03T01:00:00Z"), Instant.parse("2026-09-03T00:00:00Z"), null,
+                CollaborationWorkItem.SlaState.COMPLETED, "security-incident", "INC-NEW")));
+
+        mockMvc.perform(get("/api/collaboration/work-items")
+                        .header("X-Demo-Role", "ADMIN")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].incidentId").value("INC-NEW"));
+    }
+
+    @Test
     void approverCanReadWorkItemsForHumanApproval() throws Exception {
         when(service.list(any())).thenReturn(List.of(alertItem()));
 
@@ -139,6 +155,6 @@ class CollaborationCenterControllerTest {
                 "告警处置 ALT-POWER-001", "告警 ALT-POWER-001 · A2 · DEV-POWER-001",
                 "PARK-A", "A2", "DEV-POWER-001", Instant.parse("2026-09-01T08:30:00Z"),
                 Instant.parse("2026-09-01T08:00:00Z"), Instant.parse("2026-09-01T08:30:00Z"),
-                CollaborationWorkItem.SlaState.DUE_SOON, "workflow");
+                CollaborationWorkItem.SlaState.DUE_SOON, "workflow", null);
     }
 }

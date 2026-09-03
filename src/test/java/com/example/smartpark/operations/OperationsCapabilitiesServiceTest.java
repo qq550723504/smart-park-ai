@@ -1,10 +1,12 @@
 package com.example.smartpark.operations;
 
 import com.example.smartpark.collaboration.ExpertCollaborationService;
+import com.example.smartpark.securityincident.SecurityIncidentService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 class OperationsCapabilitiesServiceTest {
 
@@ -12,7 +14,7 @@ class OperationsCapabilitiesServiceTest {
     void normalizesModesAndDerivesRuntimeCapabilities() {
         OperationsCapabilitiesService service = new OperationsCapabilitiesService(
                 "RAG", "DASHSCOPE", true, true, true, provider(new ExpertCollaborationService(
-                        null, null, null, null, null, null, null, null)));
+                        null, null, null, null, null, null, null, null)), provider(null));
 
         OperationsCapabilitiesSnapshot snapshot = service.snapshot();
 
@@ -22,12 +24,21 @@ class OperationsCapabilitiesServiceTest {
         assertThat(snapshot.analyticsEnabled()).isTrue();
         assertThat(snapshot.collaborationEnabled()).isTrue();
         assertThat(snapshot.voiceEnabled()).isTrue();
+        assertThat(snapshot.securityIncidentEnabled()).isFalse();
+    }
+
+    @Test
+    void exposesSecurityIncidentCapabilityOnlyWhenItsRuntimeBeanIsAvailable() {
+        OperationsCapabilitiesService service = new OperationsCapabilitiesService(
+                "mock", "mock", false, false, false, provider(null), provider(mock(SecurityIncidentService.class)));
+
+        assertThat(service.snapshot().securityIncidentEnabled()).isTrue();
     }
 
     @Test
     void fallsBackToMockForUnknownModes() {
         OperationsCapabilitiesService service = new OperationsCapabilitiesService(
-                "unsupported", "unknown", false, false, false, provider(null));
+                "unsupported", "unknown", false, false, false, provider(null), provider(null));
 
         OperationsCapabilitiesSnapshot snapshot = service.snapshot();
 
@@ -41,19 +52,17 @@ class OperationsCapabilitiesServiceTest {
     @Test
     void hidesVoiceWhenLocalDemoTransportIsDisabled() {
         OperationsCapabilitiesService service = new OperationsCapabilitiesService(
-                "mock", "mock", false, true, false, provider(null));
+                "mock", "mock", false, true, false, provider(null), provider(null));
 
         assertThat(service.snapshot().voiceEnabled()).isFalse();
     }
 
-    private static ObjectProvider<ExpertCollaborationService> provider(Object value) {
+    private static <T> ObjectProvider<T> provider(T value) {
         return new ObjectProvider<>() {
-            @Override public ExpertCollaborationService getIfAvailable() {
-                return value == null ? null : (ExpertCollaborationService) value;
-            }
-            @Override public ExpertCollaborationService getIfUnique() { return getIfAvailable(); }
-            @Override public ExpertCollaborationService getObject(Object... args) { return getIfAvailable(); }
-            @Override public ExpertCollaborationService getObject() { return getIfAvailable(); }
+            @Override public T getIfAvailable() { return value; }
+            @Override public T getIfUnique() { return getIfAvailable(); }
+            @Override public T getObject(Object... args) { return getIfAvailable(); }
+            @Override public T getObject() { return getIfAvailable(); }
         };
     }
 }

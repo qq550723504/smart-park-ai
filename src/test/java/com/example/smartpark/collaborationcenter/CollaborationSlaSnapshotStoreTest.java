@@ -74,6 +74,7 @@ class CollaborationSlaSnapshotStoreTest {
                 Instant.parse("2026-09-02T08:00:00Z"),
                 Instant.parse("2026-09-02T12:00:00Z"),
                 state,
-                "customer");
+                "customer",
+                null);
     }
 }

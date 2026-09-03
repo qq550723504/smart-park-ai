@@ -134,6 +134,11 @@ class AlertWorkflowFailureTest {
             }
 
             @Override
+            public List<com.example.smartpark.model.alert.Alert> listActive() {
+                return park.alerts().listActive();
+            }
+
+            @Override
             public List<com.example.smartpark.model.alert.Alert> findHistory(String deviceId) {
                 throw new IllegalStateException("alert service token=private-alert-token");
             }

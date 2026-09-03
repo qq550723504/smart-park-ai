@@ -14,6 +14,7 @@
 .collaboration-filter-row select { min-width: 190px; padding: 9px 12px; color: var(--showcase-ivory); border: 1px solid var(--showcase-border-soft); background: rgba(12, 17, 26, .78); }
 .collaboration-list { display: grid; gap: 12px; }
 .collaboration-item { display: flex; justify-content: space-between; gap: 20px; padding: 20px 24px; }
+.collaboration-item.is-focused { border-color: var(--showcase-cyan); box-shadow: 0 0 0 1px var(--showcase-cyan); }
 .collaboration-item__main { min-width: 0; }
 .collaboration-item__meta { display: flex; gap: 10px; color: var(--showcase-cyan); font-size: .75rem; }
 .collaboration-item__meta .priority { color: var(--showcase-muted); }

@@ -1,0 +1,21 @@
+.security-incident-layout { display: grid; grid-template-columns: minmax(280px, .8fr) minmax(0, 1.5fr); gap: 1rem; }
+.security-incident-list, .security-incident-detail { min-height: 32rem; }
+.security-incident-row { display: grid; gap: .25rem; width: 100%; padding: .9rem; border: 1px solid transparent; border-radius: .75rem; background: transparent; text-align: left; color: inherit; cursor: pointer; }
+.security-incident-row:hover, .security-incident-row.active { border-color: var(--accent, #67e8f9); background: rgba(103, 232, 249, .08); }
+.security-incident-row__risk, .security-incident-badges span { font-size: .72rem; letter-spacing: .08em; }
+.risk-high { color: #fda4af; } .risk-medium { color: #fcd34d; } .risk-low { color: #86efac; }
+.security-incident-row small { color: var(--muted, #94a3b8); }
+.security-incident-empty { display: grid; place-content: center; min-height: 12rem; color: var(--muted, #94a3b8); text-align: center; }
+.security-incident-summary { padding: .9rem 1rem; border-left: 3px solid #fda4af; background: rgba(253, 164, 175, .08); }
+.security-incident-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+.security-incident-facts div { padding: .65rem; background: rgba(148, 163, 184, .08); border-radius: .5rem; }
+.security-incident-facts dt { color: var(--muted, #94a3b8); font-size: .75rem; } .security-incident-facts dd { margin: .25rem 0 0; }
+.security-incident-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-top: 1.25rem; }
+.security-incident-evidence, .security-incident-timeline { display: grid; gap: .65rem; padding: 0; margin: 0; list-style: none; }
+.security-incident-evidence li, .security-incident-timeline li { display: grid; gap: .2rem; padding: .65rem; border-bottom: 1px solid rgba(148, 163, 184, .16); }
+.security-incident-evidence span, .security-incident-timeline span { color: var(--muted, #94a3b8); }
+.security-incident-timeline time { font-size: .75rem; color: var(--muted, #94a3b8); }
+.security-incident-recommendations { margin-top: 1.25rem; } .security-incident-recommendations p { margin: .35rem 0; }
+.security-incident-actions { display: flex; gap: .75rem; margin-top: 1.25rem; } .security-incident-actions button { padding: .65rem 1rem; border: 1px solid #67e8f9; border-radius: .5rem; background: transparent; color: inherit; cursor: pointer; } .security-incident-actions button:disabled { opacity: .45; cursor: not-allowed; }
+.security-incident-error { color: #fda4af; }
+@media (max-width: 900px) { .security-incident-layout, .security-incident-columns { grid-template-columns: 1fr; } .security-incident-facts { grid-template-columns: 1fr; } }
