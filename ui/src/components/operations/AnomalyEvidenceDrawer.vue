@@ -78,8 +78,10 @@ function analysisQuestion(): string {
     .filter(([key]) => props.filters[key])
     .map(([key, label]) => `${label}：${key === 'riskLevel' ? riskLabel(props.filters[key]) : props.filters[key]}`)
   const context = activeFilters.length > 0 ? `（${activeFilters.join('；')}）` : ''
-  const windowLabel = metric === '离线设备数量' ? '1天' : '7天'
-  return `过去${windowLabel}楼宇 ${props.buildingId} 的${metric}${context}`
+  const frozenWindow = props.filters.from && props.filters.to
+    ? `时间范围：${props.filters.from}至${props.filters.to}`
+    : `过去${metric === '离线设备数量' ? '1天' : '7天'}`
+  return `${frozenWindow}楼宇 ${props.buildingId} 的${metric}${context}`
 }
 
 watch([() => props.open, () => props.buildingId, () => props.role, () => JSON.stringify(props.filters)], ([open]) => {

@@ -120,6 +120,22 @@ function breakdownUnavailableLabel(name: string): string {
   return breakdownDomain(name) === 'devices' ? '设备数据暂不可用' : '告警数据暂不可用'
 }
 
+function analysisQuestion(): string {
+  const metric = filters.value.deviceType ? '离线设备数量' : '告警数量'
+  const labels: Array<[FilterKey, string]> = [
+    ['riskLevel', '风险等级'], ['category', '告警类别'],
+    ['status', '告警状态'], ['deviceType', '设备类型'],
+  ]
+  const context = labels
+    .filter(([key]) => metric === '离线设备数量' ? key === 'deviceType' : key !== 'deviceType')
+    .filter(([key]) => filters.value[key])
+    .map(([key, label]) => `${label}：${filters.value[key]}`)
+  const from = overview.value ? dateLabel(overview.value.window.from, overview.value.window.timezone).replaceAll('/', '-') : null
+  const to = overview.value ? dateLabel(overview.value.window.to, overview.value.window.timezone).replaceAll('/', '-') : null
+  const window = from && to ? `时间范围：${from}至${to}` : '过去7天'
+  return `${window}各${metric === '离线设备数量' ? '楼宇离线设备数量' : '楼宇告警数量'}${context.length ? `（${context.join('；')}）` : ''}`
+}
+
 const hasPartialData = computed(() => Object.values(overview.value?.domainStatus ?? {})
   .some((status) => status === 'UNAVAILABLE' || status === 'PARTIAL'))
 
@@ -158,6 +174,7 @@ onMounted(() => { void load() })
           </select>
         </label>
       </div>
+      <div class="anomaly-radar__actions"><button type="button" :disabled="loading" @click="emit('open-analysis', analysisQuestion())">分析当前筛选</button></div>
       <div class="anomaly-radar__status" aria-label="数据域状态">
         <span v-for="(status, domain) in overview.domainStatus" :key="domain" :data-domain-status="status">{{ domain }}：{{ status }}</span>
       </div>
