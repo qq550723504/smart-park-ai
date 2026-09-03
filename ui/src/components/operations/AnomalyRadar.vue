@@ -102,6 +102,11 @@ function onFilterChange(key: FilterKey, event: Event): void {
   void load()
 }
 
+function evidenceFilters(): AnomalyFilters {
+  if (!overview.value) return { ...filters.value }
+  return { ...filters.value, from: overview.value.window.from, to: overview.value.window.to }
+}
+
 function breakdownDomain(name: string): string | null {
   return name === 'deviceTypes' ? 'devices' : ['riskLevels', 'categories', 'statuses'].includes(name) ? 'alerts' : null
 }
@@ -168,7 +173,7 @@ onMounted(() => { void load() })
         </div>
         <div class="anomaly-radar__buildings">
           <strong>异常楼宇排行</strong>
-          <button v-for="building in overview.buildings" :key="building.buildingId" type="button" :data-anomaly-building="building.buildingId" @click="emit('open-building', building.buildingId, filters)">
+          <button v-for="building in overview.buildings" :key="building.buildingId" type="button" :data-anomaly-building="building.buildingId" @click="emit('open-building', building.buildingId, evidenceFilters())">
             <span>{{ building.buildingId }}</span><small>告警 {{ valueOrDash(building.alertCount, 'alerts') }} · 离线 {{ valueOrDash(building.offlineDeviceCount, 'devices') }} · 能耗偏差 {{ energyLabel(building.energyDeviationPct) }}</small>
           </button>
           <small v-if="overview.buildings.length === 0">当前窗口暂无异常楼宇</small>

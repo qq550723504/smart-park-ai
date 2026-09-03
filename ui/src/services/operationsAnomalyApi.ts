@@ -22,6 +22,26 @@ function assertOverview(value: unknown): asserts value is AnomalyOverview {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function assertEvidence(value: unknown): asserts value is AnomalyEvidence {
+  if (!isRecord(value)
+    || typeof value.buildingId !== 'string'
+    || !isRecord(value.window)
+    || typeof value.window.from !== 'string'
+    || typeof value.window.to !== 'string'
+    || typeof value.window.timezone !== 'string'
+    || (value.asOf !== null && typeof value.asOf !== 'string')
+    || !Array.isArray(value.alerts)
+    || !Array.isArray(value.devices)
+    || !Array.isArray(value.energy)
+    || !isRecord(value.domainStatus)) {
+    throw new Error('异常证据响应格式无效')
+  }
+}
+
 export async function getAnomalyOverview(role: DemoRole, filters: AnomalyFilters = {}): Promise<AnomalyOverview> {
   const response = await fetch(`/api/operations/anomaly-overview${queryString(filters)}`, {
     headers: { 'X-Demo-Role': role },
@@ -37,5 +57,7 @@ export async function getAnomalyEvidence(role: DemoRole, buildingId: string, fil
     headers: { 'X-Demo-Role': role },
   })
   if (!response.ok) throw await readError(response)
-  return response.json() as Promise<AnomalyEvidence>
+  const value = await response.json() as unknown
+  assertEvidence(value)
+  return value
 }

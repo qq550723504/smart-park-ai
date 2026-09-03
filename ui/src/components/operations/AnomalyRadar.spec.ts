@@ -46,7 +46,7 @@ describe('AnomalyRadar', () => {
     await vi.waitFor(() => expect(wrapper.find('[data-anomaly-building="B1"]').exists()).toBe(true))
 
     await wrapper.get('[data-anomaly-building="B1"]').trigger('click')
-    expect(wrapper.emitted('open-building')).toEqual([['B1', {}]])
+    expect(wrapper.emitted('open-building')).toEqual([['B1', { from: overview.window.from, to: overview.window.to }]])
   })
 
   it('formats the window in the timezone declared by the response', async () => {
@@ -88,7 +88,7 @@ describe('AnomalyRadar', () => {
     expect(wrapper.text()).toContain('离线 —')
     expect(fetchMock.mock.calls[1][0]).toContain('riskLevel=HIGH')
     await wrapper.get('[data-anomaly-building="B1"]').trigger('click')
-    expect(wrapper.emitted('open-building')).toEqual([['B1', { riskLevel: 'HIGH' }]])
+    expect(wrapper.emitted('open-building')).toEqual([['B1', { from: overview.window.from, to: overview.window.to, riskLevel: 'HIGH' }]])
   })
 
   it('hides the previous overview while a filter request is pending', async () => {

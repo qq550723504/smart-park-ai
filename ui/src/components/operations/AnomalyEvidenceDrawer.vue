@@ -52,6 +52,10 @@ function value(item: Record<string, unknown>, key: string): string {
   return raw == null ? '—' : String(raw)
 }
 
+function riskLabel(value: string | undefined): string {
+  return ({ HIGH: '高风险', MEDIUM: '中风险', LOW: '低风险' } as Record<string, string>)[value ?? ''] ?? value ?? '—'
+}
+
 function analysisQuestion(): string {
   const filterLabels: Array<[keyof AnomalyFilters, string]> = [
     ['riskLevel', '风险等级'],
@@ -63,7 +67,7 @@ function analysisQuestion(): string {
   const activeFilters = filterLabels
     .filter(([key]) => metric === '离线设备数量' ? key === 'deviceType' : key !== 'deviceType')
     .filter(([key]) => props.filters[key])
-    .map(([key, label]) => `${label}：${props.filters[key]}`)
+    .map(([key, label]) => `${label}：${key === 'riskLevel' ? riskLabel(props.filters[key]) : props.filters[key]}`)
   const context = activeFilters.length > 0 ? `（${activeFilters.join('；')}）` : ''
   const windowLabel = metric === '离线设备数量' ? '1天' : '7天'
   return `过去${windowLabel}楼宇 ${props.buildingId} 的${metric}${context}`
