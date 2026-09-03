@@ -17,7 +17,8 @@ public record CollaborationWorkItem(
         Instant openedAt,
         Instant slaDueAt,
         SlaState slaState,
-        String detailPath) {
+        String detailPath,
+        String incidentId) {
 
     public CollaborationWorkItem {
         id = requireText(id, "id");
@@ -35,7 +36,7 @@ public record CollaborationWorkItem(
                                  String safeSummary, String parkId, String buildingId, String deviceId,
                                  Instant updatedAt, String detailPath) {
         this(id, source, status, priority, title, safeSummary, parkId, buildingId, deviceId,
-                updatedAt, null, null, SlaState.NOT_APPLICABLE, detailPath);
+                updatedAt, null, null, SlaState.NOT_APPLICABLE, detailPath, null);
     }
 
     private static String requireText(String value, String field) {
@@ -43,7 +44,7 @@ public record CollaborationWorkItem(
         return value.trim();
     }
 
-    public enum Source { ALERT_WORKFLOW, CUSTOMER_TICKET }
+    public enum Source { ALERT_WORKFLOW, CUSTOMER_TICKET, SECURITY_INCIDENT }
 
     public enum Priority { HIGH, NORMAL }
 

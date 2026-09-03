@@ -30,6 +30,10 @@ describe('CollaborationCenter', () => {
       title: '客服工单 cs-1', safeSummary: 'A1 洗手间漏水，等待客服接入。',
       parkId: null, buildingId: null, deviceId: null,
       updatedAt: '2026-09-01T07:00:00Z', detailPath: 'customer',
+    }, {
+      id: 'SECURITY_INCIDENT:INC-1', source: 'SECURITY_INCIDENT', status: 'COMPLETED', priority: 'HIGH',
+      title: '安全事件研判 INC-1', safeSummary: 'REDACTED:安全事件摘要', parkId: 'PARK-A', buildingId: 'A1', deviceId: null,
+      updatedAt: '2026-09-01T06:00:00Z', detailPath: 'security-incident',
     }])) as typeof fetch
 
     const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
@@ -41,6 +45,117 @@ describe('CollaborationCenter', () => {
     expect(wrapper.emitted('open-view')).toEqual([['customer', undefined, 'cs-1']])
     await wrapper.get('[data-work-item="ALERT_WORKFLOW:wf-1"] button').trigger('click')
     expect(wrapper.emitted('open-view')).toEqual([['customer', undefined, 'cs-1'], ['workflow', 'wf-1']])
+    await wrapper.get('[data-work-item="SECURITY_INCIDENT:INC-1"] button').trigger('click')
+    expect(wrapper.emitted('open-view')).toEqual([
+      ['customer', undefined, 'cs-1'], ['workflow', 'wf-1'], ['security-incident', 'INC-1'],
+    ])
+  })
+
+  it('opens a migrated security handoff using its current incident id', async () => {
+    globalThis.fetch = (async (input) => {
+      return String(input).includes('/sla-trend') ? response([]) : response([{
+        id: 'SECURITY_INCIDENT:INC-OLD', incidentId: 'INC-NEW', source: 'SECURITY_INCIDENT', status: 'COMPLETED', priority: 'HIGH',
+        title: '安全事件研判 INC-NEW', safeSummary: 'REDACTED:安全事件摘要', parkId: 'PARK-A', buildingId: 'A1', deviceId: null,
+        updatedAt: '2026-09-01T06:00:00Z', detailPath: 'security-incident',
+      }])
+    }) as typeof fetch
+
+    const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN' } })
+    await flushPromises()
+    await wrapper.get('[data-work-item="SECURITY_INCIDENT:INC-OLD"] button').trigger('click')
+
+    expect(wrapper.emitted('open-view')).toEqual([['security-incident', 'INC-NEW']])
+  })
+
+  it('hides security-detail navigation from customer agents', async () => {
+    globalThis.fetch = (async (input) => {
+      return String(input).includes('/sla-trend') ? response([]) : response([{
+        id: 'SECURITY_INCIDENT:INC-CUSTOMER', incidentId: 'INC-CUSTOMER', source: 'SECURITY_INCIDENT', status: 'COMPLETED', priority: 'HIGH',
+        title: '安全事件研判 INC-CUSTOMER', safeSummary: 'REDACTED:安全事件摘要', parkId: 'PARK-A', buildingId: 'A1', deviceId: null,
+        updatedAt: '2026-09-01T06:00:00Z', detailPath: 'security-incident',
+      }])
+    }) as typeof fetch
+
+    const wrapper = mount(CollaborationCenter, { props: { role: 'CUSTOMER_AGENT' } })
+    await flushPromises()
+
+    const item = wrapper.get('[data-work-item="SECURITY_INCIDENT:INC-CUSTOMER"]')
+    expect(item.find('[data-work-item-open]').exists()).toBe(false)
+    await item.get('[data-work-item-details]').trigger('click')
+    const drawer = document.body.querySelector('[role="dialog"]') as HTMLElement
+    expect(drawer.querySelector('[data-work-item-open]')).toBeNull()
+    expect(wrapper.emitted('open-view')).toBeUndefined()
+  })
+
+  it('loads and highlights a focused work item outside the first page', async () => {
+    const focused = {
+      id: 'SECURITY_INCIDENT:INC-1', source: 'SECURITY_INCIDENT', status: 'COMPLETED', priority: 'HIGH',
+      title: '安全事件研判 INC-1', safeSummary: 'REDACTED:安全事件摘要', parkId: 'PARK-A', buildingId: 'A1', deviceId: null,
+      updatedAt: '2026-09-01T06:00:00Z', detailPath: 'security-incident',
+    }
+    const calls: string[] = []
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      calls.push(url)
+      if (url.includes('workItemId=')) return response([focused])
+      if (url.includes('/sla-trend')) return response([])
+      return response([])
+    }) as typeof fetch
+
+    const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN', focusWorkItemId: focused.id } })
+    await flushPromises()
+
+    expect(calls).toContain(`/api/collaboration/work-items?limit=1&sort=updatedAt&workItemId=${encodeURIComponent(focused.id)}`)
+    expect(wrapper.get(`[data-work-item="${focused.id}"]`).classes()).toContain('is-focused')
+  })
+
+  it('consumes the focused-item override after the initial navigation', async () => {
+    const focused = {
+      id: 'SECURITY_INCIDENT:INC-1', source: 'SECURITY_INCIDENT', status: 'COMPLETED', priority: 'HIGH',
+      title: '安全事件研判 INC-1', safeSummary: 'REDACTED:安全事件摘要', parkId: 'PARK-A', buildingId: 'A1', deviceId: null,
+      updatedAt: '2026-09-01T06:00:00Z', detailPath: 'security-incident',
+    }
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      if (url.includes('workItemId=') && !url.includes('source=') && !url.includes('status=')) return response([focused])
+      return response([])
+    }) as typeof fetch
+
+    const wrapper = mount(CollaborationCenter, { props: { role: 'ADMIN', focusWorkItemId: focused.id } })
+    await flushPromises()
+    await wrapper.get('select').setValue('ALERT_WORKFLOW')
+    await flushPromises()
+
+    expect(wrapper.find(`[data-work-item="${focused.id}"]`).exists()).toBe(false)
+  })
+
+  it('reconsumes the focused-item override when navigation refreshes', async () => {
+    const focused = {
+      id: 'SECURITY_INCIDENT:INC-REVISIT', source: 'SECURITY_INCIDENT', status: 'COMPLETED', priority: 'HIGH',
+      title: '安全事件研判 INC-REVISIT', safeSummary: 'REDACTED:安全事件摘要', parkId: 'PARK-A', buildingId: 'A1', deviceId: null,
+      updatedAt: '2026-09-01T06:00:00Z', detailPath: 'security-incident',
+    }
+    const focusCalls: string[] = []
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      if (url.includes('workItemId=')) {
+        focusCalls.push(url)
+        return response([focused])
+      }
+      return response([])
+    }) as typeof fetch
+
+    const wrapper = mount(CollaborationCenter, {
+      props: { role: 'ADMIN', focusWorkItemId: focused.id, refreshToken: 0 },
+    })
+    await flushPromises()
+    expect(focusCalls).toHaveLength(1)
+
+    await wrapper.setProps({ refreshToken: 1 })
+    await flushPromises()
+
+    expect(focusCalls).toHaveLength(2)
+    expect(wrapper.get(`[data-work-item="${focused.id}"]`).classes()).toContain('is-focused')
   })
 
   it('ignores a stale queue response after the filters change', async () => {

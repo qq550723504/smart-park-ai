@@ -14,6 +14,7 @@ import VoiceAssistantPage from './voice/VoiceAssistantPage.vue'
 import GovernanceCenter from './governance/GovernanceCenter.vue'
 import OperationsBoard from './operations/OperationsBoard.vue'
 import CollaborationCenter from './collaboration/CollaborationCenter.vue'
+import SecurityIncidentCenter from './security/SecurityIncidentCenter.vue'
 import { demoAlerts, type DemoRole } from '../types/workflow'
 import { useWorkflow } from '../composables/useWorkflow'
 import { useExecutionTrace } from '../composables/useExecutionTrace'
@@ -35,7 +36,7 @@ const emit = defineEmits<{
   'retry-guided-launch': [scenarioId: ShowcaseScenarioId, launchInput: ShowcaseLaunchInput]
 }>()
 
-const capabilities = ref<{ knowledgeMode: string; customerAnswerMode: string; vectorStore: string; analyticsEnabled: boolean; collaborationEnabled: boolean; voiceEnabled: boolean } | null>(null)
+const capabilities = ref<{ knowledgeMode: string; customerAnswerMode: string; vectorStore: string; analyticsEnabled: boolean; collaborationEnabled: boolean; voiceEnabled: boolean; securityIncidentEnabled: boolean } | null>(null)
 const capabilityLoadState = ref<'loading' | 'ready' | 'failed'>('loading')
 const capabilityLabels = computed(() => capabilities.value ? {
   knowledge: capabilities.value.knowledgeMode === 'mock' ? 'Mock' : 'RAG',
@@ -51,6 +52,7 @@ const navItems = computed<WorkbenchNavItem[]>(() => [
   { value: 'workflow', label: '告警工作流', available: true },
   { value: 'customer', label: '园区客服', available: true },
   { value: 'collaboration-center', label: '协同中心', available: ['ADMIN', 'APPROVER', 'CUSTOMER_AGENT'].includes(role.value) },
+  { value: 'security-incidents', label: '安全事件研判', available: ['ADMIN', 'APPROVER'].includes(role.value) && capabilities.value?.securityIncidentEnabled === true },
   { value: 'operations', label: '运营看板', available: capabilities.value?.analyticsEnabled === true },
   { value: 'analytics', label: '运营分析', available: capabilities.value?.analyticsEnabled === true },
   { value: 'collaboration', label: '专家协作', available: capabilities.value?.collaborationEnabled === true },
@@ -74,6 +76,9 @@ let navigationGeneration = 0
 const selectedAnalysisQuestion = ref<string | null>(null)
 const selectedAnalysisQuestionToken = ref(0)
 const customerQueueRefreshToken = ref(0)
+const collaborationTargetWorkItemId = ref<string | null>(null)
+const collaborationRefreshToken = ref(0)
+const securityIncidentTargetId = ref<string | null>(null)
 const hasVisitedWorkflow = ref(props.initialView === 'workflow')
 function switchView(view: WorkbenchView): void {
   navigationGeneration += 1
@@ -90,6 +95,11 @@ watch(activeView, async (view) => {
   if (activeView.value === 'workflow') hasVisitedWorkflow.value = true
 })
 const role = ref<DemoRole>('ADMIN')
+watch(role, (nextRole, previousRole) => {
+  if (nextRole === previousRole) return
+  const currentItem = navItems.value.find((item) => item.value === activeView.value)
+  if (currentItem && !currentItem.available) switchView('workflow')
+})
 const reviewer = ref('')
 const comment = ref('')
 const { workflow, events, loading, approving, error, isTerminal, start, load: loadWorkflow, approve, reset: resetWorkflow, cancelPendingLoad } = useWorkflow()
@@ -151,6 +161,7 @@ const executionEvidenceByView: Record<WorkbenchView, Pick<WorkbenchEvidenceItem,
   voice: { value: '只读查询 · 实时语音会话', tone: 'verified' },
   collaboration: { value: '只读查询 · 多专家汇总', tone: 'verified' },
   'collaboration-center': { value: '安全处理 · 原场景状态机', tone: 'verified' },
+  'security-incidents': { value: '安全处理 · 脱敏研判后转协同', tone: 'warning' },
   analytics: { value: '真实只读数据', tone: 'verified' },
   governance: { value: '安全聚合 · 只读概览', tone: 'verified' },
   operations: { value: '真实只读数据 · 选择后分析', tone: 'verified' },
@@ -168,8 +179,14 @@ function openAnalysisFromBoard(question: string): void {
   switchView('analytics')
 }
 
-async function openCollaborationView(view: 'workflow' | 'customer', workflowId?: string, _ticketId?: string): Promise<void> {
+async function openCollaborationView(view: 'workflow' | 'customer' | 'security-incident', workflowId?: string, _ticketId?: string): Promise<void> {
   const generation = ++navigationGeneration
+  if (view === 'security-incident') {
+    if (!['ADMIN', 'APPROVER'].includes(role.value) || capabilities.value?.securityIncidentEnabled !== true) return
+    securityIncidentTargetId.value = workflowId ?? null
+    switchView('security-incidents')
+    return
+  }
   if (view === 'customer') {
     cancelPendingLoad()
     customerQueueRefreshToken.value += 1
@@ -183,6 +200,11 @@ async function openCollaborationView(view: 'workflow' | 'customer', workflowId?:
   }
   if (generation !== navigationGeneration) return
   activeView.value = view
+}
+function openCollaborationFromIncident(payload: { incidentId: string; workItemId: string }): void {
+  collaborationTargetWorkItemId.value = payload.workItemId
+  collaborationRefreshToken.value += 1
+  switchView('collaboration-center')
 }
 watch(
   () => [workflow.value?.workflowId, activeView.value] as const,
@@ -362,7 +384,17 @@ function confidence(value?: number) {
       v-show="activeView === 'collaboration-center'"
       :role="role"
       :active="props.active && activeView === 'collaboration-center'"
+      :focus-work-item-id="collaborationTargetWorkItemId"
+      :refresh-token="collaborationRefreshToken"
       @open-view="openCollaborationView"
+    />
+
+    <SecurityIncidentCenter
+      v-show="activeView === 'security-incidents'"
+      :role="role"
+      :active="props.active && activeView === 'security-incidents'"
+      :focus-incident-id="securityIncidentTargetId"
+      @open-collaboration="openCollaborationFromIncident"
     />
 
     <GovernanceCenter v-show="activeView === 'governance'" :role="role" :active="props.active && activeView === 'governance'" />

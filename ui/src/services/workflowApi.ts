@@ -123,6 +123,7 @@ export interface OperationsCapabilities {
   analyticsEnabled: boolean
   collaborationEnabled: boolean
   voiceEnabled: boolean
+  securityIncidentEnabled: boolean
 }
 
 export function getOperationsCapabilities() {
@@ -139,6 +140,7 @@ export function listCollaborationWorkItems(role: DemoRole, filters: Collaboratio
   if (filters.status) params.set('status', filters.status)
   if (filters.limit != null) params.set('limit', String(filters.limit))
   if (filters.sort) params.set('sort', filters.sort)
+  if (filters.workItemId) params.set('workItemId', filters.workItemId)
   const query = params.toString()
   return request<CollaborationWorkItem[]>(`/api/collaboration/work-items${query ? `?${query}` : ''}`, {
     headers: { 'X-Demo-Role': role },

@@ -12,7 +12,7 @@ vi.mock('../../services/workflowApi', () => ({
 const governanceOverview: GovernanceOverview = {
   capturedAt: '2026-09-01T08:00:00Z',
   scenarios: { total: 5, ready: 4, notReady: 1, disabled: 0 },
-  capabilities: { knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none', analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: false },
+  capabilities: { knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none', analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: false, securityIncidentEnabled: true },
   business: { workflowCount: 4, completedWorkflowCount: 3, customerSessionCount: 5, humanTicketCount: 1 },
   governance: { auditEntryCount: 7, feedbackCount: 4, positiveFeedbackCount: 3, knowledgeDocumentCount: 6, activeKnowledgeDocumentCount: 5, completionRate: 0.75, positiveFeedbackRate: 0.75 },
   boundaries: ['演示角色，不是生产认证'],

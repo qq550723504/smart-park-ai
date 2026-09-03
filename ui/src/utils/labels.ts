@@ -62,6 +62,8 @@ const auditActionLabels: Record<string, string> = {
   UPDATE_CUSTOMER_TICKET: '更新客服工单',
   UPDATE_KNOWLEDGE: '更新知识状态',
   RECORD_FEEDBACK: '记录反馈',
+  REVIEW_SECURITY_INCIDENT: '研判安全事件',
+  HANDOFF_SECURITY_INCIDENT: '交接安全事件',
 }
 
 const eventSummaryLabels: Record<string, string> = {

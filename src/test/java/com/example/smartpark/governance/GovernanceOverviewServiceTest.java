@@ -26,7 +26,7 @@ class GovernanceOverviewServiceTest {
     void aggregatesSafeCountsAndComputesDefinedRates() {
         OperationsCapabilitiesService capabilities = mock(OperationsCapabilitiesService.class);
         when(capabilities.snapshot()).thenReturn(new OperationsCapabilitiesSnapshot(
-                "rag", "dashscope", "simple-vector-store", true, true, false));
+                "rag", "dashscope", "simple-vector-store", true, true, false, false));
         OperationsMetrics metrics = mock(OperationsMetrics.class);
         when(metrics.snapshot()).thenReturn(new OperationsMetrics.Snapshot(
                 4, 3, 5, 2, 7, 4, 3, 6, 5));
@@ -54,7 +54,7 @@ class GovernanceOverviewServiceTest {
     void usesNullRatesWhenThereAreNoSamples() {
         OperationsCapabilitiesService capabilities = mock(OperationsCapabilitiesService.class);
         when(capabilities.snapshot()).thenReturn(new OperationsCapabilitiesSnapshot(
-                "mock", "mock", "none", false, false, false));
+                "mock", "mock", "none", false, false, false, false));
         OperationsMetrics metrics = mock(OperationsMetrics.class);
         when(metrics.snapshot()).thenReturn(new OperationsMetrics.Snapshot(
                 0, 0, 0, 0, 0, 0, 0, 0, 0));

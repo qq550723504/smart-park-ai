@@ -105,7 +105,7 @@
 - `AlertPort`：读取告警及设备历史告警。
 - `DevicePort`：读取设备状态。
 - `EnergyPort`：读取最新能耗读数。
-- `SecurityPort`：读取安全事件的脱敏摘要。
+- `SecurityPort`：读取单个安全事件的脱敏摘要；`SecurityEventReader` 在此基础上提供有限集合读取供事件研判使用。
 - `KnowledgePort`：按 `KnowledgeDomain` 检索知识及相似度结果。
 - `KnowledgeAdminPort`：查看元数据、新增文档、启停文档；不改变工作流的只读检索依赖。
 - `WorkOrderPort`：查询和创建工单。
@@ -223,6 +223,8 @@ safeSummary / typed displayPayload
 
 当前事件场景包括 `ALERT_WORKFLOW`、`CUSTOMER_SERVICE`、`OPERATIONS_ANALYSIS` 和 `EXPERT_COLLABORATION`。事件类型覆盖运行启动、节点开始/完成、工具调用、专家交接、SQL 生成/校验/拒绝、查询完成、图表规格、暂停/恢复、失败和完成。客服每个新会话或回复都会单独生成 `runId`，固定记录请求接收、意图识别、知识检索、答复/转人工和终态；事件只携带安全摘要，不携带原始问题、完整答复、Prompt、供应商响应或知识正文。
 
+安全事件研判不新增统一执行事件场景：它通过 `SecurityEventReader` 读取脱敏安全事件，按园区、区域、类型和 15 分钟窗口确定性归并，在独立页面展示时间线与证据；`APPROVER`/`ADMIN` 可标记已研判或幂等转出协同工作项，`CUSTOMER_AGENT` 不可读取安全事件详情。
+
 `InMemoryExecutionEventPublisher` 为每个运行保存历史并支持订阅；统一接口 `GET /api/executions/{runId}/events` 以 SSE 重放历史并继续推送实时事件，直到终态关闭。客服 POST 接口在响应头返回 `X-Execution-Run-Id`，前端据此订阅并重放完整客服轨迹，JSON 响应体保持原有契约不变。告警旧 SSE 接口由 `ProjectedWorkflowEventPublisher` 适配到统一事件层，保持兼容。
 
 `DisplayPayload` 是受控的类型化展示负载：文本、工具调用、专家交接、SQL、图表、音频状态和错误分别使用不同结构。SQL 只发送经过校验的安全版本；音频负载当前只表示状态元数据。事件模型为语音场景提供 `VOICE` 和音频事件枚举；语音 Session、WebSocket 和前端语音入口只有在对应能力开关与预检通过后才进入可演示目录。
@@ -276,6 +278,9 @@ MCP 不提供知识正文、身份数据、工作流变更、工单写入、设�
 | `GET` | `/api/customer-service/sessions/{sessionId}/conversation` | 查询对话和安全检索轨迹 |
 | `GET/PATCH` | `/api/customer-service/tickets[/{ticketId}]` | 查询或推进人工客服工单 |
 | `GET` | `/api/collaboration/work-items` | 查询告警与客服工单的安全协同投影；需要 `CUSTOMER_AGENT`、`APPROVER` 或 `ADMIN` |
+| `GET` | `/api/security/incidents[/{incidentId}]` | 查询安全事件归并、时间线和脱敏证据；需要 `APPROVER` 或 `ADMIN` |
+| `POST` | `/api/security/incidents/{incidentId}/review` | 标记安全事件已研判；需要 `APPROVER` 或 `ADMIN` |
+| `POST` | `/api/security/incidents/{incidentId}/handoff` | 将安全事件幂等转为协同工作项；需要 `APPROVER` 或 `ADMIN` |
 | `POST` | `/api/expert-collaboration/runs` | 发起专家协作 |
 | `GET` | `/api/expert-collaboration/runs/{runId}` | 查询专家协作状态、发现和汇总 |
 | `POST` | `/api/operations-analysis/runs` | 发起自然语言运营分析 |

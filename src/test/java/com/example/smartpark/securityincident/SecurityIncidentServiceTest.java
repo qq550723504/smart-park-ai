@@ -1,0 +1,688 @@
+package com.example.smartpark.securityincident;
+
+import com.example.smartpark.model.alert.Alert;
+import com.example.smartpark.model.alert.AlertClassification;
+import com.example.smartpark.model.common.RiskLevel;
+import com.example.smartpark.model.security.SecurityEvent;
+import com.example.smartpark.port.alert.AlertPort;
+import com.example.smartpark.port.collaboration.SecurityIncidentHandoff;
+import com.example.smartpark.port.collaboration.SecurityIncidentHandoffPort;
+import com.example.smartpark.port.security.SecurityEventReader;
+import com.example.smartpark.collaborationcenter.SecurityIncidentHandoffStore;
+import org.junit.jupiter.api.Test;
+
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+class SecurityIncidentServiceTest {
+
+    private static final Instant BASE = Instant.parse("2026-09-02T08:00:00Z");
+
+    @Test
+    void groupsSameAreaAndTypeWithinFifteenMinutesButSplitsTheNextWindow() {
+        SecurityIncidentService service = service(List.of(
+                event("SEC-1", "A1", "ACCESS", BASE),
+                event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(15 * 60)),
+                event("SEC-3", "A1", "ACCESS", BASE.plusSeconds(30 * 60 + 1))));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).hasSize(2);
+        assertThat(page.items().get(0).eventIds()).containsExactly("SEC-3");
+        assertThat(page.items().get(1).eventIds()).containsExactly("SEC-1", "SEC-2");
+    }
+
+    @Test
+    void removesSupersededStatesBeforeSavingNewIncidents() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-A-1", "A1", "ACCESS", BASE),
+                event("SEC-C-1", "C1", "ACCESS", BASE.plusSeconds(10 * 60)),
+                event("SEC-A-2", "A1", "ACCESS", BASE.plusSeconds(16 * 60))));
+        SecurityIncidentService service = service(events, List.of(), 3);
+        service.list(new SecurityIncidentQuery(null, 20));
+        events.add(event("SEC-A-BRIDGE", "A1", "ACCESS", BASE.plusSeconds(8 * 60)));
+        events.add(event("SEC-D-1", "D1", "ACCESS", BASE.plusSeconds(2 * 60 * 60)));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).extracting(SecurityIncident::buildingId)
+                .contains("A1", "C1", "D1");
+    }
+
+    @Test
+    void returnsAnOffsetPageWhileKeepingTheFullIncidentTotal() {
+        SecurityIncidentService service = service(List.of(
+                event("SEC-1", "A1", "ACCESS", BASE),
+                event("SEC-2", "A2", "ACCESS", BASE.plusSeconds(60))));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 1, 1));
+
+        assertThat(page.total()).isEqualTo(2);
+        assertThat(page.items()).hasSize(1);
+        assertThat(page.items().get(0).buildingId()).isEqualTo("A1");
+    }
+
+    @Test
+    void doesNotExposeHandedOffIncidentsWhoseWorkItemsWereEvicted() {
+        List<SecurityEvent> events = new ArrayList<>();
+        for (int index = 0; index < 101; index++) {
+            events.add(event("SEC-" + index, "B" + index, "ACCESS", BASE.plusSeconds(index * 60L)));
+        }
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(100);
+        SecurityIncidentService service = service(events, List.of(), 200, handoffs);
+        List<SecurityIncident> incidents = new ArrayList<>(service.list(new SecurityIncidentQuery(null, 0, 100)).items());
+        incidents.addAll(service.list(new SecurityIncidentQuery(null, 100, 100)).items());
+        for (SecurityIncident incident : incidents) {
+            service.review(incident.incidentId());
+            service.handoff(incident.incidentId());
+        }
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 0, 100));
+
+        assertThat(page.total()).isEqualTo(100);
+        assertThat(page.items()).allMatch(incident -> handoffs.list().stream()
+                .anyMatch(handoff -> handoff.workItemId().equals(incident.handoffWorkItemId())));
+    }
+
+    @Test
+    void retiresAHandoffWhenItsEntireCorrelationDisappears() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 10, handoffs);
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(incident.incidentId());
+        service.handoff(incident.incidentId());
+        events.clear();
+
+        service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(handoffs.list()).isEmpty();
+    }
+
+    @Test
+    void correlationIsStableForShuffledInputAndHighAlert() {
+        List<SecurityEvent> events = List.of(
+                event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(9 * 60)),
+                event("SEC-1", "A1", "ACCESS", BASE));
+        Alert alert = new Alert("ALT-1", "PARK-A", "A1", "DEV-ACCESS-001", AlertClassification.ACCESS,
+                RiskLevel.HIGH, "REDACTED: access alert", BASE.plusSeconds(9 * 60), List.of("security-event:SEC-2"));
+
+        SecurityIncidentService first = service(events, List.of(alert));
+        SecurityIncidentService second = service(new ArrayList<>(List.of(events.get(1), events.get(0))), List.of(alert));
+
+        SecurityIncident left = first.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        SecurityIncident right = second.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(left.incidentId()).isEqualTo(right.incidentId());
+        assertThat(left.eventIds()).containsExactly("SEC-1", "SEC-2");
+        assertThat(left.riskLevel()).isEqualTo(SecurityIncidentRisk.HIGH);
+    }
+
+    @Test
+    void preservesTheHistoricalHandoffRiskWhenTheAlertLeavesTheActiveFeed() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        List<Alert> alerts = new ArrayList<>(List.of(new Alert("ALT-1", "PARK-A", "A1", "DEV-ACCESS-001",
+                AlertClassification.ACCESS, RiskLevel.HIGH, "REDACTED: access alert", BASE,
+                List.of("security-event:SEC-1"))));
+        SecurityIncidentService service = service(events, alerts);
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        assertThat(incident.riskLevel()).isEqualTo(SecurityIncidentRisk.HIGH);
+        service.review(incident.incidentId());
+        service.handoff(incident.incidentId());
+        alerts.clear();
+
+        SecurityIncident restored = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(restored.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(restored.riskLevel()).isEqualTo(SecurityIncidentRisk.HIGH);
+        assertThat(restored.recommendations()).containsExactly(
+                "核对安全处置手册并由授权人员复核。", "必要时记录协同交接并保留人工审计。");
+    }
+
+    @Test
+    void onlyLinksAlertsToEventsInTheSameLocation() {
+        Alert foreignAlert = new Alert("ALT-FOREIGN", "PARK-B", "B1", "DEV-1", AlertClassification.ACCESS,
+                RiskLevel.HIGH, "REDACTED: foreign alert", BASE, List.of("security-event:SEC-DUP"));
+        SecurityIncidentService service = service(List.of(
+                event("SEC-DUP", "PARK-A", "A1", "ACCESS", BASE),
+                event("SEC-DUP", "PARK-B", "B1", "ACCESS", BASE.plusSeconds(60))),
+                List.of(foreignAlert));
+
+        List<SecurityIncident> incidents = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        assertThat(incidents).filteredOn(incident -> incident.parkId().equals("PARK-A"))
+                .singleElement().satisfies(incident -> {
+                    assertThat(incident.alertIds()).isEmpty();
+                    assertThat(incident.riskLevel()).isEqualTo(SecurityIncidentRisk.MEDIUM);
+                });
+        assertThat(incidents).filteredOn(incident -> incident.parkId().equals("PARK-B"))
+                .singleElement().satisfies(incident -> {
+                    assertThat(incident.alertIds()).containsExactly("ALT-FOREIGN");
+                    assertThat(incident.riskLevel()).isEqualTo(SecurityIncidentRisk.HIGH);
+                });
+    }
+
+    @Test
+    void reviewAndHandoffAreIdempotent() {
+        SecurityIncidentService service = service(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        String incidentId = service.list(new SecurityIncidentQuery(null, 20)).items().get(0).incidentId();
+
+        SecurityIncident reviewed = service.review(incidentId);
+        SecurityIncident reviewedAgain = service.review(incidentId);
+        SecurityIncident handedOff = service.handoff(incidentId);
+        SecurityIncident handedOffAgain = service.handoff(incidentId);
+
+        assertThat(reviewed.status()).isEqualTo(SecurityIncidentStatus.REVIEWED);
+        assertThat(reviewedAgain.reviewedAt()).isEqualTo(reviewed.reviewedAt());
+        assertThat(handedOff.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(handedOffAgain.handoffWorkItemId()).isEqualTo(handedOff.handoffWorkItemId());
+    }
+
+    @Test
+    void preservesReviewedAndHandoffStateWhenAnEarlierEventExpandsTheIncident() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(9 * 60))));
+        SecurityIncidentService service = service(events);
+        String incidentId = service.list(new SecurityIncidentQuery(null, 20)).items().get(0).incidentId();
+        service.review(incidentId);
+        SecurityIncident handedOff = service.handoff(incidentId);
+
+        events.add(event("SEC-1", "A1", "ACCESS", BASE));
+
+        SecurityIncident refreshed = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(refreshed.incidentId()).isEqualTo(incidentId);
+        assertThat(refreshed.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(refreshed.handoffWorkItemId()).isEqualTo(handedOff.handoffWorkItemId());
+        assertThat(refreshed.eventIds()).containsExactly("SEC-1", "SEC-2");
+    }
+
+    @Test
+    void reconcilesAllStoredStatesWhenALateEventBridgesTwoIncidents() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-1", "A1", "ACCESS", BASE),
+                event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(16 * 60))));
+        SecurityIncidentService service = service(events);
+
+        SecurityIncident later = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.eventIds().contains("SEC-2"))
+                .findFirst().orElseThrow();
+        service.review(later.incidentId());
+        SecurityIncident handedOff = service.handoff(later.incidentId());
+        events.add(event("SEC-BRIDGE", "A1", "ACCESS", BASE.plusSeconds(8 * 60)));
+
+        SecurityIncident merged = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(merged.incidentId()).isNotEqualTo(later.incidentId());
+        assertThat(merged.eventIds()).containsExactly("SEC-1", "SEC-BRIDGE", "SEC-2");
+        assertThat(merged.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(merged.handoffWorkItemId()).isEqualTo(handedOff.handoffWorkItemId());
+    }
+
+    @Test
+    void refreshesExistingHandoffProjectionAfterCorrelationDataChanges() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-1", "A1", "ACCESS", BASE, "REDACTED:旧摘要")));
+        List<Alert> alerts = new ArrayList<>();
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, alerts, 50, handoffs);
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(incident.incidentId());
+        service.handoff(incident.incidentId());
+
+        events.set(0, event("SEC-1", "A1", "ACCESS", BASE, "REDACTED:新摘要"));
+        alerts.add(new Alert("ALT-1", "PARK-A", "A1", "DEV-1", AlertClassification.ACCESS,
+                RiskLevel.HIGH, "REDACTED:高风险告警", BASE.plusSeconds(30), List.of("security-event:SEC-1")));
+        service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(handoffs.list()).singleElement().satisfies(handoff -> {
+            assertThat(handoff.riskLevel()).isEqualTo(SecurityIncidentRisk.HIGH);
+            assertThat(handoff.safeSummary()).isEqualTo("REDACTED:新摘要");
+        });
+    }
+
+    @Test
+    void missingRiskInformationDefaultsToMedium() {
+        SecurityIncidentService service = service(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(incident.riskLevel()).isEqualTo(SecurityIncidentRisk.MEDIUM);
+    }
+
+    @Test
+    void keepsCorrelationBucketsDistinctWhenIdentifiersContainDelimiters() {
+        SecurityIncidentService service = service(List.of(
+                event("SEC-1", "P:A", "B", "ACCESS", BASE),
+                event("SEC-2", "P", "A:B", "ACCESS", BASE.plusSeconds(60))));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).hasSize(2);
+        assertThat(page.items()).extracting(SecurityIncident::eventIds)
+                .containsExactlyInAnyOrder(List.of("SEC-1"), List.of("SEC-2"));
+    }
+
+    @Test
+    void generatesOpaqueUrlSafeIncidentIdsForSlashContainingIdentifiers() {
+        SecurityIncidentService service = service(List.of(
+                event("SEC/1", "P/A", "B/A", "ACCESS/ATTEMPT", BASE)));
+
+        String incidentId = service.list(new SecurityIncidentQuery(null, 20)).items().get(0).incidentId();
+
+        assertThat(incidentId).matches("INC:[0-9a-f]{64}");
+    }
+
+    @Test
+    void handoffRequiresACompletedReview() {
+        SecurityIncidentService service = service(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        String incidentId = service.list(new SecurityIncidentQuery(null, 20)).items().get(0).incidentId();
+
+        assertThatThrownBy(() -> service.handoff(incidentId))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("security incident must be reviewed before handoff");
+    }
+
+    @Test
+    void doesNotPublishAHandoffForAnOpenIncident() {
+        List<SecurityIncidentHandoff> created = new ArrayList<>();
+        SecurityIncidentHandoffPort handoffs = new SecurityIncidentHandoffPort() {
+            @Override
+            public SecurityIncidentHandoff createOrGet(SecurityIncident incident, Instant now) {
+                SecurityIncidentHandoff result = new SecurityIncidentHandoff("WI:" + incident.incidentId(), incident.incidentId(),
+                        incident.parkId(), incident.buildingId(), incident.riskLevel(), incident.summary(), now);
+                created.add(result);
+                return result;
+            }
+
+            @Override
+            public List<SecurityIncidentHandoff> list() { return List.copyOf(created); }
+
+            @Override
+            public void retire(String incidentId) {
+                created.removeIf(handoff -> handoff.incidentId().equals(incidentId));
+            }
+        };
+        SecurityIncidentService service = service(List.of(event("SEC-1", "A1", "ACCESS", BASE)), List.of(), 50, handoffs);
+        String incidentId = service.list(new SecurityIncidentQuery(null, 20)).items().get(0).incidentId();
+
+        assertThatThrownBy(() -> service.handoff(incidentId))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("security incident must be reviewed before handoff");
+        assertThat(created).isEmpty();
+    }
+
+    @Test
+    void rejectsAnIncidentIdThatIsAbsentFromTheCurrentCorrelation() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        SecurityIncidentService service = service(events);
+        String incidentId = service.list(new SecurityIncidentQuery(null, 20)).items().get(0).incidentId();
+        events.clear();
+
+        assertThatThrownBy(() -> service.get(incidentId))
+                .isInstanceOf(java.util.NoSuchElementException.class)
+                .hasMessage("security incident not found");
+    }
+
+    @Test
+    void preservesStateWhenTheFiniteEventWindowShrinks() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-1", "A1", "ACCESS", BASE),
+                event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(8 * 60)),
+                event("SEC-3", "A1", "ACCESS", BASE.plusSeconds(16 * 60))));
+        SecurityIncidentService service = service(events);
+        SecurityIncident initial = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(initial.incidentId());
+        SecurityIncident handedOff = service.handoff(initial.incidentId());
+        events.removeIf(event -> event.eventId().equals("SEC-1"));
+
+        SecurityIncident refreshed = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(refreshed.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(refreshed.handoffWorkItemId()).isEqualTo(handedOff.handoffWorkItemId());
+    }
+
+    @Test
+    void keepsReadingWhenMergedWindowsContainConflictingHandoffs() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-1", "A1", "ACCESS", BASE),
+                event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(16 * 60))));
+        SecurityIncidentService service = service(events);
+        List<SecurityIncident> initial = service.list(new SecurityIncidentQuery(null, 20)).items();
+        for (SecurityIncident incident : initial) {
+            service.review(incident.incidentId());
+            service.handoff(incident.incidentId());
+        }
+        events.add(event("SEC-BRIDGE", "A1", "ACCESS", BASE.plusSeconds(8 * 60)));
+
+        SecurityIncidentPage merged = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(merged.items()).hasSize(1);
+        assertThat(merged.items().get(0).status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+    }
+
+    @Test
+    void preservesFinalizedStateWhenAnOpenWindowJoinsTwoHandedOffWindows() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-1", "A1", "ACCESS", BASE),
+                event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(16 * 60)),
+                event("SEC-3", "A1", "ACCESS", BASE.plusSeconds(32 * 60))));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 50, handoffs);
+        List<SecurityIncident> separated = service.list(new SecurityIncidentQuery(null, 20)).items();
+        SecurityIncident secondIncident = separated.stream()
+                .filter(incident -> incident.eventIds().contains("SEC-2"))
+                .findFirst().orElseThrow();
+        SecurityIncident thirdIncident = separated.stream()
+                .filter(incident -> incident.eventIds().contains("SEC-3"))
+                .findFirst().orElseThrow();
+        service.review(secondIncident.incidentId());
+        SecurityIncident second = service.handoff(secondIncident.incidentId());
+        service.review(thirdIncident.incidentId());
+        SecurityIncident third = service.handoff(thirdIncident.incidentId());
+        events.add(event("SEC-BRIDGE-1", "A1", "ACCESS", BASE.plusSeconds(8 * 60)));
+        events.add(event("SEC-BRIDGE-2", "A1", "ACCESS", BASE.plusSeconds(24 * 60)));
+
+        SecurityIncident merged = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(merged.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(merged.handoffWorkItemId()).isIn(second.handoffWorkItemId(), third.handoffWorkItemId());
+        assertThat(handoffs.list()).hasSize(1);
+    }
+
+    @Test
+    void preservesReviewTimestampWhenRestoringAnEvictedHandoff() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 1, handoffs);
+        SecurityIncident initial = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        SecurityIncident reviewed = service.review(initial.incidentId());
+        service.handoff(initial.incidentId());
+        events.add(event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(16 * 60)));
+        service.list(new SecurityIncidentQuery(null, 20));
+
+        SecurityIncident restored = service.get(initial.incidentId());
+
+        assertThat(restored.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(restored.reviewedAt()).isEqualTo(reviewed.reviewedAt());
+    }
+
+    @Test
+    void listDoesNotReturnIncidentsEvictedByTheBoundedStore() {
+        SecurityIncidentService service = service(List.of(
+                event("SEC-1", "A1", "ACCESS", BASE),
+                event("SEC-2", "A2", "ACCESS", BASE.plusSeconds(60))), List.of(), 1);
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).hasSize(1);
+        assertThat(service.get(page.items().get(0).incidentId())).isEqualTo(page.items().get(0));
+    }
+
+    @Test
+    void keepsHandedOffIncidentsReachableAfterStateEviction() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 1, handoffs);
+        SecurityIncident handedOff = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(handedOff.incidentId());
+        SecurityIncident completed = service.handoff(handedOff.incidentId());
+        events.add(event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(16 * 60)));
+
+        service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(service.get(handedOff.incidentId()).status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(service.get(handedOff.incidentId()).handoffWorkItemId())
+                .isEqualTo(completed.handoffWorkItemId());
+    }
+
+    @Test
+    void restoresAHandedOffIncidentWhenItsDerivedIdChangesAfterStateEviction() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(9 * 60))));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 1, handoffs);
+        SecurityIncident initial = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(initial.incidentId());
+        SecurityIncident completed = service.handoff(initial.incidentId());
+        events.add(event("SEC-OTHER", "B1", "ACCESS", BASE.plusSeconds(2 * 60 * 60)));
+        service.list(new SecurityIncidentQuery(null, 20));
+        events.add(event("SEC-1", "A1", "ACCESS", BASE));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).anyMatch(incident -> incident.buildingId().equals("A1"));
+        SecurityIncident restored = page.items().stream()
+                .filter(incident -> incident.buildingId().equals("A1"))
+                .findFirst().orElseThrow();
+        assertThat(restored.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(restored.incidentId()).isNotEqualTo(initial.incidentId());
+        assertThat(restored.handoffWorkItemId()).isEqualTo(completed.handoffWorkItemId());
+        assertThat(service.get(restored.incidentId()).status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+    }
+
+    @Test
+    void reconcilesEveryRetainedHandoffWhenEvictedWindowsMerge() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-1", "A1", "ACCESS", BASE)
+        ));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 1, handoffs);
+
+        SecurityIncident first = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(first.incidentId());
+        SecurityIncident firstHandoff = service.handoff(first.incidentId());
+
+        events.add(event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(16 * 60)));
+        SecurityIncident second = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.eventIds().contains("SEC-2"))
+                .findFirst().orElseThrow();
+        service.review(second.incidentId());
+        SecurityIncident secondHandoff = service.handoff(second.incidentId());
+
+        events.add(event("SEC-OTHER", "B1", "ACCESS", BASE.plusSeconds(2 * 60 * 60)));
+        service.list(new SecurityIncidentQuery(null, 20));
+        events.add(event("SEC-BRIDGE", "A1", "ACCESS", BASE.plusSeconds(8 * 60)));
+
+        SecurityIncident merged = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.buildingId().equals("A1"))
+                .findFirst().orElseThrow();
+
+        assertThat(merged.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(merged.eventIds()).containsExactly("SEC-1", "SEC-BRIDGE", "SEC-2");
+        assertThat(merged.handoffWorkItemId()).isIn(firstHandoff.handoffWorkItemId(), secondHandoff.handoffWorkItemId());
+        assertThat(handoffs.list()).extracting(SecurityIncidentHandoff::workItemId)
+                .containsExactly(merged.handoffWorkItemId());
+    }
+
+    @Test
+    void preservesFinalizedStateForEveryGroupAfterACorrelationResplit() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-1", "A1", "ACCESS", BASE),
+                event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(16 * 60)),
+                event("SEC-BRIDGE", "A1", "ACCESS", BASE.plusSeconds(8 * 60))));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 50, handoffs);
+        SecurityIncident merged = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(merged.incidentId());
+        SecurityIncident completed = service.handoff(merged.incidentId());
+        events.removeIf(event -> event.eventId().equals("SEC-BRIDGE"));
+
+        SecurityIncidentPage split = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(split.items()).hasSize(2);
+        assertThat(split.items()).extracting(SecurityIncident::status)
+                .containsOnly(SecurityIncidentStatus.HANDOFF);
+        assertThat(split.items()).extracting(SecurityIncident::incidentId)
+                .doesNotHaveDuplicates();
+        assertThat(split.items()).extracting(SecurityIncident::handoffWorkItemId)
+                .doesNotContainNull();
+        assertThat(split.items()).extracting(SecurityIncident::handoffWorkItemId)
+                .contains(completed.handoffWorkItemId());
+        assertThat(handoffs.list()).extracting(SecurityIncidentHandoff::workItemId)
+                .containsExactly(completed.handoffWorkItemId());
+        assertThat(split.items()).extracting(SecurityIncident::handoffWorkItemId)
+                .containsOnly(completed.handoffWorkItemId());
+    }
+
+    @Test
+    void removesStoredCorrelationsThatDisappearBeforeSavingCurrentIncidents() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-OLD", "A1", "ACCESS", BASE),
+                event("SEC-VANISHED", "A1", "ACCESS", BASE.plusSeconds(16 * 60))));
+        SecurityIncidentService service = service(events, List.of(), 2);
+        String oldIncidentId = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.eventIds().contains("SEC-OLD"))
+                .findFirst().orElseThrow().incidentId();
+
+        events.removeIf(event -> event.eventId().equals("SEC-VANISHED"));
+        events.add(event("SEC-NEW", "A1", "ACCESS", BASE.plusSeconds(32 * 60)));
+
+        SecurityIncidentPage current = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(current.items()).extracting(SecurityIncident::incidentId).contains(oldIncidentId);
+        assertThat(current.items()).extracting(SecurityIncident::eventIds)
+                .noneMatch(ids -> ids.contains("SEC-VANISHED"));
+    }
+
+    @Test
+    void findsAHandedOffIncidentEvenWhenItFallsBeyondTheListPage() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-OLD", "A1", "ACCESS", BASE)));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(200);
+        SecurityIncidentService service = service(events, List.of(), 100, handoffs);
+        SecurityIncident old = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(old.incidentId());
+        service.handoff(old.incidentId());
+        for (int index = 1; index <= 100; index++) {
+            events.add(event("SEC-NEW-" + index, "NEW-" + index, "ACCESS", BASE.plusSeconds(index * 60L)));
+        }
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, SecurityIncidentQuery.MAX_LIMIT));
+
+        assertThat(handoffs.list()).extracting(SecurityIncidentHandoff::incidentId).contains(old.incidentId());
+        assertThat(page.total()).isEqualTo(101);
+        assertThat(page.items()).extracting(SecurityIncident::incidentId).doesNotContain(old.incidentId());
+        assertThat(service.get(old.incidentId()).incidentId()).isEqualTo(old.incidentId());
+    }
+
+    @Test
+    void retiresSupersededHandoffsWhenCorrelationWindowsMerge() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-1", "A1", "ACCESS", BASE),
+                event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(16 * 60))));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 50, handoffs);
+        List<SecurityIncident> separated = service.list(new SecurityIncidentQuery(null, 20)).items();
+        for (SecurityIncident incident : separated) {
+            service.review(incident.incidentId());
+            service.handoff(incident.incidentId());
+        }
+        events.add(event("SEC-BRIDGE", "A1", "ACCESS", BASE.plusSeconds(8 * 60)));
+
+        SecurityIncident merged = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(handoffs.list()).singleElement()
+                .extracting(SecurityIncidentHandoff::workItemId)
+                .isEqualTo(merged.handoffWorkItemId());
+    }
+
+    private static SecurityIncidentService service(List<SecurityEvent> events) {
+        return service(events, List.of(), 50);
+    }
+
+    private static SecurityIncidentService service(List<SecurityEvent> events, List<Alert> alerts) {
+        return service(events, alerts, 50);
+    }
+
+    private static SecurityIncidentService service(List<SecurityEvent> events, List<Alert> alerts, int capacity) {
+        List<SecurityIncidentHandoff> created = new ArrayList<>();
+        return service(events, alerts, capacity, new SecurityIncidentHandoffPort() {
+            @Override
+            public SecurityIncidentHandoff createOrGet(SecurityIncident incident, Instant now) {
+                SecurityIncidentHandoff handoff = new SecurityIncidentHandoff("WI:" + incident.incidentId(), incident.incidentId(), incident.parkId(),
+                        incident.buildingId(), incident.riskLevel(), incident.summary(), now);
+                created.removeIf(existing -> existing.workItemId().equals(handoff.workItemId()));
+                created.add(handoff);
+                return handoff;
+            }
+
+            @Override
+            public SecurityIncidentHandoff refresh(SecurityIncident incident, Instant now) {
+                SecurityIncidentHandoff existing = created.stream()
+                        .filter(handoff -> handoff.workItemId().equals(incident.handoffWorkItemId()))
+                        .findFirst().orElse(null);
+                if (existing == null) return createOrGet(incident, now);
+                SecurityIncidentHandoff refreshed = new SecurityIncidentHandoff(existing.workItemId(), incident.incidentId(),
+                        incident.parkId(), incident.buildingId(), incident.riskLevel(), incident.summary(),
+                        existing.createdAt(), existing.reviewedAt(), now, incident.eventType(), incident.eventIds());
+                created.removeIf(handoff -> handoff.workItemId().equals(existing.workItemId()));
+                created.add(refreshed);
+                return refreshed;
+            }
+
+            @Override
+            public List<SecurityIncidentHandoff> list() {
+                return List.copyOf(created);
+            }
+
+            @Override
+            public void retire(String incidentId) {
+                created.removeIf(handoff -> handoff.incidentId().equals(incidentId));
+            }
+        });
+    }
+
+    private static SecurityIncidentService service(List<SecurityEvent> events, List<Alert> alerts, int capacity,
+                                                    SecurityIncidentHandoffPort handoffs) {
+        SecurityEventReader security = new SecurityEventReader() {
+            @Override
+            public SecurityEvent getEvent(String eventId) {
+                return events.stream().filter(event -> event.eventId().equals(eventId)).findFirst().orElseThrow();
+            }
+
+            @Override
+            public List<SecurityEvent> listEvents() {
+                return events;
+            }
+        };
+        AlertPort alertPort = new AlertPort() {
+            @Override
+            public Alert getAlert(String alertId) {
+                return alerts.stream().filter(alert -> alert.id().equals(alertId)).findFirst().orElseThrow();
+            }
+
+            @Override
+            public List<Alert> findHistory(String deviceId) {
+                return List.of();
+            }
+
+            @Override
+            public List<Alert> listActive() {
+                return alerts;
+            }
+        };
+        return new SecurityIncidentService(security, alertPort, new SecurityIncidentStore(capacity), handoffs,
+                Clock.fixed(BASE.plusSeconds(3600), ZoneOffset.UTC));
+    }
+
+    private static SecurityEvent event(String id, String buildingId, String type, Instant occurredAt) {
+        return event(id, "PARK-A", buildingId, type, occurredAt);
+    }
+
+    private static SecurityEvent event(String id, String parkId, String buildingId, String type, Instant occurredAt) {
+        return event(id, parkId, buildingId, type, occurredAt, "REDACTED: safe event summary");
+    }
+
+    private static SecurityEvent event(String id, String buildingId, String type, Instant occurredAt, String summary) {
+        return event(id, "PARK-A", buildingId, type, occurredAt, summary);
+    }
+
+    private static SecurityEvent event(String id, String parkId, String buildingId, String type, Instant occurredAt,
+                                       String summary) {
+        return new SecurityEvent(id, parkId, buildingId, type, occurredAt, summary);
+    }
+}

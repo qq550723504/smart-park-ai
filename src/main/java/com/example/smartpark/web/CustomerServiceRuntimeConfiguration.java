@@ -6,6 +6,7 @@ import com.example.smartpark.adapter.mock.InMemoryCustomerTicketAdapter;
 import com.example.smartpark.feedback.FeedbackService;
 import com.example.smartpark.operations.OperationsCapabilitiesService;
 import com.example.smartpark.operations.OperationsMetrics;
+import com.example.smartpark.securityincident.SecurityIncidentService;
 import com.example.smartpark.port.customer.CustomerAnswerPort;
 import com.example.smartpark.port.customer.CustomerSessionStore;
 import com.example.smartpark.port.customer.CustomerTicketPort;
@@ -26,9 +27,10 @@ public class CustomerServiceRuntimeConfiguration {
             @Value("${smartpark.analytics.enabled:false}") boolean analyticsEnabled,
             @Value("${smartpark.voice.enabled:false}") boolean voiceEnabled,
             @Value("${smartpark.local-demo.enabled:false}") boolean localDemoEnabled,
-            org.springframework.beans.factory.ObjectProvider<com.example.smartpark.collaboration.ExpertCollaborationService> collaborationService) {
+            org.springframework.beans.factory.ObjectProvider<com.example.smartpark.collaboration.ExpertCollaborationService> collaborationService,
+            org.springframework.beans.factory.ObjectProvider<SecurityIncidentService> securityIncidentService) {
         return new OperationsCapabilitiesService(knowledgeMode, customerAnswerMode, analyticsEnabled,
-                voiceEnabled, localDemoEnabled, collaborationService);
+                voiceEnabled, localDemoEnabled, collaborationService, securityIncidentService);
     }
 
     @Bean

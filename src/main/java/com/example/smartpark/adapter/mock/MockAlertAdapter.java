@@ -18,6 +18,11 @@ public final class MockAlertAdapter implements AlertPort {
     }
 
     @Override
+    public List<Alert> listActive() {
+        return dataStore.listAlerts();
+    }
+
+    @Override
     public List<Alert> findHistory(String deviceId) {
         return dataStore.findHistory(deviceId);
     }
