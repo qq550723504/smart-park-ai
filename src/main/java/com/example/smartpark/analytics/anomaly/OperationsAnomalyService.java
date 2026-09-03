@@ -46,11 +46,17 @@ public final class OperationsAnomalyService {
         deviceSnapshot.buildings().forEach(building -> byBuilding
                 .computeIfAbsent(building.buildingId(), ignored -> new BuildingAccumulator(building.buildingId()))
                 .withOfflineDevices(building.offlineDeviceCount()));
-        energySnapshot.buildings().stream()
-                .filter(building -> hasEnergyAnomalySignal(building.deviationPct()))
-                .forEach(building -> byBuilding
-                        .computeIfAbsent(building.buildingId(), ignored -> new BuildingAccumulator(building.buildingId()))
-                        .withEnergyDeviation(building.deviationPct()));
+        energySnapshot.buildings().forEach(building -> {
+            boolean anomaly = hasEnergyAnomalySignal(building.deviationPct());
+            BuildingAccumulator existing = byBuilding.get(building.buildingId());
+            // Zero is valid observed energy data, but must not create an
+            // affected building by itself. Preserve it when another domain
+            // already established that the building is affected.
+            if (anomaly || existing != null) {
+                byBuilding.computeIfAbsent(building.buildingId(), ignored -> new BuildingAccumulator(building.buildingId()))
+                        .withEnergyDeviation(building.deviationPct());
+            }
+        });
 
         List<OperationsAnomalyDtos.BuildingSummary> buildings = byBuilding.values().stream()
                 .map(BuildingAccumulator::toDto)

@@ -58,6 +58,14 @@ _QUALIFIERS = sorted(
     key=len, reverse=True)
 
 _SPLIT = re.compile(r"到|至|~|～")
+# Structured handoffs use exact UTC instants. Treat the complete expression as
+# one atomic range before JioNLP sees it; otherwise NER splits each timestamp
+# into independent date/time mentions and reports MULTIPLE.
+_ISO_RANGE = re.compile(
+    r"(?P<from>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?Z)"
+    r"\s*(?:至|到|~|～)\s*"
+    r"(?P<to>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?Z)"
+)
 _DATE_SHAPES = [
     re.compile(r"(?<![\d])(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?![\d])"),
     re.compile(r"(\d{4})年(\d{1,2})月(\d{1,2})[日号]"),
@@ -290,6 +298,31 @@ def resolve_question(request: ResolveRequest) -> ResolveResponse:
             provider=PROVIDER, providerVersion=EXPECTED_VERSION,
             referenceInstant=canonical_reference, timezone=request.timezone,
             status="UNSUPPORTED", mentions=[], reasonCode="INVALID_DATE")
+
+    atomic = next((match for match in _ISO_RANGE.finditer(question)
+                   if not any(match.start() < ex_end and ex_start < match.end()
+                              for ex_start, ex_end in excluded)), None)
+    if atomic:
+        try:
+            start = datetime.fromisoformat(atomic.group("from").replace("Z", "+00:00"))
+            end = datetime.fromisoformat(atomic.group("to").replace("Z", "+00:00"))
+            if start >= end:
+                return ResolveResponse(
+                    provider=PROVIDER, providerVersion=EXPECTED_VERSION,
+                    referenceInstant=canonical_reference, timezone=request.timezone,
+                    status="UNSUPPORTED", mentions=[], reasonCode="REVERSED_RANGE")
+            mention = Mention(text=atomic.group(0), start=atomic.start(), end=atomic.end(),
+                              type="time_point", definition="accurate",
+                              fromInclusive=_utc(start), toExclusive=_utc(end), empty=False)
+            return ResolveResponse(
+                provider=PROVIDER, providerVersion=EXPECTED_VERSION,
+                referenceInstant=canonical_reference, timezone=request.timezone,
+                status="PARSED", mentions=[mention], reasonCode=None)
+        except ValueError:
+            return ResolveResponse(
+                provider=PROVIDER, providerVersion=EXPECTED_VERSION,
+                referenceInstant=canonical_reference, timezone=request.timezone,
+                status="UNSUPPORTED", mentions=[], reasonCode="INVALID_DATE")
 
     raw_mentions = jio.ner.extract_time(question) or []
     eligible = []
