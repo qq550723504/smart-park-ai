@@ -1,5 +1,6 @@
 package com.example.smartpark.web;
 
+import com.example.smartpark.analytics.anomaly.OperationsAnomalyService;
 import com.example.smartpark.workflow.CustomerServiceValidationException;
 
 import org.springframework.http.HttpStatus;
@@ -46,6 +47,11 @@ public class ApiExceptionHandler {
             return error(HttpStatus.CONFLICT, "Idempotency-Key 已用于其他决定，请生成新的请求键");
         }
         return error(HttpStatus.BAD_REQUEST, "Invalid request");
+    }
+
+    @ExceptionHandler(OperationsAnomalyService.AnomalyOverviewUnavailableException.class)
+    ResponseEntity<WebDtos.ApiError> anomalyUnavailable(OperationsAnomalyService.AnomalyOverviewUnavailableException exception) {
+        return error(HttpStatus.SERVICE_UNAVAILABLE, "运营异常分析暂不可用");
     }
 
     @ExceptionHandler(java.util.concurrent.RejectedExecutionException.class)

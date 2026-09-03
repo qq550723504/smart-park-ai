@@ -26,6 +26,7 @@ import com.example.smartpark.analytics.anomaly.JdbcEnergyAnalyticsReader;
 import com.example.smartpark.analytics.anomaly.AlertAnalyticsReader;
 import com.example.smartpark.analytics.anomaly.DeviceAnalyticsReader;
 import com.example.smartpark.analytics.anomaly.EnergyAnalyticsReader;
+import com.example.smartpark.analytics.anomaly.OperationsAnomalyService;
 import com.example.smartpark.analytics.catalog.MetricCatalog;
 import com.example.smartpark.analytics.sql.QueryCostGuard;
 import com.example.smartpark.analytics.sql.ReadOnlyQueryExecutor;
@@ -230,6 +231,15 @@ public class AnalyticsConfiguration {
                                                         com.example.smartpark.execution.ExecutionEventPublisher publisher) {
         return new OperationsAnalysisService(metricCatalog, graph::run, analyticsExecutor,
                 properties.getAnalysisTimeout(), properties.getClarificationTimeout(), analyticsClock, publisher);
+    }
+
+    @Bean
+    OperationsAnomalyService operationsAnomalyService(AlertAnalyticsReader alertAnalyticsReader,
+                                                      DeviceAnalyticsReader deviceAnalyticsReader,
+                                                      EnergyAnalyticsReader energyAnalyticsReader,
+                                                      Clock analyticsClock) {
+        return new OperationsAnomalyService(alertAnalyticsReader, deviceAnalyticsReader,
+                energyAnalyticsReader, analyticsClock);
     }
 
     @Bean

@@ -7,7 +7,9 @@ import java.util.List;
 public interface AlertAnalyticsReader {
     Snapshot read(OperationsAnomalyQuery query);
 
-    List<AlertReference> evidence(String buildingId, OperationsAnomalyQuery query);
+    default List<AlertReference> evidence(String buildingId, OperationsAnomalyQuery query) {
+        return List.of();
+    }
 
     record Snapshot(
             long alertCount,

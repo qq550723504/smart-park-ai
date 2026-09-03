@@ -7,7 +7,9 @@ import java.util.List;
 public interface EnergyAnalyticsReader {
     Snapshot read(OperationsAnomalyQuery query);
 
-    List<EnergyReference> evidence(String buildingId, OperationsAnomalyQuery query);
+    default List<EnergyReference> evidence(String buildingId, OperationsAnomalyQuery query) {
+        return List.of();
+    }
 
     record Snapshot(List<BuildingSummary> buildings, boolean available, String failureCode) {
         public Snapshot {
