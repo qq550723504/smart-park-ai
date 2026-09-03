@@ -63,9 +63,9 @@ describe('OperationsAnalysisPage', () => {
       '过去5天各楼宇能耗与占用人数关系',
       '设备离线数',
       '过去1天各楼宇离线设备数量',
-      '过去1天各设备类型离线数量',
-      '过去1天离线设备趋势',
-      '过去1天离线设备排行',
+      '过去1天各设备类型离线设备数量',
+      '过去1天各楼宇离线设备排行',
+      '过去1天各设备类型离线设备排行',
       '告警数量',
       '高风险告警数量',
       '过去7天各楼宇告警数量',
@@ -80,6 +80,10 @@ describe('OperationsAnalysisPage', () => {
 
     expect((wrapper.find('[aria-label="分析问题"]').element as HTMLInputElement).value)
       .toBe('过去5天各楼宇能耗')
+
+    await presets[15].trigger('click')
+    expect((wrapper.find('[aria-label="分析问题"]').element as HTMLInputElement).value)
+      .toBe('过去1天各楼宇离线设备数量')
     wrapper.unmount()
   })
 
