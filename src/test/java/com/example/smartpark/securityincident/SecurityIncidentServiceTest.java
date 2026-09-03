@@ -251,6 +251,52 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void preservesFinalizedStateWhenAnOpenWindowJoinsTwoHandedOffWindows() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-1", "A1", "ACCESS", BASE),
+                event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(16 * 60)),
+                event("SEC-3", "A1", "ACCESS", BASE.plusSeconds(32 * 60))));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 50, handoffs);
+        List<SecurityIncident> separated = service.list(new SecurityIncidentQuery(null, 20)).items();
+        SecurityIncident secondIncident = separated.stream()
+                .filter(incident -> incident.eventIds().contains("SEC-2"))
+                .findFirst().orElseThrow();
+        SecurityIncident thirdIncident = separated.stream()
+                .filter(incident -> incident.eventIds().contains("SEC-3"))
+                .findFirst().orElseThrow();
+        service.review(secondIncident.incidentId());
+        SecurityIncident second = service.handoff(secondIncident.incidentId());
+        service.review(thirdIncident.incidentId());
+        SecurityIncident third = service.handoff(thirdIncident.incidentId());
+        events.add(event("SEC-BRIDGE-1", "A1", "ACCESS", BASE.plusSeconds(8 * 60)));
+        events.add(event("SEC-BRIDGE-2", "A1", "ACCESS", BASE.plusSeconds(24 * 60)));
+
+        SecurityIncident merged = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(merged.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(merged.handoffWorkItemId()).isIn(second.handoffWorkItemId(), third.handoffWorkItemId());
+        assertThat(handoffs.list()).hasSize(1);
+    }
+
+    @Test
+    void preservesReviewTimestampWhenRestoringAnEvictedHandoff() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 1, handoffs);
+        SecurityIncident initial = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        SecurityIncident reviewed = service.review(initial.incidentId());
+        service.handoff(initial.incidentId());
+        events.add(event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(16 * 60)));
+        service.list(new SecurityIncidentQuery(null, 20));
+
+        SecurityIncident restored = service.get(initial.incidentId());
+
+        assertThat(restored.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(restored.reviewedAt()).isEqualTo(reviewed.reviewedAt());
+    }
+
+    @Test
     void listDoesNotReturnIncidentsEvictedByTheBoundedStore() {
         SecurityIncidentService service = service(List.of(
                 event("SEC-1", "A1", "ACCESS", BASE),

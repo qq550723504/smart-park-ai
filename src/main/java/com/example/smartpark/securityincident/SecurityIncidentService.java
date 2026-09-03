@@ -197,7 +197,7 @@ public final class SecurityIncidentService {
                 .findFirst()
                 .orElse(null);
         if (handoff == null) return restored;
-        return withStoredState(fresh, fresh.incidentId(), SecurityIncidentStatus.HANDOFF, restored.reviewedAt(),
+        return withStoredState(fresh, fresh.incidentId(), SecurityIncidentStatus.HANDOFF, handoff.reviewedAt(),
                 handoff.workItemId());
     }
 
@@ -213,17 +213,18 @@ public final class SecurityIncidentService {
                 .filter(Objects::nonNull)
                 .distinct()
                 .toList();
-        boolean conflictingHandoffs = handoffIds.size() > 1;
-        SecurityIncident state = conflictingHandoffs ? canonical : candidates.stream()
-                .max(Comparator.comparingInt(existing -> statusRank(existing.status())))
+        SecurityIncident state = candidates.stream()
+                .max(Comparator.comparingInt((SecurityIncident existing) -> statusRank(existing.status()))
+                        .thenComparing(existing -> existing.incidentId().equals(canonical.incidentId()) ? 1 : 0)
+                        .thenComparing(SecurityIncident::incidentId))
                 .orElseThrow();
-        Instant reviewedAt = conflictingHandoffs ? canonical.reviewedAt() : candidates.stream()
+        Instant reviewedAt = candidates.stream()
                 .map(SecurityIncident::reviewedAt)
                 .filter(Objects::nonNull)
                 .max(Comparator.naturalOrder())
                 .orElse(null);
-        String handoffWorkItemId = conflictingHandoffs ? canonical.handoffWorkItemId()
-                : handoffIds.isEmpty() ? null : handoffIds.get(0);
+        String handoffWorkItemId = state.handoffWorkItemId();
+        if (handoffWorkItemId == null && !handoffIds.isEmpty()) handoffWorkItemId = handoffIds.get(0);
         String incidentId = retainStoredIdentity ? canonical.incidentId() : fresh.incidentId();
         return withStoredState(fresh, incidentId, state.status(), reviewedAt, handoffWorkItemId);
     }

@@ -6,7 +6,13 @@ import java.util.Objects;
 import com.example.smartpark.securityincident.SecurityIncidentRisk;
 
 public record SecurityIncidentHandoff(String workItemId, String incidentId, String parkId, String buildingId,
-                                      SecurityIncidentRisk riskLevel, String safeSummary, Instant createdAt) {
+                                      SecurityIncidentRisk riskLevel, String safeSummary, Instant createdAt,
+                                      Instant reviewedAt) {
+    public SecurityIncidentHandoff(String workItemId, String incidentId, String parkId, String buildingId,
+                                   SecurityIncidentRisk riskLevel, String safeSummary, Instant createdAt) {
+        this(workItemId, incidentId, parkId, buildingId, riskLevel, safeSummary, createdAt, null);
+    }
+
     public SecurityIncidentHandoff {
         workItemId = requireText(workItemId, "workItemId");
         incidentId = requireText(incidentId, "incidentId");

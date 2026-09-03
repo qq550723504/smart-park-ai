@@ -25,10 +25,11 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
         SecurityIncidentHandoff existing = handoffs.get(incident.incidentId());
         SecurityIncidentHandoff handoff = existing == null
                 ? new SecurityIncidentHandoff("SECURITY_INCIDENT:" + incident.incidentId(), incident.incidentId(),
-                        incident.parkId(), incident.buildingId(), incident.riskLevel(), incident.summary(), now)
+                        incident.parkId(), incident.buildingId(), incident.riskLevel(), incident.summary(), now,
+                        incident.reviewedAt())
                 : new SecurityIncidentHandoff(existing.workItemId(), existing.incidentId(), existing.parkId(),
                         existing.buildingId(), higherRisk(existing.riskLevel(), incident.riskLevel()), incident.summary(),
-                        existing.createdAt());
+                        existing.createdAt(), existing.reviewedAt() != null ? existing.reviewedAt() : incident.reviewedAt());
         handoffs.put(incident.incidentId(), handoff);
         trimToCapacity();
         return handoff;
@@ -47,7 +48,8 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
                 SecurityIncidentHandoff existing = handoffs.remove(existingIncidentId);
                 SecurityIncidentHandoff migrated = new SecurityIncidentHandoff(existing.workItemId(),
                         incident.incidentId(), incident.parkId(), incident.buildingId(),
-                        higherRisk(existing.riskLevel(), incident.riskLevel()), incident.summary(), existing.createdAt());
+                        higherRisk(existing.riskLevel(), incident.riskLevel()), incident.summary(), existing.createdAt(),
+                        existing.reviewedAt() != null ? existing.reviewedAt() : incident.reviewedAt());
                 handoffs.put(incident.incidentId(), migrated);
                 trimToCapacity();
                 return migrated;
@@ -55,7 +57,7 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
             if (!handoffs.containsKey(incident.incidentId())) {
                 SecurityIncidentHandoff restored = new SecurityIncidentHandoff(incident.handoffWorkItemId(),
                         incident.incidentId(), incident.parkId(), incident.buildingId(), incident.riskLevel(),
-                        incident.summary(), now);
+                        incident.summary(), now, incident.reviewedAt());
                 handoffs.put(incident.incidentId(), restored);
                 trimToCapacity();
                 return restored;
