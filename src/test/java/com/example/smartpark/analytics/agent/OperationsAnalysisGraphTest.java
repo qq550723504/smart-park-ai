@@ -414,6 +414,30 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
+    void letsAscendingQualifierOverrideGenericRankingDefault() {
+        String ascendingSql = """
+                SELECT building_id, COUNT(*) AS device_offline_count FROM analytics.v_device_snapshot
+                WHERE snapshot_at >= :fromTs AND snapshot_at < :toTs
+                  AND status = 'OFFLINE'
+                GROUP BY building_id ORDER BY device_offline_count ASC LIMIT 200""";
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("过去1天各楼宇离线设备最少排行", List.of("离线设备"), List.of()),
+                List.of(ascendingSql),
+                null,
+                "共 3 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "过去1天各楼宇离线设备最少排行");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().sort())
+                .isEqualTo(new QueryPlan.Sort("device_offline_count", true));
+        assertThat(outcome.result().rows().stream().map(row -> row.get(0)))
+                .containsExactly("B3", "B2", "B1");
+        assertThat(outcome.result().rows().stream().map(row -> ((Number) row.get(1)).longValue()))
+                .containsExactly(1L, 2L, 3L);
+    }
+
+    @Test
     void deduplicatesMetricsAfterCanonicalCatalogResolution() {
         modelClient.reset(
                 new AnalyticsModelClient.QuestionUnderstanding("能耗和用电量", List.of("能耗", "用电量"), List.of()),
