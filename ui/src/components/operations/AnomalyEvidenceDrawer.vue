@@ -72,7 +72,9 @@ function analysisQuestion(): string {
   const deviceDriven = !hasAlerts && hasDevices
   const metric = props.filters.deviceType || deviceDriven ? '离线设备数量' : energyOnly ? '能耗偏差' : '告警数量'
   const activeFilters = filterLabels
-    .filter(([key]) => metric === '离线设备数量' ? key === 'deviceType' : key !== 'deviceType')
+    .filter(([key]) => metric === '离线设备数量'
+      ? key === 'deviceType'
+      : metric === '告警数量' && key !== 'deviceType')
     .filter(([key]) => props.filters[key])
     .map(([key, label]) => `${label}：${key === 'riskLevel' ? riskLabel(props.filters[key]) : props.filters[key]}`)
   const context = activeFilters.length > 0 ? `（${activeFilters.join('；')}）` : ''
