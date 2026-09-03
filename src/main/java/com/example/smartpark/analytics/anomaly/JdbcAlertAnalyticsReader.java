@@ -2,10 +2,13 @@ package com.example.smartpark.analytics.anomaly;
 
 import com.example.smartpark.analytics.model.TabularResult;
 import com.example.smartpark.analytics.sql.ReadOnlyQueryExecutor;
+import com.example.smartpark.workflow.WorkflowExecutionStore;
+import com.example.smartpark.workflow.WorkflowSnapshot;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 
 public final class JdbcAlertAnalyticsReader implements AlertAnalyticsReader {
     private static final String FILTERS = "WHERE occurred_at >= :from AND occurred_at < :to "
@@ -14,9 +17,15 @@ public final class JdbcAlertAnalyticsReader implements AlertAnalyticsReader {
             + "AND (:category IS NULL OR category = :category) "
             + "AND (:status IS NULL OR status = :status)";
     private final ReadOnlyQueryExecutor executor;
+    private final Optional<WorkflowExecutionStore> workflowStore;
 
     public JdbcAlertAnalyticsReader(ReadOnlyQueryExecutor executor) {
+        this(executor, null);
+    }
+
+    public JdbcAlertAnalyticsReader(ReadOnlyQueryExecutor executor, WorkflowExecutionStore workflowStore) {
         this.executor = java.util.Objects.requireNonNull(executor, "executor");
+        this.workflowStore = Optional.ofNullable(workflowStore);
     }
 
     @Override
@@ -38,8 +47,8 @@ public final class JdbcAlertAnalyticsReader implements AlertAnalyticsReader {
     }
 
     @Override
-    public List<AlertReference> evidence(String buildingId, OperationsAnomalyQuery query) {
-        if (buildingId == null || buildingId.isBlank()) return List.of();
+    public EvidenceResult<AlertReference> evidence(String buildingId, OperationsAnomalyQuery query) {
+        if (buildingId == null || buildingId.isBlank()) return EvidenceResult.available(List.of());
         try {
             OperationsAnomalyQuery scoped = new OperationsAnomalyQuery(query.from(), query.to(), buildingId,
                     query.riskLevel(), query.category(), query.status(), query.deviceType());
@@ -48,16 +57,30 @@ public final class JdbcAlertAnalyticsReader implements AlertAnalyticsReader {
             for (List<Object> row : result.rows()) {
                 String category = JdbcAnomalyReaderSupport.text(result, row, "category");
                 String status = JdbcAnomalyReaderSupport.text(result, row, "status");
-                references.add(new AlertReference(JdbcAnomalyReaderSupport.text(result, row, "alert_id"),
+                String alertId = JdbcAnomalyReaderSupport.text(result, row, "alert_id");
+                references.add(new AlertReference(alertId,
                         JdbcAnomalyReaderSupport.text(result, row, "building_id"),
                         JdbcAnomalyReaderSupport.text(result, row, "device_id"), category,
                         JdbcAnomalyReaderSupport.text(result, row, "risk_level"), status,
                         JdbcAnomalyReaderSupport.instant(result, row, "occurred_at"),
-                        "REDACTED: " + (category == null ? "告警" : category) + " · " + (status == null ? "未知状态" : status), null));
+                        "REDACTED: " + (category == null ? "告警" : category) + " · " + (status == null ? "未知状态" : status),
+                        executionRunId(alertId)));
             }
-            return List.copyOf(references);
-        } catch (Exception ignored) {
-            return List.of();
+            return result.truncated()
+                    ? EvidenceResult.partial(references, "RESULT_TRUNCATED")
+                    : EvidenceResult.available(references);
+        } catch (Exception exception) {
+            return EvidenceResult.unavailable(JdbcAnomalyReaderSupport.failureCode(exception));
+        }
+    }
+
+    private String executionRunId(String alertId) {
+        try {
+            return workflowStore.flatMap(store -> store.findByAlertId(alertId))
+                    .map(WorkflowSnapshot::workflowId)
+                    .orElse(null);
+        } catch (RuntimeException ignored) {
+            return null;
         }
     }
 

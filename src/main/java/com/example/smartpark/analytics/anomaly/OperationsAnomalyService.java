@@ -46,9 +46,11 @@ public final class OperationsAnomalyService {
         deviceSnapshot.buildings().forEach(building -> byBuilding
                 .computeIfAbsent(building.buildingId(), ignored -> new BuildingAccumulator(building.buildingId()))
                 .withOfflineDevices(building.offlineDeviceCount()));
-        energySnapshot.buildings().forEach(building -> byBuilding
-                .computeIfAbsent(building.buildingId(), ignored -> new BuildingAccumulator(building.buildingId()))
-                .withEnergyDeviation(building.deviationPct()));
+        energySnapshot.buildings().stream()
+                .filter(building -> hasEnergyAnomalySignal(building.deviationPct()))
+                .forEach(building -> byBuilding
+                        .computeIfAbsent(building.buildingId(), ignored -> new BuildingAccumulator(building.buildingId()))
+                        .withEnergyDeviation(building.deviationPct()));
 
         List<OperationsAnomalyDtos.BuildingSummary> buildings = byBuilding.values().stream()
                 .map(BuildingAccumulator::toDto)
@@ -62,7 +64,7 @@ public final class OperationsAnomalyService {
         breakdowns.put("deviceTypes", convert(deviceSnapshot.deviceTypes()));
         return new OperationsAnomalyDtos.Overview(
                 new OperationsAnomalyDtos.Window(query.from(), query.to(), "Asia/Shanghai"),
-                deviceSnapshot.asOf() == null ? query.to() : deviceSnapshot.asOf(),
+                deviceSnapshot.asOf(),
                 new OperationsAnomalyDtos.Summary(alertSnapshot.alertCount(), alertSnapshot.highRiskAlertCount(),
                         deviceSnapshot.offlineDeviceCount(), buildings.size()),
                 breakdowns, buildings, Map.of(
@@ -79,13 +81,15 @@ public final class OperationsAnomalyService {
         AlertAnalyticsReader.Snapshot alertSnapshot = alerts.read(scoped);
         DeviceAnalyticsReader.Snapshot deviceSnapshot = devices.read(scoped);
         EnergyAnalyticsReader.Snapshot energySnapshot = energy.read(scoped);
+        EvidenceResult<AlertAnalyticsReader.AlertReference> alertEvidence = alerts.evidence(buildingId, scoped);
+        EvidenceResult<DeviceAnalyticsReader.DeviceReference> deviceEvidence = devices.evidence(buildingId, scoped);
+        EvidenceResult<EnergyAnalyticsReader.EnergyReference> energyEvidence = energy.evidence(buildingId, scoped);
         return new OperationsAnomalyDtos.Evidence(buildingId,
                 new OperationsAnomalyDtos.Window(query.from(), query.to(), "Asia/Shanghai"),
-                deviceSnapshot.asOf() == null ? query.to() : deviceSnapshot.asOf(),
-                alerts.evidence(buildingId, scoped), devices.evidence(buildingId, scoped), energy.evidence(buildingId, scoped),
-                Map.of("alerts", status(alertSnapshot.available(), alertSnapshot.failureCode()),
-                        "devices", status(deviceSnapshot.available(), deviceSnapshot.failureCode()),
-                        "energy", status(energySnapshot.available(), energySnapshot.failureCode())));
+                deviceSnapshot.asOf(), alertEvidence.items(), deviceEvidence.items(), energyEvidence.items(),
+                Map.of("alerts", evidenceStatus(alertSnapshot.available(), alertSnapshot.failureCode(), alertEvidence),
+                        "devices", evidenceStatus(deviceSnapshot.available(), deviceSnapshot.failureCode(), deviceEvidence),
+                        "energy", evidenceStatus(energySnapshot.available(), energySnapshot.failureCode(), energyEvidence)));
     }
 
     private OperationsAnomalyQuery normalized(OperationsAnomalyQuery input) {
@@ -102,6 +106,16 @@ public final class OperationsAnomalyService {
     private static String status(boolean available, String failureCode) {
         if (!available) return "UNAVAILABLE";
         return failureCode == null ? "OK" : "PARTIAL";
+    }
+
+    private static String evidenceStatus(boolean snapshotAvailable, String snapshotFailureCode,
+                                         EvidenceResult<?> evidence) {
+        if (!snapshotAvailable || !evidence.available()) return "UNAVAILABLE";
+        return snapshotFailureCode == null && evidence.failureCode() == null ? "OK" : "PARTIAL";
+    }
+
+    private static boolean hasEnergyAnomalySignal(Double deviation) {
+        return deviation != null && deviation != 0.0;
     }
 
     public static final class AnomalyOverviewUnavailableException extends RuntimeException {

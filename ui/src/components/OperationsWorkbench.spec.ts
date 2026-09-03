@@ -176,6 +176,20 @@ describe('OperationsWorkbench', () => {
     ])
   })
 
+  it('hides the operations board from customer-agent roles', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'operations' },
+      global: { stubs: { ...operatorStubs, OperationsBoard: operationsBoardStub } },
+    })
+
+    await settleCapabilities()
+    await wrapper.getComponent(ImmersiveWorkbenchShell).vm.$emit('update:role', 'CUSTOMER_AGENT')
+    await nextTick()
+
+    expect(wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())).not.toContain('运营看板')
+    expect(wrapper.get('[data-workbench-view="workflow"]').classes()).toContain('active')
+  })
+
   it('subscribes the unified trace when the operations board provides a run id', async () => {
     vi.stubGlobal('EventSource', class {
       onmessage: ((event: MessageEvent) => void) | null = null

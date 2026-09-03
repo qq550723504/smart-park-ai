@@ -7,8 +7,8 @@ import java.util.List;
 public interface DeviceAnalyticsReader {
     Snapshot read(OperationsAnomalyQuery query);
 
-    default List<DeviceReference> evidence(String buildingId, OperationsAnomalyQuery query) {
-        return List.of();
+    default EvidenceResult<DeviceReference> evidence(String buildingId, OperationsAnomalyQuery query) {
+        return EvidenceResult.available(List.of());
     }
 
     record Snapshot(

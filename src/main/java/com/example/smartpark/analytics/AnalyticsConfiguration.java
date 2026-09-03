@@ -27,6 +27,7 @@ import com.example.smartpark.analytics.anomaly.AlertAnalyticsReader;
 import com.example.smartpark.analytics.anomaly.DeviceAnalyticsReader;
 import com.example.smartpark.analytics.anomaly.EnergyAnalyticsReader;
 import com.example.smartpark.analytics.anomaly.OperationsAnomalyService;
+import com.example.smartpark.workflow.WorkflowExecutionStore;
 import com.example.smartpark.analytics.catalog.MetricCatalog;
 import com.example.smartpark.analytics.sql.QueryCostGuard;
 import com.example.smartpark.analytics.sql.ReadOnlyQueryExecutor;
@@ -166,8 +167,9 @@ public class AnalyticsConfiguration {
     }
 
     @Bean
-    AlertAnalyticsReader alertAnalyticsReader(ReadOnlyQueryExecutor readOnlyQueryExecutor) {
-        return new JdbcAlertAnalyticsReader(readOnlyQueryExecutor);
+    AlertAnalyticsReader alertAnalyticsReader(ReadOnlyQueryExecutor readOnlyQueryExecutor,
+                                              ObjectProvider<WorkflowExecutionStore> workflowStore) {
+        return new JdbcAlertAnalyticsReader(readOnlyQueryExecutor, workflowStore.getIfAvailable());
     }
 
     @Bean

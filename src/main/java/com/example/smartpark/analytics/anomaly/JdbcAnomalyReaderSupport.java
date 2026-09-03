@@ -10,15 +10,26 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 final class JdbcAnomalyReaderSupport {
+    private static final Pattern TRAILING_LIMIT = Pattern.compile("(?i)\\blimit\\s+(\\d+)\\s*$");
+
     private JdbcAnomalyReaderSupport() {}
 
     static TabularResult execute(ReadOnlyQueryExecutor executor, String sql,
                                  OperationsAnomalyQuery query) throws UnsafeSqlException {
         return executor.execute(new ValidatedSql(sql,
-                        List.of("from", "to", "buildingId", "riskLevel", "category", "status", "deviceType"), 500),
+                        List.of("from", "to", "buildingId", "riskLevel", "category", "status", "deviceType"), declaredLimit(sql)),
                 parameters(query));
+    }
+
+    private static int declaredLimit(String sql) {
+        String base = sql.strip();
+        if (base.endsWith(";")) base = base.substring(0, base.length() - 1).strip();
+        Matcher matcher = TRAILING_LIMIT.matcher(base);
+        return matcher.find() ? Math.min(500, Integer.parseInt(matcher.group(1))) : 500;
     }
 
     static Map<String, Object> parameters(OperationsAnomalyQuery query) {

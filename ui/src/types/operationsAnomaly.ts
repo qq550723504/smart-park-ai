@@ -31,7 +31,7 @@ export interface AnomalyBuildingSummary {
 
 export interface AnomalyOverview {
   window: AnomalyWindow
-  asOf: string
+  asOf: string | null
   summary: {
     alertCount: number
     highRiskAlertCount: number
@@ -46,7 +46,7 @@ export interface AnomalyOverview {
 export interface AnomalyEvidence {
   buildingId: string
   window: AnomalyWindow
-  asOf: string
+  asOf: string | null
   alerts: Array<Record<string, unknown>>
   devices: Array<Record<string, unknown>>
   energy: Array<Record<string, unknown>>

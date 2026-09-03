@@ -28,10 +28,28 @@ describe('AnomalyEvidenceDrawer', () => {
   })
 
   it('shows unavailable domains without hiding available evidence', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...evidence, domainStatus: { alerts: 'OK', devices: 'UNAVAILABLE', energy: 'OK' }, devices: [] }), { status: 200 })))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...evidence, asOf: null, domainStatus: { alerts: 'OK', devices: 'UNAVAILABLE', energy: 'OK' }, devices: [] }), { status: 200 })))
     const wrapper = mount(AnomalyEvidenceDrawer, { props: { role: 'ADMIN', buildingId: 'B1', open: true } })
     await vi.waitFor(() => expect(wrapper.text()).toContain('设备数据暂不可用'))
 
     expect(wrapper.text()).toContain('REDACTED: POWER · OPEN')
+    expect(wrapper.text()).toContain('快照：—')
+  })
+
+  it('clears previous evidence while loading a different building', async () => {
+    let resolveSecond!: (response: Response) => void
+    const secondResponse = new Promise<Response>((resolve) => { resolveSecond = resolve })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(evidence), { status: 200 }))
+      .mockReturnValueOnce(secondResponse)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const wrapper = mount(AnomalyEvidenceDrawer, { props: { role: 'ADMIN', buildingId: 'B1', open: true } })
+    await vi.waitFor(() => expect(wrapper.text()).toContain('REDACTED: POWER · OPEN'))
+
+    await wrapper.setProps({ buildingId: 'B2' })
+    await vi.waitFor(() => expect(wrapper.text()).toContain('正在读取楼宇证据'))
+    expect(wrapper.text()).not.toContain('REDACTED: POWER · OPEN')
+    resolveSecond(new Response(JSON.stringify({ ...evidence, buildingId: 'B2' }), { status: 200 }))
   })
 })

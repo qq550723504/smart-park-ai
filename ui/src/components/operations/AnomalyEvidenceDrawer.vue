@@ -26,6 +26,7 @@ async function load(): Promise<void> {
   const generation = ++requestGeneration
   loading.value = true
   error.value = ''
+  evidence.value = null
   try {
     const value = await getAnomalyEvidence(props.role, props.buildingId, props.filters)
     if (generation !== requestGeneration) return
@@ -51,7 +52,7 @@ function value(item: Record<string, unknown>, key: string): string {
   return raw == null ? '—' : String(raw)
 }
 
-watch([() => props.open, () => props.buildingId, () => props.role], ([open]) => {
+watch([() => props.open, () => props.buildingId, () => props.role, () => JSON.stringify(props.filters)], ([open]) => {
   if (open) void load()
 })
 onMounted(() => { void load() })
@@ -67,7 +68,7 @@ onMounted(() => { void load() })
     <p v-else-if="error" class="anomaly-evidence__state anomaly-evidence__state--error">{{ error }} <button type="button" @click="load">重试</button></p>
     <p v-else-if="!evidence" class="anomaly-evidence__state">暂无证据数据。</p>
     <template v-else>
-      <p class="anomaly-evidence__window">数据窗口：{{ evidence.window.from }} ~ {{ evidence.window.to }} · 快照：{{ evidence.asOf }}</p>
+      <p class="anomaly-evidence__window">数据窗口：{{ evidence.window.from }} ~ {{ evidence.window.to }} · 快照：{{ evidence.asOf ?? '—' }}</p>
       <div class="anomaly-evidence__status"><span v-for="(status, domain) in evidence.domainStatus" :key="domain" :data-domain-status="status">{{ domain }}：{{ status }}</span></div>
       <p v-if="evidence.domainStatus.alerts === 'UNAVAILABLE'" class="anomaly-evidence__state anomaly-evidence__state--warning">告警数据暂不可用</p>
       <p v-if="evidence.domainStatus.devices === 'UNAVAILABLE'" class="anomaly-evidence__state anomaly-evidence__state--warning">设备数据暂不可用</p>

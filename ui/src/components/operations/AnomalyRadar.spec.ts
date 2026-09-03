@@ -48,4 +48,46 @@ describe('AnomalyRadar', () => {
     await wrapper.get('[data-anomaly-building="B1"]').trigger('click')
     expect(wrapper.emitted('open-building')).toEqual([['B1', {}]])
   })
+
+  it('formats the window in the timezone declared by the response', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      ...overview,
+      window: { ...overview.window, from: '2026-09-02T16:00:00Z', to: '2026-09-03T16:00:00Z' },
+    }), { status: 200 })))
+
+    const wrapper = mount(AnomalyRadar, { props: { role: 'ADMIN', active: true } })
+    await vi.waitFor(() => expect(wrapper.text()).toContain('2026/09/03'))
+    expect(wrapper.text()).toContain('2026/09/04')
+  })
+
+  it('keeps the composite affected count visible when one domain is unavailable', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      ...overview,
+      domainStatus: { alerts: 'UNAVAILABLE', devices: 'OK', energy: 'OK' },
+    }), { status: 200 })))
+
+    const wrapper = mount(AnomalyRadar, { props: { role: 'ADMIN', active: true } })
+    await vi.waitFor(() => expect(wrapper.text()).toContain('2'))
+    expect(wrapper.text()).toContain('部分数据')
+  })
+
+  it('renders a dash for building facts from an unavailable domain and sends active filters', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => new Response(JSON.stringify({
+      ...overview,
+      domainStatus: { alerts: 'UNAVAILABLE', devices: 'UNAVAILABLE', energy: 'OK' },
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const wrapper = mount(AnomalyRadar, { props: { role: 'ADMIN', active: true } })
+    await vi.waitFor(() => expect(wrapper.find('[data-anomaly-building="B1"]').exists()).toBe(true))
+    await wrapper.get('[data-anomaly-filter="riskLevel"]').setValue('HIGH')
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(wrapper.text()).toContain('告警 —'))
+
+    expect(wrapper.text()).toContain('告警 —')
+    expect(wrapper.text()).toContain('离线 —')
+    expect(fetchMock.mock.calls[1][0]).toContain('riskLevel=HIGH')
+    await wrapper.get('[data-anomaly-building="B1"]').trigger('click')
+    expect(wrapper.emitted('open-building')).toEqual([['B1', { riskLevel: 'HIGH' }]])
+  })
 })

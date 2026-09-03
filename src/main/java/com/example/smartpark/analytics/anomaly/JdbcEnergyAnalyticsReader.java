@@ -27,8 +27,8 @@ public final class JdbcEnergyAnalyticsReader implements EnergyAnalyticsReader {
     }
 
     @Override
-    public List<EnergyReference> evidence(String buildingId, OperationsAnomalyQuery query) {
-        if (buildingId == null || buildingId.isBlank()) return List.of();
+    public EvidenceResult<EnergyReference> evidence(String buildingId, OperationsAnomalyQuery query) {
+        if (buildingId == null || buildingId.isBlank()) return EvidenceResult.available(List.of());
         try {
             OperationsAnomalyQuery scoped = new OperationsAnomalyQuery(query.from(), query.to(), buildingId,
                     query.riskLevel(), query.category(), query.status(), query.deviceType());
@@ -41,9 +41,11 @@ public final class JdbcEnergyAnalyticsReader implements EnergyAnalyticsReader {
                         JdbcAnomalyReaderSupport.text(result, row, "meter_id"), deviation(kwh, baseline), kwh, baseline,
                         JdbcAnomalyReaderSupport.instant(result, row, "measured_at"), "REDACTED: 能耗读数摘要", null));
             }
-            return List.copyOf(references);
-        } catch (Exception ignored) {
-            return List.of();
+            return result.truncated()
+                    ? EvidenceResult.partial(references, "RESULT_TRUNCATED")
+                    : EvidenceResult.available(references);
+        } catch (Exception exception) {
+            return EvidenceResult.unavailable(JdbcAnomalyReaderSupport.failureCode(exception));
         }
     }
 
