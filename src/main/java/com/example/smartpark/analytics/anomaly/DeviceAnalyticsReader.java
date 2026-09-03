@@ -11,6 +11,11 @@ public interface DeviceAnalyticsReader {
         return EvidenceResult.available(List.of());
     }
 
+    /** Latest snapshot timestamp for a building, including online devices. */
+    default Instant latestSnapshotAt(String buildingId, OperationsAnomalyQuery query) {
+        return null;
+    }
+
     record Snapshot(
             long offlineDeviceCount,
             List<AlertAnalyticsReader.Breakdown> deviceTypes,

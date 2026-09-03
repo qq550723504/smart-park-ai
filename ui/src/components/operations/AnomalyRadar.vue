@@ -120,6 +120,10 @@ function breakdownUnavailableLabel(name: string): string {
   return breakdownDomain(name) === 'devices' ? '设备数据暂不可用' : '告警数据暂不可用'
 }
 
+function riskLabel(value: string): string {
+  return ({ HIGH: '高风险', MEDIUM: '中风险', LOW: '低风险' } as Record<string, string>)[value] ?? value
+}
+
 function analysisQuestion(): string {
   const metric = filters.value.deviceType ? '离线设备数量' : '告警数量'
   const labels: Array<[FilterKey, string]> = [
@@ -129,9 +133,13 @@ function analysisQuestion(): string {
   const context = labels
     .filter(([key]) => metric === '离线设备数量' ? key === 'deviceType' : key !== 'deviceType')
     .filter(([key]) => filters.value[key])
-    .map(([key, label]) => `${label}：${filters.value[key]}`)
-  const from = overview.value ? dateLabel(overview.value.window.from, overview.value.window.timezone).replaceAll('/', '-') : null
-  const to = overview.value ? dateLabel(overview.value.window.to, overview.value.window.timezone).replaceAll('/', '-') : null
+    .map(([key, label]) => `${label}：${key === 'riskLevel' ? riskLabel(filters.value[key]!) : filters.value[key]}`)
+  const overviewWindow = overview.value?.window
+  const deviceFrom = overviewWindow
+    ? new Date(Math.max(Date.parse(overviewWindow.from), Date.parse(overviewWindow.to) - 24 * 60 * 60 * 1000)).toISOString()
+    : null
+  const from = metric === '离线设备数量' ? deviceFrom : overviewWindow?.from
+  const to = overviewWindow?.to
   const window = from && to ? `时间范围：${from}至${to}` : '过去7天'
   return `${window}各${metric === '离线设备数量' ? '楼宇离线设备数量' : '楼宇告警数量'}${context.length ? `（${context.join('；')}）` : ''}`
 }

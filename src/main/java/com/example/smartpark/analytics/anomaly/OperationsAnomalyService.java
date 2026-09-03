@@ -93,7 +93,7 @@ public final class OperationsAnomalyService {
         EvidenceResult<EnergyAnalyticsReader.EnergyReference> energyEvidence = energy.evidence(buildingId, scoped);
         return new OperationsAnomalyDtos.Evidence(buildingId,
                 new OperationsAnomalyDtos.Window(query.from(), query.to(), "Asia/Shanghai"),
-                latestDeviceSnapshot(deviceEvidence), alertEvidence.items(), deviceEvidence.items(), energyEvidence.items(),
+                latestDeviceSnapshot(buildingId, query, deviceEvidence), alertEvidence.items(), deviceEvidence.items(), energyEvidence.items(),
                 Map.of("alerts", evidenceStatus(alertEvidence),
                         "devices", evidenceStatus(deviceEvidence),
                         "energy", evidenceStatus(energyEvidence)));
@@ -120,7 +120,10 @@ public final class OperationsAnomalyService {
         return evidence.failureCode() == null ? "OK" : "PARTIAL";
     }
 
-    private static Instant latestDeviceSnapshot(EvidenceResult<DeviceAnalyticsReader.DeviceReference> evidence) {
+    private Instant latestDeviceSnapshot(String buildingId, OperationsAnomalyQuery query,
+                                         EvidenceResult<DeviceAnalyticsReader.DeviceReference> evidence) {
+        Instant latest = devices.latestSnapshotAt(buildingId, query);
+        if (latest != null) return latest;
         return evidence.items().stream()
                 .map(DeviceAnalyticsReader.DeviceReference::snapshotAt)
                 .filter(java.util.Objects::nonNull)
