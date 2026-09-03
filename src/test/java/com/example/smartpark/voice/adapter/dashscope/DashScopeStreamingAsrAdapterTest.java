@@ -186,8 +186,7 @@ class DashScopeStreamingAsrAdapterTest {
 
         volatile Flux<ByteBuffer> capturedAudio;
         volatile DashScopeAudioTranscriptionOptions capturedOptions;
-        final Sinks.Many<RecognitionResult> outbound =
-                Sinks.many().unicast().onBackpressureBuffer();
+        volatile Sinks.Many<RecognitionResult> outbound = newOutbound();
         final java.util.concurrent.atomic.AtomicBoolean cancelled =
                 new java.util.concurrent.atomic.AtomicBoolean(false);
         final java.util.concurrent.atomic.AtomicBoolean completedOrFailed =
@@ -198,9 +197,18 @@ class DashScopeStreamingAsrAdapterTest {
                 Flux<ByteBuffer> audio, DashScopeAudioTranscriptionOptions options) {
             this.capturedAudio = audio;
             this.capturedOptions = options;
-            return outbound.asFlux()
+            // A provider opens a fresh stream for each ASR turn. Reusing the
+            // unicast sink across turns makes the replacement subscription
+            // fail asynchronously and can erase the new active turn.
+            Sinks.Many<RecognitionResult> turnOutbound = newOutbound();
+            this.outbound = turnOutbound;
+            return turnOutbound.asFlux()
                     .doOnCancel(() -> cancelled.set(true))
                     .doFinally(signal -> completedOrFailed.set(true));
+        }
+
+        private static Sinks.Many<RecognitionResult> newOutbound() {
+            return Sinks.many().unicast().onBackpressureBuffer();
         }
 
         void emit(RecognitionResult result) {
