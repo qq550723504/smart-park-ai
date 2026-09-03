@@ -297,6 +297,8 @@ class SecurityIncidentServiceTest {
         assertThat(split.items()).hasSize(2);
         assertThat(split.items()).extracting(SecurityIncident::status)
                 .containsOnly(SecurityIncidentStatus.HANDOFF);
+        assertThat(split.items()).extracting(SecurityIncident::incidentId)
+                .doesNotHaveDuplicates();
         assertThat(split.items()).extracting(SecurityIncident::handoffWorkItemId)
                 .containsOnly(completed.handoffWorkItemId());
     }

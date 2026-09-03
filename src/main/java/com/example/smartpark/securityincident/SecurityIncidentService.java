@@ -164,12 +164,18 @@ public final class SecurityIncidentService {
     private List<SecurityIncident> restoreStates(List<SecurityIncident> freshIncidents) {
         List<SecurityIncident> stored = store.findAll();
         List<SecurityIncidentHandoff> retainedHandoffs = handoffs.list();
+        Set<String> assignedStoredIncidentIds = new HashSet<>();
         return freshIncidents.stream().map(fresh -> {
             List<SecurityIncident> candidates = stored.stream()
                     .filter(existing -> sameCorrelation(existing, fresh))
                     .filter(existing -> overlaps(existing, fresh))
                     .toList();
-            SecurityIncident restored = restoreState(fresh, candidates);
+            SecurityIncident canonical = candidates.stream()
+                    .min(Comparator.comparing(SecurityIncident::openedAt).thenComparing(SecurityIncident::incidentId))
+                    .orElse(null);
+            boolean retainStoredIdentity = canonical != null
+                    && assignedStoredIncidentIds.add(canonical.incidentId());
+            SecurityIncident restored = restoreState(fresh, candidates, retainStoredIdentity);
             retireSupersededHandoffs(restored, candidates);
             return restoreHandoffProjection(fresh, restored, retainedHandoffs);
         }).toList();
@@ -195,7 +201,8 @@ public final class SecurityIncidentService {
                 handoff.workItemId());
     }
 
-    private SecurityIncident restoreState(SecurityIncident fresh, List<SecurityIncident> candidates) {
+    private SecurityIncident restoreState(SecurityIncident fresh, List<SecurityIncident> candidates,
+                                          boolean retainStoredIdentity) {
         if (candidates.isEmpty()) return fresh;
 
         SecurityIncident canonical = candidates.stream()
@@ -217,7 +224,8 @@ public final class SecurityIncidentService {
                 .orElse(null);
         String handoffWorkItemId = conflictingHandoffs ? canonical.handoffWorkItemId()
                 : handoffIds.isEmpty() ? null : handoffIds.get(0);
-        return withStoredState(fresh, canonical.incidentId(), state.status(), reviewedAt, handoffWorkItemId);
+        String incidentId = retainStoredIdentity ? canonical.incidentId() : fresh.incidentId();
+        return withStoredState(fresh, incidentId, state.status(), reviewedAt, handoffWorkItemId);
     }
 
     private static boolean overlaps(SecurityIncident left, SecurityIncident right) {
