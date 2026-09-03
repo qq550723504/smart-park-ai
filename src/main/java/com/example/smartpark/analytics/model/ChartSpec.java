@@ -164,7 +164,9 @@ public record ChartSpec(
             }
         }
 
-        String x = firstExisting(result, "building_name", "building_id", "stat_date", "hour_ts", "hour_of_day");
+        String x = firstExisting(result, "building_name", "building_id", "category", "device_type",
+                "parking_zone", "risk_level", "status", "meter_id", "day_of_week",
+                "stat_date", "hour_ts", "hour_of_day");
         if (x != null) {
             String type = containsAny(text, "趋势", "按小时", "逐时", "按日", "每日", "按日期") ? "LINE" : "BAR";
             RenderOptions options = containsAny(text, "排行", "排名")
@@ -182,7 +184,7 @@ public record ChartSpec(
     public static boolean hasVisualizationIntent(String question) {
         String text = question == null ? "" : question.toLowerCase(Locale.ROOT);
         return containsAny(text, "趋势", "排行", "排名", "热力图", "热力", "日历", "关系", "相关性",
-                "散点", "目标完成率", "目标达成率", "空间分布", "地图", "平面图", "位置分布", "构成", "堆叠",
+                "散点", "目标完成率", "目标达成率", "空间分布", "分布", "地图", "平面图", "位置分布", "构成", "堆叠",
                 "分时", "总量", "总数");
     }
 

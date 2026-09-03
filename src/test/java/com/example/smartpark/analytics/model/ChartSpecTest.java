@@ -235,4 +235,34 @@ class ChartSpecTest {
         assertThat(spec.xField()).isEqualTo("occupancy_avg");
         assertThat(spec.yFields()).containsExactly("energy_kwh");
     }
+
+    @Test
+    void recognizesDistributionIntentAndCategoryAxisAsBarFallback() {
+        TabularResult result = new TabularResult(
+                List.of("category", "alert_count"),
+                List.of(List.of("TEMPERATURE", 2), List.of("POWER", 1)), false, 2);
+
+        assertThat(ChartSpec.hasVisualizationIntent("过去7天按告警类型分布")).isTrue();
+
+        ChartSpec spec = ChartSpec.recommended("过去7天按告警类型分布", result,
+                Map.of("alert_count", "条"));
+
+        assertThat(spec.type()).isEqualTo(ChartSpec.ChartType.BAR);
+        assertThat(spec.xField()).isEqualTo("category");
+        assertThat(spec.yFields()).containsExactly("alert_count");
+    }
+
+    @Test
+    void recommendsHorizontalBarForRankingQuestionsOverCategoricalAxes() {
+        TabularResult result = new TabularResult(
+                List.of("device_type", "device_offline_count"),
+                List.of(List.of("HVAC", 3), List.of("ELEVATOR", 1)), false, 2);
+
+        ChartSpec spec = ChartSpec.recommended("过去1天各设备类型离线设备排行", result,
+                Map.of("device_offline_count", "台"));
+
+        assertThat(spec.type()).isEqualTo(ChartSpec.ChartType.BAR);
+        assertThat(spec.xField()).isEqualTo("device_type");
+        assertThat(spec.options().orientation()).isEqualTo("HORIZONTAL");
+    }
 }

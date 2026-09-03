@@ -46,6 +46,26 @@ class QueryPlanTest {
     }
 
     @Test
+    void declaresRankingSortOnlyForPlannedMetrics() {
+        QueryPlan plan = new QueryPlan("各楼宇能耗排行", List.of(metric("energy_kwh")),
+                List.of("building_id"), Map.of(),
+                new QueryPlan.TimeRange(now.minusSeconds(86400 * 7), now), 200,
+                QueryPlan.TimeRangeSource.DEFAULT_METRIC_LOOKBACK,
+                new QueryPlan.Sort("energy_kwh", false));
+
+        assertThat(plan.sort()).isEqualTo(new QueryPlan.Sort("energy_kwh", false));
+        assertThatThrownBy(() -> new QueryPlan("各楼宇能耗排行", List.of(metric("energy_kwh")),
+                List.of("building_id"), Map.of(),
+                new QueryPlan.TimeRange(now.minusSeconds(86400 * 7), now), 200,
+                QueryPlan.TimeRangeSource.DEFAULT_METRIC_LOOKBACK,
+                new QueryPlan.Sort("alert_count", false)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("sort metric");
+        assertThatThrownBy(() -> new QueryPlan.Sort("not a identifier", false))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void entityFiltersMustUseCatalogDimensionsAndValuesFromTheOriginalQuestion() {
         assertThatThrownBy(() -> new QueryPlan("B1 energy", List.of(metric("energy_kwh")),
                 List.of(), Map.of("customer_id", "B1"),

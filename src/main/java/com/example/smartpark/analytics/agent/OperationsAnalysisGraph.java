@@ -543,14 +543,16 @@ public class OperationsAnalysisGraph {
             ctx.timeResolution = TimeResolutionMetadata.defaultLookback(
                     timeRange.from(), timeRange.to());
         }
+        List<String> dimensions = validatedRequestedDimensions(ctx, originalQuestion);
         ctx.plan = new QueryPlan(
                 originalQuestion,
                 ctx.metrics,
-                validatedRequestedDimensions(ctx, originalQuestion),
+                dimensions,
                 validatedRequestedFilters(ctx, originalQuestion),
                 timeRange,
                 200,
-                timeRangeSource);
+                timeRangeSource,
+                rankingSort(originalQuestion, ctx.metrics, dimensions));
         // One shared binding set travels through both gates and execution.
         // Entity values are never copied into SQL literals.
         java.util.LinkedHashMap<String, Object> parameters = new java.util.LinkedHashMap<>();
@@ -620,6 +622,23 @@ public class OperationsAnalysisGraph {
     private static String canonicalCategoricalValue(String dimension, String value) {
         if (value == null) return null;
         return CategoricalFilterVocabulary.canonicalValue(dimension, value);
+    }
+
+    /**
+     * 排行语义必须与 LIMIT 协同排序：无 ORDER BY 的 LIMIT 会任意截断分组，
+     * 可能把真实的头部结果留在窗口之外。仅当问题明确要求排行且指标唯一、
+     * 分组维度非空时才声明排序；“最多/最高”降序、“最少/最低”升序，
+     * 方向冲突或语义不明时保守不排序。
+     */
+    private static QueryPlan.Sort rankingSort(
+            String question, List<com.example.smartpark.analytics.catalog.MetricDefinition> metrics,
+            List<String> dimensions) {
+        if (question == null || dimensions.isEmpty() || metrics.size() != 1) return null;
+        String lowered = question.toLowerCase(java.util.Locale.ROOT);
+        boolean descending = containsAny(lowered, "排行", "排名", "最多", "最高", "最大");
+        boolean ascending = containsAny(lowered, "最少", "最低", "最小");
+        if (descending == ascending) return null;
+        return new QueryPlan.Sort(metrics.get(0).name(), ascending);
     }
 
     private static List<String> inferredAggregationDimensions(RunContext ctx, String question) {
