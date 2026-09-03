@@ -75,8 +75,11 @@ function energyLabel(value: number | null): string {
   return domainUnavailable('energy') || value == null ? '—' : `${value}%`
 }
 
+const supportedCategories = new Set(['TEMPERATURE', 'POWER', 'HUMIDITY', 'ACCESS'])
+
 function filterOptions(breakdown: string): string[] {
-  return facetOptions.value[breakdown] ?? []
+  const options = facetOptions.value[breakdown] ?? []
+  return breakdown === 'categories' ? options.filter((option) => supportedCategories.has(option)) : options
 }
 
 function rememberFacetOptions(value: AnomalyOverview): void {

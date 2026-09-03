@@ -16,8 +16,23 @@ function queryString(filters: AnomalyFilters = {}): string {
 }
 
 function assertOverview(value: unknown): asserts value is AnomalyOverview {
-  const candidate = value as Partial<AnomalyOverview> | null
-  if (!candidate || typeof candidate !== 'object' || !candidate.window || !candidate.summary || !candidate.breakdowns || !candidate.domainStatus || !Array.isArray(candidate.buildings)) {
+  const candidate = isRecord(value) ? value : null
+  const window = candidate && isRecord(candidate.window) ? candidate.window : null
+  const summary = candidate && isRecord(candidate.summary) ? candidate.summary : null
+  const breakdowns = candidate && isRecord(candidate.breakdowns) ? candidate.breakdowns : null
+  if (!candidate || !window || typeof window.from !== 'string'
+    || typeof window.to !== 'string' || typeof window.timezone !== 'string'
+    || !summary || !['alertCount', 'highRiskAlertCount', 'offlineDeviceCount', 'affectedBuildingCount']
+      .every((key) => typeof summary[key] === 'number')
+    || !breakdowns || !isRecord(candidate.domainStatus) || !Array.isArray(candidate.buildings)
+    || !candidate.buildings.every((item) => isRecord(item)
+      && typeof item.buildingId === 'string'
+      && typeof item.alertCount === 'number'
+      && typeof item.highRiskAlertCount === 'number'
+      && typeof item.offlineDeviceCount === 'number'
+      && (item.energyDeviationPct === null || typeof item.energyDeviationPct === 'number'))
+    || !Object.values(breakdowns).every((items) => Array.isArray(items)
+      && items.every((item) => isRecord(item) && typeof item.key === 'string' && typeof item.count === 'number'))) {
     throw new Error('异常雷达响应格式无效')
   }
 }
