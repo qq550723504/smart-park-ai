@@ -90,4 +90,22 @@ describe('AnomalyRadar', () => {
     await wrapper.get('[data-anomaly-building="B1"]').trigger('click')
     expect(wrapper.emitted('open-building')).toEqual([['B1', { riskLevel: 'HIGH' }]])
   })
+
+  it('hides the previous overview while a filter request is pending', async () => {
+    let resolveSecond!: (response: Response) => void
+    const secondResponse = new Promise<Response>((resolve) => { resolveSecond = resolve })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(overview), { status: 200 }))
+      .mockReturnValueOnce(secondResponse)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const wrapper = mount(AnomalyRadar, { props: { role: 'ADMIN', active: true } })
+    await vi.waitFor(() => expect(wrapper.find('[data-anomaly-building="B1"]').exists()).toBe(true))
+
+    await wrapper.get('[data-anomaly-filter="riskLevel"]').setValue('HIGH')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('正在读取异常聚合…'))
+    expect(wrapper.find('[data-anomaly-building="B1"]').exists()).toBe(false)
+
+    resolveSecond(new Response(JSON.stringify(overview), { status: 200 }))
+  })
 })

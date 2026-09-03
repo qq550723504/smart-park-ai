@@ -3,6 +3,7 @@ package com.example.smartpark.analytics.anomaly;
 import com.example.smartpark.analytics.model.TabularResult;
 import com.example.smartpark.analytics.model.ValidatedSql;
 import com.example.smartpark.analytics.sql.ReadOnlyQueryExecutor;
+import com.example.smartpark.execution.LegacyWorkflowEventAdapter;
 import com.example.smartpark.workflow.WorkflowExecutionStore;
 import com.example.smartpark.workflow.WorkflowSnapshot;
 import org.junit.jupiter.api.Test;
@@ -136,8 +137,42 @@ class JdbcAnalyticsReaderTest {
         var result = new JdbcAlertAnalyticsReader(executor, workflowStore).evidence("B1", query());
 
         assertThat(result.items()).singleElement().extracting(AlertAnalyticsReader.AlertReference::executionRunId)
-                .isEqualTo("run-1");
+                .isEqualTo(LegacyWorkflowEventAdapter.runIdFor("run-1").toString());
         verify(workflowStore).findByAlertId("ALT-1");
+    }
+
+    @Test
+    void alertReaderPropagatesTruncationFromGroupedQueries() throws Exception {
+        ReadOnlyQueryExecutor executor = mock(ReadOnlyQueryExecutor.class);
+        when(executor.execute(any(), anyMap())).thenAnswer(invocation -> {
+            String sql = invocation.getArgument(0, ValidatedSql.class).sql();
+            if (sql.contains("COUNT(*) AS alert_count")) {
+                return rows(List.of("alert_count", "high_risk_alert_count"), List.of(List.of(2L, 1L)));
+            }
+            return truncatedRows(List.of("key", "count"));
+        });
+
+        AlertAnalyticsReader.Snapshot snapshot = new JdbcAlertAnalyticsReader(executor).read(query());
+
+        assertThat(snapshot.available()).isTrue();
+        assertThat(snapshot.failureCode()).isEqualTo("RESULT_TRUNCATED");
+    }
+
+    @Test
+    void deviceReaderPropagatesTruncationFromGroupedQueries() throws Exception {
+        ReadOnlyQueryExecutor executor = mock(ReadOnlyQueryExecutor.class);
+        when(executor.execute(any(), anyMap())).thenAnswer(invocation -> {
+            String sql = invocation.getArgument(0, ValidatedSql.class).sql();
+            if (sql.contains("MAX(snapshot_at)")) {
+                return rows(List.of("offline_device_count", "as_of"), List.of(List.of(1L, Instant.parse("2026-09-03T02:00:00Z"))));
+            }
+            return truncatedRows(List.of("key", "count"));
+        });
+
+        DeviceAnalyticsReader.Snapshot snapshot = new JdbcDeviceAnalyticsReader(executor).read(query());
+
+        assertThat(snapshot.available()).isTrue();
+        assertThat(snapshot.failureCode()).isEqualTo("RESULT_TRUNCATED");
     }
 
     private static OperationsAnomalyQuery query() {
@@ -146,5 +181,9 @@ class JdbcAnalyticsReaderTest {
 
     private static TabularResult rows(List<String> columns, List<List<Object>> values) {
         return new TabularResult(columns, values, false, 1);
+    }
+
+    private static TabularResult truncatedRows(List<String> columns) {
+        return new TabularResult(columns, List.of(), true, 50);
     }
 }

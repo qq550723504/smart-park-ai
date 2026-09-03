@@ -29,6 +29,7 @@ async function load(): Promise<void> {
   const generation = ++requestGeneration
   loading.value = true
   error.value = ''
+  overview.value = null
   try {
     const value = await getAnomalyOverview(props.role, filters.value)
     if (generation !== requestGeneration) return

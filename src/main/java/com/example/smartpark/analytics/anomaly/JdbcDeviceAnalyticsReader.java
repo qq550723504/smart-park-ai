@@ -24,12 +24,12 @@ public final class JdbcDeviceAnalyticsReader implements DeviceAnalyticsReader {
         try {
             OperationsAnomalyQuery recentQuery = recentQuery(query);
             TabularResult summary = execute("SELECT COUNT(*) FILTER (WHERE status = 'OFFLINE') AS offline_device_count, MAX(snapshot_at) AS as_of FROM analytics.v_device_snapshot " + FILTERS, recentQuery);
-            List<AlertAnalyticsReader.Breakdown> deviceTypes = breakdown("device_type", recentQuery);
-            List<BuildingSummary> buildings = buildings(recentQuery);
+            QueryResult<AlertAnalyticsReader.Breakdown> deviceTypes = breakdown("device_type", recentQuery);
+            QueryResult<BuildingSummary> buildings = buildings(recentQuery);
             List<Object> row = summary.rows().isEmpty() ? List.of() : summary.rows().get(0);
-            return new Snapshot(JdbcAnomalyReaderSupport.longValue(summary, row, "offline_device_count"), deviceTypes,
-                    buildings, JdbcAnomalyReaderSupport.instant(summary, row, "as_of"), true,
-                    summary.truncated() ? "RESULT_TRUNCATED" : null);
+            return new Snapshot(JdbcAnomalyReaderSupport.longValue(summary, row, "offline_device_count"), deviceTypes.values(),
+                    buildings.values(), JdbcAnomalyReaderSupport.instant(summary, row, "as_of"), true,
+                    truncated(summary, deviceTypes, buildings) ? "RESULT_TRUNCATED" : null);
         } catch (Exception exception) {
             return Snapshot.unavailable(JdbcAnomalyReaderSupport.failureCode(exception));
         }
@@ -68,15 +68,22 @@ public final class JdbcDeviceAnalyticsReader implements DeviceAnalyticsReader {
                 query.status(), query.deviceType());
     }
 
-    private List<AlertAnalyticsReader.Breakdown> breakdown(String dimension, OperationsAnomalyQuery query) throws Exception {
+    private QueryResult<AlertAnalyticsReader.Breakdown> breakdown(String dimension, OperationsAnomalyQuery query) throws Exception {
         TabularResult result = execute("SELECT " + dimension + " AS key, COUNT(*) AS count FROM analytics.v_device_snapshot " + FILTERS + " AND status = 'OFFLINE' GROUP BY " + dimension + " ORDER BY count DESC, key ASC LIMIT 50", query);
-        return result.rows().stream().map(row -> new AlertAnalyticsReader.Breakdown(JdbcAnomalyReaderSupport.text(result, row, "key"), JdbcAnomalyReaderSupport.longValue(result, row, "count"))).toList();
+        return new QueryResult<>(result.rows().stream().map(row -> new AlertAnalyticsReader.Breakdown(JdbcAnomalyReaderSupport.text(result, row, "key"), JdbcAnomalyReaderSupport.longValue(result, row, "count"))).toList(), result.truncated());
     }
 
-    private List<BuildingSummary> buildings(OperationsAnomalyQuery query) throws Exception {
+    private QueryResult<BuildingSummary> buildings(OperationsAnomalyQuery query) throws Exception {
         TabularResult result = execute("SELECT building_id, COUNT(*) AS offline_device_count FROM analytics.v_device_snapshot " + FILTERS + " AND status = 'OFFLINE' GROUP BY building_id ORDER BY offline_device_count DESC, building_id ASC LIMIT 50", query);
-        return result.rows().stream().map(row -> new BuildingSummary(JdbcAnomalyReaderSupport.text(result, row, "building_id"), JdbcAnomalyReaderSupport.longValue(result, row, "offline_device_count"))).sorted(Comparator.comparingLong(BuildingSummary::offlineDeviceCount).reversed().thenComparing(BuildingSummary::buildingId)).toList();
+        return new QueryResult<>(result.rows().stream().map(row -> new BuildingSummary(JdbcAnomalyReaderSupport.text(result, row, "building_id"), JdbcAnomalyReaderSupport.longValue(result, row, "offline_device_count"))).sorted(Comparator.comparingLong(BuildingSummary::offlineDeviceCount).reversed().thenComparing(BuildingSummary::buildingId)).toList(), result.truncated());
     }
+
+    private static boolean truncated(TabularResult summary, QueryResult<?>... results) {
+        if (summary.truncated()) return true;
+        return java.util.Arrays.stream(results).anyMatch(QueryResult::truncated);
+    }
+
+    private record QueryResult<T>(List<T> values, boolean truncated) { }
 
     private TabularResult execute(String sql, OperationsAnomalyQuery query) throws Exception {
         return JdbcAnomalyReaderSupport.execute(executor, sql, query);

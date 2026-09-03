@@ -2,6 +2,7 @@ package com.example.smartpark.analytics.anomaly;
 
 import com.example.smartpark.analytics.model.TabularResult;
 import com.example.smartpark.analytics.sql.ReadOnlyQueryExecutor;
+import com.example.smartpark.execution.LegacyWorkflowEventAdapter;
 import com.example.smartpark.workflow.WorkflowExecutionStore;
 import com.example.smartpark.workflow.WorkflowSnapshot;
 
@@ -32,15 +33,15 @@ public final class JdbcAlertAnalyticsReader implements AlertAnalyticsReader {
     public Snapshot read(OperationsAnomalyQuery query) {
         try {
             TabularResult summary = execute("SELECT COUNT(*) AS alert_count, COUNT(*) FILTER (WHERE risk_level = 'HIGH') AS high_risk_alert_count FROM analytics.v_alert_fact " + FILTERS, query);
-            List<Breakdown> riskLevels = breakdown("risk_level", query);
-            List<Breakdown> categories = breakdown("category", query);
-            List<Breakdown> statuses = breakdown("status", query);
-            List<BuildingSummary> buildings = buildings(query);
+            QueryResult<Breakdown> riskLevels = breakdown("risk_level", query);
+            QueryResult<Breakdown> categories = breakdown("category", query);
+            QueryResult<Breakdown> statuses = breakdown("status", query);
+            QueryResult<BuildingSummary> buildings = buildings(query);
             List<Object> row = summary.rows().isEmpty() ? List.of() : summary.rows().get(0);
             return new Snapshot(JdbcAnomalyReaderSupport.longValue(summary, row, "alert_count"),
                     JdbcAnomalyReaderSupport.longValue(summary, row, "high_risk_alert_count"),
-                    riskLevels, categories, statuses, buildings, true,
-                    summary.truncated() ? "RESULT_TRUNCATED" : null);
+                    riskLevels.values(), categories.values(), statuses.values(), buildings.values(), true,
+                    truncated(summary, riskLevels, categories, statuses, buildings) ? "RESULT_TRUNCATED" : null);
         } catch (Exception exception) {
             return Snapshot.unavailable(JdbcAnomalyReaderSupport.failureCode(exception));
         }
@@ -78,21 +79,30 @@ public final class JdbcAlertAnalyticsReader implements AlertAnalyticsReader {
         try {
             return workflowStore.flatMap(store -> store.findByAlertId(alertId))
                     .map(WorkflowSnapshot::workflowId)
+                    .map(LegacyWorkflowEventAdapter::runIdFor)
+                    .map(java.util.UUID::toString)
                     .orElse(null);
         } catch (RuntimeException ignored) {
             return null;
         }
     }
 
-    private List<Breakdown> breakdown(String dimension, OperationsAnomalyQuery query) throws Exception {
+    private QueryResult<Breakdown> breakdown(String dimension, OperationsAnomalyQuery query) throws Exception {
         TabularResult result = execute("SELECT " + dimension + " AS key, COUNT(*) AS count FROM analytics.v_alert_fact " + FILTERS + " GROUP BY " + dimension + " ORDER BY count DESC, key ASC LIMIT 50", query);
-        return result.rows().stream().map(row -> new Breakdown(JdbcAnomalyReaderSupport.text(result, row, "key"), JdbcAnomalyReaderSupport.longValue(result, row, "count"))).toList();
+        return new QueryResult<>(result.rows().stream().map(row -> new Breakdown(JdbcAnomalyReaderSupport.text(result, row, "key"), JdbcAnomalyReaderSupport.longValue(result, row, "count"))).toList(), result.truncated());
     }
 
-    private List<BuildingSummary> buildings(OperationsAnomalyQuery query) throws Exception {
+    private QueryResult<BuildingSummary> buildings(OperationsAnomalyQuery query) throws Exception {
         TabularResult result = execute("SELECT building_id, COUNT(*) AS alert_count, COUNT(*) FILTER (WHERE risk_level = 'HIGH') AS high_risk_alert_count FROM analytics.v_alert_fact " + FILTERS + " GROUP BY building_id ORDER BY alert_count DESC, building_id ASC LIMIT 50", query);
-        return result.rows().stream().map(row -> new BuildingSummary(JdbcAnomalyReaderSupport.text(result, row, "building_id"), JdbcAnomalyReaderSupport.longValue(result, row, "alert_count"), JdbcAnomalyReaderSupport.longValue(result, row, "high_risk_alert_count"))).sorted(Comparator.comparingLong(BuildingSummary::alertCount).reversed().thenComparing(BuildingSummary::buildingId)).toList();
+        return new QueryResult<>(result.rows().stream().map(row -> new BuildingSummary(JdbcAnomalyReaderSupport.text(result, row, "building_id"), JdbcAnomalyReaderSupport.longValue(result, row, "alert_count"), JdbcAnomalyReaderSupport.longValue(result, row, "high_risk_alert_count"))).sorted(Comparator.comparingLong(BuildingSummary::alertCount).reversed().thenComparing(BuildingSummary::buildingId)).toList(), result.truncated());
     }
+
+    private static boolean truncated(TabularResult summary, QueryResult<?>... results) {
+        if (summary.truncated()) return true;
+        return java.util.Arrays.stream(results).anyMatch(QueryResult::truncated);
+    }
+
+    private record QueryResult<T>(List<T> values, boolean truncated) { }
 
     private TabularResult execute(String sql, OperationsAnomalyQuery query) throws Exception {
         return JdbcAnomalyReaderSupport.execute(executor, sql, query);
