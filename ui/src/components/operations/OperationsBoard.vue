@@ -23,8 +23,18 @@ const groups = [
   },
   {
     title: '告警与设备',
-    description: '从风险趋势和设备在线状态识别需要关注的运营异常。',
-    questions: ['过去7天告警数量', '过去7天高风险告警数量', '各楼宇离线设备数', '各设备类型离线设备数'],
+    description: '从风险构成、楼宇分布和设备在线状态识别需要关注的运营异常。',
+    questions: [
+      '过去7天告警数量',
+      '过去7天高风险告警数量',
+      '过去7天各风险等级告警数量',
+      '过去7天各类别告警数量',
+      '过去7天各状态告警数量',
+      '过去7天各楼宇告警数量排行',
+      '过去7天各楼宇高风险告警排行',
+      '各楼宇离线设备数',
+      '各设备类型离线设备数',
+    ],
   },
 ]
 </script>
@@ -37,7 +47,7 @@ const groups = [
         <h2>停车、能耗与风险，<br /><em>从同一套证据出发</em></h2>
         <p class="hero-copy">选择一个指标卡进入自然语言分析。看板不缓存或编造业务数字，结果始终来自后端登记的只读指标。</p>
       </div>
-      <div class="hero-metrics"><div><strong>09</strong><span>受控问题</span></div><div><strong>只读</strong><span>执行模式</span></div></div>
+      <div class="hero-metrics"><div><strong>14</strong><span>受控问题</span></div><div><strong>只读</strong><span>执行模式</span></div></div>
     </section>
     <OperationsDailyReport :role="props.role" :trace="props.trace" :active="props.active" />
     <section v-for="group in groups" :key="group.title" class="panel operations-board__group" :aria-label="group.title">
