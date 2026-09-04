@@ -253,6 +253,44 @@ class ChartSpecTest {
     }
 
     @Test
+    void keepsSecondGroupingDimensionAsSeriesInDistributionFallback() {
+        TabularResult result = new TabularResult(
+                List.of("building_id", "category", "alert_count"),
+                List.of(
+                        List.of("B1", "TEMPERATURE", 1),
+                        List.of("B1", "POWER", 0),
+                        List.of("B2", "TEMPERATURE", 1),
+                        List.of("B2", "POWER", 1)),
+                false, 4);
+
+        ChartSpec spec = ChartSpec.recommended("过去7天各楼宇按告警类型分布", result,
+                Map.of("alert_count", "条"));
+
+        // A bare BAR would collapse every (building, category) row onto the
+        // same metric series and overwrite repeated building positions; the
+        // second grouping dimension must stay represented as the series.
+        assertThat(spec.type()).isEqualTo(ChartSpec.ChartType.BAR);
+        assertThat(spec.xField()).isEqualTo("building_id");
+        assertThat(spec.seriesField()).isEqualTo("category");
+        assertThat(spec.yFields()).containsExactly("alert_count");
+    }
+
+    @Test
+    void fallsBackToTableWhenDuplicateCoordinatesCannotRepresentBothDimensions() {
+        TabularResult duplicated = new TabularResult(
+                List.of("building_id", "category", "alert_count"),
+                List.of(
+                        List.of("B1", "TEMPERATURE", 1),
+                        List.of("B1", "TEMPERATURE", 2)),
+                false, 2);
+
+        ChartSpec spec = ChartSpec.recommended("过去7天各楼宇按告警类型分布", duplicated,
+                Map.of("alert_count", "条"));
+
+        assertThat(spec.type()).isEqualTo(ChartSpec.ChartType.TABLE);
+    }
+
+    @Test
     void recommendsHorizontalBarForRankingQuestionsOverCategoricalAxes() {
         TabularResult result = new TabularResult(
                 List.of("device_type", "device_offline_count"),

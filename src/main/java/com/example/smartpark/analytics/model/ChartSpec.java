@@ -172,7 +172,14 @@ public record ChartSpec(
             RenderOptions options = containsAny(text, "排行", "排名")
                     ? new RenderOptions("HORIZONTAL", false, null, "", "")
                     : RenderOptions.defaults();
-            return fromProposal(new Proposal(type, title, x, List.of(y), "", "", options),
+            // A grouped result with two categorical dimensions must not collapse
+            // to a single series: a bare BAR would overwrite repeated x positions
+            // and silently drop all but the last value of the other dimension.
+            // The second dimension becomes the series so every grouping column
+            // stays represented; when the contract validator still cannot express
+            // it, the caller keeps the table fallback.
+            String series = secondCategoricalDimension(result, x, y);
+            return fromProposal(new Proposal(type, title, x, List.of(y), series, "", options),
                     result, unitByColumn);
         }
         if (result.rows().size() == 1 && containsAny(text, "总量", "总数", "数量", "完成率")) {
@@ -190,6 +197,22 @@ public record ChartSpec(
 
     private static String firstExisting(TabularResult result, String... fields) {
         for (String field : fields) if (result.columnNames().contains(field)) return field;
+        return null;
+    }
+
+    /**
+     * Second categorical grouping column of a two-dimensional result, or null
+     * when every remaining column is the metric or an unrepresentable field.
+     * Known categorical axes only: inventing a series from numeric or coordinate
+     * columns would produce meaningless stacks.
+     */
+    private static String secondCategoricalDimension(TabularResult result, String x, String y) {
+        List<String> categorical = List.of("building_name", "building_id", "category", "device_type",
+                "parking_zone", "risk_level", "status", "meter_id", "day_of_week", "hour_of_day");
+        for (String field : categorical) {
+            if (field.equals(x) || field.equals(y)) continue;
+            if (result.columnNames().contains(field)) return field;
+        }
         return null;
     }
 

@@ -388,6 +388,32 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
+    void keepsEveryGroupingDimensionInTwoDimensionalDistributionFallback() {
+        String alertSql = """
+                SELECT building_id, category, COUNT(*) AS alert_count FROM analytics.v_alert_fact
+                WHERE occurred_at >= :fromTs AND occurred_at < :toTs
+                GROUP BY building_id, category LIMIT 200""";
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding(
+                        "过去7天各楼宇按告警类型分布", List.of("告警数量"), List.of()),
+                List.of(alertSql),
+                null,
+                "共 4 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "过去7天各楼宇按告警类型分布");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().dimensions()).containsExactly("building_id", "category");
+        // Fixed-clock fixture: B1/TEMPERATURE, B2/TEMPERATURE, B3/POWER —
+        // three unique (building, category) groups.
+        assertThat(outcome.result().rowCount()).isEqualTo(3);
+        assertThat(outcome.chart().type()).isEqualTo(ChartSpec.ChartType.BAR);
+        assertThat(outcome.chart().xField()).isEqualTo("building_id");
+        assertThat(outcome.chart().seriesField()).isEqualTo("category");
+        assertThat(outcome.chart().yFields()).containsExactly("alert_count");
+    }
+
+    @Test
     void sortsRankingPresetResultsByMetricBeforeLimiting() {
         String rankingSql = """
                 SELECT building_id, COUNT(*) AS device_offline_count FROM analytics.v_device_snapshot
