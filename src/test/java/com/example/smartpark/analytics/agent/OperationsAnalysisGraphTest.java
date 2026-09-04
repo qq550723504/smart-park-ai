@@ -71,6 +71,8 @@ class OperationsAnalysisGraphTest {
         adminDataSource.setUsername(postgres.getUsername());
         adminDataSource.setPassword(postgres.getPassword());
         seedFixedClockEnergyFacts(adminDataSource);
+        seedFixedClockAlertFacts(adminDataSource);
+        seedFixedClockDeviceSnapshots(adminDataSource);
         com.example.smartpark.analytics.AnalyticsRoleCredentials.sync(
                 postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword(), "test-ro-pass");
 
@@ -120,6 +122,46 @@ class OperationsAnalysisGraphTest {
                 new Object[] {"B1", "GRAPH-TEST-B1", Timestamp.from(TEST_NOW.minus(Duration.ofDays(4))), 10.0, 8.0, 20.0},
                 new Object[] {"B2", "GRAPH-TEST-B2", Timestamp.from(TEST_NOW.minus(Duration.ofDays(4))), 11.0, 8.0, 21.0},
                 new Object[] {"B3", "GRAPH-TEST-B3", Timestamp.from(TEST_NOW.minus(Duration.ofDays(4))), 12.0, 8.0, 22.0}));
+    }
+
+    /** Same fixed-clock fixture for alert facts, e.g. for category grouping runs. */
+    private void seedFixedClockAlertFacts(DataSource dataSource) {
+        new JdbcTemplate(dataSource).batchUpdate("""
+                INSERT INTO analytics.alert_fact_raw
+                    (alert_id, building_id, device_id, category, risk_level, occurred_at, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT DO NOTHING
+                """, List.of(
+                new Object[] {"GRAPH-TEST-ALT-001", "B1", "AC-B1-07", "TEMPERATURE", "HIGH",
+                        Timestamp.from(TEST_NOW.minus(Duration.ofDays(4))), "OPEN"},
+                new Object[] {"GRAPH-TEST-ALT-002", "B2", "HUM-B2-11", "TEMPERATURE", "MEDIUM",
+                        Timestamp.from(TEST_NOW.minus(Duration.ofDays(4))), "OPEN"},
+                new Object[] {"GRAPH-TEST-ALT-003", "B3", "DR-B2-01", "POWER", "LOW",
+                        Timestamp.from(TEST_NOW.minus(Duration.ofDays(4))), "RESOLVED"}));
+    }
+
+    /** Fixed-clock offline devices: B1=3, B2=2, B3=1 — a deterministic ranking fixture. */
+    private void seedFixedClockDeviceSnapshots(DataSource dataSource) {
+        new JdbcTemplate(dataSource).batchUpdate("""
+                INSERT INTO analytics.device_snapshot_raw
+                    (device_id, building_id, device_type, status, snapshot_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT DO NOTHING
+                """, List.of(
+                new Object[] {"GRAPH-TEST-DEV-001", "B1", "HVAC", "OFFLINE",
+                        Timestamp.from(TEST_NOW.minus(Duration.ofHours(2)))},
+                new Object[] {"GRAPH-TEST-DEV-002", "B1", "ELEVATOR", "OFFLINE",
+                        Timestamp.from(TEST_NOW.minus(Duration.ofHours(2)))},
+                new Object[] {"GRAPH-TEST-DEV-003", "B1", "ACCESS", "OFFLINE",
+                        Timestamp.from(TEST_NOW.minus(Duration.ofHours(2)))},
+                new Object[] {"GRAPH-TEST-DEV-004", "B2", "HVAC", "OFFLINE",
+                        Timestamp.from(TEST_NOW.minus(Duration.ofHours(2)))},
+                new Object[] {"GRAPH-TEST-DEV-005", "B2", "ELEVATOR", "OFFLINE",
+                        Timestamp.from(TEST_NOW.minus(Duration.ofHours(2)))},
+                new Object[] {"GRAPH-TEST-DEV-006", "B3", "HVAC", "OFFLINE",
+                        Timestamp.from(TEST_NOW.minus(Duration.ofHours(2)))},
+                new Object[] {"GRAPH-TEST-DEV-007", "B3", "HVAC", "ONLINE",
+                        Timestamp.from(TEST_NOW.minus(Duration.ofHours(2)))}));
     }
 
     @AfterAll
@@ -304,6 +346,121 @@ class OperationsAnalysisGraphTest {
 
         assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
         assertThat(modelClient.lastPlan().dimensions()).containsExactly("hour_ts");
+    }
+
+    @Test
+    void infersAlertCategoryGroupingFromAlertTypePresetQuestion() {
+        String alertSql = """
+                SELECT category, COUNT(*) AS alert_count FROM analytics.v_alert_fact
+                WHERE occurred_at >= :fromTs AND occurred_at < :toTs
+                GROUP BY category LIMIT 200""";
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("过去7天按告警类型分布", List.of("告警数量"), List.of()),
+                List.of(alertSql),
+                new ChartSpec.Proposal("BAR", "告警类型分布", "category", List.of("alert_count"), "", "条"),
+                "共 2 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "过去7天按告警类型分布");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().dimensions()).containsExactly("category");
+        assertThat(outcome.result().rowCount()).isEqualTo(2);
+    }
+
+    @Test
+    void recoversDeterministicBarChartForAlertTypeDistributionWhenProposalFails() {
+        String alertSql = """
+                SELECT category, COUNT(*) AS alert_count FROM analytics.v_alert_fact
+                WHERE occurred_at >= :fromTs AND occurred_at < :toTs
+                GROUP BY category LIMIT 200""";
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("过去7天按告警类型分布", List.of("告警数量"), List.of()),
+                List.of(alertSql),
+                null,
+                "共 2 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "过去7天按告警类型分布");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(outcome.chart().type()).isEqualTo(ChartSpec.ChartType.BAR);
+        assertThat(outcome.chart().xField()).isEqualTo("category");
+        assertThat(outcome.chart().yFields()).containsExactly("alert_count");
+    }
+
+    @Test
+    void keepsEveryGroupingDimensionInTwoDimensionalDistributionFallback() {
+        String alertSql = """
+                SELECT building_id, category, COUNT(*) AS alert_count FROM analytics.v_alert_fact
+                WHERE occurred_at >= :fromTs AND occurred_at < :toTs
+                GROUP BY building_id, category LIMIT 200""";
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding(
+                        "过去7天各楼宇按告警类型分布", List.of("告警数量"), List.of()),
+                List.of(alertSql),
+                null,
+                "共 4 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "过去7天各楼宇按告警类型分布");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().dimensions()).containsExactly("building_id", "category");
+        // Fixed-clock fixture: B1/TEMPERATURE, B2/TEMPERATURE, B3/POWER —
+        // three unique (building, category) groups.
+        assertThat(outcome.result().rowCount()).isEqualTo(3);
+        assertThat(outcome.chart().type()).isEqualTo(ChartSpec.ChartType.BAR);
+        assertThat(outcome.chart().xField()).isEqualTo("building_id");
+        assertThat(outcome.chart().seriesField()).isEqualTo("category");
+        assertThat(outcome.chart().yFields()).containsExactly("alert_count");
+    }
+
+    @Test
+    void sortsRankingPresetResultsByMetricBeforeLimiting() {
+        String rankingSql = """
+                SELECT building_id, COUNT(*) AS device_offline_count FROM analytics.v_device_snapshot
+                WHERE snapshot_at >= :fromTs AND snapshot_at < :toTs
+                  AND status = 'OFFLINE'
+                GROUP BY building_id ORDER BY device_offline_count DESC LIMIT 200""";
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("过去1天各楼宇离线设备排行", List.of("离线设备"), List.of()),
+                List.of(rankingSql),
+                null,
+                "共 3 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "过去1天各楼宇离线设备排行");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().sort())
+                .isEqualTo(new QueryPlan.Sort("device_offline_count", false));
+        assertThat(outcome.result().rows().stream().map(row -> row.get(0)))
+                .containsExactly("B1", "B2", "B3");
+        assertThat(outcome.result().rows().stream().map(row -> ((Number) row.get(1)).longValue()))
+                .containsExactly(3L, 2L, 1L);
+        assertThat(outcome.chart().type()).isEqualTo(ChartSpec.ChartType.BAR);
+        assertThat(outcome.chart().options().orientation()).isEqualTo("HORIZONTAL");
+    }
+
+    @Test
+    void letsAscendingQualifierOverrideGenericRankingDefault() {
+        String ascendingSql = """
+                SELECT building_id, COUNT(*) AS device_offline_count FROM analytics.v_device_snapshot
+                WHERE snapshot_at >= :fromTs AND snapshot_at < :toTs
+                  AND status = 'OFFLINE'
+                GROUP BY building_id ORDER BY device_offline_count ASC LIMIT 200""";
+        modelClient.reset(
+                new AnalyticsModelClient.QuestionUnderstanding("过去1天各楼宇离线设备最少排行", List.of("离线设备"), List.of()),
+                List.of(ascendingSql),
+                null,
+                "共 3 行结果。");
+
+        var outcome = graph.run(UUID.randomUUID(), "过去1天各楼宇离线设备最少排行");
+
+        assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
+        assertThat(modelClient.lastPlan().sort())
+                .isEqualTo(new QueryPlan.Sort("device_offline_count", true));
+        assertThat(outcome.result().rows().stream().map(row -> row.get(0)))
+                .containsExactly("B3", "B2", "B1");
+        assertThat(outcome.result().rows().stream().map(row -> ((Number) row.get(1)).longValue()))
+                .containsExactly(1L, 2L, 3L);
     }
 
     @Test

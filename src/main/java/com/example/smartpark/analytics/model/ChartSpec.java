@@ -164,13 +164,22 @@ public record ChartSpec(
             }
         }
 
-        String x = firstExisting(result, "building_name", "building_id", "stat_date", "hour_ts", "hour_of_day");
+        String x = firstExisting(result, "building_name", "building_id", "category", "device_type",
+                "parking_zone", "risk_level", "status", "meter_id", "day_of_week",
+                "stat_date", "hour_ts", "hour_of_day");
         if (x != null) {
             String type = containsAny(text, "趋势", "按小时", "逐时", "按日", "每日", "按日期") ? "LINE" : "BAR";
             RenderOptions options = containsAny(text, "排行", "排名")
                     ? new RenderOptions("HORIZONTAL", false, null, "", "")
                     : RenderOptions.defaults();
-            return fromProposal(new Proposal(type, title, x, List.of(y), "", "", options),
+            // A grouped result with two categorical dimensions must not collapse
+            // to a single series: a bare BAR would overwrite repeated x positions
+            // and silently drop all but the last value of the other dimension.
+            // The second dimension becomes the series so every grouping column
+            // stays represented; when the contract validator still cannot express
+            // it, the caller keeps the table fallback.
+            String series = secondCategoricalDimension(result, x, y);
+            return fromProposal(new Proposal(type, title, x, List.of(y), series, "", options),
                     result, unitByColumn);
         }
         if (result.rows().size() == 1 && containsAny(text, "总量", "总数", "数量", "完成率")) {
@@ -182,12 +191,28 @@ public record ChartSpec(
     public static boolean hasVisualizationIntent(String question) {
         String text = question == null ? "" : question.toLowerCase(Locale.ROOT);
         return containsAny(text, "趋势", "排行", "排名", "热力图", "热力", "日历", "关系", "相关性",
-                "散点", "目标完成率", "目标达成率", "空间分布", "地图", "平面图", "位置分布", "构成", "堆叠",
+                "散点", "目标完成率", "目标达成率", "空间分布", "分布", "地图", "平面图", "位置分布", "构成", "堆叠",
                 "分时", "总量", "总数");
     }
 
     private static String firstExisting(TabularResult result, String... fields) {
         for (String field : fields) if (result.columnNames().contains(field)) return field;
+        return null;
+    }
+
+    /**
+     * Second categorical grouping column of a two-dimensional result, or null
+     * when every remaining column is the metric or an unrepresentable field.
+     * Known categorical axes only: inventing a series from numeric or coordinate
+     * columns would produce meaningless stacks.
+     */
+    private static String secondCategoricalDimension(TabularResult result, String x, String y) {
+        List<String> categorical = List.of("building_name", "building_id", "category", "device_type",
+                "parking_zone", "risk_level", "status", "meter_id", "day_of_week", "hour_of_day");
+        for (String field : categorical) {
+            if (field.equals(x) || field.equals(y)) continue;
+            if (result.columnNames().contains(field)) return field;
+        }
         return null;
     }
 

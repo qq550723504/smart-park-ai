@@ -543,14 +543,16 @@ public class OperationsAnalysisGraph {
             ctx.timeResolution = TimeResolutionMetadata.defaultLookback(
                     timeRange.from(), timeRange.to());
         }
+        List<String> dimensions = validatedRequestedDimensions(ctx, originalQuestion);
         ctx.plan = new QueryPlan(
                 originalQuestion,
                 ctx.metrics,
-                validatedRequestedDimensions(ctx, originalQuestion),
+                dimensions,
                 validatedRequestedFilters(ctx, originalQuestion),
                 timeRange,
                 200,
-                timeRangeSource);
+                timeRangeSource,
+                rankingSort(originalQuestion, ctx.metrics, dimensions));
         // One shared binding set travels through both gates and execution.
         // Entity values are never copied into SQL literals.
         java.util.LinkedHashMap<String, Object> parameters = new java.util.LinkedHashMap<>();
@@ -622,6 +624,30 @@ public class OperationsAnalysisGraph {
         return CategoricalFilterVocabulary.canonicalValue(dimension, value);
     }
 
+    /**
+     * 排行语义必须与 LIMIT 协同排序：无 ORDER BY 的 LIMIT 会任意截断分组，
+     * 可能把真实的头部结果留在窗口之外。仅当问题明确要求排行且指标唯一、
+     * 分组维度非空时才声明排序；方向限定词（“最多/最高/最大”降序、
+     * “最少/最低/最小”升序）优先于“排行/排名”的降序默认——“告警数量
+     * 最少排行”是升序排行而非方向不明。方向限定词互相矛盾或语义
+     * 不明时保守不排序。
+     */
+    private static QueryPlan.Sort rankingSort(
+            String question, List<com.example.smartpark.analytics.catalog.MetricDefinition> metrics,
+            List<String> dimensions) {
+        if (question == null || dimensions.isEmpty() || metrics.size() != 1) return null;
+        String lowered = question.toLowerCase(java.util.Locale.ROOT);
+        boolean ascending = containsAny(lowered, "最少", "最低", "最小");
+        boolean descending = containsAny(lowered, "最多", "最高", "最大");
+        if (ascending != descending) {
+            return new QueryPlan.Sort(metrics.get(0).name(), ascending);
+        }
+        if (!ascending && containsAny(lowered, "排行", "排名")) {
+            return new QueryPlan.Sort(metrics.get(0).name(), false);
+        }
+        return null;
+    }
+
     private static List<String> inferredAggregationDimensions(RunContext ctx, String question) {
         List<String> inferred = new ArrayList<>();
         // A metric's timeColumn controls its safe filter window, not the only
@@ -685,7 +711,8 @@ public class OperationsAnalysisGraph {
             case "area_sqm" -> containsAny(normalized, "按面积", "单位面积", "面积");
             case "map_x", "map_y" -> containsAny(normalized, "空间分布", "地图", "平面图", "位置分布");
             case "risk_level" -> containsAny(normalized, "按风险", "各风险", "按风险等级");
-            case "category" -> containsAny(normalized, "按类别", "各类别", "按分类", "各分类", "按类型", "各类型");
+            case "category" -> containsAny(normalized, "按类别", "各类别", "按分类", "各分类", "按类型", "各类型",
+                    "按告警类型", "各告警类型", "按告警类别", "各告警类别");
             case "status" -> containsAny(normalized, "按状态", "各状态");
             case "device_type" -> containsAny(normalized, "按设备类型", "各设备类型");
             case "parking_zone" -> containsAny(normalized, "按区域", "各区域", "按车区", "各车区", "各停车区域");

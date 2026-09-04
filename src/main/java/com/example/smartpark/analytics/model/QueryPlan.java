@@ -23,12 +23,34 @@ public record QueryPlan(
         Map<String, String> filters,
         TimeRange timeRange,
         int limit,
-        TimeRangeSource timeRangeSource) {
+        TimeRangeSource timeRangeSource,
+        Sort sort) {
 
     public QueryPlan(String question, List<MetricDefinition> metrics, List<String> dimensions,
                      Map<String, String> filters, TimeRange timeRange, int limit) {
         this(question, metrics, dimensions, filters, timeRange, limit,
-                TimeRangeSource.DEFAULT_METRIC_LOOKBACK);
+                TimeRangeSource.DEFAULT_METRIC_LOOKBACK, null);
+    }
+
+    public QueryPlan(String question, List<MetricDefinition> metrics, List<String> dimensions,
+                     Map<String, String> filters, TimeRange timeRange, int limit,
+                     TimeRangeSource timeRangeSource) {
+        this(question, metrics, dimensions, filters, timeRange, limit, timeRangeSource, null);
+    }
+
+    /**
+     * Declared result ordering. A ranked query without ORDER BY lets LIMIT
+     * truncate arbitrarily, so the sort is part of the approved plan contract:
+     * the renderer must emit it and the plan guard must see exactly it.
+     */
+    public record Sort(String metricName, boolean ascending) {
+        public Sort {
+            Objects.requireNonNull(metricName, "metricName");
+            if (!metricName.matches("[a-zA-Z_][a-zA-Z0-9_]*")) {
+                throw new IllegalArgumentException("sort metric is not a safe catalog identifier");
+            }
+            metricName = metricName.toLowerCase(Locale.ROOT);
+        }
     }
 
     public QueryPlan {
@@ -99,6 +121,9 @@ public record QueryPlan(
             throw new IllegalArgumentException("limit must be 1..500");
         }
         Objects.requireNonNull(timeRangeSource, "timeRangeSource");
+        if (sort != null && metrics.stream().noneMatch(metric -> metric.name().equals(sort.metricName()))) {
+            throw new IllegalArgumentException("sort metric is not part of the plan: " + sort.metricName());
+        }
     }
 
     /**

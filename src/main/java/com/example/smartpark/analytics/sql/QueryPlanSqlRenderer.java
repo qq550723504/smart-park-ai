@@ -56,6 +56,13 @@ public final class QueryPlanSqlRenderer {
         if (!plan.dimensions().isEmpty()) {
             sql.append(" GROUP BY ").append(String.join(", ", plan.dimensions()));
         }
+        // The declared sort is part of the plan contract: it must appear
+        // before LIMIT so ranked results are never truncated arbitrarily.
+        if (plan.sort() != null) {
+            requireIdentifier(plan.sort().metricName(), "sort metric");
+            sql.append(" ORDER BY ").append(plan.sort().metricName())
+                    .append(plan.sort().ascending() ? " ASC" : " DESC");
+        }
         sql.append(" LIMIT ").append(plan.limit());
         return sql.toString();
     }

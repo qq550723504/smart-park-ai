@@ -89,4 +89,19 @@ class AnalyticsQuestionNormalizerTest {
 
         assertThat(normalized.requestedDimensions()).containsExactly("parking_zone");
     }
+
+    @Test
+    void keepsAlertTypePhrasingAsAnExplicitCategoryGrouping() {
+        var modelUnderstanding = new AnalyticsModelClient.QuestionUnderstanding(
+                "过去7天按告警类型分布",
+                List.of("告警数量"),
+                List.of(),
+                null,
+                List.of("category"),
+                Map.of());
+
+        var normalized = normalizer.normalize("过去7天按告警类型分布", modelUnderstanding);
+
+        assertThat(normalized.requestedDimensions()).containsExactly("category");
+    }
 }

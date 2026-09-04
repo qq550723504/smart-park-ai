@@ -29,6 +29,38 @@ class SqlPlanGuardTest {
     }
 
     @Test
+    void acceptsOrderByOnlyWhenItMatchesTheDeclaredPlanSort() throws UnsafeSqlException {
+        QueryPlan ranked = rankedPlan(new QueryPlan.Sort("energy_kwh", false));
+
+        assertThatCode(() -> SqlPlanGuard.validate(SqlAstGuard.validate("""
+                SELECT building_id, SUM(kwh) AS energy_kwh FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                GROUP BY building_id ORDER BY energy_kwh DESC LIMIT 100"""), ranked))
+                .doesNotThrowAnyException();
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(SqlAstGuard.validate("""
+                SELECT building_id, SUM(kwh) AS energy_kwh FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                GROUP BY building_id ORDER BY energy_kwh ASC LIMIT 100"""), ranked))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("排序");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(SqlAstGuard.validate("""
+                SELECT building_id, SUM(kwh) AS energy_kwh FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                GROUP BY building_id ORDER BY building_id DESC LIMIT 100"""), ranked))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("排序");
+
+        assertThatThrownBy(() -> SqlPlanGuard.validate(SqlAstGuard.validate("""
+                SELECT building_id, SUM(kwh) AS energy_kwh FROM analytics.v_energy_hourly
+                WHERE hour_ts >= :fromTs AND hour_ts < :toTs
+                GROUP BY building_id LIMIT 100"""), ranked))
+                .isInstanceOf(UnsafeSqlException.class)
+                .hasMessageContaining("排序");
+    }
+
+    @Test
     void rejectsPostgresLockingClausesBeforeExecution() throws UnsafeSqlException {
         QueryPlan plan = plan("energy_kwh", List.of("building_id"));
         ValidatedSql sql = SqlAstGuard.validate("""
@@ -501,5 +533,14 @@ class SqlPlanGuardTest {
                 new QueryPlan.TimeRange(
                         Instant.parse("2026-08-17T00:00:00Z"),
                         Instant.parse("2026-08-24T00:00:00Z")), 100);
+    }
+
+    private QueryPlan rankedPlan(QueryPlan.Sort sort) {
+        MetricDefinition metric = catalog.findByName("energy_kwh").orElseThrow();
+        return new QueryPlan("各楼宇能耗排行", List.of(metric), List.of("building_id"), Map.of(),
+                new QueryPlan.TimeRange(
+                        Instant.parse("2026-08-17T00:00:00Z"),
+                        Instant.parse("2026-08-24T00:00:00Z")), 100,
+                QueryPlan.TimeRangeSource.DEFAULT_METRIC_LOOKBACK, sort);
     }
 }

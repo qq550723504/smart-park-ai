@@ -53,7 +53,7 @@ public final class SqlPlanGuard {
         }
 
         validateSourceGrain(plan);
-        PlainSelect resultQuery = validateSupportedShape(select);
+        PlainSelect resultQuery = validateSupportedShape(select, plan);
         List<Expression> terms = new ArrayList<>();
         flattenAnd(resultQuery.getWhere(), terms);
         List<Branch> branches = List.of(new Branch(
@@ -218,10 +218,11 @@ public final class SqlPlanGuard {
 
     /**
      * QueryPlan can currently describe one physical fact source, projections,
-     * predicates, grouping and an exact row bound. It cannot prove semantics
-     * through relational transformations, so accept only that direct shape.
+     * predicates, grouping, an exact row bound and an optional declared sort.
+     * It cannot prove semantics through relational transformations, so accept
+     * only that direct shape.
      */
-    private static PlainSelect validateSupportedShape(Select select) throws UnsafeSqlException {
+    private static PlainSelect validateSupportedShape(Select select, QueryPlan plan) throws UnsafeSqlException {
         if (select.getWithItemsList() != null && !select.getWithItemsList().isEmpty()) {
             throw reject("当前 QueryPlan 不支持 CTE 关系变换");
         }
@@ -241,7 +242,10 @@ public final class SqlPlanGuard {
             throw reject("当前 QueryPlan 不支持 DISTINCT 结果变换");
         }
         if (plain.getOrderByElements() != null && !plain.getOrderByElements().isEmpty()) {
-            throw reject("当前 QueryPlan 不支持 ORDER BY 结果变换");
+            validateOrderBy(plain.getOrderByElements(), plan);
+        } else if (plan.sort() != null) {
+            throw reject("查询缺少计划要求的排序: " + plan.sort().metricName()
+                    + (plan.sort().ascending() ? " ASC" : " DESC"));
         }
         if (plain.getOffset() != null
                 || (plain.getLimit() != null && plain.getLimit().getOffset() != null)) {
@@ -260,6 +264,25 @@ public final class SqlPlanGuard {
     }
 
     private record Branch(PlainSelect select, List<Expression> terms, List<SqlRelationName> tables) { }
+
+    /**
+     * ORDER BY is part of the approved plan contract, exactly like LIMIT: it
+     * must sort by precisely the planned metric alias in the planned direction.
+     * Any other ordering silently changes which rows survive the row bound.
+     */
+    private static void validateOrderBy(List<net.sf.jsqlparser.statement.select.OrderByElement> elements,
+                                        QueryPlan plan) throws UnsafeSqlException {
+        if (plan.sort() == null || elements.size() != 1) {
+            throw reject("当前 QueryPlan 不支持 ORDER BY 结果变换");
+        }
+        net.sf.jsqlparser.statement.select.OrderByElement element = elements.get(0);
+        if (!(element.getExpression() instanceof Column column)
+                || !column.getUnquotedColumnName().equalsIgnoreCase(plan.sort().metricName())
+                || element.isAsc() != plan.sort().ascending()) {
+            throw reject("ORDER BY 必须与计划排序完全一致: " + plan.sort().metricName()
+                    + (plan.sort().ascending() ? " ASC" : " DESC"));
+        }
+    }
 
     private static void validateProjection(PlainSelect resultQuery, QueryPlan plan)
             throws UnsafeSqlException {
