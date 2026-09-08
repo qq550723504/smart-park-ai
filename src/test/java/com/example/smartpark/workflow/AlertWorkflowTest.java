@@ -27,7 +27,9 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -210,31 +212,30 @@ class AlertWorkflowTest {
     }
 
     @Test
-    void expirationDefersToAnApprovalRequestReceivedBeforeTheDeadline() throws Exception {
-        MutableClock clock = new MutableClock(NOW);
+    void approvalArrivalIsRegisteredBeforeExpirationCanAcquireTheExecutionMonitor() throws Exception {
+        BlockingClock clock = new BlockingClock(NOW);
         Fixture fixture = fixture("ALT-POWER-001", 0.96, 0.96, "HIGH", null,
                 sequentialIds(), clock);
         Instant deadline = NOW.plus(Duration.ofMinutes(5));
         WorkflowSnapshot waiting = fixture.workflow.start("ALT-POWER-001", deadline);
-        WorkflowExecutionStore.Execution execution = fixture.store.execution(waiting.workflowId()).orElseThrow();
-        clock.advance(Duration.ofMinutes(4));
-        CompletableFuture<WorkflowSnapshot> approval;
+        ApprovalDecision decision = approvedAt("arrival-registration-race", NOW.toString());
+        clock.blockNextInstant();
 
-        synchronized (execution) {
-            approval = CompletableFuture.supplyAsync(() -> fixture.workflow.approve(waiting.workflowId(),
-                    approvedAt("in-flight-before-deadline", clock.instant().toString())));
-            long waitUntil = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-            while (!execution.hasApprovalAttemptBefore(deadline) && System.nanoTime() < waitUntil) {
-                Thread.sleep(5);
-            }
-            assertThat(execution.hasApprovalAttemptBefore(deadline)).isTrue();
-            clock.advance(Duration.ofMinutes(2));
-            assertThat(fixture.workflow.expireApproval(waiting.workflowId(), deadline).status())
-                    .isEqualTo(WorkflowStatus.WAITING_APPROVAL);
-        }
+        CompletableFuture<WorkflowSnapshot> approval = CompletableFuture.supplyAsync(
+                () -> fixture.workflow.approve(waiting.workflowId(), decision));
+        assertThat(clock.awaitBlocked(2, TimeUnit.SECONDS)).isTrue();
+        clock.advance(Duration.ofMinutes(6));
+        CompletableFuture<WorkflowSnapshot> expiration = CompletableFuture.supplyAsync(
+                () -> fixture.workflow.expireApproval(waiting.workflowId(), deadline));
+        Thread.sleep(50);
 
+        assertThat(expiration).isNotDone();
+        clock.release();
         WorkflowSnapshot completed = approval.get(2, TimeUnit.SECONDS);
+        WorkflowSnapshot observed = expiration.get(2, TimeUnit.SECONDS);
+
         assertThat(completed.status()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThat(observed.status()).isEqualTo(WorkflowStatus.COMPLETED);
         assertThat(fixture.parkSystem.workOrders().findByWorkflowId(waiting.workflowId())).hasSize(1);
     }
 
@@ -607,6 +608,51 @@ class AlertWorkflowTest {
         @Override public ZoneId getZone() { return ZoneOffset.UTC; }
         @Override public Clock withZone(ZoneId zone) { return this; }
         @Override public Instant instant() { return current; }
+    }
+
+    private static final class BlockingClock extends Clock {
+        private volatile Instant current;
+        private final AtomicBoolean blockNext = new AtomicBoolean();
+        private final CountDownLatch blocked = new CountDownLatch(1);
+        private final CountDownLatch release = new CountDownLatch(1);
+
+        private BlockingClock(Instant current) {
+            this.current = current;
+        }
+
+        void blockNextInstant() {
+            blockNext.set(true);
+        }
+
+        boolean awaitBlocked(long timeout, TimeUnit unit) throws InterruptedException {
+            return blocked.await(timeout, unit);
+        }
+
+        void release() {
+            release.countDown();
+        }
+
+        void advance(Duration duration) {
+            current = current.plus(duration);
+        }
+
+        @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+        @Override public Clock withZone(ZoneId zone) { return this; }
+
+        @Override
+        public Instant instant() {
+            Instant observed = current;
+            if (blockNext.compareAndSet(true, false)) {
+                blocked.countDown();
+                try {
+                    release.await();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("clock wait interrupted", interrupted);
+                }
+            }
+            return observed;
+        }
     }
 
     private static String triageJson(String alertId, double confidence, String riskLevel) {

@@ -253,9 +253,12 @@ public final class AlertWorkflow {
         WorkflowExecutionStore.Execution execution = executionStore.execution(requiredWorkflowId)
                 .orElseThrow(() -> new NoSuchElementException("Unknown workflow: " + requiredWorkflowId));
 
-        Instant receivedAt = Instant.now(clock);
         UUID approvalAttemptId = UUID.randomUUID();
-        execution.beginApprovalAttempt(approvalAttemptId, receivedAt);
+        Instant receivedAt;
+        synchronized (execution) {
+            receivedAt = Instant.now(clock);
+            execution.beginApprovalAttempt(approvalAttemptId, receivedAt);
+        }
         try {
             synchronized (execution) {
                 WorkflowSnapshot current = status(requiredWorkflowId);
@@ -313,7 +316,9 @@ public final class AlertWorkflow {
                 }
             }
         } finally {
-            execution.endApprovalAttempt(approvalAttemptId);
+            synchronized (execution) {
+                execution.endApprovalAttempt(approvalAttemptId);
+            }
         }
     }
 
