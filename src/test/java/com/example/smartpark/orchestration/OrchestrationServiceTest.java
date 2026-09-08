@@ -21,6 +21,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -33,6 +34,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -982,6 +985,72 @@ class OrchestrationServiceTest {
         assertThat(completed.status()).isEqualTo(OrchestrationStatus.COMPLETED);
     }
 
+    @Test
+    void referencePersistenceFailureCancelsAndReleasesTheOwnedWorkflow() {
+        FailNextUpdateStore store = new FailNextUpdateStore();
+        AtomicInteger cancellations = new AtomicInteger();
+        AtomicInteger retentionReleases = new AtomicInteger();
+        OrchestrationPorts.WorkflowRunner workflow = new OrchestrationPorts.WorkflowRunner() {
+            @Override public WorkflowOutcome start(String alertId) {
+                throw new AssertionError("shared alert start must not be used");
+            }
+            @Override public WorkflowOutcome startOwned(String alertId, Instant approvalExpiresAt) {
+                store.failNextUpdate();
+                return workflowOutcome("COMPLETED");
+            }
+            @Override public WorkflowOutcome get(String workflowId) { return workflowOutcome("COMPLETED"); }
+            @Override public WorkflowOutcome cancel(String workflowId) {
+                cancellations.incrementAndGet();
+                return workflowOutcome("CANCELLED");
+            }
+            @Override public void releaseRetention(String workflowId) {
+                retentionReleases.incrementAndGet();
+            }
+        };
+        Harness harness = harness(new Capabilities(true, false, false, false, true), Runnable::run,
+                input -> availableSecurity(), workflow,
+                question -> {
+                    UUID id = UUID.randomUUID();
+                    return new StartedChild(id, CompletableFuture.completedFuture(completedChild(id)));
+                }, alertId -> "B1", store);
+        OrchestrationInput input = new OrchestrationInput("处置告警", "ALT-001", List.of(),
+                false, false, false, true);
+
+        OrchestrationRun run = harness.service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                input, "reference-write-failure", null, "OPERATOR").run();
+
+        assertThat(cancellations).hasValue(1);
+        assertThat(retentionReleases).hasValue(1);
+        assertThat(step(run, "alert-workflow").status()).isEqualTo(OrchestrationStepStatus.FAILED);
+        assertThat(step(run, "alert-workflow").runReference()).isNull();
+    }
+
+    @Test
+    void referencePersistenceFailureCancelsAStartedAsyncChild() {
+        FailNextUpdateStore store = new FailNextUpdateStore();
+        UUID childId = UUID.randomUUID();
+        AtomicReference<UUID> cancelledChild = new AtomicReference<>();
+        OrchestrationPorts.OperationsRunner operations = new OrchestrationPorts.OperationsRunner() {
+            @Override public StartedChild start(String question) {
+                store.failNextUpdate();
+                return new StartedChild(childId,
+                        CompletableFuture.completedFuture(completedChild(childId)));
+            }
+            @Override public void cancel(UUID runId) {
+                cancelledChild.set(runId);
+            }
+        };
+        Harness harness = harness(new Capabilities(true, false, false, false, false), Runnable::run,
+                input -> availableSecurity(), completedWorkflow(), operations, alertId -> "B1", store);
+
+        OrchestrationRun run = harness.service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                simpleInput(), "async-reference-write-failure", null, "OPERATOR").run();
+
+        assertThat(cancelledChild).hasValue(childId);
+        assertThat(step(run, "operations-analysis").status()).isEqualTo(OrchestrationStepStatus.BLOCKED);
+        assertThat(step(run, "operations-analysis").runReference()).isNull();
+    }
+
     private Harness harness(Capabilities capabilities, java.util.concurrent.Executor executor) {
         return harness(capabilities, executor, input -> availableSecurity());
     }
@@ -1009,10 +1078,20 @@ class OrchestrationServiceTest {
     }
 
     private Harness harness(Capabilities capabilities, java.util.concurrent.Executor executor,
+                             OrchestrationPorts.SecurityReader security,
+                             OrchestrationPorts.WorkflowRunner workflow,
+                             OrchestrationPorts.OperationsRunner operations,
+                             OrchestrationPorts.AlertScopeReader alertScope) {
+        return harness(capabilities, executor, security, workflow, operations, alertScope,
+                new InMemoryOrchestrationRunStore());
+    }
+
+    private Harness harness(Capabilities capabilities, java.util.concurrent.Executor executor,
                             OrchestrationPorts.SecurityReader security,
                             OrchestrationPorts.WorkflowRunner workflow,
                             OrchestrationPorts.OperationsRunner operations,
-                            OrchestrationPorts.AlertScopeReader alertScope) {
+                            OrchestrationPorts.AlertScopeReader alertScope,
+                            OrchestrationRunStore store) {
         InMemoryExecutionEventPublisher events = new InMemoryExecutionEventPublisher();
         OrchestrationPorts.EnergyReader energy = buildings -> new EvidenceOutcome("AVAILABLE",
                 "真实能耗证据", List.of("energy:B1:120/120"), List.of("OPERATIONS_ANALYTICS:energy_kwh"),
@@ -1022,7 +1101,7 @@ class OrchestrationServiceTest {
             return new StartedChild(id, CompletableFuture.completedFuture(new ChildOutcome(id,
                     "COMPLETED", "跨域结论", List.of("expert:evidence-1"), null)));
         };
-        OrchestrationService service = new OrchestrationService(new InMemoryOrchestrationRunStore(),
+        OrchestrationService service = new OrchestrationService(store,
                 () -> capabilities, operations, energy, collaboration, security, alertScope, workflow,
                 events, executor, CLOCK);
         return new Harness(service, events);
@@ -1062,6 +1141,39 @@ class OrchestrationServiceTest {
         @Override public ZoneId getZone() { return ZoneOffset.UTC; }
         @Override public Clock withZone(ZoneId zone) { return this; }
         @Override public Instant instant() { return current; }
+    }
+
+    private static final class FailNextUpdateStore implements OrchestrationRunStore {
+        private final InMemoryOrchestrationRunStore delegate = new InMemoryOrchestrationRunStore();
+        private final AtomicBoolean failNextUpdate = new AtomicBoolean();
+
+        void failNextUpdate() {
+            failNextUpdate.set(true);
+        }
+
+        @Override
+        public StartResult createOrGet(String idempotencyKey, String requestFingerprint,
+                                       Supplier<OrchestrationRun> factory) {
+            return delegate.createOrGet(idempotencyKey, requestFingerprint, factory);
+        }
+
+        @Override
+        public Optional<OrchestrationRun> find(UUID runId) {
+            return delegate.find(runId);
+        }
+
+        @Override
+        public OrchestrationRun update(UUID runId, UnaryOperator<OrchestrationRun> transition) {
+            if (failNextUpdate.compareAndSet(true, false)) {
+                throw new IllegalStateException("simulated reference persistence failure");
+            }
+            return delegate.update(runId, transition);
+        }
+
+        @Override
+        public List<OrchestrationRun> nonTerminalRuns() {
+            return delegate.nonTerminalRuns();
+        }
     }
 
     private static WorkflowOutcome workflowOutcome(String status) {

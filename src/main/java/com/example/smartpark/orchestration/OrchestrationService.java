@@ -766,7 +766,18 @@ public final class OrchestrationService {
                                     java.util.function.Consumer<UUID> cancel) {
         if (!startStep(runId, stepId, inputSummary)) return null;
         StartedChild child = start.get();
-        if (!rememberChildReference(runId, stepId, child.runId().toString())) {
+        boolean remembered;
+        try {
+            remembered = rememberChildReference(runId, stepId, child.runId().toString());
+        } catch (RuntimeException persistenceFailure) {
+            try {
+                cancel.accept(child.runId());
+            } catch (RuntimeException cleanupFailure) {
+                persistenceFailure.addSuppressed(cleanupFailure);
+            }
+            throw persistenceFailure;
+        }
+        if (!remembered) {
             cancel.accept(child.runId());
             return null;
         }
@@ -778,7 +789,14 @@ public final class OrchestrationService {
         try (RunLockLease ignored = acquireRunLock(runId)) {
             if (!startStep(runId, stepId, "调用现有 Alert Workflow")) return null;
             WorkflowOutcome outcome = workflow.startOwned(alertId, approvalDeadline);
-            if (!rememberChildReference(runId, stepId, outcome.workflowId())) {
+            boolean remembered;
+            try {
+                remembered = rememberChildReference(runId, stepId, outcome.workflowId());
+            } catch (RuntimeException persistenceFailure) {
+                compensateUnreferencedWorkflow(outcome.workflowId(), persistenceFailure);
+                throw persistenceFailure;
+            }
+            if (!remembered) {
                 try {
                     workflow.cancel(outcome.workflowId());
                 } finally {
@@ -787,6 +805,19 @@ public final class OrchestrationService {
                 return null;
             }
             return outcome;
+        }
+    }
+
+    private void compensateUnreferencedWorkflow(String workflowId, RuntimeException persistenceFailure) {
+        try {
+            workflow.cancel(workflowId);
+        } catch (RuntimeException cleanupFailure) {
+            persistenceFailure.addSuppressed(cleanupFailure);
+        }
+        try {
+            releaseWorkflowRetention(workflowId);
+        } catch (RuntimeException cleanupFailure) {
+            persistenceFailure.addSuppressed(cleanupFailure);
         }
     }
 
