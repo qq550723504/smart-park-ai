@@ -1,8 +1,17 @@
 package com.example.smartpark.execution.model;
 
-/** What happened; COMPLETED, FAILED and INTERRUPTED close the run stream. */
+/** What happened; the terminal leaf and orchestration run events close the stream. */
 public enum ExecutionEventType {
     RUN_STARTED,
+    STEP_STARTED,
+    STEP_COMPLETED,
+    STEP_SKIPPED,
+    STEP_FAILED,
+    WAITING_APPROVAL,
+    APPROVAL_RESUMED,
+    RUN_COMPLETED,
+    RUN_FAILED,
+    RUN_CANCELLED,
     TEXT_DELTA,
     TEXT_COMPLETED,
     TOOL_CALL_STARTED,
@@ -26,6 +35,7 @@ public enum ExecutionEventType {
     COMPLETED;
 
     public boolean isTerminal() {
-        return this == COMPLETED || this == FAILED || this == INTERRUPTED;
+        return this == COMPLETED || this == FAILED || this == INTERRUPTED
+                || this == RUN_COMPLETED || this == RUN_FAILED || this == RUN_CANCELLED;
     }
 }

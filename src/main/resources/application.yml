@@ -55,6 +55,10 @@ spring:
         streamable-http:
           mcp-endpoint: /mcp
 smartpark:
+  orchestration:
+    # Safe run metadata and trace references only. Docker mounts this path on a
+    # named volume so refresh, reconnect and backend restart do not erase runs.
+    state-file: ${SMARTPARK_ORCHESTRATION_STATE_FILE:./data/orchestration/runs.json}
   local-demo:
     enabled: ${SMARTPARK_LOCAL_DEMO_ENABLED:false}
   analytics:

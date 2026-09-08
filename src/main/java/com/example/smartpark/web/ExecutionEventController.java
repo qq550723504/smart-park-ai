@@ -1,12 +1,14 @@
 package com.example.smartpark.web;
 
 import com.example.smartpark.execution.ExecutionEventPublisher;
+import com.example.smartpark.execution.ExecutionEventArchive;
 import com.example.smartpark.execution.ExecutionEventPublisher.Subscription;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.beans.factory.ObjectProvider;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
@@ -21,9 +23,12 @@ import java.util.UUID;
 class ExecutionEventController {
 
     private final ExecutionEventPublisher publisher;
+    private final ObjectProvider<ExecutionEventArchive> archives;
 
-    ExecutionEventController(ExecutionEventPublisher publisher) {
+    ExecutionEventController(ExecutionEventPublisher publisher,
+                             ObjectProvider<ExecutionEventArchive> archives) {
         this.publisher = publisher;
+        this.archives = archives;
     }
 
     @GetMapping("/api/executions/{runId}")
@@ -34,6 +39,7 @@ class ExecutionEventController {
 
     @GetMapping(value = "/api/executions/{runId}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     Flux<ServerSentEvent<ExecutionDtos.ExecutionEventDto>> events(@PathVariable UUID runId) {
+        hydrate(runId);
         Sinks.Many<ExecutionDtos.ExecutionEventDto> sink = Sinks.many().unicast().onBackpressureBuffer();
         try {
             Subscription subscription = publisher.subscribe(runId, event -> {
@@ -54,8 +60,23 @@ class ExecutionEventController {
     }
 
     private void requireKnownRun(UUID runId) {
+        hydrate(runId);
         if (publisher.history(runId).isEmpty() && "UNKNOWN".equals(publisher.status(runId))) {
             throw new NoSuchElementException("Unknown execution run: " + runId);
+        }
+    }
+
+    private void hydrate(UUID runId) {
+        synchronized (publisher) {
+            if (!publisher.history(runId).isEmpty() || !"UNKNOWN".equals(publisher.status(runId))) return;
+            archives.orderedStream().map(archive -> archive.history(runId)).filter(history -> !history.isEmpty())
+                    .findFirst().ifPresent(history -> history.forEach(event -> {
+                        try {
+                            publisher.publish(event);
+                        } catch (IllegalArgumentException | IllegalStateException alreadyHydrated) {
+                            // Another request restored the same durable trace first.
+                        }
+                    }));
         }
     }
 

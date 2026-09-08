@@ -159,20 +159,30 @@ public class OperationsAnalysisService {
      * bounded orchestrators; it does not add a second execution path.
      */
     public CompletableFuture<AnalysisRunStore.RunRecord> startAndAwait(String question) {
-        CompletableFuture<AnalysisRunStore.RunRecord> future = new CompletableFuture<>();
         AnalysisRunStore.RunRecord accepted;
         try {
             accepted = start(question);
         } catch (RuntimeException failure) {
+            CompletableFuture<AnalysisRunStore.RunRecord> future = new CompletableFuture<>();
             future.completeExceptionally(failure);
             return future;
         }
+        return await(accepted.runId());
+    }
+
+    /** Attaches an awaiter to an already accepted run without starting a second analysis. */
+    public CompletableFuture<AnalysisRunStore.RunRecord> await(UUID runId) {
+        CompletableFuture<AnalysisRunStore.RunRecord> future = new CompletableFuture<>();
         synchronized (lifecycleLock) {
-            AnalysisRunStore.RunRecord current = store.get(accepted.runId());
+            AnalysisRunStore.RunRecord current = store.get(runId);
+            if (current == null) {
+                future.completeExceptionally(new java.util.NoSuchElementException("Unknown analysis run: " + runId));
+                return future;
+            }
             if (current != null && isAwaitableState(current.status())) {
                 future.complete(current);
             } else {
-                completionWaiters.put(accepted.runId(), future);
+                completionWaiters.put(runId, future);
             }
         }
         return future;

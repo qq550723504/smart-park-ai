@@ -43,7 +43,8 @@ class ExecutionEventTest {
     @Test
     void rejectsUnknownScenariosAtCompileTimeThroughEnum() {
         assertThat(Set.of(ExecutionScenario.values()))
-                .containsExactlyInAnyOrder(ExecutionScenario.VOICE,
+                .containsExactlyInAnyOrder(ExecutionScenario.ORCHESTRATION,
+                        ExecutionScenario.VOICE,
                         ExecutionScenario.EXPERT_COLLABORATION,
                         ExecutionScenario.OPERATIONS_ANALYSIS,
                         ExecutionScenario.ALERT_WORKFLOW,

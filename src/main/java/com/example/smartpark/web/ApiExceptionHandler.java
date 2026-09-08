@@ -22,6 +22,11 @@ public class ApiExceptionHandler {
         return error(HttpStatus.FORBIDDEN, "Operation is not allowed for the current demo role");
     }
 
+    @ExceptionHandler(SecurityException.class)
+    ResponseEntity<WebDtos.ApiError> securityForbidden(SecurityException exception) {
+        return error(HttpStatus.FORBIDDEN, "Operation is not allowed for the current demo role");
+    }
+
     @ExceptionHandler(NoSuchElementException.class)
     ResponseEntity<WebDtos.ApiError> notFound(NoSuchElementException exception) {
         return error(HttpStatus.NOT_FOUND, "Requested resource was not found");
@@ -34,7 +39,9 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(IllegalStateException.class)
     ResponseEntity<WebDtos.ApiError> conflict(RuntimeException exception) {
-        String message = "Idempotency key was already used for another question".equals(exception.getMessage())
+        String message = exception.getMessage() != null && exception.getMessage().startsWith("Idempotency-Key was already used")
+                ? "Idempotency-Key 已用于其他编排请求，请生成新的请求键"
+                : "Idempotency key was already used for another question".equals(exception.getMessage())
                 ? "Idempotency-Key 已用于其他问题，请生成新的请求键"
                 : "Request conflicts with current resource state";
         return error(HttpStatus.CONFLICT, message);
