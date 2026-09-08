@@ -267,6 +267,8 @@ $env:SMARTPARK_CUSTOMER_SERVICE_ANSWER_MODE = 'dashscope'
 
 真实运营分析必须使用独立 PostgreSQL 数据库，不能与业务表或其他应用共库。数据库迁移会撤销该数据库中 `PUBLIC` 的数据库、`public`/`analytics` schema 及对象权限，再仅向 `smartpark_analytics_ro` 授予四个分析视图的 `SELECT` 权限；这是阻断 PostgreSQL 隐式公共权限旁路所必需的安全边界。管理员账号只用于迁移和演示数据刷新，应用查询始终使用只读账号。
 
+能耗时序接口为 `GET /api/operations/energy-time-series`，接受 `buildingIds`、`from`、`to`、`granularity=HOUR|DAY` 和已登记的 `metric=energy_kwh|energy_deviation_pct`。窗口边界必须与粒度对齐；返回 `AVAILABLE`、`PARTIAL` 或 `UNAVAILABLE`，缺失 bucket 会单独列出且不会补零或插值。详细契约与真实性边界见 [`docs/energy-time-series.md`](docs/energy-time-series.md)。
+
 如需使用兼容网关，只覆盖当前进程的 URL：
 
 ```powershell
