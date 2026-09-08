@@ -158,7 +158,7 @@ onMounted(() => { void load() })
 <template>
   <section class="panel anomaly-radar" data-anomaly-radar>
     <div class="anomaly-radar__heading">
-      <div><span class="eyebrow">ANOMALY RADAR / SOURCE OF TRUTH</span><h2>实时运营异常雷达</h2><p v-if="overview">数据窗口：{{ dateLabel(overview.window.from, overview.window.timezone) }} ~ {{ dateLabel(overview.window.to, overview.window.timezone) }} · 设备快照：{{ dateLabel(overview.asOf, overview.window.timezone) }}</p></div>
+      <div><span class="eyebrow">ANOMALY RADAR / SOURCE OF TRUTH</span><h2>园区运营异常雷达</h2><p v-if="overview">数据窗口：{{ dateLabel(overview.window.from, overview.window.timezone) }} ~ {{ dateLabel(overview.window.to, overview.window.timezone) }} · 设备快照：{{ dateLabel(overview.asOf, overview.window.timezone) }}</p></div>
       <button type="button" class="anomaly-radar__retry" :disabled="loading || !props.active" @click="load">{{ loading ? '同步中…' : '刷新真实数据' }}</button>
     </div>
     <p v-if="error" class="anomaly-radar__state anomaly-radar__state--error">{{ error }} <button type="button" @click="load">重试</button></p>

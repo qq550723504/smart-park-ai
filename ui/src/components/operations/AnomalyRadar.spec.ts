@@ -25,6 +25,8 @@ describe('AnomalyRadar', () => {
     const wrapper = mount(AnomalyRadar, { props: { role: 'ADMIN', active: true } })
     await vi.waitFor(() => expect(wrapper.get('[data-anomaly-radar]').text()).toContain('3'))
 
+    expect(wrapper.get('[data-anomaly-radar] h2').text()).toBe('园区运营异常雷达')
+    expect(wrapper.get('[data-anomaly-radar] h2').text()).not.toContain('实时')
     expect(wrapper.text()).toContain('近 7 天告警')
     expect(wrapper.text()).toContain('最近 1 天离线设备')
     expect(wrapper.text()).toContain('2026/08/27')
