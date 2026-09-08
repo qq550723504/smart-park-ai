@@ -37,10 +37,11 @@ describe('OperationsBoard', () => {
     expect(wrapper.emitted('open-analysis')).toEqual([['过去7天告警数量']])
   })
 
-  it('keeps unsupported cockpit functions explicit and non-executable', () => {
+  it('upgrades energy trend to a runtime availability state while keeping unsupported functions explicit', () => {
     const wrapper = mount(OperationsBoard, { props: { role: 'ADMIN' } })
 
-    expect(wrapper.get('[data-cockpit-feature="energy-trend"]').attributes('data-feature-state')).toBe('NOT_READY')
+    expect(wrapper.get('[data-cockpit-feature="energy-trend"]').attributes('data-feature-state')).toBe('UNAVAILABLE')
+    expect(wrapper.get('[data-cockpit-feature="energy-trend"]').text()).not.toContain('NOT_READY')
     expect(wrapper.get('[data-cockpit-feature="telemetry"]').text()).toContain('数据源未接入')
     expect(wrapper.get('[data-cockpit-feature="run-all-agents"]').text()).toContain('组合编排 API')
     expect(wrapper.get('[data-cockpit-feature="report-history"]').text()).toContain('尚无列表或下载 API')
