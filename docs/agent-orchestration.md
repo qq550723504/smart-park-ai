@@ -119,7 +119,9 @@ maps the key to a request fingerprint (definition, role and normalized input):
 - Operations/Collaboration cancellation is persisted before the child is
   interrupted, so late results cannot overwrite `CANCELLED`; an Alert Workflow
   waiting for approval is first terminalized at its work-order side-effect
-  boundary, and only then is the parent reported `CANCELLED`;
+  boundary, and only then is the parent reported `CANCELLED`; if that child has
+  already failed, cancellation still terminates the parent and all remaining
+  steps instead of continuing to a partial final summary;
 - duplicate approval observation sees an already terminal step/run and is a
   no-op.
 

@@ -814,6 +814,35 @@ class OrchestrationServiceTest {
         assertThat(step(cancelled, "alert-workflow").status()).isEqualTo(OrchestrationStepStatus.CANCELLED);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"FAILED", "WORK_ORDER_FAILED"})
+    void cancellationStillTerminatesTheParentWhenTheChildAlreadyFailed(String childStatus) {
+        AtomicInteger childCancellationAttempts = new AtomicInteger();
+        OrchestrationPorts.WorkflowRunner workflow = new OrchestrationPorts.WorkflowRunner() {
+            @Override public WorkflowOutcome start(String alertId) { return workflowOutcome("WAITING_APPROVAL"); }
+            @Override public WorkflowOutcome get(String workflowId) { return workflowOutcome("WAITING_APPROVAL"); }
+            @Override public WorkflowOutcome cancel(String workflowId) {
+                childCancellationAttempts.incrementAndGet();
+                return workflowOutcome(childStatus);
+            }
+        };
+        Harness harness = harness(new Capabilities(true, false, false, false, true), Runnable::run,
+                input -> availableSecurity(), workflow);
+        OrchestrationInput input = new OrchestrationInput("处置告警", "ALT-001", List.of(),
+                false, false, false, true);
+        OrchestrationRun accepted = harness.service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                input, "cancel-after-child-" + childStatus, null, "OPERATOR").run();
+
+        OrchestrationRun cancelled = harness.service.cancel(accepted.id());
+
+        assertThat(childCancellationAttempts).hasValue(1);
+        assertThat(cancelled.status()).isEqualTo(OrchestrationStatus.CANCELLED);
+        assertThat(step(cancelled, "alert-workflow").status()).isEqualTo(OrchestrationStepStatus.CANCELLED);
+        assertThat(step(cancelled, "final-summary").status()).isEqualTo(OrchestrationStepStatus.CANCELLED);
+        assertThat(cancelled.traceEvents()).extracting(OrchestrationTraceRecord::eventType)
+                .endsWith(ExecutionEventType.RUN_CANCELLED);
+    }
+
     @Test
     void cancellationDoesNotClaimSuccessWhenApprovalWonTheChildRace() {
         OrchestrationPorts.WorkflowRunner workflow = new OrchestrationPorts.WorkflowRunner() {

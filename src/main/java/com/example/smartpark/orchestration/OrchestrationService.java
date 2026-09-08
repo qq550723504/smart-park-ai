@@ -221,10 +221,12 @@ public final class OrchestrationService {
                     .filter(step -> step.status() == OrchestrationStepStatus.RUNNING
                             || step.status() == OrchestrationStepStatus.WAITING_APPROVAL)
                     .map(OrchestrationStep::type).findFirst().orElse(null);
+            boolean childCancellationAttempted = false;
             if (activeType == OrchestrationStepType.ALERT_WORKFLOW
                     && childReference != null && workflow != null) {
                 WorkflowOutcome child = workflow.cancel(childReference);
-                if (!"CANCELLED".equals(child.status())) {
+                childCancellationAttempted = true;
+                if (!"CANCELLED".equals(child.status()) && !isTerminalWorkflowFailure(child.status())) {
                     return resolveWorkflowCancellationRace(runId, current, child);
                 }
             }
@@ -241,7 +243,7 @@ public final class OrchestrationService {
                     appendedTrace(run, "orchestrator", ExecutionStage.COMPLETION,
                             ExecutionEventType.RUN_CANCELLED, ExecutionStatus.INTERRUPTED,
                             "园区异常联合研判已取消")));
-            cancelChild(activeType, childReference);
+            if (!childCancellationAttempted) cancelChild(activeType, childReference);
             publishProjection(cancelled);
             return cancelled;
         }
@@ -279,6 +281,10 @@ public final class OrchestrationService {
         }
         executor.execute(() -> execute(runId));
         return getStored(runId);
+    }
+
+    private static boolean isTerminalWorkflowFailure(String status) {
+        return "FAILED".equals(status) || "WORK_ORDER_FAILED".equals(status);
     }
 
     /** Called once after dependency wiring to recover persisted non-terminal records. */

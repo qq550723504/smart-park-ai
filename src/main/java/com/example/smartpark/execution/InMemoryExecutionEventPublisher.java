@@ -175,9 +175,11 @@ public class InMemoryExecutionEventPublisher implements ExecutionEventPublisher 
             consumer.accept(event);
         }
         if (event.isTerminal()) {
-            state.closed = true;
-            state.consumers.clear();
             state.terminalAt = clock.instant();
+            state.consumers.clear();
+            // Publish the timestamp before the volatile closed flag so capacity
+            // scans that observe closed also observe an eviction candidate.
+            state.closed = true;
         }
     }
 
