@@ -48,6 +48,7 @@ public final class OrchestrationService {
     private static final String SAFE_STEP_FAILURE = "步骤执行失败，未采用未确认结果";
     private static final Duration DEFAULT_APPROVAL_TIMEOUT = Duration.ofMinutes(15);
     private static final Duration MAX_APPROVAL_TIMEOUT = Duration.ofDays(1);
+    private static final int ADMISSION_LOCK_STRIPES = 64;
 
     private final OrchestrationRunStore store;
     private final OrchestrationPorts.CapabilityReader capabilities;
@@ -61,6 +62,7 @@ public final class OrchestrationService {
     private final Executor executor;
     private final Clock clock;
     private final Duration approvalTimeout;
+    private final ReentrantLock[] admissionLocks = new ReentrantLock[ADMISSION_LOCK_STRIPES];
     private final ConcurrentHashMap<UUID, RunLock> runLocks = new ConcurrentHashMap<>();
 
     public OrchestrationService(OrchestrationRunStore store,
@@ -135,47 +137,60 @@ public final class OrchestrationService {
             throw new IllegalArgumentException("approvalTimeout must be positive and no greater than one day");
         }
         this.approvalTimeout = approvalTimeout;
+        for (int index = 0; index < admissionLocks.length; index++) {
+            admissionLocks[index] = new ReentrantLock();
+        }
     }
 
     public OrchestrationRunStore.StartResult start(String definitionId, OrchestrationInput input,
                                                    String idempotencyKey, String requestedBy,
                                                    String role) {
-        requireText(idempotencyKey, "Idempotency-Key", 200);
+        String normalizedKey = requireText(idempotencyKey, "Idempotency-Key", 200);
         String normalizedRole = requireRole(role);
         if (!START_ROLES.contains(normalizedRole)) {
             throw new SecurityException("role is not allowed to start orchestration");
         }
-        java.util.Objects.requireNonNull(input, "input");
-        OrchestrationDefinition.steps(definitionId);
-        validateActionScope(input);
-        String fingerprint = fingerprint(definitionId, input, normalizedRole);
-        reconcileWaitingApprovals();
-        Instant now = clock.instant();
-        OrchestrationRunStore.StartResult result = store.createOrGet(idempotencyKey.trim(), fingerprint, () -> {
-            UUID id = UUID.randomUUID();
-            List<OrchestrationStep> steps = OrchestrationDefinition.steps(definitionId).stream()
-                    .map(OrchestrationStep::pending).toList();
-            List<OrchestrationTraceRecord> trace = List.of(new OrchestrationTraceRecord(
-                    UUID.randomUUID(), 1L, now, "orchestrator", ExecutionStage.INITIALIZATION,
-                    ExecutionEventType.RUN_STARTED, ExecutionStatus.RUNNING, "园区异常联合研判已启动"));
-            return new OrchestrationRun(id, definitionId, OrchestrationStatus.RUNNING, now, now, null,
-                    normalizeActor(requestedBy), normalizedRole, input, "编排已启动", steps, List.of(), id,
-                    null, null, idempotencyKey.trim(), fingerprint, false, 0, trace);
-        });
-        if (result.created()) {
-            publishProjection(result.run());
-            try {
-                executor.execute(() -> execute(result.run().id()));
-            } catch (RuntimeException rejected) {
-                failRun(result.run().id(), "编排执行资源暂不可用");
-                throw rejected;
+        ReentrantLock admissionLock = admissionLock(normalizedKey);
+        admissionLock.lock();
+        try {
+            java.util.Objects.requireNonNull(input, "input");
+            OrchestrationDefinition.steps(definitionId);
+            validateActionScope(input);
+            String fingerprint = fingerprint(definitionId, input, normalizedRole);
+            reconcileWaitingApprovals();
+            Instant now = clock.instant();
+            OrchestrationRunStore.StartResult result = store.createOrGet(normalizedKey, fingerprint, () -> {
+                UUID id = UUID.randomUUID();
+                List<OrchestrationStep> steps = OrchestrationDefinition.steps(definitionId).stream()
+                        .map(OrchestrationStep::pending).toList();
+                List<OrchestrationTraceRecord> trace = List.of(new OrchestrationTraceRecord(
+                        UUID.randomUUID(), 1L, now, "orchestrator", ExecutionStage.INITIALIZATION,
+                        ExecutionEventType.RUN_STARTED, ExecutionStatus.RUNNING, "园区异常联合研判已启动"));
+                return new OrchestrationRun(id, definitionId, OrchestrationStatus.RUNNING, now, now, null,
+                        normalizeActor(requestedBy), normalizedRole, input, "编排已启动", steps, List.of(), id,
+                        null, null, normalizedKey, fingerprint, false, 0, trace);
+            });
+            if (result.created()) {
+                try {
+                    publishProjection(result.run());
+                } catch (RuntimeException projectionFailure) {
+                    terminalizeProjectionAdmission(result.run().id());
+                    throw projectionFailure;
+                }
+                try {
+                    executor.execute(() -> execute(result.run().id()));
+                } catch (RuntimeException rejected) {
+                    failRun(result.run().id(), "编排执行资源暂不可用");
+                    throw rejected;
+                }
+            } else {
+                // Replays prove that every durable event is available before returning the run.
+                publishProjections(result.run(), 0);
             }
-        } else {
-            // A prior admission may have persisted before its live projection was accepted.
-            // Replays must prove that the trace is available before returning an accepted run.
-            publishProjections(result.run(), 0);
+            return new OrchestrationRunStore.StartResult(get(result.run().id()), result.created());
+        } finally {
+            admissionLock.unlock();
         }
-        return new OrchestrationRunStore.StartResult(get(result.run().id()), result.created());
     }
 
     public OrchestrationRun get(UUID runId) {
@@ -890,6 +905,16 @@ public final class OrchestrationService {
         }
     }
 
+    private void terminalizeProjectionAdmission(UUID runId) {
+        Instant now = clock.instant();
+        store.update(runId, run -> run.copy(OrchestrationStatus.FAILED,
+                run.startedAt(), now, "编排启动失败", run.steps(), run.evidence(),
+                "执行事件回放容量不足", run.result(), run.cancelRequested(),
+                appendedTrace(run, "orchestrator", ExecutionStage.FAILURE,
+                        ExecutionEventType.RUN_FAILED, ExecutionStatus.FAILED,
+                        "园区异常联合研判启动失败")));
+    }
+
     private List<OrchestrationTraceRecord> appendedTrace(OrchestrationRun run, String actor,
                                                           ExecutionStage stage, ExecutionEventType type,
                                                           ExecutionStatus status, String summary) {
@@ -1022,6 +1047,10 @@ public final class OrchestrationService {
 
     private static String safeSummary(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value.trim();
+    }
+
+    private ReentrantLock admissionLock(String idempotencyKey) {
+        return admissionLocks[Math.floorMod(idempotencyKey.hashCode(), admissionLocks.length)];
     }
 
     private static String normalizeActor(String value) {

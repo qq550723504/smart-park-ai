@@ -133,7 +133,9 @@ evicts the oldest terminal histories first, and refuses new histories when all
 slots are active rather than allowing heap growth without bound. A new or
 idempotently replayed orchestration propagates that admission failure instead of
 returning a run whose trace cannot be opened; only an exact event already present
-in the projection is treated as a harmless duplicate.
+in the projection is treated as a harmless duplicate. If the initial projection
+cannot be admitted, the durable run is terminalized before the request returns;
+later same-key replays can restore its failed trace but never schedule that run.
 
 The UI exposes the launch action only when the required Operations Analysis
 capability is reported available; the backend independently rechecks that

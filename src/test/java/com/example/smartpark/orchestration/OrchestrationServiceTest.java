@@ -372,6 +372,43 @@ class OrchestrationServiceTest {
         }
         assertThat(publishAttempts).hasValue(2);
         assertThat(scheduled).hasValue(0);
+        assertThat(store.nonTerminalRuns()).isEmpty();
+    }
+
+    @Test
+    void recoveredTraceCapacityReplaysTheTerminalAdmissionFailureWithoutScheduling() {
+        InMemoryOrchestrationRunStore store = new InMemoryOrchestrationRunStore();
+        AtomicBoolean rejectFirstProjection = new AtomicBoolean(true);
+        AtomicInteger scheduled = new AtomicInteger();
+        InMemoryExecutionEventPublisher recovering = new InMemoryExecutionEventPublisher() {
+            @Override
+            public ExecutionEvent publish(ExecutionEvent event) {
+                if (rejectFirstProjection.compareAndSet(true, false)) {
+                    throw new ExecutionEventCapacityException("execution event replay capacity is exhausted");
+                }
+                return super.publish(event);
+            }
+        };
+        OrchestrationService service = new OrchestrationService(store,
+                () -> new Capabilities(true, false, false, false, false),
+                null, null, null, null, null, recovering,
+                task -> scheduled.incrementAndGet(), CLOCK);
+
+        assertThatThrownBy(() -> service.start(
+                OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT, simpleInput(),
+                "recovering-trace-capacity", null, "OPERATOR"))
+                .isInstanceOf(ExecutionEventCapacityException.class);
+        OrchestrationRunStore.StartResult replay = service.start(
+                OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT, simpleInput(),
+                "recovering-trace-capacity", null, "OPERATOR");
+
+        assertThat(replay.created()).isFalse();
+        assertThat(replay.run().status()).isEqualTo(OrchestrationStatus.FAILED);
+        assertThat(store.nonTerminalRuns()).isEmpty();
+        assertThat(scheduled).hasValue(0);
+        assertThat(recovering.history(replay.run().traceId()))
+                .extracting(ExecutionEvent::eventType)
+                .containsExactly(ExecutionEventType.RUN_STARTED, ExecutionEventType.RUN_FAILED);
     }
 
     @Test
