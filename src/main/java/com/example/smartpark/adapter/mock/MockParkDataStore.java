@@ -41,6 +41,7 @@ public class MockParkDataStore {
     private final Map<String, KnowledgeDocument> knowledgeDocuments = new ConcurrentHashMap<>();
     private final Map<String, Boolean> knowledgeActive = new ConcurrentHashMap<>();
     private final Map<String, WorkOrder> workOrdersByWorkflowId = new ConcurrentHashMap<>();
+    private final Map<String, WorkOrder> workOrdersByAlertId = new ConcurrentHashMap<>();
     private final AtomicInteger workOrderSequence = new AtomicInteger();
 
     MockParkDataStore() { reset(); }
@@ -48,7 +49,8 @@ public class MockParkDataStore {
     final void reset() {
         // 重置动态数据后重新装载基础设备、告警、历史记录和知识库。
         devices.clear(); energyReadings.clear(); securityEvents.clear(); alerts.clear(); historyByDevice.clear();
-        knowledgeDocuments.clear(); knowledgeActive.clear(); workOrdersByWorkflowId.clear(); workOrderSequence.set(0);
+        knowledgeDocuments.clear(); knowledgeActive.clear(); workOrdersByWorkflowId.clear();
+        workOrdersByAlertId.clear(); workOrderSequence.set(0);
         seedDevices(); seedSecurityEvents(); seedAlerts(); seedHistory(); seedKnowledge();
     }
 
@@ -73,11 +75,25 @@ public class MockParkDataStore {
         return workOrder == null ? List.of() : List.of(workOrder);
     }
 
-    WorkOrder buildWorkOrder(String workflowId, String alertId, String summary) {
+    synchronized WorkOrder buildWorkOrder(String workflowId, String alertId, String summary) {
         Objects.requireNonNull(workflowId, "workflowId");
         Objects.requireNonNull(alertId, "alertId");
         Objects.requireNonNull(summary, "summary");
-        return workOrdersByWorkflowId.computeIfAbsent(workflowId, key -> createWorkOrder(key, alertId, summary));
+        WorkOrder workOrder = workOrdersByWorkflowId.computeIfAbsent(
+                workflowId, key -> createWorkOrder(key, alertId, summary));
+        workOrdersByAlertId.putIfAbsent(alertId, workOrder);
+        return workOrder;
+    }
+
+    synchronized WorkOrder buildWorkOrderOnceForAlert(String workflowId, String alertId, String summary) {
+        Objects.requireNonNull(workflowId, "workflowId");
+        Objects.requireNonNull(alertId, "alertId");
+        Objects.requireNonNull(summary, "summary");
+        WorkOrder existing = workOrdersByAlertId.get(alertId);
+        if (existing != null) {
+            return existing;
+        }
+        return buildWorkOrder(workflowId, alertId, summary);
     }
 
     List<KnowledgeDocument> search(KnowledgeDomain domain, String query) {
@@ -182,7 +198,8 @@ public class MockParkDataStore {
     }
 
     private WorkOrder createWorkOrder(String workflowId, String alertId, String summary) {
-        // workflowId 作为幂等键，同一工作流重复创建时返回原工单。
+        // workflowId protects retries of one execution; the alert index protects
+        // the same business action across independently owned executions.
         Alert alert = getAlert(alertId);
         int sequence = workOrderSequence.incrementAndGet();
         Instant createdAt = WORK_ORDER_BASE_TIME.plusSeconds(sequence);

@@ -86,6 +86,9 @@ class ParkToolsTest {
         WorkOrderPort port = new WorkOrderPort() {
             @Override public List<WorkOrder> findByWorkflowId(String workflowId) { return List.of(internal); }
             @Override public WorkOrder create(String workflowId, String alertId, String summary) { return internal; }
+            @Override public WorkOrder createOrGetByAlertId(String workflowId, String alertId, String summary) {
+                return internal;
+            }
         };
 
         WorkOrderTool.WorkOrderLookupResult result = new WorkOrderTool(port).lookupWorkOrders("wf-1");

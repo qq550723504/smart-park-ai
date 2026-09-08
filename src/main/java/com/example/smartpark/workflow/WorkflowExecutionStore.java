@@ -13,6 +13,7 @@ import java.util.Comparator;
 import java.util.concurrent.ConcurrentHashMap;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 public interface WorkflowExecutionStore {
 
@@ -40,8 +41,18 @@ public interface WorkflowExecutionStore {
 
     Optional<Execution> execution(String workflowId);
 
+    /**
+     * Marks an execution terminal and evicts the oldest terminal exclusive executions above the
+     * configured retention bound. Cleanup runs before removal so a failed cleanup remains retryable.
+     */
+    void markTerminalAndCompact(Execution execution, Consumer<Execution> cleanup);
+
     static WorkflowExecutionStore inMemory() {
-        return new InMemoryWorkflowExecutionStore();
+        return inMemory(200);
+    }
+
+    static WorkflowExecutionStore inMemory(int maxRetainedExclusiveExecutions) {
+        return new InMemoryWorkflowExecutionStore(maxRetainedExclusiveExecutions);
     }
 
     final class Execution {
@@ -53,6 +64,7 @@ public interface WorkflowExecutionStore {
         private final boolean reusableByAlert;
         private volatile InterruptionMetadata interruption;
         private volatile Throwable failureCause;
+        private volatile long terminalSequence;
         private final Map<UUID, Instant> pendingApprovalAttempts = new ConcurrentHashMap<>();
 
         Execution(
@@ -88,6 +100,20 @@ public interface WorkflowExecutionStore {
 
         boolean reusableByAlert() {
             return reusableByAlert;
+        }
+
+        boolean terminal() {
+            return terminalSequence > 0;
+        }
+
+        long terminalSequence() {
+            return terminalSequence;
+        }
+
+        void markTerminal(long terminalSequence) {
+            if (this.terminalSequence == 0) {
+                this.terminalSequence = terminalSequence;
+            }
         }
 
         public Optional<InterruptionMetadata> interruption() {
@@ -134,6 +160,15 @@ public interface WorkflowExecutionStore {
 final class InMemoryWorkflowExecutionStore implements WorkflowExecutionStore {
 
     private final Map<String, Execution> executions = new ConcurrentHashMap<>();
+    private final int maxRetainedExclusiveExecutions;
+    private long terminalSequence;
+
+    InMemoryWorkflowExecutionStore(int maxRetainedExclusiveExecutions) {
+        if (maxRetainedExclusiveExecutions < 1) {
+            throw new IllegalArgumentException("maxRetainedExclusiveExecutions must be positive");
+        }
+        this.maxRetainedExclusiveExecutions = maxRetainedExclusiveExecutions;
+    }
 
     @Override
     public Optional<WorkflowSnapshot> get(String workflowId) {
@@ -206,6 +241,28 @@ final class InMemoryWorkflowExecutionStore implements WorkflowExecutionStore {
     @Override
     public Optional<Execution> execution(String workflowId) {
         return Optional.ofNullable(executions.get(workflowId));
+    }
+
+    @Override
+    public synchronized void markTerminalAndCompact(
+            Execution execution,
+            Consumer<Execution> cleanup) {
+        Objects.requireNonNull(execution, "execution");
+        Objects.requireNonNull(cleanup, "cleanup");
+        if (executions.get(execution.workflowId()) != execution) {
+            throw new IllegalStateException("Workflow execution is not registered: " + execution.workflowId());
+        }
+        execution.markTerminal(++terminalSequence);
+        List<Execution> terminalExclusive = executions.values().stream()
+                .filter(candidate -> !candidate.reusableByAlert() && candidate.terminal())
+                .sorted(Comparator.comparingLong(Execution::terminalSequence))
+                .toList();
+        int excess = terminalExclusive.size() - maxRetainedExclusiveExecutions;
+        for (int index = 0; index < excess; index++) {
+            Execution evicted = terminalExclusive.get(index);
+            cleanup.accept(evicted);
+            executions.remove(evicted.workflowId(), evicted);
+        }
     }
 
     private static boolean isRunning(WorkflowStatus status) {

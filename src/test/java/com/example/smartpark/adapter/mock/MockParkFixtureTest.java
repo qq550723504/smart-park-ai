@@ -157,4 +157,43 @@ class MockParkFixtureTest {
             executor.shutdownNow();
         }
     }
+
+    @Test
+    void concurrentOwnedWorkflowsCreateOneAlertAction() throws Exception {
+        int callers = 4;
+        ExecutorService executor = Executors.newFixedThreadPool(callers);
+        CountDownLatch ready = new CountDownLatch(callers);
+        CountDownLatch start = new CountDownLatch(1);
+
+        try {
+            List<Callable<WorkOrder>> tasks = new ArrayList<>();
+            for (int i = 0; i < callers; i++) {
+                String workflowId = "wf-owned-" + i;
+                tasks.add(() -> {
+                    ready.countDown();
+                    start.await();
+                    return fixture.workOrders().createOrGetByAlertId(
+                            workflowId, "ALT-TEMP-001", "temperature anomaly");
+                });
+            }
+
+            List<Future<WorkOrder>> futures = new ArrayList<>();
+            for (Callable<WorkOrder> task : tasks) {
+                futures.add(executor.submit(task));
+            }
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            List<WorkOrder> results = new ArrayList<>();
+            for (Future<WorkOrder> future : futures) {
+                results.add(future.get(5, TimeUnit.SECONDS));
+            }
+
+            assertThat(results).extracting(WorkOrder::id).containsOnly(results.get(0).id());
+            assertThat(results).extracting(WorkOrder::alertId).containsOnly("ALT-TEMP-001");
+        }
+        finally {
+            executor.shutdownNow();
+        }
+    }
 }

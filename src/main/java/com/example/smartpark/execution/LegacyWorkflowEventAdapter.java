@@ -49,6 +49,10 @@ public class LegacyWorkflowEventAdapter {
                 payloadFor(legacy)));
     }
 
+    public void remove(String workflowId) {
+        publisher.remove(runIdFor(workflowId));
+    }
+
     private static String actorFor(WorkflowEvent legacy) {
         return legacy.eventType() == WorkflowEvent.EventType.TOOL_CALLED ? "tool" : "alert workflow";
     }

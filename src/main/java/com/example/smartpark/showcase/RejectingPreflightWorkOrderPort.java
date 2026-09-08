@@ -16,4 +16,9 @@ public final class RejectingPreflightWorkOrderPort implements WorkOrderPort {
     public WorkOrder create(String workflowId, String alertId, String summary) {
         throw new IllegalStateException("preflight work-order writes are forbidden");
     }
+
+    @Override
+    public WorkOrder createOrGetByAlertId(String workflowId, String alertId, String summary) {
+        throw new IllegalStateException("preflight work-order writes are forbidden");
+    }
 }

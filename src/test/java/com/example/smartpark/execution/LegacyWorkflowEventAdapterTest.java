@@ -77,6 +77,17 @@ class LegacyWorkflowEventAdapterTest {
     }
 
     @Test
+    void removesTerminalProjectedHistoryWithItsLegacyWorkflow() {
+        String workflowId = nextWorkflowId();
+        adapter.project(legacy(workflowId, 1, WorkflowEvent.EventType.STARTED, "alert workflow started"));
+        adapter.project(legacy(workflowId, 2, WorkflowEvent.EventType.COMPLETED, "workflow completed"));
+
+        adapter.remove(workflowId);
+
+        assertThat(unified.history(LegacyWorkflowEventAdapter.runIdFor(workflowId))).isEmpty();
+    }
+
+    @Test
     void rejectedWorkflowCompletionProjectsAsAFailedOutcome() {
         // "workflow rejected" is a rejected operator intervention; projecting
         // it as a successful completion would mislead audit consumers.

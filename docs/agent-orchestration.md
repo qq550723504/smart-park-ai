@@ -101,6 +101,13 @@ existing graph, agents, approval and work-order logic, but never attaches two
 parents to the same mutable child run. The ordinary Alert Workflow API keeps
 its existing alert-level idempotency independently. This one-parent/one-child
 ownership is what makes cancellation and approval deadlines deterministic.
+Execution ownership does not create a new business side effect: work-order
+creation is atomic and idempotent by alert ID, so independent orchestration keys
+for the same alert reuse the first work order. Terminal owned executions, graph
+checkpoints, legacy events and projected unified trace events are retained up to
+`SMARTPARK_WORKFLOW_MAX_RETAINED_EXCLUSIVE_EXECUTIONS` (default `200`) and then
+removed oldest-first. Active owned executions and reusable direct Alert Workflow
+executions are not eligible for that compaction.
 Before admitting a requested action with an explicit building scope, the
 orchestrator resolves the alert through the existing `AlertPort` and rejects the
 request unless the alert belongs to one of those buildings.

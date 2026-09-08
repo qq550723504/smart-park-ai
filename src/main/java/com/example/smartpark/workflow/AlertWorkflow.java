@@ -23,6 +23,8 @@ import com.example.smartpark.port.knowledge.KnowledgePort;
 import com.example.smartpark.port.security.SecurityPort;
 import com.example.smartpark.port.workorder.WorkOrderPort;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -40,6 +42,7 @@ import static com.alibaba.cloud.ai.graph.action.AsyncEdgeAction.edge_async;
 
 public final class AlertWorkflow {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(AlertWorkflow.class);
     private static final double CONFIDENCE_THRESHOLD = 0.75;
     private static final String APPROVAL_DEADLINE_EXPIRED = "Approval deadline expired";
     private static final String CANCELLED_BY_ORCHESTRATION = "Workflow cancelled by orchestration";
@@ -47,6 +50,7 @@ public final class AlertWorkflow {
     private final WorkflowExecutionStore executionStore;
     private final WorkflowEventPublisher eventPublisher;
     private final AlertWorkflowNodes nodes;
+    private final MemorySaver checkpointSaver;
     private final CompiledGraph compiledGraph;
     private final Supplier<String> workflowIds;
     private final Clock clock;
@@ -171,6 +175,7 @@ public final class AlertWorkflow {
                 energyPort,
                 securityPort,
                 failureObserver);
+        this.checkpointSaver = MemorySaver.builder().build();
         this.compiledGraph = compileGraph();
     }
 
@@ -387,7 +392,9 @@ public final class AlertWorkflow {
                 AlertWorkflowState.UPDATED_AT, Instant.now(clock).toString()));
         execution.failureCause(new IllegalStateException(reason));
         eventPublisher.complete(execution.workflowId());
-        return execution.snapshot();
+        WorkflowSnapshot snapshot = execution.snapshot();
+        retireTerminalExecution(execution);
+        return snapshot;
     }
 
     public WorkflowSnapshot status(String workflowId) {
@@ -441,9 +448,8 @@ public final class AlertWorkflow {
                                     Route.REJECT.name(), AlertWorkflowNodes.SUMMARIZE_RESULT))
                     .addEdge(AlertWorkflowNodes.CREATE_WORK_ORDER, AlertWorkflowNodes.SUMMARIZE_RESULT)
                     .addEdge(AlertWorkflowNodes.SUMMARIZE_RESULT, StateGraph.END);
-            MemorySaver memorySaver = MemorySaver.builder().build();
             return graph.compile(CompileConfig.builder()
-                    .saverConfig(SaverConfig.builder().register(memorySaver).build())
+                    .saverConfig(SaverConfig.builder().register(checkpointSaver).build())
                     .build());
         }
         catch (Exception exception) {
@@ -467,6 +473,7 @@ public final class AlertWorkflow {
                 AlertWorkflowState.UPDATED_AT, Instant.now(clock).toString()));
         WorkflowSnapshot snapshot = execution.snapshot();
         eventPublisher.complete(execution.workflowId());
+        retireTerminalExecution(execution);
         return snapshot;
     }
 
@@ -496,7 +503,32 @@ public final class AlertWorkflow {
                 AlertWorkflowState.UPDATED_AT, Instant.now(clock).toString()));
         WorkflowSnapshot failed = execution.snapshot();
         eventPublisher.complete(execution.workflowId());
+        retireTerminalExecution(execution);
         return failed;
+    }
+
+    private void retireTerminalExecution(WorkflowExecutionStore.Execution execution) {
+        try {
+            executionStore.markTerminalAndCompact(execution, this::releaseExclusiveResources);
+        }
+        catch (RuntimeException cleanupFailure) {
+            // The terminal result remains authoritative. The store deliberately keeps an entry
+            // whose cleanup failed so a later terminal transition can retry the reclamation.
+            LOGGER.warn("Unable to compact terminal exclusive workflow executions", cleanupFailure);
+        }
+    }
+
+    private void releaseExclusiveResources(WorkflowExecutionStore.Execution execution) {
+        try {
+            checkpointSaver.release(RunnableConfig.builder()
+                    .threadId(execution.graphThreadId())
+                    .build());
+            eventPublisher.remove(execution.workflowId());
+        }
+        catch (Exception exception) {
+            throw new IllegalStateException(
+                    "Unable to release workflow resources: " + execution.workflowId(), exception);
+        }
     }
 
     private static void updateGraphState(

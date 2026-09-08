@@ -74,6 +74,49 @@ class AlertWorkflowTest {
     }
 
     @Test
+    void independentlyOwnedExecutionsReuseTheSameAlertAction() {
+        Fixture fixture = fixture("ALT-TEMP-001", 0.92, "LOW", null, sequentialIds());
+
+        WorkflowSnapshot first = fixture.workflow.startExclusive("ALT-TEMP-001", null);
+        WorkflowSnapshot second = fixture.workflow.startExclusive("ALT-TEMP-001", null);
+
+        assertThat(first.workflowId()).isNotEqualTo(second.workflowId());
+        assertThat(first.workOrder().id()).isEqualTo(second.workOrder().id());
+        assertThat(second.workOrder().workflowId()).isEqualTo(first.workflowId());
+        assertThat(fixture.parkSystem.workOrders().findByWorkflowId(second.workflowId())).isEmpty();
+    }
+
+    @Test
+    void terminalExclusiveRetentionReleasesExecutionCheckpointAndEventHistory() {
+        MockParkFixture parkSystem = new MockParkFixture();
+        WorkflowExecutionStore store = WorkflowExecutionStore.inMemory(1);
+        WorkflowEventPublisher publisher = WorkflowEventPublisher.inMemory();
+        Fixture fixture = fixture(
+                parkSystem,
+                parkSystem.workOrders(),
+                "ALT-TEMP-001",
+                0.92,
+                0.92,
+                "LOW",
+                parkSystem.knowledge(),
+                sequentialIds(),
+                CLOCK,
+                store,
+                publisher);
+
+        WorkflowSnapshot first = fixture.workflow.startExclusive("ALT-TEMP-001", null);
+        WorkflowExecutionStore.Execution firstExecution = store.execution(first.workflowId()).orElseThrow();
+        WorkflowSnapshot second = fixture.workflow.startExclusive("ALT-TEMP-001", null);
+
+        assertThat(store.execution(first.workflowId())).isEmpty();
+        assertThat(store.execution(second.workflowId())).isPresent();
+        assertThat(publisher.history(first.workflowId())).isEmpty();
+        assertThat(firstExecution.compiledGraph().stateOf(RunnableConfig.builder()
+                .threadId(firstExecution.graphThreadId())
+                .build())).isEmpty();
+    }
+
+    @Test
     void highRiskAlertPausesAndApprovalResumesTheSameThread() {
         Fixture fixture = fixture("ALT-POWER-001", 0.96, "HIGH", null, sequentialIds());
 
@@ -445,7 +488,7 @@ class AlertWorkflowTest {
         WorkflowSnapshot result = fixture.workflow.start("ALT-TEMP-001");
 
         assertThat(result.workOrder().id()).isEqualTo(existing.id());
-        assertThat(workOrderPort.createCalls()).isZero();
+        assertThat(workOrderPort.createCalls()).isEqualTo(1);
         assertThat(parkSystem.workOrders().findByWorkflowId("wf-fixed")).containsExactly(existing);
     }
 
@@ -532,6 +575,32 @@ class AlertWorkflowTest {
             KnowledgePort knowledgePort,
             Supplier<String> workflowIds,
             Clock clock) {
+        return fixture(
+                parkSystem,
+                workOrderPort,
+                alertId,
+                classificationConfidence,
+                diagnosisConfidence,
+                riskLevel,
+                knowledgePort,
+                workflowIds,
+                clock,
+                WorkflowExecutionStore.inMemory(),
+                WorkflowEventPublisher.inMemory());
+    }
+
+    private static Fixture fixture(
+            MockParkFixture parkSystem,
+            WorkOrderPort workOrderPort,
+            String alertId,
+            double classificationConfidence,
+            double diagnosisConfidence,
+            String riskLevel,
+            KnowledgePort knowledgePort,
+            Supplier<String> workflowIds,
+            Clock clock,
+            WorkflowExecutionStore store,
+            WorkflowEventPublisher publisher) {
         String triageResponse = triageJson(alertId, classificationConfidence, riskLevel);
         TestChatModel triageModel = new TestChatModel(
                 triageResponse, triageResponse, triageResponse, triageResponse);
@@ -550,8 +619,6 @@ class AlertWorkflowTest {
                 new AlertQueryTool(parkSystem.alerts()),
                 new WorkOrderTool(workOrderPort),
                 new ParkKnowledgeTool(knowledgePort));
-        WorkflowExecutionStore store = WorkflowExecutionStore.inMemory();
-        WorkflowEventPublisher publisher = WorkflowEventPublisher.inMemory();
         AlertWorkflow workflow = new AlertWorkflow(
                 triageAgent,
                 diagnosisAgent,
@@ -729,6 +796,12 @@ class AlertWorkflowTest {
         public WorkOrder create(String workflowId, String alertId, String summary) {
             createCalls.incrementAndGet();
             return delegate.create(workflowId, alertId, summary);
+        }
+
+        @Override
+        public WorkOrder createOrGetByAlertId(String workflowId, String alertId, String summary) {
+            createCalls.incrementAndGet();
+            return delegate.createOrGetByAlertId(workflowId, alertId, summary);
         }
 
         private int createCalls() {

@@ -307,28 +307,15 @@ public final class AlertWorkflowNodes {
     public AsyncNodeAction createWorkOrder() {
         return observed(CREATE_WORK_ORDER, state -> {
             AlertWorkflowState workflowState = AlertWorkflowState.from(state);
-            toolCall(workflowState.workflowId(), CREATE_WORK_ORDER, "WorkOrderPort.findByWorkflowId");
-            List<WorkOrder> existing = guarded(
+            toolCall(workflowState.workflowId(), CREATE_WORK_ORDER, "WorkOrderPort.createOrGetByAlertId");
+            WorkOrder workOrder = guarded(
                     WorkflowFailure.Code.WORK_ORDER_FAILED,
                     "Unable to create work order",
                     CREATE_WORK_ORDER,
-                    () -> workOrderPort.findByWorkflowId(workflowState.workflowId()));
-            WorkOrder workOrder;
-            if (existing.isEmpty()) {
-                // 仅在工作流尚无工单时创建，确保节点重试不会重复写入。
-                toolCall(workflowState.workflowId(), CREATE_WORK_ORDER, "WorkOrderPort.create");
-                workOrder = guarded(
-                        WorkflowFailure.Code.WORK_ORDER_FAILED,
-                        "Unable to create work order",
-                        CREATE_WORK_ORDER,
-                        () -> workOrderPort.create(
-                                workflowState.workflowId(),
-                                workflowState.alertId(),
-                                workflowState.diagnosis().orElseThrow().summary()));
-            }
-            else {
-                workOrder = existing.get(0);
-            }
+                    () -> workOrderPort.createOrGetByAlertId(
+                            workflowState.workflowId(),
+                            workflowState.alertId(),
+                            workflowState.diagnosis().orElseThrow().summary()));
             return Map.of(AlertWorkflowState.WORK_ORDER, AlertWorkflowState.serializable(workOrder));
         });
     }

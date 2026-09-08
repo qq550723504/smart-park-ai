@@ -205,6 +205,11 @@ class AlertWorkflowFailureTest {
                 createCalls.incrementAndGet();
                 throw new IllegalStateException("ticket response apiKey=private-ticket-key");
             }
+
+            @Override
+            public WorkOrder createOrGetByAlertId(String workflowId, String alertId, String summary) {
+                return create(workflowId, alertId, summary);
+            }
         };
         Fixture fixture = fixture(
                 validTriageModel("ALT-TEMP-001", "LOW"),
@@ -537,6 +542,12 @@ class AlertWorkflowFailureTest {
         public WorkOrder create(String workflowId, String alertId, String summary) {
             createCalls.incrementAndGet();
             return delegate.create(workflowId, alertId, summary);
+        }
+
+        @Override
+        public WorkOrder createOrGetByAlertId(String workflowId, String alertId, String summary) {
+            createCalls.incrementAndGet();
+            return delegate.createOrGetByAlertId(workflowId, alertId, summary);
         }
 
         private int createCalls() {

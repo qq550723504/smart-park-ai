@@ -9,6 +9,7 @@ import com.example.smartpark.port.workorder.WorkOrderPort;
 import com.example.smartpark.workflow.AlertWorkflow;
 import com.example.smartpark.workflow.WorkflowEventPublisher;
 import com.example.smartpark.workflow.WorkflowExecutionStore;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -62,8 +63,10 @@ public class AlertWorkflowController {
 class AlertWorkflowRuntimeConfiguration {
 
     @Bean
-    WorkflowExecutionStore workflowExecutionStore() {
-        return WorkflowExecutionStore.inMemory();
+    WorkflowExecutionStore workflowExecutionStore(
+            @Value("${smartpark.workflow.max-retained-exclusive-executions:200}")
+            int maxRetainedExclusiveExecutions) {
+        return WorkflowExecutionStore.inMemory(maxRetainedExclusiveExecutions);
     }
 
     @Bean

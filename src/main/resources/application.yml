@@ -55,6 +55,11 @@ spring:
         streamable-http:
           mcp-endpoint: /mcp
 smartpark:
+  workflow:
+    # Orchestration-owned child executions are isolated for cancellation, but
+    # their terminal graph checkpoints and event traces are retained only within
+    # this bound. Reusable direct alert workflows are unaffected.
+    max-retained-exclusive-executions: ${SMARTPARK_WORKFLOW_MAX_RETAINED_EXCLUSIVE_EXECUTIONS:200}
   orchestration:
     # Safe run metadata and trace references only. Docker mounts this path on a
     # named volume so refresh, reconnect and backend restart do not erase runs.
