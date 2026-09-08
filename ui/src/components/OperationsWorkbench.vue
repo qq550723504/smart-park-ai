@@ -102,10 +102,11 @@ watch(role, (nextRole, previousRole) => {
   if (!isViewAvailable(activeView.value)) switchView('workflow')
 })
 function reconcileViewAfterCapabilityLoad(navigationGenerationAtRequest: number): void {
-  const view = props.active && navigationGeneration === navigationGenerationAtRequest
-    ? props.initialView
-    : activeView.value
-  switchView(view)
+  if (props.active && navigationGeneration === navigationGenerationAtRequest) {
+    switchView(props.initialView)
+    return
+  }
+  if (!isViewAvailable(activeView.value)) switchView('workflow')
 }
 onMounted(() => {
   const navigationGenerationAtRequest = navigationGeneration

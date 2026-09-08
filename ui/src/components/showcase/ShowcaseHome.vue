@@ -48,9 +48,15 @@ const cockpitCapabilities: CockpitCapability[] = [
 
 const isSelectable = (scenario: ShowcaseScenario) => scenario.status === 'READY' && scenario.live
 const hasConfirmedCatalog = computed(() => !loading.value && !failed.value && catalog.value !== null)
+const hasConfirmedCapabilityStates = computed(() => hasConfirmedCatalog.value
+  && !governanceLoading.value
+  && !governanceFailed.value
+  && governanceOverview.value !== null)
 const readyScenarioCount = computed(() => catalog.value?.scenarios.filter(isSelectable).length ?? 0)
 const scenarioCount = computed(() => catalog.value?.scenarios.length ?? 0)
-const unavailableScenarioCount = computed(() => Math.max(0, scenarioCount.value - readyScenarioCount.value))
+const capabilityRiskCount = computed(() => cockpitCapabilities
+  .filter((capability) => ['NOT_READY', 'DISABLED', 'UNAVAILABLE'].includes(capabilityState(capability)))
+  .length)
 const orderedScenarios = computed(() => {
   if (!catalog.value) return []
   return [...catalog.value.scenarios]
@@ -214,7 +220,7 @@ watch(() => props.active, (active) => {
         </div>
         <dl class="showcase-home__pulse" aria-label="园区 AI 运行状态">
           <div data-showcase-metric="verified"><dt>已验证能力</dt><dd>{{ hasConfirmedCatalog ? readyScenarioCount : '—' }}</dd><small>/ {{ hasConfirmedCatalog ? scenarioCount : '—' }} 个场景</small></div>
-          <div data-showcase-metric="risk"><dt>能力风险</dt><dd>{{ hasConfirmedCatalog ? unavailableScenarioCount : '—' }}</dd><small>NOT_READY / DISABLED</small></div>
+          <div data-showcase-metric="risk"><dt>能力风险</dt><dd>{{ hasConfirmedCapabilityStates ? capabilityRiskCount : '—' }}</dd><small>NOT_READY / DISABLED / UNAVAILABLE</small></div>
           <div><dt>人工治理边界</dt><dd>{{ governanceOverview?.boundaries.length ?? '—' }}</dd><small>{{ governanceFailed ? '治理状态暂不可用' : '服务端治理摘要' }}</small></div>
         </dl>
       </section>

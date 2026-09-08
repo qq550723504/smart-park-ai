@@ -126,6 +126,19 @@ describe('ShowcaseHome truthful catalog selection', () => {
     expect(allAgents.attributes('title')).toContain('多场景编排 API')
   })
 
+  it('counts the unavailable cockpit capabilities represented by the risk metric', async () => {
+    vi.mocked(getShowcaseScenarios).mockResolvedValue(catalog([
+      scenario('ALERT_WORKFLOW', 'READY', true, null),
+      scenario('OPERATIONS_ANALYSIS', 'READY', true, null),
+      scenario('EXPERT_COLLABORATION', 'READY', true, null),
+    ]))
+
+    const wrapper = await mountLoaded()
+
+    expect(wrapper.get('[data-showcase-metric="risk"] dd').text()).toBe('7')
+    expect(wrapper.get('[data-showcase-metric="risk"] small').text()).toContain('UNAVAILABLE')
+  })
+
   it('opens an available adapted security capability in its real workbench view', async () => {
     vi.mocked(getShowcaseScenarios).mockResolvedValue(catalog([
       scenario('EXPERT_COLLABORATION', 'READY', true, null),

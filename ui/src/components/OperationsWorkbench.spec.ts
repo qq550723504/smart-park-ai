@@ -622,6 +622,49 @@ describe('OperationsWorkbench', () => {
     }
   })
 
+  it('does not cancel a queue workflow load when capabilities settle', async () => {
+    const originalEventSource = globalThis.EventSource
+    const pendingCapabilities = deferred<Response>()
+    const pendingWorkflow = deferred<Response>()
+    globalThis.EventSource = class {
+      onerror: ((event: Event) => void) | null = null
+      constructor(_url: string | URL) {}
+      addEventListener(): void {}
+      close(): void {}
+    } as unknown as typeof EventSource
+    globalThis.fetch = ((url: RequestInfo | URL) => String(url).includes('/api/workflows/wf-selected')
+      ? pendingWorkflow.promise
+      : pendingCapabilities.promise) as typeof fetch
+
+    try {
+      const wrapper = mount(OperationsWorkbench, {
+        props: { initialView: 'collaboration-center' },
+        global: { stubs: { ...operatorStubs, CollaborationCenter: collaborationWorkflowStub } },
+      })
+      await nextTick()
+      await wrapper.get('[data-open-selected-workflow]').trigger('click')
+
+      pendingCapabilities.resolve(new Response(JSON.stringify({
+        knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      await settleCapabilities()
+      expect(wrapper.get('[data-workbench-view="collaboration-center"]').classes()).toContain('active')
+
+      pendingWorkflow.resolve(new Response(JSON.stringify({
+        workflowId: 'wf-selected', alertId: 'ALT-POWER-001', status: 'WAITING_APPROVAL',
+        diagnosis: null, approval: null, workOrder: null, errors: [], eventSequence: 2, riskReasons: [],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      await flushPromises()
+
+      expect(wrapper.get('[data-workbench-view="workflow"]').classes()).toContain('active')
+      expect(wrapper.get('[data-selected-alert]').text()).toBe('ALT-POWER-001')
+      wrapper.unmount()
+    } finally {
+      globalThis.EventSource = originalEventSource
+    }
+  })
+
   it('does not reopen a workflow after navigating away while it is loading', async () => {
     const originalEventSource = globalThis.EventSource
     const pendingWorkflow = deferred<Response>()
