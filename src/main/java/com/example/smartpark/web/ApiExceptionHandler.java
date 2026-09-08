@@ -2,6 +2,7 @@ package com.example.smartpark.web;
 
 import com.example.smartpark.analytics.anomaly.OperationsAnomalyService;
 import com.example.smartpark.analytics.energy.EnergyTimeSeriesService;
+import com.example.smartpark.execution.ExecutionEventCapacityException;
 import com.example.smartpark.orchestration.OrchestrationCapacityException;
 import com.example.smartpark.workflow.CustomerServiceValidationException;
 
@@ -77,6 +78,11 @@ public class ApiExceptionHandler {
     @ExceptionHandler(OrchestrationCapacityException.class)
     ResponseEntity<WebDtos.ApiError> orchestrationOverloaded(OrchestrationCapacityException exception) {
         return error(HttpStatus.TOO_MANY_REQUESTS, "Too many orchestration runs; retry later");
+    }
+
+    @ExceptionHandler(ExecutionEventCapacityException.class)
+    ResponseEntity<WebDtos.ApiError> executionReplayOverloaded(ExecutionEventCapacityException exception) {
+        return error(HttpStatus.TOO_MANY_REQUESTS, "Too many active execution traces; retry later");
     }
 
     @ExceptionHandler({MethodArgumentNotValidException.class, HttpMessageNotReadableException.class})

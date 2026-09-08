@@ -99,6 +99,9 @@ existing graph, agents, approval and work-order logic, but never attaches two
 parents to the same mutable child run. The ordinary Alert Workflow API keeps
 its existing alert-level idempotency independently. This one-parent/one-child
 ownership is what makes cancellation and approval deadlines deterministic.
+Before admitting a requested action with an explicit building scope, the
+orchestrator resolves the alert through the existing `AlertPort` and rejects the
+request unless the alert belongs to one of those buildings.
 
 ## Idempotency and concurrency
 
@@ -127,7 +130,10 @@ If retention compacts a run while its SSE projection is still cached, the trace
 archive treats it as unknown rather than allowing the cache to bypass role
 authorization. The in-memory replay registry also retains at most 512 runs,
 evicts the oldest terminal histories first, and refuses new histories when all
-slots are active rather than allowing heap growth without bound.
+slots are active rather than allowing heap growth without bound. A new or
+idempotently replayed orchestration propagates that admission failure instead of
+returning a run whose trace cannot be opened; only an exact event already present
+in the projection is treated as a harmless duplicate.
 
 The UI exposes the launch action only when the required Operations Analysis
 capability is reported available; the backend independently rechecks that

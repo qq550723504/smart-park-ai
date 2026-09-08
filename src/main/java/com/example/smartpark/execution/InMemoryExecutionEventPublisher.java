@@ -189,7 +189,7 @@ public class InMemoryExecutionEventPublisher implements ExecutionEventPublisher 
             // Make bounded room without ever discarding a live stream.
         }
         if (runs.size() >= maxRetainedRuns) {
-            throw new IllegalStateException("execution event replay capacity is exhausted");
+            throw new ExecutionEventCapacityException("execution event replay capacity is exhausted");
         }
         RunState created = new RunState();
         runs.put(runId, created);

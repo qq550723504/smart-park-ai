@@ -47,6 +47,11 @@ public final class OrchestrationPorts {
         EvidenceOutcome query(OrchestrationInput input);
     }
 
+    @FunctionalInterface
+    public interface AlertScopeReader {
+        String buildingId(String alertId);
+    }
+
     public interface WorkflowRunner {
         WorkflowOutcome start(String alertId);
 

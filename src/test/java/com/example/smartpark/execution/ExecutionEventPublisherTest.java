@@ -215,7 +215,7 @@ class ExecutionEventPublisherTest {
                 java.time.Duration.ofMinutes(30), clock, 1);
         allActive.publish(event(active, "active", false));
         assertThatThrownBy(() -> allActive.publish(event(newest, "rejected", false)))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(ExecutionEventCapacityException.class)
                 .hasMessageContaining("capacity");
     }
 

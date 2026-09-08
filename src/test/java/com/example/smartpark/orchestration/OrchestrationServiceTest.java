@@ -1,6 +1,8 @@
 package com.example.smartpark.orchestration;
 
+import com.example.smartpark.execution.ExecutionEventCapacityException;
 import com.example.smartpark.execution.InMemoryExecutionEventPublisher;
+import com.example.smartpark.execution.model.ExecutionEvent;
 import com.example.smartpark.execution.model.ExecutionEventType;
 import com.example.smartpark.orchestration.OrchestrationPorts.Capabilities;
 import com.example.smartpark.orchestration.OrchestrationPorts.ChildOutcome;
@@ -330,6 +332,46 @@ class OrchestrationServiceTest {
                 false, false, false, false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("alertId");
+    }
+
+    @Test
+    void rejectsAnActionWhenTheAlertIsOutsideTheRequestedBuildingScope() {
+        Harness harness = harness(new Capabilities(true, true, false, false, true), Runnable::run);
+        OrchestrationInput input = new OrchestrationInput("分析 B2 并处置告警", "ALT-001", List.of("B2"),
+                true, false, false, true);
+
+        assertThatThrownBy(() -> harness.service.start(
+                OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT, input,
+                "mismatched-alert-scope", null, "OPERATOR"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("does not belong");
+    }
+
+    @Test
+    void propagatesReplayCapacityExhaustionForNewAndIdempotentAdmissions() {
+        InMemoryOrchestrationRunStore store = new InMemoryOrchestrationRunStore();
+        AtomicInteger publishAttempts = new AtomicInteger();
+        AtomicInteger scheduled = new AtomicInteger();
+        InMemoryExecutionEventPublisher exhausted = new InMemoryExecutionEventPublisher() {
+            @Override
+            public ExecutionEvent publish(ExecutionEvent event) {
+                publishAttempts.incrementAndGet();
+                throw new ExecutionEventCapacityException("execution event replay capacity is exhausted");
+            }
+        };
+        OrchestrationService service = new OrchestrationService(store,
+                () -> new Capabilities(true, false, false, false, false),
+                null, null, null, null, null, exhausted,
+                task -> scheduled.incrementAndGet(), CLOCK);
+
+        for (int attempt = 0; attempt < 2; attempt++) {
+            assertThatThrownBy(() -> service.start(
+                    OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT, simpleInput(),
+                    "exhausted-trace-capacity", null, "OPERATOR"))
+                    .isInstanceOf(ExecutionEventCapacityException.class);
+        }
+        assertThat(publishAttempts).hasValue(2);
+        assertThat(scheduled).hasValue(0);
     }
 
     @Test
@@ -805,6 +847,14 @@ class OrchestrationServiceTest {
                             OrchestrationPorts.SecurityReader security,
                             OrchestrationPorts.WorkflowRunner workflow,
                             OrchestrationPorts.OperationsRunner operations) {
+        return harness(capabilities, executor, security, workflow, operations, alertId -> "B1");
+    }
+
+    private Harness harness(Capabilities capabilities, java.util.concurrent.Executor executor,
+                            OrchestrationPorts.SecurityReader security,
+                            OrchestrationPorts.WorkflowRunner workflow,
+                            OrchestrationPorts.OperationsRunner operations,
+                            OrchestrationPorts.AlertScopeReader alertScope) {
         InMemoryExecutionEventPublisher events = new InMemoryExecutionEventPublisher();
         OrchestrationPorts.EnergyReader energy = buildings -> new EvidenceOutcome("AVAILABLE",
                 "真实能耗证据", List.of("energy:B1:120/120"), List.of("OPERATIONS_ANALYTICS:energy_kwh"),
@@ -815,7 +865,7 @@ class OrchestrationServiceTest {
                     "COMPLETED", "跨域结论", List.of("expert:evidence-1"), null)));
         };
         OrchestrationService service = new OrchestrationService(new InMemoryOrchestrationRunStore(),
-                () -> capabilities, operations, energy, collaboration, security, workflow,
+                () -> capabilities, operations, energy, collaboration, security, alertScope, workflow,
                 events, executor, CLOCK);
         return new Harness(service, events);
     }

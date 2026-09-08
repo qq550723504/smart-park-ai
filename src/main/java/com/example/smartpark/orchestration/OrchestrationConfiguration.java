@@ -11,6 +11,7 @@ import com.example.smartpark.collaboration.model.FindingStatus;
 import com.example.smartpark.execution.ExecutionEventArchive;
 import com.example.smartpark.execution.ExecutionEventPublisher;
 import com.example.smartpark.operations.OperationsCapabilitiesService;
+import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.securityincident.SecurityIncident;
 import com.example.smartpark.securityincident.SecurityIncidentService;
 import com.example.smartpark.workflow.AlertWorkflow;
@@ -94,6 +95,7 @@ public class OrchestrationConfiguration {
             ObjectProvider<EnergyTimeSeriesService> energyProvider,
             ObjectProvider<ExpertCollaborationService> collaborationProvider,
             ObjectProvider<SecurityIncidentService> securityProvider,
+            ObjectProvider<AlertPort> alertProvider,
             ObjectProvider<AlertWorkflow> workflowProvider,
             ExecutionEventPublisher events,
             @Qualifier("orchestrationExecutor") ExecutorService executor,
@@ -194,6 +196,11 @@ public class OrchestrationConfiguration {
                 buildings -> energyOutcome(energyProvider.getIfAvailable(), buildings),
                 collaboration,
                 input -> securityOutcome(securityProvider.getIfAvailable(), input),
+                alertId -> {
+                    AlertPort alerts = alertProvider.getIfAvailable();
+                    if (alerts == null) throw new IllegalStateException("alert scope validation unavailable");
+                    return alerts.getAlert(alertId).buildingId();
+                },
                 workflow, events, executor, clock, Duration.ofSeconds(approvalTimeoutSeconds));
     }
 

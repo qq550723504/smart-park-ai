@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
@@ -54,6 +55,7 @@ public final class OrchestrationService {
     private final OrchestrationPorts.EnergyReader energy;
     private final OrchestrationPorts.CollaborationRunner collaboration;
     private final OrchestrationPorts.SecurityReader security;
+    private final OrchestrationPorts.AlertScopeReader alertScope;
     private final OrchestrationPorts.WorkflowRunner workflow;
     private final ExecutionEventPublisher events;
     private final Executor executor;
@@ -71,7 +73,22 @@ public final class OrchestrationService {
                                 ExecutionEventPublisher events,
                                 Executor executor,
                                 Clock clock) {
-        this(store, capabilities, operations, energy, collaboration, security, workflow,
+        this(store, capabilities, operations, energy, collaboration, security, null, workflow,
+                events, executor, clock, DEFAULT_APPROVAL_TIMEOUT);
+    }
+
+    public OrchestrationService(OrchestrationRunStore store,
+                                OrchestrationPorts.CapabilityReader capabilities,
+                                OrchestrationPorts.OperationsRunner operations,
+                                OrchestrationPorts.EnergyReader energy,
+                                OrchestrationPorts.CollaborationRunner collaboration,
+                                OrchestrationPorts.SecurityReader security,
+                                OrchestrationPorts.AlertScopeReader alertScope,
+                                OrchestrationPorts.WorkflowRunner workflow,
+                                ExecutionEventPublisher events,
+                                Executor executor,
+                                Clock clock) {
+        this(store, capabilities, operations, energy, collaboration, security, alertScope, workflow,
                 events, executor, clock, DEFAULT_APPROVAL_TIMEOUT);
     }
 
@@ -86,12 +103,29 @@ public final class OrchestrationService {
                                 Executor executor,
                                 Clock clock,
                                 Duration approvalTimeout) {
+        this(store, capabilities, operations, energy, collaboration, security, null, workflow,
+                events, executor, clock, approvalTimeout);
+    }
+
+    public OrchestrationService(OrchestrationRunStore store,
+                                OrchestrationPorts.CapabilityReader capabilities,
+                                OrchestrationPorts.OperationsRunner operations,
+                                OrchestrationPorts.EnergyReader energy,
+                                OrchestrationPorts.CollaborationRunner collaboration,
+                                OrchestrationPorts.SecurityReader security,
+                                OrchestrationPorts.AlertScopeReader alertScope,
+                                OrchestrationPorts.WorkflowRunner workflow,
+                                ExecutionEventPublisher events,
+                                Executor executor,
+                                Clock clock,
+                                Duration approvalTimeout) {
         this.store = store;
         this.capabilities = capabilities;
         this.operations = operations;
         this.energy = energy;
         this.collaboration = collaboration;
         this.security = security;
+        this.alertScope = alertScope;
         this.workflow = workflow;
         this.events = events;
         this.executor = executor;
@@ -113,6 +147,7 @@ public final class OrchestrationService {
         }
         java.util.Objects.requireNonNull(input, "input");
         OrchestrationDefinition.steps(definitionId);
+        validateActionScope(input);
         String fingerprint = fingerprint(definitionId, input, normalizedRole);
         reconcileWaitingApprovals();
         Instant now = clock.instant();
@@ -135,6 +170,10 @@ public final class OrchestrationService {
                 failRun(result.run().id(), "编排执行资源暂不可用");
                 throw rejected;
             }
+        } else {
+            // A prior admission may have persisted before its live projection was accepted.
+            // Replays must prove that the trace is available before returning an accepted run.
+            publishProjections(result.run(), 0);
         }
         return new OrchestrationRunStore.StartResult(get(result.run().id()), result.created());
     }
@@ -875,13 +914,31 @@ public final class OrchestrationService {
     private void publishProjections(OrchestrationRun updated, int firstTraceIndex) {
         for (int index = firstTraceIndex; index < updated.traceEvents().size(); index++) {
             OrchestrationTraceRecord record = updated.traceEvents().get(index);
+            ExecutionEvent projection = new ExecutionEvent(record.eventId(), updated.traceId(), record.sequence(),
+                    record.timestamp(), ExecutionScenario.ORCHESTRATION, record.actor(), record.stage(),
+                    record.eventType(), record.status(), record.safeSummary(), null);
             try {
-                events.publish(new ExecutionEvent(record.eventId(), updated.traceId(), record.sequence(),
-                        record.timestamp(), ExecutionScenario.ORCHESTRATION, record.actor(), record.stage(),
-                        record.eventType(), record.status(), record.safeSummary(), null));
+                events.publish(projection);
             } catch (IllegalArgumentException | IllegalStateException duplicateOrClosed) {
-                // Durable trace remains authoritative and can rehydrate the in-memory projection.
+                boolean exactProjectionAlreadyExists = events.history(updated.traceId()).stream()
+                        .anyMatch(projection::equals);
+                if (!exactProjectionAlreadyExists) throw duplicateOrClosed;
             }
+        }
+    }
+
+    private void validateActionScope(OrchestrationInput input) {
+        if (!input.requestAction() || input.buildingIds().isEmpty()) return;
+        if (alertScope == null) {
+            throw new IllegalStateException("alert scope validation unavailable");
+        }
+        String buildingId = alertScope.buildingId(input.alertId());
+        if (buildingId == null || buildingId.isBlank()) {
+            throw new IllegalStateException("alert has no building scope");
+        }
+        String normalizedBuildingId = buildingId.trim().toUpperCase(Locale.ROOT);
+        if (!input.buildingIds().contains(normalizedBuildingId)) {
+            throw new IllegalArgumentException("alertId does not belong to requested buildingIds");
         }
     }
 
