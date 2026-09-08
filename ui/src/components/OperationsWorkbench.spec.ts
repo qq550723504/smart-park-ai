@@ -438,7 +438,9 @@ describe('OperationsWorkbench', () => {
     expect(unmounts.analysis).toBe(0)
   })
 
-  it('defers the workflow graph until its visible view is first opened', async () => {
+  it('mounts the workflow graph immediately when a gated initial view falls back', async () => {
+    const pendingCapabilities = deferred<Response>()
+    globalThis.fetch = (() => pendingCapabilities.promise) as typeof fetch
     const wrapper = mount(OperationsWorkbench, {
       props: { initialView: 'collaboration' },
       global: {
@@ -449,14 +451,17 @@ describe('OperationsWorkbench', () => {
       },
     })
 
-    await settleCapabilities()
-    expect(mounts.workflow).toBe(0)
-
-    await wrapper.get('[data-workbench-view="workflow"]').trigger('click')
     await nextTick()
+    expect(wrapper.get('[data-workbench-view="workflow"]').classes()).toContain('active')
+    expect(wrapper.find('[data-workbench-view="collaboration"]').exists()).toBe(false)
     expect(mounts.workflow).toBe(1)
 
-    await wrapper.get('[data-workbench-view="collaboration"]').trigger('click')
+    pendingCapabilities.resolve(new Response(JSON.stringify({
+      knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+      analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    await settleCapabilities()
+    expect(wrapper.get('[data-workbench-view="collaboration"]').classes()).toContain('active')
     expect(mounts.workflow).toBe(1)
     expect(unmounts.workflow).toBe(0)
   })

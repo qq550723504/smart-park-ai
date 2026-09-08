@@ -69,7 +69,7 @@ const customerQueueRefreshToken = ref(0)
 const collaborationTargetWorkItemId = ref<string | null>(null)
 const collaborationRefreshToken = ref(0)
 const securityIncidentTargetId = ref<string | null>(null)
-const hasVisitedWorkflow = ref(props.initialView === 'workflow')
+const hasVisitedWorkflow = ref(activeView.value === 'workflow')
 function isViewAvailable(view: WorkbenchView): boolean {
   return navItems.value.some((item) => item.value === view && item.available)
 }
