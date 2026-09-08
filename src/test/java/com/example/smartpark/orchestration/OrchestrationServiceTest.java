@@ -1026,6 +1026,87 @@ class OrchestrationServiceTest {
     }
 
     @Test
+    void approvalWaitPersistenceFailureCancelsAndReleasesTheOwnedWorkflow() {
+        FailNextUpdateStore store = new FailNextUpdateStore();
+        AtomicInteger cancellations = new AtomicInteger();
+        AtomicInteger retentionReleases = new AtomicInteger();
+        OrchestrationPorts.WorkflowRunner workflow = new OrchestrationPorts.WorkflowRunner() {
+            @Override public WorkflowOutcome start(String alertId) {
+                throw new AssertionError("shared alert start must not be used");
+            }
+            @Override public WorkflowOutcome startOwned(String alertId, Instant approvalExpiresAt) {
+                store.failAfterSuccessfulUpdates(1);
+                return workflowOutcome("WAITING_APPROVAL");
+            }
+            @Override public WorkflowOutcome get(String workflowId) { return workflowOutcome("WAITING_APPROVAL"); }
+            @Override public WorkflowOutcome cancel(String workflowId) {
+                cancellations.incrementAndGet();
+                return workflowOutcome("CANCELLED");
+            }
+            @Override public void releaseRetention(String workflowId) {
+                retentionReleases.incrementAndGet();
+            }
+        };
+        Harness harness = harness(new Capabilities(true, false, false, false, true), Runnable::run,
+                input -> availableSecurity(), workflow,
+                question -> {
+                    UUID id = UUID.randomUUID();
+                    return new StartedChild(id, CompletableFuture.completedFuture(completedChild(id)));
+                }, alertId -> "B1", store);
+        OrchestrationInput input = new OrchestrationInput("处置告警", "ALT-001", List.of(),
+                false, false, false, true);
+
+        OrchestrationRun run = harness.service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                input, "approval-wait-write-failure", null, "OPERATOR").run();
+
+        assertThat(cancellations).hasValue(1);
+        assertThat(retentionReleases).hasValue(1);
+        assertThat(step(run, "alert-workflow").status()).isEqualTo(OrchestrationStepStatus.FAILED);
+        assertThat(step(run, "alert-workflow").runReference()).isEqualTo("wf-1");
+    }
+
+    @Test
+    void approvalWaitProjectionFailureKeepsTheDurableRecoverableState() {
+        AtomicInteger cancellations = new AtomicInteger();
+        AtomicInteger retentionReleases = new AtomicInteger();
+        OrchestrationPorts.WorkflowRunner workflow = new OrchestrationPorts.WorkflowRunner() {
+            @Override public WorkflowOutcome start(String alertId) { return workflowOutcome("WAITING_APPROVAL"); }
+            @Override public WorkflowOutcome get(String workflowId) { return workflowOutcome("WAITING_APPROVAL"); }
+            @Override public WorkflowOutcome cancel(String workflowId) {
+                cancellations.incrementAndGet();
+                return workflowOutcome("CANCELLED");
+            }
+            @Override public void releaseRetention(String workflowId) {
+                retentionReleases.incrementAndGet();
+            }
+        };
+        InMemoryExecutionEventPublisher events = new InMemoryExecutionEventPublisher() {
+            @Override public ExecutionEvent publish(ExecutionEvent event) {
+                if (event.eventType() == ExecutionEventType.WAITING_APPROVAL) {
+                    throw new IllegalStateException("simulated projection failure");
+                }
+                return super.publish(event);
+            }
+        };
+        Harness harness = harness(new Capabilities(true, false, false, false, true), Runnable::run,
+                input -> availableSecurity(), workflow,
+                question -> {
+                    UUID id = UUID.randomUUID();
+                    return new StartedChild(id, CompletableFuture.completedFuture(completedChild(id)));
+                }, alertId -> "B1", new InMemoryOrchestrationRunStore(), events);
+        OrchestrationInput input = new OrchestrationInput("处置告警", "ALT-001", List.of(),
+                false, false, false, true);
+
+        OrchestrationRun run = harness.service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                input, "approval-wait-projection-failure", null, "OPERATOR").run();
+
+        assertThat(run.status()).isEqualTo(OrchestrationStatus.WAITING_APPROVAL);
+        assertThat(step(run, "alert-workflow").status()).isEqualTo(OrchestrationStepStatus.WAITING_APPROVAL);
+        assertThat(cancellations).hasValue(0);
+        assertThat(retentionReleases).hasValue(0);
+    }
+
+    @Test
     void referencePersistenceFailureCancelsAStartedAsyncChild() {
         FailNextUpdateStore store = new FailNextUpdateStore();
         UUID childId = UUID.randomUUID();
@@ -1092,7 +1173,17 @@ class OrchestrationServiceTest {
                             OrchestrationPorts.OperationsRunner operations,
                             OrchestrationPorts.AlertScopeReader alertScope,
                             OrchestrationRunStore store) {
-        InMemoryExecutionEventPublisher events = new InMemoryExecutionEventPublisher();
+        return harness(capabilities, executor, security, workflow, operations, alertScope, store,
+                new InMemoryExecutionEventPublisher());
+    }
+
+    private Harness harness(Capabilities capabilities, java.util.concurrent.Executor executor,
+                            OrchestrationPorts.SecurityReader security,
+                            OrchestrationPorts.WorkflowRunner workflow,
+                            OrchestrationPorts.OperationsRunner operations,
+                            OrchestrationPorts.AlertScopeReader alertScope,
+                            OrchestrationRunStore store,
+                            InMemoryExecutionEventPublisher events) {
         OrchestrationPorts.EnergyReader energy = buildings -> new EvidenceOutcome("AVAILABLE",
                 "真实能耗证据", List.of("energy:B1:120/120"), List.of("OPERATIONS_ANALYTICS:energy_kwh"),
                 List.of(), null);
@@ -1145,10 +1236,15 @@ class OrchestrationServiceTest {
 
     private static final class FailNextUpdateStore implements OrchestrationRunStore {
         private final InMemoryOrchestrationRunStore delegate = new InMemoryOrchestrationRunStore();
-        private final AtomicBoolean failNextUpdate = new AtomicBoolean();
+        private final AtomicInteger updateCount = new AtomicInteger();
+        private final AtomicInteger failingUpdate = new AtomicInteger(-1);
 
         void failNextUpdate() {
-            failNextUpdate.set(true);
+            failAfterSuccessfulUpdates(0);
+        }
+
+        void failAfterSuccessfulUpdates(int successfulUpdates) {
+            failingUpdate.set(updateCount.get() + successfulUpdates + 1);
         }
 
         @Override
@@ -1164,7 +1260,8 @@ class OrchestrationServiceTest {
 
         @Override
         public OrchestrationRun update(UUID runId, UnaryOperator<OrchestrationRun> transition) {
-            if (failNextUpdate.compareAndSet(true, false)) {
+            int currentUpdate = updateCount.incrementAndGet();
+            if (failingUpdate.compareAndSet(currentUpdate, -1)) {
                 throw new IllegalStateException("simulated reference persistence failure");
             }
             return delegate.update(runId, transition);

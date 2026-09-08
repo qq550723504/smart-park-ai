@@ -686,18 +686,29 @@ public final class OrchestrationService {
             OrchestrationRun current = getStored(runId);
             if (current.status().isTerminal()) return;
             Instant now = clock.instant();
-            OrchestrationRun waiting = store.update(runId, run -> {
-                List<OrchestrationStep> steps = new ArrayList<>(run.steps());
-                int index = stepIndex(steps, stepId);
-                steps.set(index, steps.get(index).waitForApproval(now, approvalDeadline,
-                        "等待现有 Human Approval", outcome.workflowId(), outcome.evidenceReferences()));
-                return run.copy(OrchestrationStatus.WAITING_APPROVAL,
-                        run.startedAt(), null, "等待人工审批", steps, run.evidence(), null,
-                        run.result(), run.cancelRequested(),
-                        appendedTrace(run, "orchestrator", ExecutionStage.HUMAN_APPROVAL,
-                                ExecutionEventType.WAITING_APPROVAL, ExecutionStatus.RUNNING, "等待人工审批"));
-            });
-            publishProjection(waiting);
+            OrchestrationRun waiting;
+            try {
+                waiting = store.update(runId, run -> {
+                    List<OrchestrationStep> steps = new ArrayList<>(run.steps());
+                    int index = stepIndex(steps, stepId);
+                    steps.set(index, steps.get(index).waitForApproval(now, approvalDeadline,
+                            "等待现有 Human Approval", outcome.workflowId(), outcome.evidenceReferences()));
+                    return run.copy(OrchestrationStatus.WAITING_APPROVAL,
+                            run.startedAt(), null, "等待人工审批", steps, run.evidence(), null,
+                            run.result(), run.cancelRequested(),
+                            appendedTrace(run, "orchestrator", ExecutionStage.HUMAN_APPROVAL,
+                                    ExecutionEventType.WAITING_APPROVAL, ExecutionStatus.RUNNING, "等待人工审批"));
+                });
+            } catch (RuntimeException persistenceFailure) {
+                compensateOwnedWorkflow(outcome.workflowId(), persistenceFailure);
+                throw persistenceFailure;
+            }
+            try {
+                publishProjection(waiting);
+            } catch (RuntimeException projectionFailure) {
+                LOGGER.warn("Unable to publish durable approval wait for orchestration {}", runId,
+                        projectionFailure);
+            }
         }
     }
 
@@ -793,7 +804,7 @@ public final class OrchestrationService {
             try {
                 remembered = rememberChildReference(runId, stepId, outcome.workflowId());
             } catch (RuntimeException persistenceFailure) {
-                compensateUnreferencedWorkflow(outcome.workflowId(), persistenceFailure);
+                compensateOwnedWorkflow(outcome.workflowId(), persistenceFailure);
                 throw persistenceFailure;
             }
             if (!remembered) {
@@ -808,16 +819,16 @@ public final class OrchestrationService {
         }
     }
 
-    private void compensateUnreferencedWorkflow(String workflowId, RuntimeException persistenceFailure) {
+    private void compensateOwnedWorkflow(String workflowId, RuntimeException primaryFailure) {
         try {
             workflow.cancel(workflowId);
         } catch (RuntimeException cleanupFailure) {
-            persistenceFailure.addSuppressed(cleanupFailure);
+            primaryFailure.addSuppressed(cleanupFailure);
         }
         try {
             releaseWorkflowRetention(workflowId);
         } catch (RuntimeException cleanupFailure) {
-            persistenceFailure.addSuppressed(cleanupFailure);
+            primaryFailure.addSuppressed(cleanupFailure);
         }
     }
 
