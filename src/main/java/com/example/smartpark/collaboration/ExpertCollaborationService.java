@@ -65,15 +65,27 @@ public final class ExpertCollaborationService {
             throw rejected;
         }
         CollaborationRun run;
+        boolean runStored = false;
         try {
             run = store.save(new CollaborationRun(id, question.trim(), CollaborationRun.RunStatus.RUNNING,
                     null, List.of(), null, null, Instant.now(clock)));
+            runStored = true;
             publish(id, "Supervisor", ExecutionStage.INITIALIZATION, ExecutionEventType.RUN_STARTED,
                     ExecutionStatus.RUNNING, "Expert collaboration started");
         } catch (RuntimeException registrationFailure) {
             activeTasks.remove(id, task);
             task.cancel(true);
             admitted.countDown();
+            if (runStored) {
+                try {
+                    // Trace admission is part of accepting a collaboration run.
+                    // Keep the persisted record truthful and terminal when the
+                    // replay registry cannot admit its first event.
+                    failIfRunning(id, "collaboration trace admission failed");
+                } catch (RuntimeException rollbackFailure) {
+                    registrationFailure.addSuppressed(rollbackFailure);
+                }
+            }
             throw registrationFailure;
         }
         admitted.countDown();

@@ -22,6 +22,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -129,6 +130,58 @@ class ExpertCollaborationServiceTest {
         assertThatThrownBy(() -> service.start("energy consumption"))
                 .isInstanceOf(java.util.concurrent.RejectedExecutionException.class);
         assertThat(published).hasValue(0);
+    }
+
+    @Test void terminalizesTheStoredRunWhenInitialTraceAdmissionFails() {
+        AtomicReference<java.util.UUID> rejectedRunId = new AtomicReference<>();
+        com.example.smartpark.execution.ExecutionEventPublisher rejectingPublisher =
+                new com.example.smartpark.execution.ExecutionEventPublisher() {
+                    @Override public com.example.smartpark.execution.model.ExecutionEvent publish(
+                            com.example.smartpark.execution.model.ExecutionEvent event) {
+                        rejectedRunId.compareAndSet(null, event.runId());
+                        throw new com.example.smartpark.execution.ExecutionEventCapacityException(
+                                "execution event replay capacity is exhausted");
+                    }
+                    @Override public List<com.example.smartpark.execution.model.ExecutionEvent> history(
+                            java.util.UUID runId) { return List.of(); }
+                    @Override public void hydrate(java.util.UUID runId,
+                            List<com.example.smartpark.execution.model.ExecutionEvent> durableHistory) { }
+                    @Override public Subscription subscribe(java.util.UUID runId,
+                            java.util.function.Consumer<com.example.smartpark.execution.model.ExecutionEvent> consumer) {
+                        return () -> { };
+                    }
+                    @Override public String status(java.util.UUID runId) { return "UNKNOWN"; }
+                    @Override public void remove(java.util.UUID runId) { }
+                };
+        CollaborationRunStore store = new CollaborationRunStore(Duration.ofMinutes(30), CLOCK);
+        java.util.concurrent.ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicBoolean plannerCalled = new AtomicBoolean();
+        var graph = new ExpertCollaborationGraph(Map.of(
+                ExpertDomain.ENERGY, assignment -> new ExpertFinding(ExpertDomain.ENERGY,
+                        FindingStatus.SUPPORTED, "energy", List.of("energy:1"), .8, List.of()),
+                ExpertDomain.DEVICE, assignment -> new ExpertFinding(ExpertDomain.DEVICE,
+                        FindingStatus.SUPPORTED, "device", List.of("device:1"), .8, List.of()),
+                ExpertDomain.SECURITY, assignment -> new ExpertFinding(ExpertDomain.SECURITY,
+                        FindingStatus.SUPPORTED, "security", List.of("security:1"), .8, List.of())),
+                Runnable::run);
+        var service = new ExpertCollaborationService(question -> {
+            plannerCalled.set(true);
+            return plan();
+        }, graph, (plan, findings) -> new Synthesis(FindingStatus.SUPPORTED, "ok",
+                List.of("energy:1"), .8, List.of()), store, rejectingPublisher,
+                executor, Duration.ofSeconds(2), CLOCK);
+
+        try {
+            assertThatThrownBy(() -> service.start("energy consumption"))
+                    .isInstanceOf(com.example.smartpark.execution.ExecutionEventCapacityException.class);
+
+            assertThat(rejectedRunId).doesNotHaveValue(null);
+            assertThat(store.get(rejectedRunId.get()).status()).isEqualTo(CollaborationRun.RunStatus.FAILED);
+            assertThat(store.get(rejectedRunId.get()).error()).isEqualTo("collaboration trace admission failed");
+            assertThat(plannerCalled).isFalse();
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     @Test void publishesOneFailureWhenPlannerFails() throws Exception {

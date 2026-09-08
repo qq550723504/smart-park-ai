@@ -40,7 +40,7 @@ public class OperationsDailyReportService {
             throw new IllegalStateException("已有正在生成的运营日报，请等待完成后再启动");
         }
         UUID runId = UUID.randomUUID();
-        OperationsDailyReport report;
+        OperationsDailyReport report = null;
         try {
             report = store.create(runId, clock.instant());
             publish(runId, ExecutionStage.INITIALIZATION, ExecutionEventType.RUN_STARTED,
@@ -48,6 +48,17 @@ public class OperationsDailyReportService {
             runSection(runId, 0);
             return report;
         } catch (RuntimeException failure) {
+            if (report != null) {
+                try {
+                    // A report is accepted only when its replayable trace is
+                    // admitted. Terminalize the snapshot if the first event
+                    // fails so it cannot survive forever as a RUNNING ghost.
+                    OperationsDailyReport current = store.get(report.runId()).orElse(report);
+                    store.update(current.withStatus("FAILED", clock.instant()));
+                } catch (RuntimeException rollbackFailure) {
+                    failure.addSuppressed(rollbackFailure);
+                }
+            }
             store.releaseRun();
             throw failure;
         }

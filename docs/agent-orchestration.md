@@ -152,6 +152,10 @@ returning a run whose trace cannot be opened; only an exact event already presen
 in the projection is treated as a harmless duplicate. If the initial projection
 cannot be admitted, the durable run is terminalized before the request returns;
 later same-key replays can restore its failed trace but never schedule that run.
+The same admission invariant is enforced by existing server-owned child run
+starters used by the definition: a collaboration or operations-report snapshot
+whose first trace event is rejected is terminalized before control returns, and
+no worker/section is allowed to start from that rejected registration.
 
 The UI exposes the launch action only when the required Operations Analysis
 capability is reported available; the backend independently rechecks that
