@@ -1066,12 +1066,54 @@ class OrchestrationServiceTest {
     }
 
     @Test
-    void approvalWaitProjectionFailureKeepsTheDurableRecoverableState() {
+    void approvalWinningTheFailedWaitPersistenceRaceIsRecorded() {
+        FailNextUpdateStore store = new FailNextUpdateStore();
         AtomicInteger cancellations = new AtomicInteger();
         AtomicInteger retentionReleases = new AtomicInteger();
         OrchestrationPorts.WorkflowRunner workflow = new OrchestrationPorts.WorkflowRunner() {
-            @Override public WorkflowOutcome start(String alertId) { return workflowOutcome("WAITING_APPROVAL"); }
-            @Override public WorkflowOutcome get(String workflowId) { return workflowOutcome("WAITING_APPROVAL"); }
+            @Override public WorkflowOutcome start(String alertId) {
+                throw new AssertionError("shared alert start must not be used");
+            }
+            @Override public WorkflowOutcome startOwned(String alertId, Instant approvalExpiresAt) {
+                store.failAfterSuccessfulUpdates(1);
+                return workflowOutcome("WAITING_APPROVAL");
+            }
+            @Override public WorkflowOutcome get(String workflowId) { return workflowOutcome("COMPLETED"); }
+            @Override public WorkflowOutcome cancel(String workflowId) {
+                cancellations.incrementAndGet();
+                return workflowOutcome("COMPLETED");
+            }
+            @Override public void releaseRetention(String workflowId) {
+                retentionReleases.incrementAndGet();
+            }
+        };
+        Harness harness = harness(new Capabilities(true, false, false, false, true), Runnable::run,
+                input -> availableSecurity(), workflow,
+                question -> {
+                    UUID id = UUID.randomUUID();
+                    return new StartedChild(id, CompletableFuture.completedFuture(completedChild(id)));
+                }, alertId -> "B1", store);
+        OrchestrationInput input = new OrchestrationInput("处置告警", "ALT-001", List.of(),
+                false, false, false, true);
+
+        OrchestrationRun run = harness.service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                input, "approval-wins-wait-write-race", null, "OPERATOR").run();
+
+        assertThat(cancellations).hasValue(1);
+        assertThat(retentionReleases).hasValue(1);
+        assertThat(run.status()).isEqualTo(OrchestrationStatus.COMPLETED);
+        assertThat(step(run, "alert-workflow").status()).isEqualTo(OrchestrationStepStatus.COMPLETED);
+        assertThat(step(run, "alert-workflow").approvalResult()).isEqualTo("APPROVED");
+    }
+
+    @Test
+    void approvalWaitProjectionFailureKeepsTheDurableRecoverableState() {
+        AtomicReference<String> workflowStatus = new AtomicReference<>("WAITING_APPROVAL");
+        AtomicInteger cancellations = new AtomicInteger();
+        AtomicInteger retentionReleases = new AtomicInteger();
+        OrchestrationPorts.WorkflowRunner workflow = new OrchestrationPorts.WorkflowRunner() {
+            @Override public WorkflowOutcome start(String alertId) { return workflowOutcome(workflowStatus.get()); }
+            @Override public WorkflowOutcome get(String workflowId) { return workflowOutcome(workflowStatus.get()); }
             @Override public WorkflowOutcome cancel(String workflowId) {
                 cancellations.incrementAndGet();
                 return workflowOutcome("CANCELLED");
@@ -1104,6 +1146,18 @@ class OrchestrationServiceTest {
         assertThat(step(run, "alert-workflow").status()).isEqualTo(OrchestrationStepStatus.WAITING_APPROVAL);
         assertThat(cancellations).hasValue(0);
         assertThat(retentionReleases).hasValue(0);
+
+        workflowStatus.set("COMPLETED");
+        OrchestrationRun completed = harness.service.get(run.id());
+
+        assertThat(completed.status()).isEqualTo(OrchestrationStatus.COMPLETED);
+        assertThat(retentionReleases).hasValue(1);
+        List<ExecutionEvent> history = events.history(run.id());
+        assertThat(history).extracting(ExecutionEvent::sequence).containsExactlyElementsOf(
+                java.util.stream.LongStream.rangeClosed(1, history.size()).boxed().toList());
+        assertThat(history).extracting(ExecutionEvent::eventType)
+                .contains(ExecutionEventType.WAITING_APPROVAL, ExecutionEventType.APPROVAL_RESUMED)
+                .endsWith(ExecutionEventType.RUN_COMPLETED);
     }
 
     @Test

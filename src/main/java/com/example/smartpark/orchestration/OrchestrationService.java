@@ -539,9 +539,8 @@ public final class OrchestrationService {
             if (outcome == null) return false;
             if (cancelled(runId)) return false;
             if ("WAITING_APPROVAL".equals(outcome.status())) {
-                waitForApproval(runId, step.id(), outcome,
+                return waitForApproval(runId, step.id(), outcome,
                         outcome.approvalExpiresAt() == null ? approvalDeadline : outcome.approvalExpiresAt());
-                return false;
             }
             return applyWorkflowOutcome(runId, step.id(), outcome);
         } catch (RuntimeException failure) {
@@ -571,6 +570,7 @@ public final class OrchestrationService {
     private boolean reconcileApprovalLocked(UUID runId) {
         OrchestrationRun run = getStored(runId);
         if (run.status() != OrchestrationStatus.WAITING_APPROVAL) return false;
+        hydrateProjection(run);
         OrchestrationStep step = run.steps().stream()
                 .filter(item -> item.status() == OrchestrationStepStatus.WAITING_APPROVAL)
                 .findFirst().orElse(null);
@@ -680,11 +680,11 @@ public final class OrchestrationService {
         }
     }
 
-    private void waitForApproval(UUID runId, String stepId, WorkflowOutcome outcome,
-                                 Instant approvalDeadline) {
+    private boolean waitForApproval(UUID runId, String stepId, WorkflowOutcome outcome,
+                                    Instant approvalDeadline) {
         try (RunLockLease ignored = acquireRunLock(runId)) {
             OrchestrationRun current = getStored(runId);
-            if (current.status().isTerminal()) return;
+            if (current.status().isTerminal()) return false;
             Instant now = clock.instant();
             OrchestrationRun waiting;
             try {
@@ -700,7 +700,10 @@ public final class OrchestrationService {
                                     ExecutionEventType.WAITING_APPROVAL, ExecutionStatus.RUNNING, "等待人工审批"));
                 });
             } catch (RuntimeException persistenceFailure) {
-                compensateOwnedWorkflow(outcome.workflowId(), persistenceFailure);
+                WorkflowOutcome settled = compensateOwnedWorkflow(outcome.workflowId(), persistenceFailure);
+                if (settled != null) {
+                    return applyWorkflowOutcome(runId, stepId, settled);
+                }
                 throw persistenceFailure;
             }
             try {
@@ -708,7 +711,14 @@ public final class OrchestrationService {
             } catch (RuntimeException projectionFailure) {
                 LOGGER.warn("Unable to publish durable approval wait for orchestration {}", runId,
                         projectionFailure);
+                try {
+                    hydrateProjection(waiting);
+                } catch (RuntimeException hydrationFailure) {
+                    LOGGER.warn("Unable to hydrate durable approval trace for orchestration {}", runId,
+                            hydrationFailure);
+                }
             }
+            return false;
         }
     }
 
@@ -804,7 +814,8 @@ public final class OrchestrationService {
             try {
                 remembered = rememberChildReference(runId, stepId, outcome.workflowId());
             } catch (RuntimeException persistenceFailure) {
-                compensateOwnedWorkflow(outcome.workflowId(), persistenceFailure);
+                WorkflowOutcome settled = compensateOwnedWorkflow(outcome.workflowId(), persistenceFailure);
+                if (settled != null) return settled;
                 throw persistenceFailure;
             }
             if (!remembered) {
@@ -819,9 +830,12 @@ public final class OrchestrationService {
         }
     }
 
-    private void compensateOwnedWorkflow(String workflowId, RuntimeException primaryFailure) {
+    private WorkflowOutcome compensateOwnedWorkflow(String workflowId, RuntimeException primaryFailure) {
         try {
-            workflow.cancel(workflowId);
+            WorkflowOutcome outcome = workflow.cancel(workflowId);
+            if ("COMPLETED".equals(outcome.status()) || "REJECTED".equals(outcome.status())) {
+                return outcome;
+            }
         } catch (RuntimeException cleanupFailure) {
             primaryFailure.addSuppressed(cleanupFailure);
         }
@@ -830,6 +844,7 @@ public final class OrchestrationService {
         } catch (RuntimeException cleanupFailure) {
             primaryFailure.addSuppressed(cleanupFailure);
         }
+        return null;
     }
 
     private void releaseWorkflowRetention(String workflowId) {
