@@ -101,6 +101,40 @@ beforeEach(() => {
 })
 
 describe('ShowcaseHome truthful catalog selection', () => {
+  it('labels cockpit capabilities without presenting missing data as runnable', async () => {
+    vi.mocked(getShowcaseScenarios).mockResolvedValue(catalog([
+      scenario('ALERT_WORKFLOW', 'READY', true, null),
+      scenario('OPERATIONS_ANALYSIS', 'NOT_READY', false, '在线验证已过期'),
+      scenario('EXPERT_COLLABORATION', 'READY', true, null),
+    ]))
+
+    const wrapper = await mountLoaded()
+    const workflow = wrapper.get('[data-cockpit-capability="运维剧本"]')
+    const energy = wrapper.get('[data-cockpit-capability="节能优化"]')
+    const allAgents = wrapper.get('[data-cockpit-capability="完整演示"]')
+
+    expect(workflow.attributes('data-mapping')).toBe('DIRECT_REUSE')
+    expect(workflow.attributes('data-capability-state')).toBe('READY')
+    expect(energy.attributes('data-capability-state')).toBe('NOT_READY')
+    expect(energy.attributes('disabled')).toBeDefined()
+    expect(allAgents.attributes('data-mapping')).toBe('NOT_READY')
+    expect(allAgents.attributes('title')).toContain('多场景编排 API')
+  })
+
+  it('opens an available adapted security capability in its real workbench view', async () => {
+    vi.mocked(getShowcaseScenarios).mockResolvedValue(catalog([
+      scenario('EXPERT_COLLABORATION', 'READY', true, null),
+    ]))
+
+    const wrapper = await mountLoaded()
+    const security = wrapper.get('[data-cockpit-capability="安防剧本"]')
+    expect(security.attributes('data-mapping')).toBe('ADAPTED')
+    expect(security.attributes('data-capability-state')).toBe('AVAILABLE')
+
+    await security.trigger('click')
+    expect(wrapper.emitted('enter-workbench')).toEqual([['security-incidents']])
+  })
+
   it('renders the platform positioning tagline on the homepage', async () => {
     vi.mocked(getShowcaseScenarios).mockResolvedValue(catalog([
       scenario('CUSTOMER_SERVICE', 'READY', true, null),
