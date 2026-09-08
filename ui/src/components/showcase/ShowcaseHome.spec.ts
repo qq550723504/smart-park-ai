@@ -111,12 +111,17 @@ describe('ShowcaseHome truthful catalog selection', () => {
     const wrapper = await mountLoaded()
     const workflow = wrapper.get('[data-cockpit-capability="运维剧本"]')
     const energy = wrapper.get('[data-cockpit-capability="节能优化"]')
+    const predictiveMaintenance = wrapper.get('[data-cockpit-capability="预测性维护"]')
     const allAgents = wrapper.get('[data-cockpit-capability="完整演示"]')
 
     expect(workflow.attributes('data-mapping')).toBe('DIRECT_REUSE')
     expect(workflow.attributes('data-capability-state')).toBe('READY')
     expect(energy.attributes('data-capability-state')).toBe('NOT_READY')
     expect(energy.attributes('disabled')).toBeDefined()
+    expect(predictiveMaintenance.attributes('data-mapping')).toBe('NOT_READY')
+    expect(predictiveMaintenance.attributes('data-capability-state')).toBe('NOT_READY')
+    expect(predictiveMaintenance.attributes('disabled')).toBeDefined()
+    expect(predictiveMaintenance.attributes('title')).toContain('预测模型')
     expect(allAgents.attributes('data-mapping')).toBe('NOT_READY')
     expect(allAgents.attributes('title')).toContain('多场景编排 API')
   })
@@ -481,7 +486,7 @@ describe('ShowcaseHome truthful catalog selection', () => {
 
     expect(wrapper.text()).toContain('治理状态暂不可用')
     expect(wrapper.text()).toContain('跨域专家协作')
-    for (const label of ['预测性维护', '安防剧本', '安防完整']) {
+    for (const label of ['安防剧本', '安防完整']) {
       const capability = wrapper.get(`[data-cockpit-capability="${label}"]`)
       expect(capability.attributes('data-capability-state')).toBe('UNAVAILABLE')
       expect(capability.attributes('disabled')).toBeDefined()

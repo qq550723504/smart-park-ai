@@ -35,7 +35,7 @@ const cockpitCapabilities: CockpitCapability[] = [
   { label: '运维剧本', mapping: 'DIRECT_REUSE', scenarioId: 'ALERT_WORKFLOW' },
   { label: '节能优化', mapping: 'DIRECT_REUSE', scenarioId: 'OPERATIONS_ANALYSIS' },
   { label: '异常诊断', mapping: 'DIRECT_REUSE', scenarioId: 'EXPERT_COLLABORATION' },
-  { label: '预测性维护', mapping: 'ADAPTED', view: 'operations' },
+  { label: '预测性维护', mapping: 'NOT_READY', unavailableReason: '缺少设备时序历史、预测模型与维护领域 API' },
   { label: '完整演示', mapping: 'NOT_READY', unavailableReason: '缺少多场景编排 API' },
   { label: '安防剧本', mapping: 'ADAPTED', view: 'security-incidents' },
   { label: '误报过滤', mapping: 'NOT_READY', unavailableReason: '缺少误报判定模型' },
