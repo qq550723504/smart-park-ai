@@ -107,7 +107,9 @@ for the same alert reuse the first work order. Terminal owned executions, graph
 checkpoints, legacy events and projected unified trace events are retained up to
 `SMARTPARK_WORKFLOW_MAX_RETAINED_EXCLUSIVE_EXECUTIONS` (default `200`) and then
 removed oldest-first. Active owned executions and reusable direct Alert Workflow
-executions are not eligible for that compaction.
+executions are not eligible for that compaction. If the initial child trace cannot
+be admitted, its pre-start execution registration, checkpoint and partial legacy
+events are rolled back immediately instead of waiting for terminal compaction.
 Before admitting a requested action with an explicit building scope, the
 orchestrator resolves the alert through the existing `AlertPort` and rejects the
 request unless the alert belongs to one of those buildings.
@@ -131,6 +133,9 @@ maps the key to a request fingerprint (definition, role and normalized input):
   boundary, and only then is the parent reported `CANCELLED`; if that child has
   already failed, cancellation still terminates the parent and all remaining
   steps instead of continuing to a partial final summary;
+- if approval settles while cancellation is in flight, the settled child outcome
+  is recorded for audit, but the parent and every still-pending step are still
+  cancelled and no final-summary work is scheduled;
 - duplicate approval observation sees an already terminal step/run and is a
   no-op.
 

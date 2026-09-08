@@ -219,11 +219,23 @@ public final class AlertWorkflow {
             return executionStore.get(execution.workflowId()).orElseThrow();
         }
 
-        long startedSequence = nodes.publish(
-                workflowId,
-                WorkflowEvent.EventType.STARTED,
-                "workflow",
-                "alert workflow started");
+        long startedSequence;
+        try {
+            startedSequence = nodes.publish(
+                    workflowId,
+                    WorkflowEvent.EventType.STARTED,
+                    "workflow",
+                    "alert workflow started");
+        }
+        catch (RuntimeException admissionFailure) {
+            try {
+                executionStore.discardUnstarted(execution, this::releaseWorkflowResources);
+            }
+            catch (RuntimeException cleanupFailure) {
+                admissionFailure.addSuppressed(cleanupFailure);
+            }
+            throw admissionFailure;
+        }
 
         RunnableConfig config = RunnableConfig.builder().threadId(graphThreadId).build();
         try {
@@ -509,7 +521,7 @@ public final class AlertWorkflow {
 
     private void retireTerminalExecution(WorkflowExecutionStore.Execution execution) {
         try {
-            executionStore.markTerminalAndCompact(execution, this::releaseExclusiveResources);
+            executionStore.markTerminalAndCompact(execution, this::releaseWorkflowResources);
         }
         catch (RuntimeException cleanupFailure) {
             // The terminal result remains authoritative. The store deliberately keeps an entry
@@ -518,7 +530,7 @@ public final class AlertWorkflow {
         }
     }
 
-    private void releaseExclusiveResources(WorkflowExecutionStore.Execution execution) {
+    private void releaseWorkflowResources(WorkflowExecutionStore.Execution execution) {
         try {
             checkpointSaver.release(RunnableConfig.builder()
                     .threadId(execution.graphThreadId())

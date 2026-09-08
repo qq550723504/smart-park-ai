@@ -876,12 +876,13 @@ class OrchestrationServiceTest {
                 .endsWith(ExecutionEventType.RUN_CANCELLED);
     }
 
-    @Test
-    void cancellationDoesNotClaimSuccessWhenApprovalWonTheChildRace() {
+    @ParameterizedTest
+    @ValueSource(strings = {"COMPLETED", "REJECTED"})
+    void cancellationRecordsASettledApprovalChildButCancelsRemainingWork(String childStatus) {
         OrchestrationPorts.WorkflowRunner workflow = new OrchestrationPorts.WorkflowRunner() {
             @Override public WorkflowOutcome start(String alertId) { return workflowOutcome("WAITING_APPROVAL"); }
-            @Override public WorkflowOutcome get(String workflowId) { return workflowOutcome("COMPLETED"); }
-            @Override public WorkflowOutcome cancel(String workflowId) { return workflowOutcome("COMPLETED"); }
+            @Override public WorkflowOutcome get(String workflowId) { return workflowOutcome("WAITING_APPROVAL"); }
+            @Override public WorkflowOutcome cancel(String workflowId) { return workflowOutcome(childStatus); }
         };
         Harness harness = harness(new Capabilities(true, false, false, false, true), Runnable::run,
                 input -> availableSecurity(), workflow);
@@ -892,9 +893,13 @@ class OrchestrationServiceTest {
 
         OrchestrationRun observed = harness.service.cancel(accepted.id());
 
-        assertThat(observed.status()).isEqualTo(OrchestrationStatus.COMPLETED);
+        assertThat(observed.status()).isEqualTo(OrchestrationStatus.CANCELLED);
         assertThat(step(observed, "alert-workflow").status()).isEqualTo(OrchestrationStepStatus.COMPLETED);
-        assertThat(observed.cancelRequested()).isFalse();
+        assertThat(step(observed, "final-summary").status()).isEqualTo(OrchestrationStepStatus.CANCELLED);
+        assertThat(observed.cancelRequested()).isTrue();
+        assertThat(observed.traceEvents()).extracting(OrchestrationTraceRecord::eventType)
+                .contains(ExecutionEventType.STEP_COMPLETED)
+                .endsWith(ExecutionEventType.RUN_CANCELLED);
     }
 
     @Test

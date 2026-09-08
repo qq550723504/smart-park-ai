@@ -225,65 +225,90 @@ public final class OrchestrationService {
                             || step.status() == OrchestrationStepStatus.WAITING_APPROVAL)
                     .map(OrchestrationStep::type).findFirst().orElse(null);
             boolean childCancellationAttempted = false;
+            WorkflowOutcome settledWorkflow = null;
             if (activeType == OrchestrationStepType.ALERT_WORKFLOW
                     && childReference != null && workflow != null) {
                 WorkflowOutcome child = workflow.cancel(childReference);
                 childCancellationAttempted = true;
-                if (!"CANCELLED".equals(child.status()) && !isTerminalWorkflowFailure(child.status())) {
-                    return resolveWorkflowCancellationRace(runId, current, child);
+                if ("COMPLETED".equals(child.status()) || "REJECTED".equals(child.status())) {
+                    settledWorkflow = child;
+                }
+                else if ("APPROVAL_EXPIRED".equals(child.status())) {
+                    settledWorkflow = child;
+                }
+                else if (!"CANCELLED".equals(child.status()) && !isTerminalWorkflowFailure(child.status())) {
+                    throw new IllegalStateException("approval child could not be cancelled: " + child.status());
                 }
             }
             Instant now = clock.instant();
+            WorkflowOutcome settledChild = settledWorkflow;
+            int firstNewTraceIndex = current.traceEvents().size();
             OrchestrationRun cancelled = store.update(runId, run -> run.copy(
                     OrchestrationStatus.CANCELLED, run.startedAt(), now, "编排已取消",
-                    run.steps().stream().map(step ->
-                            step.status() == OrchestrationStepStatus.PENDING
-                                    || step.status() == OrchestrationStepStatus.RUNNING
-                                    || step.status() == OrchestrationStepStatus.WAITING_APPROVAL
-                            ? step.transition(OrchestrationStepStatus.CANCELLED, now, null, null,
-                                    null, null, "编排已取消") : step).toList(),
-                    run.evidence(), "编排已取消", run.result(), true,
-                    appendedTrace(run, "orchestrator", ExecutionStage.COMPLETION,
-                            ExecutionEventType.RUN_CANCELLED, ExecutionStatus.INTERRUPTED,
-                            "园区异常联合研判已取消")));
+                    cancelledSteps(run, settledChild, now),
+                    cancelledEvidence(run, settledChild), "编排已取消", run.result(), true,
+                    cancelledTrace(run, settledChild)));
             if (!childCancellationAttempted) cancelChild(activeType, childReference);
-            publishProjection(cancelled);
+            publishProjections(cancelled, firstNewTraceIndex);
             return cancelled;
         }
     }
 
-    private OrchestrationRun resolveWorkflowCancellationRace(UUID runId, OrchestrationRun current,
-                                                               WorkflowOutcome child) {
-        OrchestrationStep step = current.steps().stream()
-                .filter(item -> item.type() == OrchestrationStepType.ALERT_WORKFLOW
-                        && (item.status() == OrchestrationStepStatus.RUNNING
-                            || item.status() == OrchestrationStepStatus.WAITING_APPROVAL))
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("approval step is no longer cancellable"));
-        if ("APPROVAL_EXPIRED".equals(child.status())) {
-            if (step.status() == OrchestrationStepStatus.WAITING_APPROVAL) {
-                expireApprovalLocked(runId, step);
-            } else {
-                failStep(runId, step.id(), "人工审批等待超时", false);
-                executor.execute(() -> execute(runId));
+    private static List<OrchestrationStep> cancelledSteps(
+            OrchestrationRun run,
+            WorkflowOutcome settledChild,
+            Instant now) {
+        List<OrchestrationStep> steps = new ArrayList<>(run.steps());
+        if (settledChild != null) {
+            int index = stepIndex(steps, "alert-workflow");
+            OrchestrationStep step = steps.get(index);
+            if ("APPROVAL_EXPIRED".equals(settledChild.status())) {
+                steps.set(index, step.transition(OrchestrationStepStatus.FAILED, now,
+                        null, null, settledChild.workflowId(), settledChild.evidenceReferences(),
+                        "人工审批等待超时"));
             }
-            return getStored(runId);
+            else {
+                String summary = "REJECTED".equals(settledChild.status())
+                        ? "人工拒绝了处置动作" : "处置工作流已完成";
+                steps.set(index, step.complete(now, summary, settledChild.workflowId(),
+                        settledChild.evidenceReferences(), List.of(), List.of(), null)
+                        .withApprovalResult(settledChild.approvalResult()));
+            }
         }
-        boolean completed = "COMPLETED".equals(child.status()) || "REJECTED".equals(child.status());
-        if (!completed) {
-            throw new IllegalStateException("approval child could not be cancelled: " + child.status());
+        return steps.stream().map(step ->
+                step.status() == OrchestrationStepStatus.PENDING
+                        || step.status() == OrchestrationStepStatus.RUNNING
+                        || step.status() == OrchestrationStepStatus.WAITING_APPROVAL
+                ? step.transition(OrchestrationStepStatus.CANCELLED, now, null, null,
+                        null, null, "编排已取消") : step).toList();
+    }
+
+    private static List<String> cancelledEvidence(OrchestrationRun run, WorkflowOutcome settledChild) {
+        if (settledChild == null || "APPROVAL_EXPIRED".equals(settledChild.status())) {
+            return run.evidence();
         }
-        String summary = "REJECTED".equals(child.status())
-                ? "人工拒绝了处置动作" : "处置工作流已完成";
-        if (step.status() == OrchestrationStepStatus.WAITING_APPROVAL) {
-            commitApprovalResume(runId, step.id(), true, summary, child.workflowId(),
-                    child.evidenceReferences(), child.approvalResult());
-        } else {
-            completeStep(runId, step.id(), summary, child.workflowId(), child.evidenceReferences(),
-                    List.of(), List.of(), null, child.approvalResult());
+        LinkedHashSet<String> evidence = new LinkedHashSet<>(run.evidence());
+        evidence.addAll(settledChild.evidenceReferences());
+        return List.copyOf(evidence);
+    }
+
+    private List<OrchestrationTraceRecord> cancelledTrace(
+            OrchestrationRun run,
+            WorkflowOutcome settledChild) {
+        List<OrchestrationTraceRecord> trace = run.traceEvents();
+        if (settledChild != null) {
+            boolean expired = "APPROVAL_EXPIRED".equals(settledChild.status());
+            String summary = expired ? "人工审批等待超时"
+                    : "REJECTED".equals(settledChild.status())
+                    ? "人工拒绝了处置动作" : "处置工作流已完成";
+            trace = appendedTrace(trace, "alert-workflow",
+                    expired ? ExecutionStage.FAILURE : stageFor("alert-workflow"),
+                    expired ? ExecutionEventType.STEP_FAILED : ExecutionEventType.STEP_COMPLETED,
+                    expired ? ExecutionStatus.FAILED : ExecutionStatus.RUNNING, summary);
         }
-        executor.execute(() -> execute(runId));
-        return getStored(runId);
+        return appendedTrace(trace, "orchestrator", ExecutionStage.COMPLETION,
+                ExecutionEventType.RUN_CANCELLED, ExecutionStatus.INTERRUPTED,
+                "园区异常联合研判已取消");
     }
 
     private static boolean isTerminalWorkflowFailure(String status) {

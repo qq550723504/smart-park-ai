@@ -41,6 +41,9 @@ public interface WorkflowExecutionStore {
 
     Optional<Execution> execution(String workflowId);
 
+    /** Removes an execution that never crossed its start-event admission boundary. */
+    void discardUnstarted(Execution execution, Consumer<Execution> cleanup);
+
     /**
      * Marks an execution terminal and evicts the oldest terminal exclusive executions above the
      * configured retention bound. Cleanup runs before removal so a failed cleanup remains retryable.
@@ -241,6 +244,25 @@ final class InMemoryWorkflowExecutionStore implements WorkflowExecutionStore {
     @Override
     public Optional<Execution> execution(String workflowId) {
         return Optional.ofNullable(executions.get(workflowId));
+    }
+
+    @Override
+    public synchronized void discardUnstarted(
+            Execution execution,
+            Consumer<Execution> cleanup) {
+        Objects.requireNonNull(execution, "execution");
+        Objects.requireNonNull(cleanup, "cleanup");
+        if (executions.get(execution.workflowId()) != execution) {
+            return;
+        }
+        try {
+            cleanup.accept(execution);
+        }
+        finally {
+            // Admission failed before graph execution, so keeping an unusable registry entry is
+            // always worse than surfacing a best-effort resource-cleanup failure to the caller.
+            executions.remove(execution.workflowId(), execution);
+        }
     }
 
     @Override

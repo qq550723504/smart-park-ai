@@ -19,6 +19,7 @@ import com.example.smartpark.tool.device.DeviceQueryTool;
 import com.example.smartpark.tool.knowledge.ParkKnowledgeTool;
 import com.example.smartpark.tool.workorder.WorkOrderTool;
 import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Flux;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -114,6 +115,33 @@ class AlertWorkflowTest {
         assertThat(firstExecution.compiledGraph().stateOf(RunnableConfig.builder()
                 .threadId(firstExecution.graphThreadId())
                 .build())).isEmpty();
+    }
+
+    @Test
+    void startEventAdmissionFailureRollsBackTheUnstartedExecutionAndPartialEvents() {
+        MockParkFixture parkSystem = new MockParkFixture();
+        WorkflowExecutionStore store = WorkflowExecutionStore.inMemory(1);
+        FailingAdmissionPublisher publisher = new FailingAdmissionPublisher();
+        Fixture fixture = fixture(
+                parkSystem,
+                parkSystem.workOrders(),
+                "ALT-TEMP-001",
+                0.92,
+                0.92,
+                "LOW",
+                parkSystem.knowledge(),
+                () -> "wf-admission-failure",
+                CLOCK,
+                store,
+                publisher);
+
+        assertThatThrownBy(() -> fixture.workflow.startExclusive("ALT-TEMP-001", null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("execution event replay capacity is exhausted");
+
+        assertThat(store.execution("wf-admission-failure")).isEmpty();
+        assertThat(publisher.history("wf-admission-failure")).isEmpty();
+        assertThat(publisher.removed).isTrue();
     }
 
     @Test
@@ -806,6 +834,39 @@ class AlertWorkflowTest {
 
         private int createCalls() {
             return createCalls.get();
+        }
+    }
+
+    private static final class FailingAdmissionPublisher implements WorkflowEventPublisher {
+        private final WorkflowEventPublisher delegate = WorkflowEventPublisher.inMemory();
+        private boolean removed;
+
+        @Override
+        public WorkflowEvent publish(String workflowId, WorkflowEvent.EventType eventType,
+                                     String node, Instant timestamp, String summary) {
+            delegate.publish(workflowId, eventType, node, timestamp, summary);
+            throw new IllegalStateException("execution event replay capacity is exhausted");
+        }
+
+        @Override
+        public Flux<WorkflowEvent> events(String workflowId) {
+            return delegate.events(workflowId);
+        }
+
+        @Override
+        public List<WorkflowEvent> history(String workflowId) {
+            return delegate.history(workflowId);
+        }
+
+        @Override
+        public void complete(String workflowId) {
+            delegate.complete(workflowId);
+        }
+
+        @Override
+        public void remove(String workflowId) {
+            removed = true;
+            delegate.remove(workflowId);
         }
     }
 }
