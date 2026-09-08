@@ -110,13 +110,18 @@ public final class OrchestrationService {
     }
 
     public OrchestrationRun get(UUID runId) {
-        OrchestrationRun run = store.find(runId)
-                .orElseThrow(() -> new NoSuchElementException("Unknown orchestration run"));
+        OrchestrationRun run = snapshot(runId);
         if (run.status() == OrchestrationStatus.WAITING_APPROVAL) {
             reconcileApproval(runId);
-            run = store.find(runId).orElseThrow();
+            run = snapshot(runId);
         }
         return run;
+    }
+
+    /** Returns persisted state without reconciling or scheduling work. */
+    public OrchestrationRun snapshot(UUID runId) {
+        return store.find(runId)
+                .orElseThrow(() -> new NoSuchElementException("Unknown orchestration run"));
     }
 
     public OrchestrationRun cancel(UUID runId) {
@@ -228,7 +233,7 @@ public final class OrchestrationService {
             if (child == null) return false;
             ChildOutcome outcome = child.completion().join();
             if (cancelled(runId)) return false;
-            if (!"COMPLETED".equals(outcome.status())) {
+            if (!"COMPLETED".equals(outcome.status()) && !"PARTIAL".equals(outcome.status())) {
                 String reason = "NEEDS_CLARIFICATION".equals(outcome.status())
                         ? "运营分析需要澄清，编排未猜测用户选择" : "运营分析未完成";
                 if ("NEEDS_CLARIFICATION".equals(outcome.status())) {
@@ -238,7 +243,8 @@ public final class OrchestrationService {
                 return false;
             }
             completeStep(runId, step.id(), safeSummary(outcome.summary(), "运营分析已完成"),
-                    outcome.runId().toString(), outcome.evidenceReferences());
+                    outcome.runId().toString(), outcome.evidenceReferences(), List.of(), List.of(),
+                    outcome.partialReason());
             return true;
         } catch (RuntimeException failure) {
             if (cancelled(runId)) return false;
@@ -294,12 +300,13 @@ public final class OrchestrationService {
             if (child == null) return false;
             ChildOutcome outcome = child.completion().join();
             if (cancelled(runId)) return false;
-            if (!"COMPLETED".equals(outcome.status())) {
+            if (!"COMPLETED".equals(outcome.status()) && !"PARTIAL".equals(outcome.status())) {
                 failStep(runId, step.id(), "专家协作未完成", false);
                 return true;
             }
             completeStep(runId, step.id(), safeSummary(outcome.summary(), "专家协作已完成"),
-                    outcome.runId().toString(), outcome.evidenceReferences());
+                    outcome.runId().toString(), outcome.evidenceReferences(), List.of(), List.of(),
+                    outcome.partialReason());
             return true;
         } catch (RuntimeException failure) {
             if (cancelled(runId)) return false;

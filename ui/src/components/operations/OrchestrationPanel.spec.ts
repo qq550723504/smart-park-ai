@@ -156,6 +156,27 @@ describe('OrchestrationPanel', () => {
     wrapper.unmount()
   })
 
+  it('discards a definitively conflicting pending key before the next launch', async () => {
+    localStorage.setItem('smartpark.orchestration.pending.OPERATOR', 'stale-key')
+    vi.mocked(startOrchestration)
+      .mockRejectedValueOnce(new OrchestrationApiError(409, 'Idempotency-Key conflicts with another request'))
+      .mockResolvedValueOnce({ runId: run().runId, status: 'RUNNING', statusUrl: '/status',
+        traceUrl: '/trace', idempotentReplay: false })
+    vi.mocked(getOrchestration).mockResolvedValue({ ...run(), role: 'OPERATOR' })
+    const wrapper = mount(OrchestrationPanel, { props: { role: 'OPERATOR', available: true } })
+
+    await wrapper.get('[data-start-orchestration]').trigger('click')
+    await flushPromises()
+    expect(localStorage.getItem('smartpark.orchestration.pending.OPERATOR')).toBeNull()
+
+    await wrapper.get('[data-start-orchestration]').trigger('click')
+    await flushPromises()
+    expect(startOrchestration).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(startOrchestration).mock.calls[0][1]).toBe('stale-key')
+    expect(vi.mocked(startOrchestration).mock.calls[1][1]).not.toBe('stale-key')
+    wrapper.unmount()
+  })
+
   it('retries a transient refresh failure with capped exponential backoff', async () => {
     vi.useFakeTimers()
     try {

@@ -129,6 +129,52 @@ class OrchestrationServiceTest {
     }
 
     @Test
+    void partialOperationsOutcomeKeepsTheRequiredStepAndMarksTheRunPartial() {
+        UUID childId = UUID.randomUUID();
+        OrchestrationPorts.OperationsRunner operations = question -> new StartedChild(childId,
+                CompletableFuture.completedFuture(new ChildOutcome(childId, "PARTIAL",
+                        "运营结论基于受限结果", List.of("analysis:" + childId),
+                        "运营分析结果已达到查询上限，结论基于截断结果集", null)));
+        OrchestrationService service = new OrchestrationService(new InMemoryOrchestrationRunStore(),
+                () -> new Capabilities(true, false, false, false, false), operations,
+                null, null, null, null, new InMemoryExecutionEventPublisher(), Runnable::run, CLOCK);
+
+        OrchestrationRun run = service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                simpleInput(), "partial-operations", null, "OPERATOR").run();
+
+        assertThat(run.status()).isEqualTo(OrchestrationStatus.PARTIAL);
+        assertThat(step(run, "operations-analysis").status()).isEqualTo(OrchestrationStepStatus.COMPLETED);
+        assertThat(run.result().partialReasons()).containsExactly(
+                "运营分析结果已达到查询上限，结论基于截断结果集");
+    }
+
+    @Test
+    void partialCollaborationOutcomeKeepsItsUncertaintiesInTheFinalResult() {
+        OrchestrationPorts.OperationsRunner operations = question -> {
+            UUID id = UUID.randomUUID();
+            return new StartedChild(id, CompletableFuture.completedFuture(completedChild(id)));
+        };
+        UUID collaborationId = UUID.randomUUID();
+        OrchestrationPorts.CollaborationRunner collaboration = question -> new StartedChild(collaborationId,
+                CompletableFuture.completedFuture(new ChildOutcome(collaborationId, "PARTIAL",
+                        "无法确认跨域关联", List.of("expert:evidence-1"),
+                        "专家协作证据不足：设备时间窗缺失；需要人工复核", null)));
+        OrchestrationService service = new OrchestrationService(new InMemoryOrchestrationRunStore(),
+                () -> new Capabilities(true, false, true, false, false), operations,
+                null, collaboration, null, null, new InMemoryExecutionEventPublisher(), Runnable::run, CLOCK);
+        OrchestrationInput input = new OrchestrationInput("跨域异常", null, List.of(),
+                false, true, false, false);
+
+        OrchestrationRun run = service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                input, "partial-collaboration", null, "OPERATOR").run();
+
+        assertThat(run.status()).isEqualTo(OrchestrationStatus.PARTIAL);
+        assertThat(step(run, "expert-collaboration").status()).isEqualTo(OrchestrationStepStatus.COMPLETED);
+        assertThat(run.result().partialReasons()).containsExactly(
+                "专家协作证据不足：设备时间窗缺失；需要人工复核");
+    }
+
+    @Test
     void rechecksCapabilitiesBeforeEachStepAndDoesNotInvokeOneDisabledDuringTheRun() {
         AtomicReference<Capabilities> current = new AtomicReference<>(
                 new Capabilities(true, true, false, false, false));

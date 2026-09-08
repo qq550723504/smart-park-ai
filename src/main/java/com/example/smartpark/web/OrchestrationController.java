@@ -49,8 +49,9 @@ public class OrchestrationController {
             @PathVariable UUID runId,
             @RequestHeader("X-Demo-Role") String role) {
         DemoRole.require(role, DemoRole.VIEWER, DemoRole.OPERATOR, DemoRole.APPROVER, DemoRole.ADMIN);
+        DemoRole requester = DemoRole.parse(role);
+        requireRunAccess(service.snapshot(runId), requester);
         OrchestrationRun run = service.get(runId);
-        requireRunAccess(run, DemoRole.parse(role));
         return OrchestrationDtos.RunResponse.from(run);
     }
 
@@ -59,8 +60,8 @@ public class OrchestrationController {
             @PathVariable UUID runId,
             @RequestHeader("X-Demo-Role") String role) {
         DemoRole.require(role, DemoRole.VIEWER, DemoRole.OPERATOR, DemoRole.APPROVER, DemoRole.ADMIN);
-        OrchestrationRun current = service.get(runId);
-        requireRunAccess(current, DemoRole.parse(role));
+        DemoRole requester = DemoRole.parse(role);
+        requireRunAccess(service.snapshot(runId), requester);
         return OrchestrationDtos.RunResponse.from(service.cancel(runId));
     }
 

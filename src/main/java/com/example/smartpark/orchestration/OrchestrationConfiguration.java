@@ -6,6 +6,8 @@ import com.example.smartpark.analytics.energy.EnergyTimeSeriesDtos;
 import com.example.smartpark.analytics.energy.EnergyTimeSeriesQuery;
 import com.example.smartpark.analytics.energy.EnergyTimeSeriesService;
 import com.example.smartpark.collaboration.ExpertCollaborationService;
+import com.example.smartpark.collaboration.model.CollaborationRun;
+import com.example.smartpark.collaboration.model.FindingStatus;
 import com.example.smartpark.execution.ExecutionEventArchive;
 import com.example.smartpark.execution.ExecutionEventPublisher;
 import com.example.smartpark.operations.OperationsCapabilitiesService;
@@ -100,10 +102,7 @@ public class OrchestrationConfiguration {
                 if (service == null) throw new IllegalStateException("expert collaboration unavailable");
                 var accepted = service.start(question);
                 return new OrchestrationPorts.StartedChild(accepted.runId(), service.await(accepted.runId())
-                        .thenApply(run -> new OrchestrationPorts.ChildOutcome(
-                                run.runId(), run.status().name(),
-                                run.synthesis() == null ? "" : run.synthesis().conclusion(),
-                                run.synthesis() == null ? List.of() : run.synthesis().evidenceRefs(), run.error())));
+                        .thenApply(OrchestrationConfiguration::collaborationOutcome));
             }
 
             @Override
@@ -148,12 +147,32 @@ public class OrchestrationConfiguration {
         return args -> service.recover();
     }
 
-    private static OrchestrationPorts.ChildOutcome operationsOutcome(AnalysisRunStore.RunRecord run) {
+    static OrchestrationPorts.ChildOutcome operationsOutcome(AnalysisRunStore.RunRecord run) {
         List<String> evidence = new ArrayList<>();
         evidence.add("operations-analysis-run:" + run.runId());
         if (run.timeResolution() != null) evidence.add("time-source:" + run.timeResolution().source());
-        return new OrchestrationPorts.ChildOutcome(run.runId(), run.status(), run.summary(), evidence,
+        boolean partial = "COMPLETED".equals(run.status()) && run.truncated();
+        return new OrchestrationPorts.ChildOutcome(run.runId(), partial ? "PARTIAL" : run.status(),
+                run.summary(), evidence,
+                partial ? "运营分析结果已达到查询上限，结论基于截断结果集" : null,
                 run.failureStage());
+    }
+
+    static OrchestrationPorts.ChildOutcome collaborationOutcome(CollaborationRun run) {
+        boolean partial = run.status() == CollaborationRun.RunStatus.COMPLETED
+                && run.synthesis() != null
+                && run.synthesis().status() != FindingStatus.SUPPORTED;
+        String partialReason = null;
+        if (partial) {
+            String uncertainty = String.join("；", run.synthesis().uncertainties());
+            partialReason = uncertainty.isBlank()
+                    ? "专家协作证据不足"
+                    : "专家协作证据不足：" + uncertainty;
+        }
+        return new OrchestrationPorts.ChildOutcome(run.runId(), partial ? "PARTIAL" : run.status().name(),
+                run.synthesis() == null ? "" : run.synthesis().conclusion(),
+                run.synthesis() == null ? List.of() : run.synthesis().evidenceRefs(),
+                partialReason, run.error());
     }
 
     private static OrchestrationPorts.EvidenceOutcome energyOutcome(EnergyTimeSeriesService service,

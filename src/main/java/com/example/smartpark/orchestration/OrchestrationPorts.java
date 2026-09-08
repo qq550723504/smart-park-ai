@@ -52,9 +52,15 @@ public final class OrchestrationPorts {
     }
 
     public record ChildOutcome(UUID runId, String status, String summary,
-                               List<String> evidenceReferences, String failureReason) {
+                               List<String> evidenceReferences, String partialReason,
+                               String failureReason) {
         public ChildOutcome {
             evidenceReferences = List.copyOf(evidenceReferences == null ? List.of() : evidenceReferences);
+        }
+
+        public ChildOutcome(UUID runId, String status, String summary,
+                            List<String> evidenceReferences, String failureReason) {
+            this(runId, status, summary, evidenceReferences, null, failureReason);
         }
     }
 

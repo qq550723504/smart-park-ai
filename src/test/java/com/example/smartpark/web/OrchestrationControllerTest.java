@@ -19,6 +19,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -77,6 +79,7 @@ class OrchestrationControllerTest {
     @Test
     void preventsCrossRoleReadButAllowsAdminAndOwnerRole() throws Exception {
         OrchestrationRun run = run("OPERATOR", OrchestrationStatus.COMPLETED);
+        when(service.snapshot(run.id())).thenReturn(run);
         when(service.get(run.id())).thenReturn(run);
 
         mockMvc.perform(get("/api/orchestrations/runs/" + run.id()).header("X-Demo-Role", "VIEWER"))
@@ -85,6 +88,21 @@ class OrchestrationControllerTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("COMPLETED"));
         mockMvc.perform(get("/api/orchestrations/runs/" + run.id()).header("X-Demo-Role", "ADMIN"))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void rejectsCrossRoleAccessBeforeApprovalReconciliationOrCancellation() throws Exception {
+        OrchestrationRun run = run("APPROVER", OrchestrationStatus.WAITING_APPROVAL);
+        when(service.snapshot(run.id())).thenReturn(run);
+
+        mockMvc.perform(get("/api/orchestrations/runs/" + run.id()).header("X-Demo-Role", "VIEWER"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/orchestrations/runs/" + run.id() + "/cancel")
+                        .header("X-Demo-Role", "VIEWER"))
+                .andExpect(status().isForbidden());
+
+        verify(service, never()).get(run.id());
+        verify(service, never()).cancel(run.id());
     }
 
     private static OrchestrationRun run(String role, OrchestrationStatus status) {

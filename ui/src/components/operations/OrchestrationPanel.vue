@@ -125,16 +125,17 @@ async function start(): Promise<void> {
   const requestGeneration = generation
   loading.value = true
   error.value = ''
-  const key = localStorage.getItem(pendingKey.value) || nextKey()
+  const requestPendingKey = pendingKey.value
+  const key = localStorage.getItem(requestPendingKey) || nextKey()
   let acceptedRunId: string | null = null
-  localStorage.setItem(pendingKey.value, key)
+  localStorage.setItem(requestPendingKey, key)
   try {
     const accepted = await startOrchestration(props.role, key, launchInput())
     if (requestGeneration !== generation) return
     acceptedRunId = accepted.runId
     remember(accepted.runId)
     restoring.value = true
-    localStorage.removeItem(pendingKey.value)
+    localStorage.removeItem(requestPendingKey)
     const startedRun = await getOrchestration(props.role, accepted.runId)
     if (requestGeneration !== generation) return
     run.value = startedRun
@@ -142,6 +143,9 @@ async function start(): Promise<void> {
     trace(run.value)
     startPolling()
   } catch (cause) {
+    if (cause instanceof OrchestrationApiError && cause.status === 409) {
+      localStorage.removeItem(requestPendingKey)
+    }
     if (requestGeneration === generation) {
       error.value = cause instanceof Error ? cause.message : '编排启动失败'
       if (acceptedRunId) startPolling()
