@@ -3,6 +3,7 @@ package com.example.smartpark.analytics;
 import com.example.smartpark.analytics.agent.AnalyticsModelClient;
 import com.example.smartpark.analytics.catalog.MetricCatalog;
 import com.example.smartpark.analytics.agent.OperationsAnalysisGraph;
+import com.example.smartpark.execution.ExecutionEventCapacityException;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -455,6 +456,41 @@ class OperationsAnalysisServiceTest {
 
         reject.set(false);
         assertThat(service.start("恢复后问题").status()).isEqualTo("COMPLETED");
+    }
+
+    @Test
+    void propagatesTraceCapacityFailureBeforePersistingOrLaunchingAnalysis() {
+        AtomicBoolean exhausted = new AtomicBoolean(true);
+        AtomicReference<UUID> rejectedRunId = new AtomicReference<>();
+        var publisher = new com.example.smartpark.execution.InMemoryExecutionEventPublisher() {
+            @Override
+            public com.example.smartpark.execution.model.ExecutionEvent publish(
+                    com.example.smartpark.execution.model.ExecutionEvent event) {
+                rejectedRunId.compareAndSet(null, event.runId());
+                if (exhausted.get()) {
+                    throw new ExecutionEventCapacityException("replay capacity exhausted");
+                }
+                return super.publish(event);
+            }
+        };
+        AtomicInteger graphCalls = new AtomicInteger();
+        OperationsAnalysisService service = new OperationsAnalysisService(new MetricCatalog(),
+                (id, question, pinned) -> {
+                    graphCalls.incrementAndGet();
+                    return completed(id);
+                }, directExecutor(), DEFAULT_TIMEOUT, Clock.fixed(NOW, ZoneOffset.UTC), publisher);
+
+        assertThatThrownBy(() -> service.start("容量耗尽问题"))
+                .isInstanceOf(ExecutionEventCapacityException.class);
+        assertThat(graphCalls).hasValue(0);
+        assertThat(rejectedRunId.get()).isNotNull();
+        assertThat(publisher.history(rejectedRunId.get())).isEmpty();
+        assertThatThrownBy(() -> service.get(rejectedRunId.get()))
+                .isInstanceOf(java.util.NoSuchElementException.class);
+
+        exhausted.set(false);
+        assertThat(service.start("容量恢复后问题").status()).isEqualTo("COMPLETED");
+        assertThat(graphCalls).hasValue(1);
     }
 
     @Test

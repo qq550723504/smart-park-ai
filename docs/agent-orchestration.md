@@ -73,7 +73,9 @@ their internal events.
 safe summaries, state, evidence/source references, child run IDs and orchestration
 trace events. `SMARTPARK_ORCHESTRATION_STATE_FILE` selects the path. Compose
 mounts `/var/lib/smartpark/orchestration` on the `orchestration-state` named
-volume. Storage is bounded by `SMARTPARK_ORCHESTRATION_MAX_RETAINED_RUNS`
+volume; the backend image creates that mount point with ownership assigned to
+its non-root `app` user so a fresh volume is writable. Storage is bounded by
+`SMARTPARK_ORCHESTRATION_MAX_RETAINED_RUNS`
 (default `200`) and `SMARTPARK_ORCHESTRATION_MAX_ACTIVE_RUNS` (default `8`).
 Each durable run is capped by `SMARTPARK_ORCHESTRATION_MAX_RUN_BYTES` (default
 `131072`), and request identifiers are validated before admission.

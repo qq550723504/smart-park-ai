@@ -306,6 +306,39 @@ class OrchestrationServiceTest {
     }
 
     @Test
+    void idempotentReplayDoesNotDependOnMutableAlertAvailability() {
+        AtomicBoolean alertAvailable = new AtomicBoolean(true);
+        OrchestrationPorts.AlertScopeReader alertScope = alertId -> {
+            if (!alertAvailable.get()) throw new NoSuchElementException("alert unavailable");
+            return "B1";
+        };
+        OrchestrationPorts.OperationsRunner operations = question -> {
+            UUID id = UUID.randomUUID();
+            return new StartedChild(id, CompletableFuture.completedFuture(completedChild(id)));
+        };
+        Harness harness = harness(new Capabilities(true, false, false, false, true), Runnable::run,
+                input -> availableSecurity(), completedWorkflow(), operations, alertScope);
+        OrchestrationInput input = new OrchestrationInput("处置 B1 告警", "ALT-001", List.of("B1"),
+                true, false, false, true);
+
+        OrchestrationRunStore.StartResult first = harness.service.start(
+                OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                input, "stable-replay", null, "OPERATOR");
+        alertAvailable.set(false);
+        OrchestrationRunStore.StartResult replay = harness.service.start(
+                OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                input, "stable-replay", null, "OPERATOR");
+
+        assertThat(replay.created()).isFalse();
+        assertThat(replay.run().id()).isEqualTo(first.run().id());
+        assertThatThrownBy(() -> harness.service.start(
+                OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                input, "new-admission", null, "OPERATOR"))
+                .isInstanceOf(NoSuchElementException.class)
+                .hasMessageContaining("alert unavailable");
+    }
+
+    @Test
     void idempotencyFingerprintFramesStructuredFieldsIndependently() {
         Harness harness = harness(new Capabilities(true, false, false, false, false), Runnable::run);
         OrchestrationInput first = new OrchestrationInput("a, alertId=b", null, List.of(),

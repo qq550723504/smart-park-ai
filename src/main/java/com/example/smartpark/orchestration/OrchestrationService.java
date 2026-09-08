@@ -155,11 +155,14 @@ public final class OrchestrationService {
         try {
             java.util.Objects.requireNonNull(input, "input");
             OrchestrationDefinition.steps(definitionId);
-            validateActionScope(input);
             String fingerprint = fingerprint(definitionId, input, normalizedRole);
             reconcileWaitingApprovals();
             Instant now = clock.instant();
             OrchestrationRunStore.StartResult result = store.createOrGet(normalizedKey, fingerprint, () -> {
+                // The store invokes this factory only for a genuinely new
+                // idempotency key. Replays must remain independent of mutable
+                // alert-source availability after their first admission.
+                validateActionScope(input);
                 UUID id = UUID.randomUUID();
                 List<OrchestrationStep> steps = OrchestrationDefinition.steps(definitionId).stream()
                         .map(OrchestrationStep::pending).toList();

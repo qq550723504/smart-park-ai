@@ -713,8 +713,11 @@ public class OperationsAnalysisService {
                     resumed ? ExecutionEventType.RESUMED : ExecutionEventType.RUN_STARTED,
                     ExecutionStatus.RUNNING,
                     resumed ? "澄清已提交，继续运营分析" : "运营分析已启动", null));
-        } catch (IllegalStateException alreadyRegistered) {
-            // Trace already open for this run; nothing more to do.
+        } catch (IllegalStateException publishFailure) {
+            // A closed trace can legitimately win a raced lifecycle retry. An
+            // empty history proves this was not an existing trace (for example
+            // replay-capacity exhaustion), so admission must fail visibly.
+            if (events.history(runId).isEmpty()) throw publishFailure;
         }
     }
 

@@ -6,6 +6,8 @@ import com.example.smartpark.collaboration.model.FindingStatus;
 import com.example.smartpark.collaboration.model.Synthesis;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -41,5 +43,16 @@ class OrchestrationConfigurationTest {
         assertThat(outcome.status()).isEqualTo("PARTIAL");
         assertThat(outcome.partialReason()).contains("设备时间窗缺失", "需要人工复核");
         assertThat(outcome.evidenceReferences()).containsExactly("energy:1");
+    }
+
+    @Test
+    void backendImageOwnsTheOrchestrationVolumeMountPointBeforeDroppingPrivileges() throws Exception {
+        String dockerfile = Files.readString(Path.of("Dockerfile"));
+        String compose = Files.readString(Path.of("compose.yaml"));
+        String ownedMountPoint = "install -d -o app -g app /var/lib/smartpark/orchestration";
+
+        assertThat(dockerfile).contains(ownedMountPoint, "USER app");
+        assertThat(dockerfile.indexOf(ownedMountPoint)).isLessThan(dockerfile.indexOf("USER app"));
+        assertThat(compose).contains("orchestration-state:/var/lib/smartpark/orchestration");
     }
 }
