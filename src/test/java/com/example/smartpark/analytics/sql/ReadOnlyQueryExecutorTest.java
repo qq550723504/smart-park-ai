@@ -1,5 +1,9 @@
 package com.example.smartpark.analytics.sql;
 
+import com.example.smartpark.analytics.catalog.MetricCatalog;
+import com.example.smartpark.analytics.energy.EnergyTimeSeriesQuery;
+import com.example.smartpark.analytics.energy.EnergyTimeSeriesReader;
+import com.example.smartpark.analytics.energy.JdbcEnergyTimeSeriesReader;
 import com.example.smartpark.analytics.model.TabularResult;
 import com.example.smartpark.analytics.model.ValidatedSql;
 import org.junit.jupiter.api.AfterAll;
@@ -15,8 +19,9 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.DriverManager;
-import java.time.LocalDate;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
@@ -100,6 +105,30 @@ class ReadOnlyQueryExecutorTest {
         assertThat(result.rowCount()).isEqualTo(3);
         assertThat(result.truncated()).isFalse();
         assertThat(result.durationMs()).isGreaterThanOrEqualTo(0);
+    }
+
+    @Test
+    void executesEnergyTimeSeriesThroughTheRealViewExplainAndReadOnlyRole() {
+        var reader = new JdbcEnergyTimeSeriesReader(
+                new QueryCostGuard(jdbcTemplate), executor, ZoneId.of("Asia/Shanghai"));
+        Instant from = databaseCurrentDate.minusDays(1).atStartOfDay()
+                .atOffset(ZoneOffset.ofHours(8)).toInstant();
+        Instant to = databaseCurrentDate.atStartOfDay()
+                .atOffset(ZoneOffset.ofHours(8)).toInstant();
+
+        EnergyTimeSeriesReader.Snapshot snapshot = reader.read(
+                new EnergyTimeSeriesReader.Request(List.of("B1", "B2"), from, to,
+                        EnergyTimeSeriesQuery.Granularity.HOUR),
+                new MetricCatalog().findByName("energy_kwh").orElseThrow());
+
+        assertThat(snapshot.available()).isTrue();
+        assertThat(snapshot.truncated()).isFalse();
+        assertThat(snapshot.rows()).isNotEmpty().allSatisfy(row -> {
+            assertThat(row.buildingId()).isIn("B1", "B2");
+            assertThat(row.bucketTimestamp()).isBetween(from, to.minusSeconds(1));
+            assertThat(row.value()).isNotNull();
+            assertThat(row.observedAt()).isNotNull();
+        });
     }
 
     @Test

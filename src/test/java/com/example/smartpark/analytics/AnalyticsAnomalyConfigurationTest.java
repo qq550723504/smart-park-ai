@@ -12,7 +12,8 @@ class AnalyticsAnomalyConfigurationTest {
     void registersAnomalyReadersOnlyInsideTheAnalyticsCapability() throws Exception {
         String configuration = Files.readString(Path.of("src/main/java/com/example/smartpark/analytics/AnalyticsConfiguration.java"));
 
-        assertThat(configuration).contains("JdbcAlertAnalyticsReader", "JdbcDeviceAnalyticsReader", "JdbcEnergyAnalyticsReader");
+        assertThat(configuration).contains("JdbcAlertAnalyticsReader", "JdbcDeviceAnalyticsReader", "JdbcEnergyAnalyticsReader",
+                "JdbcEnergyTimeSeriesReader", "EnergyTimeSeriesService");
         assertThat(configuration).contains("@ConditionalOnProperty(name = \"smartpark.analytics.enabled\", havingValue = \"true\")");
     }
 }
