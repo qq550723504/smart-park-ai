@@ -44,11 +44,14 @@ public class OrchestrationConfiguration {
 
     @Bean
     OrchestrationRunStore orchestrationRunStore(
-            @Value("${smartpark.orchestration.state-file:./data/orchestration/runs.json}") String stateFile) {
+            @Value("${smartpark.orchestration.state-file:./data/orchestration/runs.json}") String stateFile,
+            @Value("${smartpark.orchestration.max-retained-runs:200}") int maxRetainedRuns,
+            @Value("${smartpark.orchestration.max-active-runs:8}") int maxActiveRuns) {
         // Spring Boot 4's HTTP stack uses tools.jackson. The graph dependencies
         // still carry com.fasterxml Jackson, so the durable adapter deliberately
         // owns its mapper instead of coupling the two incompatible bean types.
-        return new FileOrchestrationRunStore(Path.of(stateFile), new ObjectMapper().findAndRegisterModules());
+        return new FileOrchestrationRunStore(Path.of(stateFile), new ObjectMapper().findAndRegisterModules(),
+                maxRetainedRuns, maxActiveRuns);
     }
 
     @Bean

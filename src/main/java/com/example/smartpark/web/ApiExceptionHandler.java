@@ -2,6 +2,7 @@ package com.example.smartpark.web;
 
 import com.example.smartpark.analytics.anomaly.OperationsAnomalyService;
 import com.example.smartpark.analytics.energy.EnergyTimeSeriesService;
+import com.example.smartpark.orchestration.OrchestrationCapacityException;
 import com.example.smartpark.workflow.CustomerServiceValidationException;
 
 import org.springframework.http.HttpStatus;
@@ -71,6 +72,11 @@ public class ApiExceptionHandler {
     @ExceptionHandler(java.util.concurrent.RejectedExecutionException.class)
     ResponseEntity<WebDtos.ApiError> overloaded(java.util.concurrent.RejectedExecutionException exception) {
         return error(HttpStatus.TOO_MANY_REQUESTS, "Too many collaboration runs; retry later");
+    }
+
+    @ExceptionHandler(OrchestrationCapacityException.class)
+    ResponseEntity<WebDtos.ApiError> orchestrationOverloaded(OrchestrationCapacityException exception) {
+        return error(HttpStatus.TOO_MANY_REQUESTS, "Too many orchestration runs; retry later");
     }
 
     @ExceptionHandler({MethodArgumentNotValidException.class, HttpMessageNotReadableException.class})

@@ -11,8 +11,17 @@ import java.util.function.UnaryOperator;
 
 /** Test adapter; production wiring always uses the durable file store. */
 public final class InMemoryOrchestrationRunStore implements OrchestrationRunStore {
+    private final OrchestrationStoreLimits limits;
     private final Map<UUID, OrchestrationRun> runs = new LinkedHashMap<>();
     private final Map<String, UUID> keys = new LinkedHashMap<>();
+
+    public InMemoryOrchestrationRunStore() {
+        this(OrchestrationStoreLimits.defaults());
+    }
+
+    InMemoryOrchestrationRunStore(OrchestrationStoreLimits limits) {
+        this.limits = java.util.Objects.requireNonNull(limits, "limits");
+    }
 
     @Override
     public synchronized StartResult createOrGet(String key, String fingerprint,
@@ -25,8 +34,15 @@ public final class InMemoryOrchestrationRunStore implements OrchestrationRunStor
             }
             return new StartResult(existing, false);
         }
+        Map<UUID, OrchestrationRun> nextRuns = limits.prepareForAdmission(runs);
         OrchestrationRun created = factory.get();
-        runs.put(created.id(), created);
+        if (!key.equals(created.idempotencyKey()) || !fingerprint.equals(created.requestFingerprint())) {
+            throw new IllegalArgumentException("created run does not match its idempotency request");
+        }
+        nextRuns.put(created.id(), created);
+        runs.clear();
+        runs.putAll(nextRuns);
+        keys.entrySet().removeIf(entry -> !runs.containsKey(entry.getValue()));
         keys.put(key, created.id());
         return new StartResult(created, true);
     }

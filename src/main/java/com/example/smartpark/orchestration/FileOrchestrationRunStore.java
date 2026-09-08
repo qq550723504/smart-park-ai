@@ -12,6 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -29,17 +30,30 @@ public final class FileOrchestrationRunStore implements OrchestrationRunStore {
     private final Path stateFile;
     private final ObjectMapper mapper;
     private final AtomicReplacer atomicReplacer;
+    private final OrchestrationStoreLimits limits;
     private final Map<UUID, OrchestrationRun> runs = new LinkedHashMap<>();
     private final Map<String, UUID> idempotencyIndex = new LinkedHashMap<>();
 
     public FileOrchestrationRunStore(Path stateFile, ObjectMapper mapper) {
-        this(stateFile, mapper, FileOrchestrationRunStore::atomicReplace);
+        this(stateFile, mapper, OrchestrationStoreLimits.defaults(), FileOrchestrationRunStore::atomicReplace);
+    }
+
+    public FileOrchestrationRunStore(Path stateFile, ObjectMapper mapper,
+                                     int maxRetainedRuns, int maxActiveRuns) {
+        this(stateFile, mapper, new OrchestrationStoreLimits(maxRetainedRuns, maxActiveRuns),
+                FileOrchestrationRunStore::atomicReplace);
     }
 
     FileOrchestrationRunStore(Path stateFile, ObjectMapper mapper, AtomicReplacer atomicReplacer) {
+        this(stateFile, mapper, OrchestrationStoreLimits.defaults(), atomicReplacer);
+    }
+
+    FileOrchestrationRunStore(Path stateFile, ObjectMapper mapper,
+                              OrchestrationStoreLimits limits, AtomicReplacer atomicReplacer) {
         this.stateFile = stateFile.toAbsolutePath().normalize();
         this.mapper = mapper.copy().findAndRegisterModules();
-        this.atomicReplacer = java.util.Objects.requireNonNull(atomicReplacer, "atomicReplacer");
+        this.limits = Objects.requireNonNull(limits, "limits");
+        this.atomicReplacer = Objects.requireNonNull(atomicReplacer, "atomicReplacer");
         load();
     }
 
@@ -55,13 +69,14 @@ public final class FileOrchestrationRunStore implements OrchestrationRunStore {
             }
             return new StartResult(existing, false);
         }
+        Map<UUID, OrchestrationRun> nextRuns = limits.prepareForAdmission(runs);
         OrchestrationRun created = factory.get();
-        Map<UUID, OrchestrationRun> nextRuns = new LinkedHashMap<>(runs);
+        if (!key.equals(created.idempotencyKey()) || !fingerprint.equals(created.requestFingerprint())) {
+            throw new IllegalArgumentException("created run does not match its idempotency request");
+        }
         nextRuns.put(created.id(), created);
         persist(nextRuns.values());
-        runs.clear();
-        runs.putAll(nextRuns);
-        idempotencyIndex.put(key, created.id());
+        replaceState(nextRuns);
         return new StartResult(created, true);
     }
 
@@ -94,15 +109,32 @@ public final class FileOrchestrationRunStore implements OrchestrationRunStore {
         if (!Files.exists(stateFile)) return;
         try {
             List<OrchestrationRun> restored = mapper.readValue(stateFile.toFile(), RUN_LIST);
+            Map<UUID, OrchestrationRun> loaded = new LinkedHashMap<>();
+            Map<String, UUID> loadedKeys = new LinkedHashMap<>();
             for (OrchestrationRun run : restored) {
-                runs.put(run.id(), run);
-                UUID duplicate = idempotencyIndex.putIfAbsent(run.idempotencyKey(), run.id());
+                loaded.put(run.id(), run);
+                UUID duplicate = loadedKeys.putIfAbsent(run.idempotencyKey(), run.id());
                 if (duplicate != null && !duplicate.equals(run.id())) {
                     throw new IllegalStateException("duplicate orchestration idempotency key");
                 }
             }
+            Map<UUID, OrchestrationRun> compacted = limits.compactRetained(loaded);
+            if (compacted.size() != loaded.size()) persist(compacted.values());
+            replaceState(compacted);
         } catch (IOException | RuntimeException failure) {
             throw new IllegalStateException("unable to load orchestration state", failure);
+        }
+    }
+
+    private void replaceState(Map<UUID, OrchestrationRun> nextRuns) {
+        runs.clear();
+        runs.putAll(nextRuns);
+        idempotencyIndex.clear();
+        for (OrchestrationRun run : runs.values()) {
+            UUID duplicate = idempotencyIndex.putIfAbsent(run.idempotencyKey(), run.id());
+            if (duplicate != null && !duplicate.equals(run.id())) {
+                throw new IllegalStateException("duplicate orchestration idempotency key");
+            }
         }
     }
 

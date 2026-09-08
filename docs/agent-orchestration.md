@@ -73,7 +73,11 @@ their internal events.
 safe summaries, state, evidence/source references, child run IDs and orchestration
 trace events. `SMARTPARK_ORCHESTRATION_STATE_FILE` selects the path. Compose
 mounts `/var/lib/smartpark/orchestration` on the `orchestration-state` named
-volume.
+volume. Storage is bounded by `SMARTPARK_ORCHESTRATION_MAX_RETAINED_RUNS`
+(default `200`) and `SMARTPARK_ORCHESTRATION_MAX_ACTIVE_RUNS` (default `8`).
+Admission first preserves idempotent replay, then rejects excess active work
+with `429`; when retained capacity is full it atomically compacts the oldest
+terminal runs and their idempotency keys. Active runs are never evicted.
 
 Browser refresh/reconnect loads the saved run and resumes real polling. After a
 backend restart, completed runs and their orchestration trace are rehydrated.
