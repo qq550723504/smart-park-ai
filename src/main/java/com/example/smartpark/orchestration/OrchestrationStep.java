@@ -16,6 +16,7 @@ public record OrchestrationStep(
         String outputSummary,
         String runReference,
         List<String> evidenceReferences,
+        List<String> sourceReferences,
         List<String> recommendations,
         String failureReason) {
 
@@ -25,13 +26,14 @@ public record OrchestrationStep(
         Objects.requireNonNull(capability, "capability");
         Objects.requireNonNull(status, "status");
         evidenceReferences = List.copyOf(evidenceReferences == null ? List.of() : evidenceReferences);
+        sourceReferences = List.copyOf(sourceReferences == null ? List.of() : sourceReferences);
         recommendations = List.copyOf(recommendations == null ? List.of() : recommendations);
     }
 
     public static OrchestrationStep pending(OrchestrationDefinition.Step definition) {
         return new OrchestrationStep(definition.id(), definition.type(), definition.capability(),
                 definition.required(), OrchestrationStepStatus.PENDING,
-                null, null, null, null, null, List.of(), List.of(), null);
+                null, null, null, null, null, List.of(), List.of(), List.of(), null);
     }
 
     public OrchestrationStep transition(OrchestrationStepStatus next, Instant at,
@@ -44,12 +46,16 @@ public record OrchestrationStep(
                 output == null ? outputSummary : output,
                 childRun == null ? runReference : childRun,
                 evidence == null ? evidenceReferences : evidence,
-                recommendations,
+                sourceReferences, recommendations,
                 failure);
     }
 
-    public OrchestrationStep withRecommendations(List<String> values) {
-        return new OrchestrationStep(id, type, capability, required, status, startedAt, completedAt,
-                inputSummary, outputSummary, runReference, evidenceReferences, values, failureReason);
+    public OrchestrationStep complete(Instant at, String output, String childRun,
+                                      List<String> evidence, List<String> sources,
+                                      List<String> nextRecommendations, String partialReason) {
+        return new OrchestrationStep(id, type, capability, required, OrchestrationStepStatus.COMPLETED,
+                startedAt == null ? at : startedAt, at, inputSummary, output,
+                childRun == null ? runReference : childRun, evidence, sources,
+                nextRecommendations, partialReason);
     }
 }

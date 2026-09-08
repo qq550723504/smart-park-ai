@@ -12,17 +12,19 @@ const emit = defineEmits<{ 'open-trace': [runId: string] }>()
 
 const run = ref<OrchestrationRun | null>(null)
 const loading = ref(false)
+const restoring = ref(false)
 const error = ref('')
 let pollHandle: number | null = null
 let pollFailures = 0
 let generation = 0
 let tracedRunId: string | null = null
+let disposed = false
 
 const storageKey = computed(() => `smartpark.orchestration.last.${props.role}`)
 const pendingKey = computed(() => `smartpark.orchestration.pending.${props.role}`)
 const terminal = computed(() => run.value && ['COMPLETED', 'PARTIAL', 'FAILED', 'CANCELLED'].includes(run.value.status))
 const canStart = computed(() => props.role !== 'CUSTOMER_AGENT'
-  && props.active && props.available && !loading.value && (!run.value || terminal.value))
+  && props.active && props.available && !loading.value && !restoring.value && (!run.value || terminal.value))
 
 const labels: Record<string, string> = {
   'collect-context': '收集上下文',
@@ -77,7 +79,8 @@ function stopPolling(): void {
 
 function startPolling(): void {
   stopPolling()
-  if (!(run.value?.runId ?? localStorage.getItem(storageKey.value)) || terminal.value || !props.active) return
+  if (disposed || !(run.value?.runId ?? localStorage.getItem(storageKey.value))
+      || terminal.value || !props.active) return
   const delay = Math.min(1000 * (2 ** pollFailures), 10_000)
   pollHandle = window.setTimeout(async () => {
     pollHandle = null
@@ -97,6 +100,7 @@ async function refresh(): Promise<void> {
     pollFailures = 0
     error.value = ''
     run.value = current
+    restoring.value = false
     trace(current)
     if (['COMPLETED', 'PARTIAL', 'FAILED', 'CANCELLED'].includes(current.status)) stopPolling()
   } catch (cause) {
@@ -113,19 +117,26 @@ async function start(): Promise<void> {
   loading.value = true
   error.value = ''
   const key = localStorage.getItem(pendingKey.value) || nextKey()
+  let acceptedRunId: string | null = null
   localStorage.setItem(pendingKey.value, key)
   try {
     const accepted = await startOrchestration(props.role, key, launchInput())
     if (requestGeneration !== generation) return
+    acceptedRunId = accepted.runId
     remember(accepted.runId)
+    restoring.value = true
     localStorage.removeItem(pendingKey.value)
     const startedRun = await getOrchestration(props.role, accepted.runId)
     if (requestGeneration !== generation) return
     run.value = startedRun
+    restoring.value = false
     trace(run.value)
     startPolling()
   } catch (cause) {
-    if (requestGeneration === generation) error.value = cause instanceof Error ? cause.message : '编排启动失败'
+    if (requestGeneration === generation) {
+      error.value = cause instanceof Error ? cause.message : '编排启动失败'
+      if (acceptedRunId) startPolling()
+    }
   } finally {
     if (requestGeneration === generation) loading.value = false
   }
@@ -162,10 +173,15 @@ watch(() => [props.active, props.role, props.available] as const, ([active]) => 
   loading.value = false
   error.value = ''
   tracedRunId = null
+  restoring.value = Boolean(active && localStorage.getItem(storageKey.value))
   if (active) void refresh().then(startPolling)
 }, { immediate: true })
 
-onBeforeUnmount(stopPolling)
+onBeforeUnmount(() => {
+  generation += 1
+  disposed = true
+  stopPolling()
+})
 </script>
 
 <template>

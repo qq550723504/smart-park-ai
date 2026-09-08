@@ -70,7 +70,7 @@ their internal events.
 ## Persistence and recovery
 
 `FileOrchestrationRunStore` atomically replaces a JSON snapshot containing only
-safe summaries, state, evidence references, child run IDs and orchestration
+safe summaries, state, evidence/source references, child run IDs and orchestration
 trace events. `SMARTPARK_ORCHESTRATION_STATE_FILE` selects the path. Compose
 mounts `/var/lib/smartpark/orchestration` on the `orchestration-state` named
 volume.

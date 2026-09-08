@@ -266,9 +266,8 @@ public final class OrchestrationService {
                 return true;
             }
             completeStep(runId, step.id(), safeSummary(outcome.summary(), "能耗时序证据已读取"),
-                    null, outcome.evidenceReferences());
-            rememberRecommendations(runId, step.id(), outcome.recommendations());
-            if ("PARTIAL".equals(outcome.status())) markStepPartial(runId, step.id(), "能耗时序存在缺失点");
+                    null, outcome.evidenceReferences(), outcome.sourceReferences(), outcome.recommendations(),
+                    "PARTIAL".equals(outcome.status()) ? "能耗时序存在缺失点" : null);
             return true;
         } catch (RuntimeException failure) {
             if (cancelled(runId)) return false;
@@ -332,8 +331,7 @@ public final class OrchestrationService {
                 return true;
             }
             completeStep(runId, step.id(), safeSummary(outcome.summary(), "安全事件证据已读取"),
-                    null, outcome.evidenceReferences());
-            rememberRecommendations(runId, step.id(), outcome.recommendations());
+                    null, outcome.evidenceReferences(), outcome.sourceReferences(), outcome.recommendations(), null);
             return true;
         } catch (RuntimeException failure) {
             if (cancelled(runId)) return false;
@@ -486,15 +484,31 @@ public final class OrchestrationService {
 
     private void completeStep(UUID runId, String stepId, String outputSummary,
                               String childRun, List<String> evidence) {
+        completeStep(runId, stepId, outputSummary, childRun, evidence, List.of(), List.of(), null);
+    }
+
+    private void completeStep(UUID runId, String stepId, String outputSummary,
+                              String childRun, List<String> evidence, List<String> sources,
+                              List<String> recommendations, String partialReason) {
         synchronized (lock(runId)) {
             if (getStored(runId).status().isTerminal()) return;
             Instant now = clock.instant();
             List<String> safeEvidence = evidence == null ? List.of() : List.copyOf(evidence);
-            updateStep(runId, stepId, step -> step.transition(OrchestrationStepStatus.COMPLETED,
-                    now, null, outputSummary, childRun, safeEvidence, null));
-            appendEvidence(runId, safeEvidence);
-            publish(runId, stepId, stageFor(stepId), ExecutionEventType.STEP_COMPLETED,
-                    ExecutionStatus.RUNNING, outputSummary);
+            List<String> safeSources = sources == null ? List.of() : List.copyOf(sources);
+            List<String> safeRecommendations = recommendations == null ? List.of() : List.copyOf(recommendations);
+            OrchestrationRun completed = store.update(runId, run -> {
+                List<OrchestrationStep> steps = new ArrayList<>(run.steps());
+                int index = stepIndex(steps, stepId);
+                steps.set(index, steps.get(index).complete(now, outputSummary, childRun,
+                        safeEvidence, safeSources, safeRecommendations, partialReason));
+                LinkedHashSet<String> mergedEvidence = new LinkedHashSet<>(run.evidence());
+                mergedEvidence.addAll(safeEvidence);
+                return run.copy(run.status(), run.startedAt(), run.completedAt(), run.summary(), steps,
+                        List.copyOf(mergedEvidence), run.failureReason(), run.result(), run.cancelRequested(),
+                        appendedTrace(run, stepId, stageFor(stepId), ExecutionEventType.STEP_COMPLETED,
+                                ExecutionStatus.RUNNING, outputSummary));
+            });
+            publishProjection(completed);
         }
     }
 
@@ -540,24 +554,6 @@ public final class OrchestrationService {
         }
     }
 
-    private void markStepPartial(UUID runId, String stepId, String reason) {
-        synchronized (lock(runId)) {
-            if (getStored(runId).status().isTerminal()) return;
-            updateStep(runId, stepId, step -> new OrchestrationStep(step.id(), step.type(), step.capability(),
-                    step.required(), step.status(), step.startedAt(), step.completedAt(), step.inputSummary(),
-                    step.outputSummary(), step.runReference(), step.evidenceReferences(),
-                    step.recommendations(), reason));
-        }
-    }
-
-    private void rememberRecommendations(UUID runId, String stepId, List<String> recommendations) {
-        if (recommendations == null || recommendations.isEmpty()) return;
-        synchronized (lock(runId)) {
-            if (getStored(runId).status().isTerminal()) return;
-            updateStep(runId, stepId, step -> step.withRecommendations(recommendations));
-        }
-    }
-
     private boolean rememberChildReference(UUID runId, String stepId, String childRun) {
         if (childRun == null) return true;
         synchronized (lock(runId)) {
@@ -566,16 +562,6 @@ public final class OrchestrationService {
                     null, null, childRun, null, step.failureReason()));
             return true;
         }
-    }
-
-    private void appendEvidence(UUID runId, List<String> evidence) {
-        if (evidence.isEmpty()) return;
-        store.update(runId, run -> {
-            LinkedHashSet<String> merged = new LinkedHashSet<>(run.evidence());
-            merged.addAll(evidence);
-            return run.copy(run.status(), run.startedAt(), run.completedAt(), run.summary(), run.steps(),
-                    List.copyOf(merged), run.failureReason(), run.result(), run.cancelRequested(), run.traceEvents());
-        });
     }
 
     private void updateStep(UUID runId, String stepId,
@@ -634,11 +620,7 @@ public final class OrchestrationService {
     }
 
     private List<String> sourceReferences(OrchestrationRun run) {
-        LinkedHashSet<String> sources = new LinkedHashSet<>();
-        run.steps().forEach(step -> {
-            if (step.status() == OrchestrationStepStatus.COMPLETED) sources.add(step.capability());
-        });
-        return List.copyOf(sources);
+        return run.steps().stream().flatMap(step -> step.sourceReferences().stream()).distinct().toList();
     }
 
     private void failRun(UUID runId, String reason) {

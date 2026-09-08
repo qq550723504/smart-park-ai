@@ -25,6 +25,7 @@ export interface OrchestrationStep {
   outputSummary: string | null
   runReference: string | null
   evidenceReferences: string[]
+  sourceReferences: string[]
   recommendations: string[]
   failureReason: string | null
 }

@@ -24,7 +24,8 @@ function run(status: OrchestrationStatus = 'RUNNING', stepStatus: OrchestrationS
     steps: [{ id: 'operations-analysis', type: 'OPERATIONS_ANALYSIS', capability: 'analytics', required: true,
       status: stepStatus, startedAt: '2026-09-08T00:00:00Z', completedAt: null,
       inputSummary: '调用真实分析', outputSummary: null, runReference: 'child-run',
-      evidenceReferences: [], recommendations: [], failureReason: stepStatus === 'SKIPPED' ? '能力不可用' : null }],
+      evidenceReferences: [], sourceReferences: [], recommendations: [],
+      failureReason: stepStatus === 'SKIPPED' ? '能力不可用' : null }],
     evidence: [], traceId: '11111111-1111-1111-1111-111111111111', failureReason: null,
     result: status === 'PARTIAL' ? { conclusion: '部分结论', recommendations: ['人工复核'],
       evidenceReferences: ['analysis:child-run'], sourceReferences: ['analytics'], childRuns: {},
@@ -79,6 +80,22 @@ describe('OrchestrationPanel', () => {
     expect(getOrchestration).toHaveBeenCalledWith('APPROVER', run().runId)
     expect(startOrchestration).not.toHaveBeenCalled()
     expect(wrapper.get('[data-run-status="WAITING_APPROVAL"]').text()).toBe('等待人工审批')
+    wrapper.unmount()
+  })
+
+  it('blocks launch while a saved run is still being restored', async () => {
+    let resolveGet!: (value: OrchestrationRun) => void
+    localStorage.setItem('smartpark.orchestration.last.OPERATOR', run().runId)
+    vi.mocked(getOrchestration).mockReturnValue(new Promise((resolve) => { resolveGet = resolve }))
+    const wrapper = mount(OrchestrationPanel, { props: { role: 'OPERATOR', available: true } })
+
+    expect(wrapper.get('[data-start-orchestration]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-start-orchestration]').trigger('click')
+    expect(startOrchestration).not.toHaveBeenCalled()
+
+    resolveGet({ ...run(), role: 'OPERATOR' })
+    await flushPromises()
+    expect(wrapper.get('[data-run-status="RUNNING"]').text()).toBe('执行中')
     wrapper.unmount()
   })
 
@@ -144,6 +161,7 @@ describe('OrchestrationPanel', () => {
       await flushPromises()
 
       expect(wrapper.text()).toContain('temporary outage')
+      expect(wrapper.get('[data-start-orchestration]').attributes('disabled')).toBeDefined()
       await vi.advanceTimersByTimeAsync(1999)
       expect(getOrchestration).toHaveBeenCalledTimes(1)
       await vi.advanceTimersByTimeAsync(1)

@@ -55,6 +55,9 @@ class OrchestrationServiceTest {
         assertThat(run.steps()).allSatisfy(step -> assertThat(step.status()).isEqualTo(OrchestrationStepStatus.COMPLETED));
         assertThat(run.result().childRuns()).containsKeys("operations-analysis", "expert-collaboration", "alert-workflow");
         assertThat(run.result().evidenceReferences()).contains("energy:B1:120/120", "security-incident:SEC-1");
+        assertThat(run.result().sourceReferences())
+                .containsExactly("OPERATIONS_ANALYTICS:energy_kwh", "security-incident");
+        assertThat(run.result().sourceReferences()).doesNotContain("park-context", "orchestration-summary");
         assertThat(run.result().recommendations()).contains("人工复核");
         assertThat(harness.events.history(run.id())).extracting(event -> event.eventType())
                 .startsWith(ExecutionEventType.RUN_STARTED, ExecutionEventType.STEP_STARTED,
@@ -93,6 +96,34 @@ class OrchestrationServiceTest {
         assertThat(step(run, "expert-collaboration").status()).isEqualTo(OrchestrationStepStatus.SKIPPED);
         assertThat(run.result().partialReasons()).containsExactly("专家协作能力不可用");
         assertThat(run.summary()).doesNotContain("全部");
+    }
+
+    @Test
+    void partialEnergyOutcomePersistsItsCompleteMetadataAndActualSources() {
+        InMemoryExecutionEventPublisher events = new InMemoryExecutionEventPublisher();
+        OrchestrationPorts.OperationsRunner operations = question -> {
+            UUID id = UUID.randomUUID();
+            return new StartedChild(id, CompletableFuture.completedFuture(completedChild(id)));
+        };
+        OrchestrationPorts.EnergyReader partialEnergy = buildings -> new EvidenceOutcome("PARTIAL",
+                "能耗数据存在缺口", List.of("energy:B1:110/120"),
+                List.of("OPERATIONS_ANALYTICS:energy_kwh"), List.of("补采十个缺失点"), null);
+        OrchestrationService service = new OrchestrationService(new InMemoryOrchestrationRunStore(),
+                () -> new Capabilities(true, true, false, false, false), operations, partialEnergy,
+                null, null, null, events, Runnable::run, CLOCK);
+        OrchestrationInput input = new OrchestrationInput("检查 B1 能耗异常", null, List.of("B1"),
+                true, false, false, false);
+
+        OrchestrationRun run = service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                input, "partial-energy", null, "OPERATOR").run();
+        OrchestrationStep energyStep = step(run, "energy-time-series");
+
+        assertThat(run.status()).isEqualTo(OrchestrationStatus.PARTIAL);
+        assertThat(energyStep.status()).isEqualTo(OrchestrationStepStatus.COMPLETED);
+        assertThat(energyStep.failureReason()).isEqualTo("能耗时序存在缺失点");
+        assertThat(energyStep.recommendations()).containsExactly("补采十个缺失点");
+        assertThat(energyStep.sourceReferences()).containsExactly("OPERATIONS_ANALYTICS:energy_kwh");
+        assertThat(run.result().sourceReferences()).containsExactly("OPERATIONS_ANALYTICS:energy_kwh");
     }
 
     @Test
