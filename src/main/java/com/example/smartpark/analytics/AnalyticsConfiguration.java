@@ -27,6 +27,9 @@ import com.example.smartpark.analytics.anomaly.AlertAnalyticsReader;
 import com.example.smartpark.analytics.anomaly.DeviceAnalyticsReader;
 import com.example.smartpark.analytics.anomaly.EnergyAnalyticsReader;
 import com.example.smartpark.analytics.anomaly.OperationsAnomalyService;
+import com.example.smartpark.analytics.energy.EnergyTimeSeriesReader;
+import com.example.smartpark.analytics.energy.EnergyTimeSeriesService;
+import com.example.smartpark.analytics.energy.JdbcEnergyTimeSeriesReader;
 import com.example.smartpark.workflow.WorkflowExecutionStore;
 import com.example.smartpark.analytics.catalog.MetricCatalog;
 import com.example.smartpark.analytics.sql.QueryCostGuard;
@@ -181,6 +184,21 @@ public class AnalyticsConfiguration {
     @Bean
     EnergyAnalyticsReader energyAnalyticsReader(ReadOnlyQueryExecutor readOnlyQueryExecutor) {
         return new JdbcEnergyAnalyticsReader(readOnlyQueryExecutor);
+    }
+
+    @Bean
+    EnergyTimeSeriesReader energyTimeSeriesReader(QueryCostGuard queryCostGuard,
+                                                  ReadOnlyQueryExecutor readOnlyQueryExecutor) {
+        return new JdbcEnergyTimeSeriesReader(queryCostGuard, readOnlyQueryExecutor,
+                EnergyTimeSeriesService.FACT_TIMEZONE);
+    }
+
+    @Bean
+    EnergyTimeSeriesService energyTimeSeriesService(MetricCatalog metricCatalog,
+                                                    EnergyTimeSeriesReader energyTimeSeriesReader,
+                                                    Clock analyticsClock) {
+        return new EnergyTimeSeriesService(metricCatalog, energyTimeSeriesReader, analyticsClock,
+                EnergyTimeSeriesService.FACT_TIMEZONE);
     }
 
     @Bean

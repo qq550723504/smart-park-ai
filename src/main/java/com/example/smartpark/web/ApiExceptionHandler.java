@@ -1,6 +1,7 @@
 package com.example.smartpark.web;
 
 import com.example.smartpark.analytics.anomaly.OperationsAnomalyService;
+import com.example.smartpark.analytics.energy.EnergyTimeSeriesService;
 import com.example.smartpark.workflow.CustomerServiceValidationException;
 
 import org.springframework.http.HttpStatus;
@@ -52,6 +53,12 @@ public class ApiExceptionHandler {
     @ExceptionHandler(OperationsAnomalyService.AnomalyOverviewUnavailableException.class)
     ResponseEntity<WebDtos.ApiError> anomalyUnavailable(OperationsAnomalyService.AnomalyOverviewUnavailableException exception) {
         return error(HttpStatus.SERVICE_UNAVAILABLE, "运营异常分析暂不可用");
+    }
+
+    @ExceptionHandler(EnergyTimeSeriesService.EnergyTimeSeriesUnavailableException.class)
+    ResponseEntity<WebDtos.ApiError> energyTimeSeriesUnavailable(
+            EnergyTimeSeriesService.EnergyTimeSeriesUnavailableException exception) {
+        return error(HttpStatus.SERVICE_UNAVAILABLE, "能耗时序暂不可用");
     }
 
     @ExceptionHandler(java.util.concurrent.RejectedExecutionException.class)
