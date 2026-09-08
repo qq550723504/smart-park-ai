@@ -97,6 +97,23 @@ class ExecutionEventPublisherTest {
     }
 
     @Test
+    void hydrationAppendsTheMissingDurableSuffixToAnExistingProjection() {
+        UUID runId = UUID.randomUUID();
+        ExecutionEvent first = sequencedEvent(runId, 1, "first", false);
+        ExecutionEvent second = sequencedEvent(runId, 2, "second", false);
+        ExecutionEvent terminal = sequencedEvent(runId, 3, "done", true);
+        publisher.publish(first);
+
+        publisher.hydrate(runId, List.of(first, second, terminal));
+
+        assertThat(publisher.history(runId)).extracting(ExecutionEvent::eventId)
+                .containsExactly(first.eventId(), second.eventId(), terminal.eventId());
+        assertThat(publisher.status(runId)).isEqualTo("COMPLETED");
+        assertThatThrownBy(() -> publisher.publish(event(runId, "too late", false)))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void terminalEventCompletesTheStreamAndRejectsFurtherPublishing() {
         UUID runId = UUID.randomUUID();
         publisher.publish(event(runId, "working", false));
@@ -202,5 +219,11 @@ class ExecutionEventPublisherTest {
                 terminal ? ExecutionEventType.COMPLETED : ExecutionEventType.RUN_STARTED,
                 terminal ? ExecutionStatus.SUCCEEDED : ExecutionStatus.RUNNING,
                 summary, null);
+    }
+
+    private static ExecutionEvent sequencedEvent(UUID runId, long sequence, String summary, boolean terminal) {
+        ExecutionEvent event = event(runId, summary, terminal);
+        return new ExecutionEvent(event.eventId(), runId, sequence, event.timestamp(), event.scenario(),
+                event.actor(), event.stage(), event.eventType(), event.status(), summary, null);
     }
 }

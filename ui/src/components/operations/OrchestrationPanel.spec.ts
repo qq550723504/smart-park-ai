@@ -1,10 +1,16 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import OrchestrationPanel from './OrchestrationPanel.vue'
-import { cancelOrchestration, getOrchestration, startOrchestration } from '../../services/orchestrationApi'
+import { cancelOrchestration, getOrchestration, OrchestrationApiError, startOrchestration } from '../../services/orchestrationApi'
 import type { OrchestrationRun, OrchestrationStepStatus, OrchestrationStatus } from '../../types/orchestration'
 
 vi.mock('../../services/orchestrationApi', () => ({
+  OrchestrationApiError: class OrchestrationApiError extends Error {
+    constructor(public readonly status: number, message: string) {
+      super(message)
+      this.name = 'OrchestrationApiError'
+    }
+  },
   startOrchestration: vi.fn(),
   getOrchestration: vi.fn(),
   cancelOrchestration: vi.fn(),
@@ -170,6 +176,25 @@ describe('OrchestrationPanel', () => {
       expect(getOrchestration).toHaveBeenCalledTimes(2)
       expect(wrapper.get('[data-run-status="COMPLETED"]').text()).toBe('已完成')
       expect(wrapper.text()).not.toContain('temporary outage')
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('clears a stale saved run after a definitive 404 and releases launch', async () => {
+    vi.useFakeTimers()
+    try {
+      localStorage.setItem('smartpark.orchestration.last.OPERATOR', run().runId)
+      vi.mocked(getOrchestration).mockRejectedValue(new OrchestrationApiError(404, 'missing'))
+      const wrapper = mount(OrchestrationPanel, { props: { role: 'OPERATOR', available: true } })
+      await flushPromises()
+
+      expect(localStorage.getItem('smartpark.orchestration.last.OPERATOR')).toBeNull()
+      expect(wrapper.get('[data-start-orchestration]').attributes('disabled')).toBeUndefined()
+      expect(wrapper.text()).toContain('上次编排记录已失效，请重新启动')
+      await vi.advanceTimersByTimeAsync(20_000)
+      expect(getOrchestration).toHaveBeenCalledTimes(1)
       wrapper.unmount()
     } finally {
       vi.useRealTimers()

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { cancelOrchestration, getOrchestration, startOrchestration } from './orchestrationApi'
+import { cancelOrchestration, getOrchestration, OrchestrationApiError, startOrchestration } from './orchestrationApi'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -28,4 +28,15 @@ it('uses role-scoped status and cancel requests', async () => {
   expect(fetchMock.mock.calls[0][0]).toBe('/api/orchestrations/runs/run%20id')
   expect(fetchMock.mock.calls[0][1]).toEqual({ headers: { 'X-Demo-Role': 'VIEWER' } })
   expect(fetchMock.mock.calls[1][1]).toEqual({ method: 'POST', headers: { 'X-Demo-Role': 'VIEWER' } })
+})
+
+it('preserves the response status on API failures', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: 'missing' }), {
+    status: 404,
+    headers: { 'Content-Type': 'application/json' },
+  })))
+
+  await expect(getOrchestration('VIEWER', 'stale-run')).rejects.toEqual(
+    expect.objectContaining<Partial<OrchestrationApiError>>({ status: 404, message: 'missing' }),
+  )
 })

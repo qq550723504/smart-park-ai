@@ -16,6 +16,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -23,6 +24,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -311,6 +313,71 @@ class OrchestrationServiceTest {
         assertThat(duplicateGet.revision()).isEqualTo(completed.revision());
         assertThat(harness.events.history(run.id()).stream()
                 .filter(event -> event.eventType() == ExecutionEventType.APPROVAL_RESUMED)).hasSize(1);
+    }
+
+    @Test
+    void approvalRecoveryCommitsTheStepRunEvidenceAndTraceInOneRevision() {
+        AtomicReference<String> workflowStatus = new AtomicReference<>("WAITING_APPROVAL");
+        OrchestrationPorts.WorkflowRunner workflow = new OrchestrationPorts.WorkflowRunner() {
+            @Override public WorkflowOutcome start(String alertId) { return workflowOutcome(workflowStatus.get()); }
+            @Override public WorkflowOutcome get(String workflowId) { return workflowOutcome(workflowStatus.get()); }
+        };
+        AtomicInteger submissions = new AtomicInteger();
+        AtomicReference<Runnable> continuation = new AtomicReference<>();
+        java.util.concurrent.Executor stagedExecutor = command -> {
+            if (submissions.getAndIncrement() == 0) command.run();
+            else continuation.set(command);
+        };
+        Harness harness = harness(new Capabilities(true, false, false, false, true), stagedExecutor,
+                input -> availableSecurity(), workflow);
+        OrchestrationInput input = new OrchestrationInput("处置告警", "ALT-001", List.of(),
+                false, false, false, true);
+        OrchestrationRun waiting = harness.service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                input, "atomic-approval", null, "APPROVER").run();
+        workflowStatus.set("COMPLETED");
+
+        OrchestrationRun resumed = harness.service.get(waiting.id());
+
+        assertThat(resumed.revision()).isEqualTo(waiting.revision() + 1);
+        assertThat(resumed.status()).isEqualTo(OrchestrationStatus.RUNNING);
+        assertThat(step(resumed, "alert-workflow").status()).isEqualTo(OrchestrationStepStatus.COMPLETED);
+        assertThat(resumed.evidence()).contains("alert-workflow:wf-1");
+        assertThat(resumed.traceEvents()).extracting(OrchestrationTraceRecord::eventType)
+                .endsWith(ExecutionEventType.APPROVAL_RESUMED, ExecutionEventType.STEP_COMPLETED);
+        assertThat(continuation).doesNotHaveNullValue();
+    }
+
+    @Test
+    void missingApprovalChildAlsoResumesWithOneAtomicRevision() {
+        AtomicInteger lookups = new AtomicInteger();
+        OrchestrationPorts.WorkflowRunner workflow = new OrchestrationPorts.WorkflowRunner() {
+            @Override public WorkflowOutcome start(String alertId) { return workflowOutcome("WAITING_APPROVAL"); }
+            @Override public WorkflowOutcome get(String workflowId) {
+                if (lookups.getAndIncrement() == 0) return workflowOutcome("WAITING_APPROVAL");
+                throw new NoSuchElementException("gone");
+            }
+        };
+        AtomicInteger submissions = new AtomicInteger();
+        AtomicReference<Runnable> continuation = new AtomicReference<>();
+        java.util.concurrent.Executor stagedExecutor = command -> {
+            if (submissions.getAndIncrement() == 0) command.run();
+            else continuation.set(command);
+        };
+        Harness harness = harness(new Capabilities(true, false, false, false, true), stagedExecutor,
+                input -> availableSecurity(), workflow);
+        OrchestrationInput input = new OrchestrationInput("处置告警", "ALT-001", List.of(),
+                false, false, false, true);
+        OrchestrationRun waiting = harness.service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                input, "missing-approval-child", null, "APPROVER").run();
+
+        OrchestrationRun resumed = harness.service.get(waiting.id());
+
+        assertThat(resumed.revision()).isEqualTo(waiting.revision() + 1);
+        assertThat(resumed.status()).isEqualTo(OrchestrationStatus.RUNNING);
+        assertThat(step(resumed, "alert-workflow").status()).isEqualTo(OrchestrationStepStatus.FAILED);
+        assertThat(resumed.traceEvents()).extracting(OrchestrationTraceRecord::eventType)
+                .endsWith(ExecutionEventType.APPROVAL_RESUMED, ExecutionEventType.STEP_FAILED);
+        assertThat(continuation).doesNotHaveNullValue();
     }
 
     @Test

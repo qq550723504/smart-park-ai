@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { cancelOrchestration, getOrchestration, startOrchestration } from '../../services/orchestrationApi'
+import { cancelOrchestration, getOrchestration, OrchestrationApiError, startOrchestration } from '../../services/orchestrationApi'
 import type { OrchestrationInput, OrchestrationRun } from '../../types/orchestration'
 import type { DemoRole } from '../../types/workflow'
 
@@ -105,6 +105,15 @@ async function refresh(): Promise<void> {
     if (['COMPLETED', 'PARTIAL', 'FAILED', 'CANCELLED'].includes(current.status)) stopPolling()
   } catch (cause) {
     if (requestGeneration !== generation) return
+    if (cause instanceof OrchestrationApiError && cause.status === 404) {
+      localStorage.removeItem(storageKey.value)
+      run.value = null
+      restoring.value = false
+      pollFailures = 0
+      error.value = '上次编排记录已失效，请重新启动'
+      stopPolling()
+      return
+    }
     pollFailures = Math.min(pollFailures + 1, 4)
     error.value = cause instanceof Error ? cause.message : '无法查询编排状态'
   }

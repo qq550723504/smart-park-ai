@@ -100,6 +100,8 @@ class ExpertCollaborationServiceTest {
                     }
                     @Override public List<com.example.smartpark.execution.model.ExecutionEvent> history(
                             java.util.UUID runId) { return List.of(); }
+                    @Override public void hydrate(java.util.UUID runId,
+                            List<com.example.smartpark.execution.model.ExecutionEvent> durableHistory) { }
                     @Override public Subscription subscribe(java.util.UUID runId,
                             java.util.function.Consumer<com.example.smartpark.execution.model.ExecutionEvent> consumer) {
                         return () -> { };

@@ -394,24 +394,29 @@ public final class OrchestrationService {
         OrchestrationStep step = run.steps().stream()
                 .filter(item -> item.status() == OrchestrationStepStatus.WAITING_APPROVAL)
                 .findFirst().orElse(null);
-        if (step == null || step.runReference() == null || workflow == null) {
-            failStep(runId, step == null ? "alert-workflow" : step.id(),
-                    "审批子运行无法恢复", false);
-            resumeRunAfterApproval(runId, "审批子运行无法恢复");
+        if (step == null) {
+            failRun(runId, "等待审批的编排缺少对应步骤");
+            return;
+        }
+        if (step.runReference() == null || workflow == null) {
+            commitApprovalResume(runId, step.id(), false, "审批子运行无法恢复",
+                    step.runReference(), List.of(), "审批子运行无法恢复");
             executor.execute(() -> execute(runId));
             return;
         }
         try {
             WorkflowOutcome outcome = workflow.get(step.runReference());
             if ("WAITING_APPROVAL".equals(outcome.status())) return;
-            publish(runId, "orchestrator", ExecutionStage.HUMAN_APPROVAL,
-                    ExecutionEventType.APPROVAL_RESUMED, ExecutionStatus.RUNNING, "人工审批结果已由现有工作流记录");
-            applyWorkflowOutcome(runId, step.id(), outcome);
-            resumeRunAfterApproval(runId, outcome.approvalResult());
+            boolean completed = "COMPLETED".equals(outcome.status()) || "REJECTED".equals(outcome.status());
+            String summary = "REJECTED".equals(outcome.status())
+                    ? "人工拒绝了处置动作"
+                    : completed ? "处置工作流已完成" : "处置工作流未完成";
+            commitApprovalResume(runId, step.id(), completed, summary, outcome.workflowId(),
+                    outcome.evidenceReferences(), outcome.approvalResult());
             executor.execute(() -> execute(runId));
         } catch (RuntimeException missingChild) {
-            failStep(runId, step.id(), "服务恢复后无法确认审批子运行", false);
-            resumeRunAfterApproval(runId, "审批子运行不可恢复");
+            commitApprovalResume(runId, step.id(), false, "服务恢复后无法确认审批子运行",
+                    step.runReference(), List.of(), "审批子运行不可恢复");
             executor.execute(() -> execute(runId));
         }
     }
@@ -428,9 +433,10 @@ public final class OrchestrationService {
 
     private void waitForApproval(UUID runId, String stepId, WorkflowOutcome outcome) {
         synchronized (lock(runId)) {
-            if (getStored(runId).status().isTerminal()) return;
+            OrchestrationRun current = getStored(runId);
+            if (current.status().isTerminal()) return;
             Instant now = clock.instant();
-            store.update(runId, run -> {
+            OrchestrationRun waiting = store.update(runId, run -> {
                 List<OrchestrationStep> steps = new ArrayList<>(run.steps());
                 int index = stepIndex(steps, stepId);
                 steps.set(index, steps.get(index).transition(OrchestrationStepStatus.WAITING_APPROVAL,
@@ -438,27 +444,60 @@ public final class OrchestrationService {
                         outcome.evidenceReferences(), null));
                 return run.copy(OrchestrationStatus.WAITING_APPROVAL,
                         run.startedAt(), null, "等待人工审批", steps, run.evidence(), null,
-                        run.result(), run.cancelRequested(), run.traceEvents());
+                        run.result(), run.cancelRequested(),
+                        appendedTrace(run, "orchestrator", ExecutionStage.HUMAN_APPROVAL,
+                                ExecutionEventType.WAITING_APPROVAL, ExecutionStatus.RUNNING, "等待人工审批"));
             });
-            publish(runId, "orchestrator", ExecutionStage.HUMAN_APPROVAL,
-                    ExecutionEventType.WAITING_APPROVAL, ExecutionStatus.RUNNING, "等待人工审批");
+            publishProjection(waiting);
         }
     }
 
-    private void resumeRunAfterApproval(UUID runId, String approvalResult) {
-        store.update(runId, run -> run.copy(OrchestrationStatus.RUNNING,
-                run.startedAt(), null, approvalResult == null ? "审批后恢复编排" : approvalResult,
-                run.steps(), run.evidence(), null, run.result(), run.cancelRequested(), run.traceEvents()));
+    private void commitApprovalResume(UUID runId, String stepId, boolean completed, String stepSummary,
+                                      String workflowId, List<String> evidence, String approvalResult) {
+        Instant now = clock.instant();
+        List<String> safeEvidence = evidence == null ? List.of() : List.copyOf(evidence);
+        OrchestrationRun current = getStored(runId);
+        int firstNewTraceIndex = current.traceEvents().size();
+        OrchestrationRun resumed = store.update(runId, run -> {
+            List<OrchestrationStep> steps = new ArrayList<>(run.steps());
+            int index = stepIndex(steps, stepId);
+            OrchestrationStep currentStep = steps.get(index);
+            steps.set(index, completed
+                    ? currentStep.complete(now, stepSummary, workflowId, safeEvidence,
+                            List.of(), List.of(), null)
+                    : currentStep.transition(OrchestrationStepStatus.FAILED, now, null, null,
+                            workflowId, safeEvidence, stepSummary));
+            LinkedHashSet<String> mergedEvidence = new LinkedHashSet<>(run.evidence());
+            mergedEvidence.addAll(safeEvidence);
+            List<OrchestrationTraceRecord> trace = appendedTrace(run.traceEvents(), "orchestrator",
+                    ExecutionStage.HUMAN_APPROVAL, ExecutionEventType.APPROVAL_RESUMED,
+                    ExecutionStatus.RUNNING, "人工审批等待已结束");
+            trace = appendedTrace(trace, stepId,
+                    completed ? stageFor(stepId) : ExecutionStage.FAILURE,
+                    completed ? ExecutionEventType.STEP_COMPLETED : ExecutionEventType.STEP_FAILED,
+                    completed ? ExecutionStatus.RUNNING : ExecutionStatus.FAILED, stepSummary);
+            return run.copy(OrchestrationStatus.RUNNING, run.startedAt(), null,
+                    approvalResult == null ? "审批后恢复编排" : approvalResult,
+                    steps, List.copyOf(mergedEvidence), null, run.result(), run.cancelRequested(), trace);
+        });
+        publishProjections(resumed, firstNewTraceIndex);
     }
 
     private boolean startStep(UUID runId, String stepId, String inputSummary) {
         synchronized (lock(runId)) {
             if (getStored(runId).status().isTerminal()) return false;
             Instant now = clock.instant();
-            updateStep(runId, stepId, step -> step.transition(OrchestrationStepStatus.RUNNING,
-                    now, inputSummary, null, null, null, null));
-            publish(runId, stepId, stageFor(stepId), ExecutionEventType.STEP_STARTED,
-                    ExecutionStatus.RUNNING, inputSummary);
+            OrchestrationRun started = store.update(runId, run -> {
+                List<OrchestrationStep> steps = new ArrayList<>(run.steps());
+                int index = stepIndex(steps, stepId);
+                steps.set(index, steps.get(index).transition(OrchestrationStepStatus.RUNNING,
+                        now, inputSummary, null, null, null, null));
+                return run.copy(run.status(), run.startedAt(), run.completedAt(), run.summary(), steps,
+                        run.evidence(), run.failureReason(), run.result(), run.cancelRequested(),
+                        appendedTrace(run, stepId, stageFor(stepId), ExecutionEventType.STEP_STARTED,
+                                ExecutionStatus.RUNNING, inputSummary));
+            });
+            publishProjection(started);
             return true;
         }
     }
@@ -516,10 +555,17 @@ public final class OrchestrationService {
         synchronized (lock(runId)) {
             if (getStored(runId).status().isTerminal()) return;
             Instant now = clock.instant();
-            updateStep(runId, stepId, step -> step.transition(OrchestrationStepStatus.SKIPPED,
-                    now, null, reason, null, List.of(), partial ? reason : null));
-            publish(runId, stepId, stageFor(stepId), ExecutionEventType.STEP_SKIPPED,
-                    ExecutionStatus.RUNNING, reason);
+            OrchestrationRun skipped = store.update(runId, run -> {
+                List<OrchestrationStep> steps = new ArrayList<>(run.steps());
+                int index = stepIndex(steps, stepId);
+                steps.set(index, steps.get(index).transition(OrchestrationStepStatus.SKIPPED,
+                        now, null, reason, null, List.of(), partial ? reason : null));
+                return run.copy(run.status(), run.startedAt(), run.completedAt(), run.summary(), steps,
+                        run.evidence(), run.failureReason(), run.result(), run.cancelRequested(),
+                        appendedTrace(run, stepId, stageFor(stepId), ExecutionEventType.STEP_SKIPPED,
+                                ExecutionStatus.RUNNING, reason));
+            });
+            publishProjection(skipped);
         }
     }
 
@@ -547,10 +593,17 @@ public final class OrchestrationService {
                 publishProjections(failed, firstNewTraceIndex);
                 return;
             }
-            updateStep(runId, stepId, step -> step.transition(OrchestrationStepStatus.FAILED,
-                    now, null, null, null, null, reason));
-            publish(runId, stepId, ExecutionStage.FAILURE, ExecutionEventType.STEP_FAILED,
-                    ExecutionStatus.FAILED, reason);
+            OrchestrationRun failed = store.update(runId, run -> {
+                List<OrchestrationStep> steps = new ArrayList<>(run.steps());
+                int index = stepIndex(steps, stepId);
+                steps.set(index, steps.get(index).transition(OrchestrationStepStatus.FAILED,
+                        now, null, null, null, null, reason));
+                return run.copy(run.status(), run.startedAt(), run.completedAt(), run.summary(), steps,
+                        run.evidence(), run.failureReason(), run.result(), run.cancelRequested(),
+                        appendedTrace(run, stepId, ExecutionStage.FAILURE,
+                                ExecutionEventType.STEP_FAILED, ExecutionStatus.FAILED, reason));
+            });
+            publishProjection(failed);
         }
     }
 
@@ -634,18 +687,6 @@ public final class OrchestrationService {
                     appendedTrace(run, "orchestrator", ExecutionStage.FAILURE,
                             ExecutionEventType.RUN_FAILED, ExecutionStatus.FAILED, "园区异常联合研判失败")));
             publishProjection(failed);
-        }
-    }
-
-    private void publish(UUID runId, String actor, ExecutionStage stage,
-                         ExecutionEventType type, ExecutionStatus status, String summary) {
-        synchronized (lock(runId)) {
-            OrchestrationRun updated = store.update(runId, run -> {
-                return run.copy(run.status(), run.startedAt(), run.completedAt(), run.summary(), run.steps(),
-                        run.evidence(), run.failureReason(), run.result(), run.cancelRequested(),
-                        appendedTrace(run, actor, stage, type, status, summary));
-            });
-            publishProjection(updated);
         }
     }
 

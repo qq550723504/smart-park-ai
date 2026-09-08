@@ -20,6 +20,13 @@ public interface ExecutionEventPublisher {
     List<ExecutionEvent> history(UUID runId);
 
     /**
+     * Reconciles a durable, contiguous history into the live projection. Implementations should
+     * append only the missing suffix under the same per-run lock used by {@link #publish} so a
+     * concurrent recovery publisher cannot create a gap.
+     */
+    void hydrate(UUID runId, List<ExecutionEvent> durableHistory);
+
+    /**
      * Subscribes to an existing run: the consumer first receives the full history,
      * then every subsequent live event until a terminal event completes the stream.
      */

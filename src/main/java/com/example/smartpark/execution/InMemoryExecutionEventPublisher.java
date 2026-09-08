@@ -59,16 +59,44 @@ public class InMemoryExecutionEventPublisher implements ExecutionEventPublisher 
             ExecutionEvent stored = new ExecutionEvent(event.eventId(), event.runId(), sequence,
                     event.timestamp(), event.scenario(), event.actor(), event.stage(),
                     event.eventType(), event.status(), event.safeSummary(), event.displayPayload());
-            state.addInternal(stored);
-            for (Consumer<ExecutionEvent> consumer : state.consumers) {
-                consumer.accept(stored);
-            }
-            if (stored.isTerminal()) {
-                state.closed = true;
-                state.consumers.clear();
-                state.terminalAt = clock.instant();
-            }
+            append(state, stored);
             return stored;
+        } finally {
+            state.lock.unlock();
+        }
+    }
+
+    @Override
+    public void hydrate(UUID runId, List<ExecutionEvent> durableHistory) {
+        if (durableHistory == null || durableHistory.isEmpty()) return;
+        evictExpiredRuns(clock.instant());
+        RunState state = runs.computeIfAbsent(runId, id -> new RunState());
+        state.lock.lock();
+        try {
+            for (ExecutionEvent event : durableHistory) {
+                if (!runId.equals(event.runId())) {
+                    throw new IllegalArgumentException("durable event belongs to another run");
+                }
+                if (event.sequence() <= 0) {
+                    throw new IllegalArgumentException("durable event sequence must be positive");
+                }
+                if (event.sequence() <= state.count) {
+                    ExecutionEvent existing = state.historyBacking.get(Math.toIntExact(event.sequence() - 1));
+                    if (!existing.eventId().equals(event.eventId())) {
+                        throw new IllegalStateException("durable history conflicts at sequence " + event.sequence());
+                    }
+                    continue;
+                }
+                if (state.closed) {
+                    throw new IllegalStateException("run " + runId + " is already terminal");
+                }
+                long expectedNext = state.count + 1;
+                if (event.sequence() != expectedNext) {
+                    throw new IllegalArgumentException("out-of-order durable sequence " + event.sequence()
+                            + " for run " + runId + "; expected " + expectedNext);
+                }
+                append(state, event);
+            }
         } finally {
             state.lock.unlock();
         }
@@ -129,6 +157,18 @@ public class InMemoryExecutionEventPublisher implements ExecutionEventPublisher 
             state.lock.unlock();
         }
         runs.remove(runId);
+    }
+
+    private void append(RunState state, ExecutionEvent event) {
+        state.addInternal(event);
+        for (Consumer<ExecutionEvent> consumer : state.consumers) {
+            consumer.accept(event);
+        }
+        if (event.isTerminal()) {
+            state.closed = true;
+            state.consumers.clear();
+            state.terminalAt = clock.instant();
+        }
     }
 
     /** Removes terminal runs whose replayable window has elapsed; running runs are never touched. */

@@ -162,6 +162,21 @@ class ExecutionEventControllerTest {
                 .andExpect(jsonPath("$.totalEvents").value(2));
     }
 
+    @Test
+    void summaryReconcilesADurableSuffixEvenWhenTheProjectionAlreadyHasAPrefix() throws Exception {
+        ExecutionEvent first = event(1, ExecutionEventType.RUN_STARTED, null);
+        ExecutionEvent second = event(2, ExecutionEventType.COMPLETED, null);
+        when(publisher.history(RUN_ID)).thenReturn(List.of(first), List.of(first, second));
+        when(publisher.status(RUN_ID)).thenReturn("COMPLETED");
+        when(archive.history(RUN_ID)).thenReturn(List.of(first, second));
+
+        mockMvc.perform(get("/api/executions/{runId}", RUN_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalEvents").value(2));
+
+        verify(publisher).hydrate(RUN_ID, List.of(first, second));
+    }
+
     private void scriptSubscription(List<ExecutionEvent> scripted) {
         doAnswer(invocation -> {
             Consumer<ExecutionEvent> consumer = invocation.getArgument(1);

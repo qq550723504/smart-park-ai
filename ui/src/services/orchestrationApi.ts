@@ -1,10 +1,17 @@
 import type { DemoRole } from '../types/workflow'
 import type { OrchestrationInput, OrchestrationRun, StartOrchestrationResponse } from '../types/orchestration'
 
+export class OrchestrationApiError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message)
+    this.name = 'OrchestrationApiError'
+  }
+}
+
 async function parse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { message?: string } | null
-    throw new Error(body?.message || `编排请求失败（${response.status}）`)
+    throw new OrchestrationApiError(response.status, body?.message || `编排请求失败（${response.status}）`)
   }
   return response.json() as Promise<T>
 }

@@ -80,17 +80,8 @@ class ExecutionEventController {
     }
 
     private void hydrate(UUID runId) {
-        synchronized (publisher) {
-            if (!publisher.history(runId).isEmpty() || !"UNKNOWN".equals(publisher.status(runId))) return;
-            archives.orderedStream().map(archive -> archive.history(runId)).filter(history -> !history.isEmpty())
-                    .findFirst().ifPresent(history -> history.forEach(event -> {
-                        try {
-                            publisher.publish(event);
-                        } catch (IllegalArgumentException | IllegalStateException alreadyHydrated) {
-                            // Another request restored the same durable trace first.
-                        }
-                    }));
-        }
+        archives.orderedStream().map(archive -> archive.history(runId)).filter(history -> !history.isEmpty())
+                .findFirst().ifPresent(history -> publisher.hydrate(runId, history));
     }
 
     private static ServerSentEvent<ExecutionDtos.ExecutionEventDto> toSse(ExecutionDtos.ExecutionEventDto dto) {
