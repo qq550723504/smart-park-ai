@@ -51,7 +51,9 @@ export function useExecutionTrace(): ExecutionTrace {
     for (const event of ordered) {
       if (isTerminalEvent(event)) {
         status.value =
-          event.eventType === 'COMPLETED' ? 'completed' : event.eventType === 'FAILED' ? 'failed' : 'interrupted'
+          event.eventType === 'COMPLETED' || event.eventType === 'RUN_COMPLETED'
+            ? 'completed'
+            : event.eventType === 'FAILED' || event.eventType === 'RUN_FAILED' ? 'failed' : 'interrupted'
       }
     }
   }

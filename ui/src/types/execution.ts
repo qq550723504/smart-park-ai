@@ -4,10 +4,19 @@
  * payload union is closed and discriminated by `payloadType`.
  */
 
-export type ExecutionScenario = 'VOICE' | 'EXPERT_COLLABORATION' | 'OPERATIONS_ANALYSIS' | 'ALERT_WORKFLOW' | 'CUSTOMER_SERVICE'
+export type ExecutionScenario = 'VOICE' | 'EXPERT_COLLABORATION' | 'OPERATIONS_ANALYSIS' | 'ALERT_WORKFLOW' | 'CUSTOMER_SERVICE' | 'ORCHESTRATION'
 
 export type ExecutionEventType =
   | 'RUN_STARTED'
+  | 'STEP_STARTED'
+  | 'STEP_COMPLETED'
+  | 'STEP_SKIPPED'
+  | 'STEP_FAILED'
+  | 'WAITING_APPROVAL'
+  | 'APPROVAL_RESUMED'
+  | 'RUN_COMPLETED'
+  | 'RUN_FAILED'
+  | 'RUN_CANCELLED'
   | 'TEXT_DELTA'
   | 'TEXT_COMPLETED'
   | 'TOOL_CALL_STARTED'
@@ -32,7 +41,7 @@ export type ExecutionEventType =
 
 export type ExecutionStatus = 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'INTERRUPTED' | 'NEEDS_CLARIFICATION'
 
-const TERMINAL_EVENT_TYPES: readonly ExecutionEventType[] = ['COMPLETED', 'FAILED', 'INTERRUPTED']
+const TERMINAL_EVENT_TYPES: readonly ExecutionEventType[] = ['COMPLETED', 'FAILED', 'INTERRUPTED', 'RUN_COMPLETED', 'RUN_FAILED', 'RUN_CANCELLED']
 
 export function isTerminalEvent(event: ExecutionEvent): boolean {
   return TERMINAL_EVENT_TYPES.includes(event.eventType)

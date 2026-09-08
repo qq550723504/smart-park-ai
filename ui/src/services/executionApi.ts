@@ -4,6 +4,15 @@ import { isTerminalEvent } from '../types/execution'
 /** Fixed named SSE event types published by GET /api/executions/{runId}/events. */
 export const EXECUTION_EVENT_TYPES = [
   'RUN_STARTED',
+  'STEP_STARTED',
+  'STEP_COMPLETED',
+  'STEP_SKIPPED',
+  'STEP_FAILED',
+  'WAITING_APPROVAL',
+  'APPROVAL_RESUMED',
+  'RUN_COMPLETED',
+  'RUN_FAILED',
+  'RUN_CANCELLED',
   'TEXT_DELTA',
   'TEXT_COMPLETED',
   'TOOL_CALL_STARTED',

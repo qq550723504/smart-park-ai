@@ -43,7 +43,8 @@ describe('OperationsBoard', () => {
     expect(wrapper.get('[data-cockpit-feature="energy-trend"]').attributes('data-feature-state')).toBe('UNAVAILABLE')
     expect(wrapper.get('[data-cockpit-feature="energy-trend"]').text()).not.toContain('NOT_READY')
     expect(wrapper.get('[data-cockpit-feature="telemetry"]').text()).toContain('数据源未接入')
-    expect(wrapper.get('[data-cockpit-feature="run-all-agents"]').text()).toContain('组合编排 API')
+    expect(wrapper.get('[data-cockpit-feature="run-all-agents"]').attributes('data-feature-state')).toBe('AVAILABLE')
+    expect(wrapper.get('[data-cockpit-feature="run-all-agents"]').text()).toContain('真实跨场景编排')
     expect(wrapper.get('[data-cockpit-feature="report-history"]').text()).toContain('尚无列表或下载 API')
   })
 

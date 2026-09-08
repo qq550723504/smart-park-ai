@@ -4,6 +4,7 @@ import OperationsDailyReport from './OperationsDailyReport.vue'
 import AnomalyRadar from './AnomalyRadar.vue'
 import AnomalyEvidenceDrawer from './AnomalyEvidenceDrawer.vue'
 import EnergyTimeSeriesPanel from './EnergyTimeSeriesPanel.vue'
+import OrchestrationPanel from './OrchestrationPanel.vue'
 import type { ExecutionTraceLike } from '../../composables/useOperationsAnalysis'
 import type { DemoRole } from '../../types/workflow'
 import type { AnomalyFilters } from '../../types/operationsAnomaly'
@@ -126,10 +127,12 @@ watch(() => props.active, (active) => {
           <button type="button" data-agent-entry="security" :disabled="!props.securityIncidentAvailable" @click="emit('open-view', 'security-incidents')">安全事件研判</button>
         </div>
       </div>
-      <div class="operations-board__agent-boundary" data-cockpit-feature="run-all-agents" data-feature-state="NOT_READY">
-        <span>完整演示 / 运行全部 Agent</span><strong>NOT_READY</strong><p>当前没有组合编排 API。每个可用入口都调用真实场景；不播放模拟执行动画。</p>
+      <div class="operations-board__agent-boundary" data-cockpit-feature="run-all-agents" data-feature-state="AVAILABLE">
+        <span>完整演示 / 运行全部 Agent</span><strong>AVAILABLE</strong><p>启动真实跨场景编排；不适用或无权限的步骤会明确跳过。</p>
       </div>
     </section>
+
+    <OrchestrationPanel :role="props.role" :active="props.active" @open-trace="(runId) => emit('open-trace', runId)" />
 
     <OperationsDailyReport :role="props.role" :trace="props.trace" :active="props.active" />
     <section class="operations-board__report-gap" data-cockpit-feature="report-history" data-feature-state="NOT_READY">
