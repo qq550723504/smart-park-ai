@@ -161,6 +161,56 @@ class OperationsAnalysisServiceTest {
     }
 
     @Test
+    void orchestrationAdmissionWaitsForTheSingletonRunnerInsteadOfFailingOnContention() throws Exception {
+        ExecutorService analyticsExecutor = Executors.newFixedThreadPool(2);
+        ExecutorService callerExecutor = Executors.newSingleThreadExecutor();
+        CountDownLatch firstStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
+        try {
+            OperationsAnalysisService service = service((runId, question, pinned) -> {
+                if (calls.incrementAndGet() == 1) {
+                    firstStarted.countDown();
+                    try {
+                        releaseFirst.await();
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new AssertionError(interrupted);
+                    }
+                }
+                return completed(runId);
+            }, analyticsExecutor);
+            var first = service.start("直接分析");
+            assertThat(firstStarted.await(1, TimeUnit.SECONDS)).isTrue();
+
+            var queued = callerExecutor.submit(() -> service.startWhenAvailable("编排分析", () -> false));
+            Thread.sleep(50);
+            assertThat(queued.isDone()).isFalse();
+            releaseFirst.countDown();
+
+            AnalysisRunStore.RunRecord accepted = queued.get(2, TimeUnit.SECONDS);
+            assertThat(service.await(accepted.runId()).get(2, TimeUnit.SECONDS).status()).isEqualTo("COMPLETED");
+            assertThat(calls).hasValue(2);
+        } finally {
+            releaseFirst.countDown();
+            callerExecutor.shutdownNow();
+            analyticsExecutor.shutdownNow();
+            callerExecutor.awaitTermination(2, TimeUnit.SECONDS);
+            analyticsExecutor.awaitTermination(2, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void orchestrationAdmissionCanBeCancelledWhileWaitingForTheSingletonRunner() {
+        OperationsAnalysisService service = service(
+                (runId, question, pinned) -> clarifying(runId), directExecutor());
+        service.start("占用中的分析");
+
+        assertThatThrownBy(() -> service.startWhenAvailable("已取消的编排分析", () -> true))
+                .isInstanceOf(java.util.concurrent.CancellationException.class);
+    }
+
+    @Test
     void abortReleasesAClarificationRunForTheNextAnalysis() {
         OperationsAnalysisService service = service(
                 (runId, question, pinned) -> clarifying(runId), directExecutor());

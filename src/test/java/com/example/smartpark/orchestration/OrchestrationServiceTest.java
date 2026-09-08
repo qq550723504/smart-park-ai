@@ -61,12 +61,15 @@ class OrchestrationServiceTest {
                 .containsExactly("OPERATIONS_ANALYTICS:energy_kwh", "security-incident");
         assertThat(run.result().sourceReferences()).doesNotContain("park-context", "orchestration-summary");
         assertThat(run.result().recommendations()).contains("人工复核");
+        assertThat(run.result().humanApprovalResult()).isEqualTo("APPROVED");
+        assertThat(step(run, "alert-workflow").approvalResult()).isEqualTo("APPROVED");
         assertThat(harness.events.history(run.id())).extracting(event -> event.eventType())
                 .startsWith(ExecutionEventType.RUN_STARTED, ExecutionEventType.STEP_STARTED,
                         ExecutionEventType.STEP_COMPLETED)
                 .endsWith(ExecutionEventType.RUN_COMPLETED);
         assertThat(run.traceEvents()).extracting(OrchestrationTraceRecord::eventType)
                 .endsWith(ExecutionEventType.RUN_COMPLETED);
+        assertThat(harness.service.retainedRunLockCount()).isZero();
     }
 
     @Test
@@ -83,6 +86,34 @@ class OrchestrationServiceTest {
                 .endsWith(ExecutionEventType.STEP_FAILED, ExecutionEventType.RUN_FAILED);
         assertThat(run.traceEvents()).extracting(OrchestrationTraceRecord::eventType)
                 .endsWith(ExecutionEventType.STEP_FAILED, ExecutionEventType.RUN_FAILED);
+        assertThat(harness.service.retainedRunLockCount()).isZero();
+    }
+
+    @Test
+    void completedActionWithoutHumanDecisionKeepsApprovalResultNull() {
+        OrchestrationPorts.WorkflowRunner workflow = new OrchestrationPorts.WorkflowRunner() {
+            @Override
+            public WorkflowOutcome start(String alertId) {
+                return new WorkflowOutcome("wf-low-risk", "COMPLETED", "completed without approval",
+                        List.of("alert-workflow:wf-low-risk"), null, null);
+            }
+
+            @Override
+            public WorkflowOutcome get(String workflowId) {
+                throw new AssertionError("completed workflow must not be polled");
+            }
+        };
+        Harness harness = harness(new Capabilities(true, false, false, false, true), Runnable::run,
+                input -> availableSecurity(), workflow);
+        OrchestrationInput input = new OrchestrationInput("执行低风险处置", "ALT-LOW", List.of(),
+                false, false, false, true);
+
+        OrchestrationRun run = harness.service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                input, "no-human-decision", null, "OPERATOR").run();
+
+        assertThat(run.status()).isEqualTo(OrchestrationStatus.COMPLETED);
+        assertThat(step(run, "alert-workflow").approvalResult()).isNull();
+        assertThat(run.result().humanApprovalResult()).isNull();
     }
 
     @Test
@@ -374,6 +405,8 @@ class OrchestrationServiceTest {
         OrchestrationRun duplicateGet = harness.service.get(run.id());
 
         assertThat(completed.status()).isEqualTo(OrchestrationStatus.COMPLETED);
+        assertThat(step(completed, "alert-workflow").approvalResult()).isEqualTo("APPROVED");
+        assertThat(completed.result().humanApprovalResult()).isEqualTo("APPROVED");
         assertThat(duplicateGet.revision()).isEqualTo(completed.revision());
         assertThat(harness.events.history(run.id()).stream()
                 .filter(event -> event.eventType() == ExecutionEventType.APPROVAL_RESUMED)).hasSize(1);
@@ -405,6 +438,7 @@ class OrchestrationServiceTest {
         assertThat(resumed.revision()).isEqualTo(waiting.revision() + 1);
         assertThat(resumed.status()).isEqualTo(OrchestrationStatus.RUNNING);
         assertThat(step(resumed, "alert-workflow").status()).isEqualTo(OrchestrationStepStatus.COMPLETED);
+        assertThat(step(resumed, "alert-workflow").approvalResult()).isEqualTo("APPROVED");
         assertThat(resumed.evidence()).contains("alert-workflow:wf-1");
         assertThat(resumed.traceEvents()).extracting(OrchestrationTraceRecord::eventType)
                 .endsWith(ExecutionEventType.APPROVAL_RESUMED, ExecutionEventType.STEP_COMPLETED);

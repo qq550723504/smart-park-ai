@@ -28,6 +28,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 
 /**
@@ -51,7 +52,7 @@ public final class OrchestrationService {
     private final ExecutionEventPublisher events;
     private final Executor executor;
     private final Clock clock;
-    private final ConcurrentHashMap<UUID, Object> runLocks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, RunLock> runLocks = new ConcurrentHashMap<>();
 
     public OrchestrationService(OrchestrationRunStore store,
                                 OrchestrationPorts.CapabilityReader capabilities,
@@ -125,7 +126,7 @@ public final class OrchestrationService {
     }
 
     public OrchestrationRun cancel(UUID runId) {
-        synchronized (lock(runId)) {
+        try (RunLockLease ignored = acquireRunLock(runId)) {
             OrchestrationRun current = getStored(runId);
             if (current.status().isTerminal()) return current;
             String childReference = current.steps().stream()
@@ -229,7 +230,7 @@ public final class OrchestrationService {
         OrchestrationInput input = getStored(runId).input();
         try {
             StartedChild child = startChild(runId, step.id(), "调用现有 Operations Analysis",
-                    () -> operations.start(input.question()));
+                    () -> operations.start(input.question(), () -> cancelled(runId)), operations::cancel);
             if (child == null) return false;
             ChildOutcome outcome = child.completion().join();
             if (cancelled(runId)) return false;
@@ -296,7 +297,7 @@ public final class OrchestrationService {
         }
         try {
             StartedChild child = startChild(runId, step.id(), "调用现有 Expert Collaboration",
-                    () -> collaboration.start(input.question()));
+                    () -> collaboration.start(input.question()), collaboration::cancel);
             if (child == null) return false;
             ChildOutcome outcome = child.completion().join();
             if (cancelled(runId)) return false;
@@ -391,7 +392,7 @@ public final class OrchestrationService {
     }
 
     private void reconcileApproval(UUID runId) {
-        synchronized (lock(runId)) {
+        try (RunLockLease ignored = acquireRunLock(runId)) {
             reconcileApprovalLocked(runId);
         }
     }
@@ -432,7 +433,8 @@ public final class OrchestrationService {
     private boolean applyWorkflowOutcome(UUID runId, String stepId, WorkflowOutcome outcome) {
         if ("COMPLETED".equals(outcome.status()) || "REJECTED".equals(outcome.status())) {
             String summary = "REJECTED".equals(outcome.status()) ? "人工拒绝了处置动作" : "处置工作流已完成";
-            completeStep(runId, stepId, summary, outcome.workflowId(), outcome.evidenceReferences());
+            completeStep(runId, stepId, summary, outcome.workflowId(), outcome.evidenceReferences(),
+                    List.of(), List.of(), null, outcome.approvalResult());
             return true;
         }
         failStep(runId, stepId, "处置工作流未完成", false);
@@ -440,7 +442,7 @@ public final class OrchestrationService {
     }
 
     private void waitForApproval(UUID runId, String stepId, WorkflowOutcome outcome) {
-        synchronized (lock(runId)) {
+        try (RunLockLease ignored = acquireRunLock(runId)) {
             OrchestrationRun current = getStored(runId);
             if (current.status().isTerminal()) return;
             Instant now = clock.instant();
@@ -472,11 +474,12 @@ public final class OrchestrationService {
             OrchestrationStep currentStep = steps.get(index);
             List<String> resultEvidence = suppliedEvidence == null
                     ? currentStep.evidenceReferences() : suppliedEvidence;
-            steps.set(index, completed
+            OrchestrationStep resolved = completed
                     ? currentStep.complete(now, stepSummary, workflowId, resultEvidence,
                             List.of(), List.of(), null)
                     : currentStep.transition(OrchestrationStepStatus.FAILED, now, null, null,
-                            workflowId, resultEvidence, stepSummary));
+                            workflowId, resultEvidence, stepSummary);
+            steps.set(index, resolved.withApprovalResult(approvalResult));
             LinkedHashSet<String> mergedEvidence = new LinkedHashSet<>(run.evidence());
             mergedEvidence.addAll(resultEvidence);
             List<OrchestrationTraceRecord> trace = appendedTrace(run.traceEvents(), "orchestrator",
@@ -494,7 +497,7 @@ public final class OrchestrationService {
     }
 
     private boolean startStep(UUID runId, String stepId, String inputSummary) {
-        synchronized (lock(runId)) {
+        try (RunLockLease ignored = acquireRunLock(runId)) {
             if (getStored(runId).status().isTerminal()) return false;
             Instant now = clock.instant();
             OrchestrationRun started = store.update(runId, run -> {
@@ -513,17 +516,19 @@ public final class OrchestrationService {
     }
 
     private StartedChild startChild(UUID runId, String stepId, String inputSummary,
-                                    Supplier<StartedChild> start) {
-        synchronized (lock(runId)) {
-            if (!startStep(runId, stepId, inputSummary)) return null;
-            StartedChild child = start.get();
-            rememberChildReference(runId, stepId, child.runId().toString());
-            return child;
+                                    Supplier<StartedChild> start,
+                                    java.util.function.Consumer<UUID> cancel) {
+        if (!startStep(runId, stepId, inputSummary)) return null;
+        StartedChild child = start.get();
+        if (!rememberChildReference(runId, stepId, child.runId().toString())) {
+            cancel.accept(child.runId());
+            return null;
         }
+        return child;
     }
 
     private WorkflowOutcome startWorkflow(UUID runId, String stepId, String alertId) {
-        synchronized (lock(runId)) {
+        try (RunLockLease ignored = acquireRunLock(runId)) {
             if (!startStep(runId, stepId, "调用现有 Alert Workflow")) return null;
             WorkflowOutcome outcome = workflow.start(alertId);
             rememberChildReference(runId, stepId, outcome.workflowId());
@@ -539,7 +544,14 @@ public final class OrchestrationService {
     private void completeStep(UUID runId, String stepId, String outputSummary,
                               String childRun, List<String> evidence, List<String> sources,
                               List<String> recommendations, String partialReason) {
-        synchronized (lock(runId)) {
+        completeStep(runId, stepId, outputSummary, childRun, evidence, sources,
+                recommendations, partialReason, null);
+    }
+
+    private void completeStep(UUID runId, String stepId, String outputSummary,
+                              String childRun, List<String> evidence, List<String> sources,
+                              List<String> recommendations, String partialReason, String approvalResult) {
+        try (RunLockLease ignored = acquireRunLock(runId)) {
             if (getStored(runId).status().isTerminal()) return;
             Instant now = clock.instant();
             List<String> safeEvidence = evidence == null ? List.of() : List.copyOf(evidence);
@@ -549,7 +561,8 @@ public final class OrchestrationService {
                 List<OrchestrationStep> steps = new ArrayList<>(run.steps());
                 int index = stepIndex(steps, stepId);
                 steps.set(index, steps.get(index).complete(now, outputSummary, childRun,
-                        safeEvidence, safeSources, safeRecommendations, partialReason));
+                        safeEvidence, safeSources, safeRecommendations, partialReason)
+                        .withApprovalResult(approvalResult));
                 LinkedHashSet<String> mergedEvidence = new LinkedHashSet<>(run.evidence());
                 mergedEvidence.addAll(safeEvidence);
                 return run.copy(run.status(), run.startedAt(), run.completedAt(), run.summary(), steps,
@@ -562,7 +575,7 @@ public final class OrchestrationService {
     }
 
     private void skipStep(UUID runId, String stepId, String reason, boolean partial) {
-        synchronized (lock(runId)) {
+        try (RunLockLease ignored = acquireRunLock(runId)) {
             if (getStored(runId).status().isTerminal()) return;
             Instant now = clock.instant();
             OrchestrationRun skipped = store.update(runId, run -> {
@@ -580,7 +593,7 @@ public final class OrchestrationService {
     }
 
     private void failStep(UUID runId, String stepId, String reason, boolean required) {
-        synchronized (lock(runId)) {
+        try (RunLockLease ignored = acquireRunLock(runId)) {
             OrchestrationRun current = getStored(runId);
             if (current.status().isTerminal()) return;
             Instant now = clock.instant();
@@ -619,8 +632,9 @@ public final class OrchestrationService {
 
     private boolean rememberChildReference(UUID runId, String stepId, String childRun) {
         if (childRun == null) return true;
-        synchronized (lock(runId)) {
-            if (getStored(runId).status().isTerminal()) return false;
+        try (RunLockLease ignored = acquireRunLock(runId)) {
+            OrchestrationRun current = store.find(runId).orElse(null);
+            if (current == null || current.status().isTerminal()) return false;
             updateStep(runId, stepId, step -> step.transition(step.status(), clock.instant(),
                     null, null, childRun, null, step.failureReason()));
             return true;
@@ -646,7 +660,7 @@ public final class OrchestrationService {
     }
 
     private void completeRun(UUID runId) {
-        synchronized (lock(runId)) {
+        try (RunLockLease ignored = acquireRunLock(runId)) {
             OrchestrationRun current = getStored(runId);
             if (current.status().isTerminal()) return;
             List<String> partialReasons = current.steps().stream()
@@ -664,7 +678,7 @@ public final class OrchestrationService {
                     .map(OrchestrationStep::outputSummary).findFirst().orElse("没有形成可验证结论");
             String approval = current.steps().stream()
                     .filter(step -> step.type() == OrchestrationStepType.ALERT_WORKFLOW)
-                    .map(OrchestrationStep::outputSummary).filter(java.util.Objects::nonNull).findFirst().orElse(null);
+                    .map(OrchestrationStep::approvalResult).filter(java.util.Objects::nonNull).findFirst().orElse(null);
             List<String> recommendations = current.steps().stream()
                     .flatMap(step -> step.recommendations().stream()).distinct().toList();
             if (recommendations.isEmpty()) recommendations = List.of("请根据已列出的证据与未完成项进行人工复核");
@@ -687,7 +701,7 @@ public final class OrchestrationService {
     }
 
     private void failRun(UUID runId, String reason) {
-        synchronized (lock(runId)) {
+        try (RunLockLease ignored = acquireRunLock(runId)) {
             OrchestrationRun current = getStored(runId);
             if (current.status().isTerminal()) return;
             Instant now = clock.instant();
@@ -748,15 +762,55 @@ public final class OrchestrationService {
     }
 
     private boolean cancelled(UUID runId) {
-        return getStored(runId).status() == OrchestrationStatus.CANCELLED;
+        return store.find(runId).map(run -> run.status() == OrchestrationStatus.CANCELLED).orElse(true);
     }
 
     private OrchestrationRun getStored(UUID runId) {
         return store.find(runId).orElseThrow(() -> new NoSuchElementException("Unknown orchestration run"));
     }
 
-    private Object lock(UUID runId) {
-        return runLocks.computeIfAbsent(runId, ignored -> new Object());
+    int retainedRunLockCount() {
+        return runLocks.size();
+    }
+
+    private RunLockLease acquireRunLock(UUID runId) {
+        RunLock holder = runLocks.compute(runId, (ignored, current) -> {
+            RunLock selected = current == null ? new RunLock() : current;
+            selected.users++;
+            return selected;
+        });
+        holder.lock.lock();
+        return new RunLockLease(runId, holder);
+    }
+
+    private final class RunLockLease implements AutoCloseable {
+        private final UUID runId;
+        private final RunLock holder;
+        private boolean closed;
+
+        private RunLockLease(UUID runId, RunLock holder) {
+            this.runId = runId;
+            this.holder = holder;
+        }
+
+        @Override
+        public void close() {
+            if (closed) return;
+            closed = true;
+            holder.lock.unlock();
+            runLocks.computeIfPresent(runId, (ignored, current) -> {
+                if (current != holder) return current;
+                current.users--;
+                boolean terminalOrMissing = store.find(runId)
+                        .map(run -> run.status().isTerminal()).orElse(true);
+                return current.users == 0 && terminalOrMissing ? null : current;
+            });
+        }
+    }
+
+    private static final class RunLock {
+        private final ReentrantLock lock = new ReentrantLock();
+        private int users;
     }
 
     private static ExecutionStage stageFor(String stepId) {

@@ -18,7 +18,8 @@ public record OrchestrationStep(
         List<String> evidenceReferences,
         List<String> sourceReferences,
         List<String> recommendations,
-        String failureReason) {
+        String failureReason,
+        String approvalResult) {
 
     public OrchestrationStep {
         Objects.requireNonNull(id, "id");
@@ -33,7 +34,7 @@ public record OrchestrationStep(
     public static OrchestrationStep pending(OrchestrationDefinition.Step definition) {
         return new OrchestrationStep(definition.id(), definition.type(), definition.capability(),
                 definition.required(), OrchestrationStepStatus.PENDING,
-                null, null, null, null, null, List.of(), List.of(), List.of(), null);
+                null, null, null, null, null, List.of(), List.of(), List.of(), null, null);
     }
 
     public OrchestrationStep transition(OrchestrationStepStatus next, Instant at,
@@ -47,7 +48,7 @@ public record OrchestrationStep(
                 childRun == null ? runReference : childRun,
                 evidence == null ? evidenceReferences : evidence,
                 sourceReferences, recommendations,
-                failure);
+                failure, approvalResult);
     }
 
     public OrchestrationStep complete(Instant at, String output, String childRun,
@@ -56,6 +57,12 @@ public record OrchestrationStep(
         return new OrchestrationStep(id, type, capability, required, OrchestrationStepStatus.COMPLETED,
                 startedAt == null ? at : startedAt, at, inputSummary, output,
                 childRun == null ? runReference : childRun, evidence, sources,
-                nextRecommendations, partialReason);
+                nextRecommendations, partialReason, approvalResult);
+    }
+
+    public OrchestrationStep withApprovalResult(String result) {
+        return new OrchestrationStep(id, type, capability, required, status, startedAt, completedAt,
+                inputSummary, outputSummary, runReference, evidenceReferences, sourceReferences,
+                recommendations, failureReason, result);
     }
 }

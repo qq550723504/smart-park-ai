@@ -102,10 +102,20 @@ maps the key to a request fingerprint (definition, role and normalized input):
 - refresh/reconnect uses `GET` and never starts another run;
 - child references are persisted before awaiting completion, allowing cancel to
   invoke the existing child abort seam;
+- access to the singleton Operations Analysis runner is serialized; a busy
+  direct analysis makes orchestration wait instead of permanently failing, and
+  cancellation stops the wait before a child is admitted;
 - cancellation is persisted before the child is interrupted, so late results
 cannot overwrite `CANCELLED`;
 - duplicate approval observation sees an already terminal step/run and is a
   no-op.
+
+Human approval is persisted as its typed decision (`APPROVED`, `REJECTED`, or
+`null` when no approval occurred), separate from localized display summaries.
+Terminal run locks are reference-counted and removed when their last user exits.
+If retention compacts a run while its SSE projection is still cached, the trace
+archive treats it as unknown rather than allowing the cache to bypass role
+authorization.
 
 The UI exposes the launch action only when the required Operations Analysis
 capability is reported available; the backend independently rechecks that

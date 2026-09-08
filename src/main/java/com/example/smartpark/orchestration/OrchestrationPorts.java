@@ -3,6 +3,7 @@ package com.example.smartpark.orchestration;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.BooleanSupplier;
 
 public final class OrchestrationPorts {
     private OrchestrationPorts() {
@@ -20,6 +21,10 @@ public final class OrchestrationPorts {
     @FunctionalInterface
     public interface OperationsRunner {
         StartedChild start(String question);
+
+        default StartedChild start(String question, BooleanSupplier cancelled) {
+            return start(question);
+        }
 
         default void cancel(UUID runId) { }
     }

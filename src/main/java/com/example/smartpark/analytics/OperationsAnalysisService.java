@@ -12,21 +12,23 @@ import com.example.smartpark.execution.model.ExecutionStage;
 import com.example.smartpark.execution.model.ExecutionStatus;
 
 import java.time.Clock;
-import java.time.Instant;
 import java.time.Duration;
-import java.util.List;
+import java.time.Instant;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.Executor;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 
 /**
  * Run lifecycle for natural-language operations analysis: start, ambiguity
@@ -136,6 +138,50 @@ public class OperationsAnalysisService {
             expired = expireAbandonedClarificationLocked(Instant.now(clock));
             if (activeRunId != null) {
                 throw new IllegalStateException("已有正在进行的分析，请等待完成后再启动");
+            }
+            activeRunId = runId;
+        }
+        publishExpiredClarification(expired);
+        try {
+            launch(runId, question, null, false,
+                    () -> store.put(new RecordBuilder(runId, question, clock).running()),
+                    () -> { }, true);
+        } catch (RuntimeException rejected) {
+            synchronized (lifecycleLock) {
+                releaseActiveLocked(runId);
+            }
+            throw rejected;
+        }
+        return store.get(runId);
+    }
+
+    /**
+     * Waits for the service's singleton execution slot and claims it atomically.
+     * Direct API callers keep the existing fail-fast {@link #start(String)}
+     * contract; bounded orchestrators use this seam so transient contention is
+     * queued instead of being persisted as an analysis failure.
+     */
+    public AnalysisRunStore.RunRecord startWhenAvailable(String question, BooleanSupplier cancelled) {
+        requireValidQuestion(question);
+        java.util.Objects.requireNonNull(cancelled, "cancelled");
+        UUID runId = UUID.randomUUID();
+        AnalysisRunStore.RunRecord expired = null;
+        synchronized (lifecycleLock) {
+            while (activeRunId != null) {
+                expired = expireAbandonedClarificationLocked(Instant.now(clock));
+                if (activeRunId == null) break;
+                if (cancelled.getAsBoolean()) {
+                    throw new CancellationException("orchestration cancelled while awaiting analysis admission");
+                }
+                try {
+                    lifecycleLock.wait(100L);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new CancellationException("interrupted while awaiting analysis admission");
+                }
+            }
+            if (cancelled.getAsBoolean()) {
+                throw new CancellationException("orchestration cancelled while awaiting analysis admission");
             }
             activeRunId = runId;
         }
@@ -675,6 +721,7 @@ public class OperationsAnalysisService {
     private void releaseActiveLocked(UUID runId) {
         if (runId.equals(activeRunId)) {
             activeRunId = null;
+            lifecycleLock.notifyAll();
         }
     }
 
@@ -690,6 +737,7 @@ public class OperationsAnalysisService {
         store.put(expired);
         pendingClarifications.remove(activeRunId);
         activeRunId = null;
+        lifecycleLock.notifyAll();
         return expired;
     }
 

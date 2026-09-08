@@ -1,18 +1,26 @@
 package com.example.smartpark.orchestration;
 
 import com.example.smartpark.execution.ExecutionEventArchive;
+import com.example.smartpark.execution.ExecutionEventPublisher;
 import com.example.smartpark.execution.model.ExecutionEvent;
 import com.example.smartpark.execution.model.ExecutionScenario;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.NoSuchElementException;
 import java.util.UUID;
 
 public final class OrchestrationTraceArchive implements ExecutionEventArchive {
     private final OrchestrationRunStore store;
+    private final ExecutionEventPublisher publisher;
 
     public OrchestrationTraceArchive(OrchestrationRunStore store) {
+        this(store, null);
+    }
+
+    public OrchestrationTraceArchive(OrchestrationRunStore store, ExecutionEventPublisher publisher) {
         this.store = store;
+        this.publisher = publisher;
     }
 
     @Override
@@ -26,11 +34,18 @@ public final class OrchestrationTraceArchive implements ExecutionEventArchive {
 
     @Override
     public void authorize(UUID runId, String role) {
-        store.find(runId).ifPresent(run -> {
+        var persisted = store.find(runId);
+        if (persisted.isPresent()) {
+            OrchestrationRun run = persisted.orElseThrow();
             String normalized = role == null ? "" : role.trim().toUpperCase(Locale.ROOT);
             if (!"ADMIN".equals(normalized) && !run.role().equals(normalized)) {
                 throw new SecurityException("role is not allowed to read orchestration trace");
             }
-        });
+            return;
+        }
+        if (publisher != null && publisher.history(runId).stream()
+                .anyMatch(event -> event.scenario() == ExecutionScenario.ORCHESTRATION)) {
+            throw new NoSuchElementException("Unknown orchestration trace");
+        }
     }
 }

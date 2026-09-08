@@ -32,6 +32,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 
 @Configuration(proxyBeanMethods = false)
 public class OrchestrationConfiguration {
@@ -55,8 +56,9 @@ public class OrchestrationConfiguration {
     }
 
     @Bean
-    ExecutionEventArchive orchestrationTraceArchive(OrchestrationRunStore store) {
-        return new OrchestrationTraceArchive(store);
+    ExecutionEventArchive orchestrationTraceArchive(OrchestrationRunStore store,
+                                                     ExecutionEventPublisher events) {
+        return new OrchestrationTraceArchive(store, events);
     }
 
     @Bean(destroyMethod = "shutdownNow")
@@ -85,9 +87,14 @@ public class OrchestrationConfiguration {
         OrchestrationPorts.OperationsRunner operations = new OrchestrationPorts.OperationsRunner() {
             @Override
             public OrchestrationPorts.StartedChild start(String question) {
+                return start(question, () -> false);
+            }
+
+            @Override
+            public OrchestrationPorts.StartedChild start(String question, BooleanSupplier cancelled) {
                 OperationsAnalysisService service = operationsProvider.getIfAvailable();
                 if (service == null) throw new IllegalStateException("operations analysis unavailable");
-                AnalysisRunStore.RunRecord accepted = service.start(question);
+                AnalysisRunStore.RunRecord accepted = service.startWhenAvailable(question, cancelled);
                 return new OrchestrationPorts.StartedChild(accepted.runId(),
                         service.await(accepted.runId()).thenApply(OrchestrationConfiguration::operationsOutcome));
             }

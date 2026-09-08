@@ -1,5 +1,11 @@
 package com.example.smartpark.orchestration;
 
+import com.example.smartpark.execution.InMemoryExecutionEventPublisher;
+import com.example.smartpark.execution.model.ExecutionEvent;
+import com.example.smartpark.execution.model.ExecutionEventType;
+import com.example.smartpark.execution.model.ExecutionScenario;
+import com.example.smartpark.execution.model.ExecutionStage;
+import com.example.smartpark.execution.model.ExecutionStatus;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -138,6 +144,29 @@ class FileOrchestrationRunStoreTest {
         assertThat(reopened.find(oldest.id())).isEmpty();
         assertThat(reopened.find(newer.id())).contains(newer);
         assertThat(reopened.find(active.id())).contains(active);
+    }
+
+    @Test
+    void compactedOrchestrationTraceCannotBypassAuthorizationThroughPublisherCache() {
+        Path file = temporaryDirectory.resolve("trace-compaction.json");
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        FileOrchestrationRunStore store = new FileOrchestrationRunStore(file, mapper, 1, 1);
+        Instant base = Instant.parse("2026-09-08T00:00:00Z");
+        OrchestrationRun evicted = run("evicted", "fp-evicted", OrchestrationStatus.COMPLETED, base);
+        store.createOrGet("evicted", "fp-evicted", () -> evicted);
+        InMemoryExecutionEventPublisher publisher = new InMemoryExecutionEventPublisher();
+        publisher.publish(new ExecutionEvent(UUID.randomUUID(), evicted.traceId(), 1, base,
+                ExecutionScenario.ORCHESTRATION, "orchestrator", ExecutionStage.COMPLETION,
+                ExecutionEventType.RUN_COMPLETED, ExecutionStatus.SUCCEEDED, "completed", null));
+        OrchestrationRun replacement = run(
+                "replacement", "fp-replacement", OrchestrationStatus.COMPLETED, base.plusSeconds(1));
+        store.createOrGet("replacement", "fp-replacement", () -> replacement);
+
+        OrchestrationTraceArchive archive = new OrchestrationTraceArchive(store, publisher);
+
+        assertThat(store.find(evicted.id())).isEmpty();
+        assertThatThrownBy(() -> archive.authorize(evicted.traceId(), "ADMIN"))
+                .isInstanceOf(java.util.NoSuchElementException.class);
     }
 
     @Test
