@@ -63,6 +63,9 @@ const navItems = computed<WorkbenchNavItem[]>(() => [
 const selectedAlertId = ref(demoAlerts[0].id)
 const activeView = ref<WorkbenchView>(resolveRequestedView(props.initialView))
 let navigationGeneration = 0
+let pendingCapabilityView: { view: WorkbenchView; navigationGeneration: number } | null = activeView.value === props.initialView
+  ? null
+  : { view: props.initialView, navigationGeneration }
 const selectedAnalysisQuestion = ref<string | null>(null)
 const selectedAnalysisQuestionToken = ref(0)
 const customerQueueRefreshToken = ref(0)
@@ -82,15 +85,27 @@ function canMountView(view: WorkbenchView): boolean {
   return isViewAvailable(view)
 }
 
+function beginNavigation(): number {
+  pendingCapabilityView = null
+  navigationGeneration += 1
+  return navigationGeneration
+}
+
 function switchView(view: WorkbenchView): void {
   const nextView = resolveRequestedView(view)
-  navigationGeneration += 1
+  beginNavigation()
   if (nextView !== 'workflow') cancelPendingLoad()
   if (nextView === 'workflow') hasVisitedWorkflow.value = true
   activeView.value = nextView
 }
+function requestView(view: WorkbenchView): void {
+  switchView(view)
+  if (capabilityLoadState.value === 'loading' && activeView.value !== view) {
+    pendingCapabilityView = { view, navigationGeneration }
+  }
+}
 watch([() => props.initialView, () => props.active], ([view, active]) => {
-  if (active) switchView(view)
+  if (active) requestView(view)
 })
 watch(activeView, async (view) => {
   if (view !== 'workflow' || hasVisitedWorkflow.value) return
@@ -101,25 +116,26 @@ watch(role, (nextRole, previousRole) => {
   if (nextRole === previousRole) return
   if (!isViewAvailable(activeView.value)) switchView('workflow')
 })
-function reconcileViewAfterCapabilityLoad(navigationGenerationAtRequest: number): void {
-  if (props.active && navigationGeneration === navigationGenerationAtRequest) {
-    switchView(props.initialView)
+function reconcileViewAfterCapabilityLoad(): void {
+  const pendingView = pendingCapabilityView
+  pendingCapabilityView = null
+  if (props.active && pendingView?.navigationGeneration === navigationGeneration) {
+    switchView(pendingView.view)
     return
   }
   if (!isViewAvailable(activeView.value)) switchView('workflow')
 }
 onMounted(() => {
-  const navigationGenerationAtRequest = navigationGeneration
   void getOperationsCapabilities()
     .then((value) => {
       capabilities.value = value
       capabilityLoadState.value = 'ready'
-      reconcileViewAfterCapabilityLoad(navigationGenerationAtRequest)
+      reconcileViewAfterCapabilityLoad()
     })
     .catch(() => {
       capabilities.value = null
       capabilityLoadState.value = 'failed'
-      reconcileViewAfterCapabilityLoad(navigationGenerationAtRequest)
+      reconcileViewAfterCapabilityLoad()
     })
 })
 const reviewer = ref('')
@@ -212,7 +228,7 @@ function openTraceFromBoard(runId: string): void {
 }
 
 async function openCollaborationView(view: 'workflow' | 'customer' | 'security-incident', workflowId?: string, _ticketId?: string): Promise<void> {
-  const generation = ++navigationGeneration
+  const generation = beginNavigation()
   if (view === 'security-incident') {
     if (!['ADMIN', 'APPROVER'].includes(role.value) || capabilities.value?.securityIncidentEnabled !== true) return
     securityIncidentTargetId.value = workflowId ?? null

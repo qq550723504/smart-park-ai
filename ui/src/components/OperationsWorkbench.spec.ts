@@ -332,6 +332,37 @@ describe('OperationsWorkbench', () => {
     wrapper.unmount()
   })
 
+  it.each([
+    ['analytics', 'analysis'],
+    ['security-incidents', 'security'],
+  ] as const)('reapplies a cached %s request after capabilities settle', async (requestedView, mountKey) => {
+    const pendingCapabilities = deferred<Response>()
+    globalThis.fetch = (() => pendingCapabilities.promise) as typeof fetch
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow', active: true },
+      global: { stubs: operatorStubs },
+    })
+
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ initialView: requestedView })
+    await wrapper.setProps({ active: true })
+    await nextTick()
+
+    expect(wrapper.get('[data-workbench-view="workflow"]').classes()).toContain('active')
+    expect(wrapper.find(`[data-workbench-view="${requestedView}"]`).exists()).toBe(false)
+    expect(mountKey === 'analysis' ? mounts.analysis : restrictedMounts.security).toBe(0)
+
+    pendingCapabilities.resolve(new Response(JSON.stringify({
+      knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+      analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    await settleCapabilities()
+
+    expect(wrapper.get(`[data-workbench-view="${requestedView}"]`).classes()).toContain('active')
+    expect(mountKey === 'analysis' ? mounts.analysis : restrictedMounts.security).toBeGreaterThan(0)
+    wrapper.unmount()
+  })
+
   it('mounts the visible default workflow graph without waiting for capabilities', async () => {
     const pendingCapabilities = deferred<Response>()
     globalThis.fetch = (() => pendingCapabilities.promise) as typeof fetch
