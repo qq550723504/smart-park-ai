@@ -56,7 +56,7 @@ describe('OrchestrationPanel', () => {
     await flushPromises()
 
     expect(startOrchestration).toHaveBeenCalledOnce()
-    expect(vi.mocked(startOrchestration).mock.calls[0][2]).toMatchObject({ buildingIds: ['B1'],
+    expect(vi.mocked(startOrchestration).mock.calls[0][2]).toMatchObject({ alertId: 'ALT-ORCH-ENERGY-B1-001', buildingIds: ['B1'],
       energyRelated: true, crossDomain: true, securityRelated: true, requestAction: true })
     expect(wrapper.get('[data-step-status="RUNNING"]').text()).toContain('调用真实分析')
     expect(wrapper.emitted('open-trace')).toEqual([[run().traceId]])

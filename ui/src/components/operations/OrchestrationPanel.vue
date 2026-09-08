@@ -53,7 +53,7 @@ function launchInput(): OrchestrationInput {
     question: canApproveSecurity
       ? '研判 B1 最近5天能耗异常与关联安全风险，并在必要时进入告警处置'
       : '研判 B1 最近5天能耗异常并形成跨域建议',
-    alertId: canAct ? 'ALT-TEMP-001' : null,
+    alertId: canAct ? 'ALT-ORCH-ENERGY-B1-001' : null,
     buildingIds: ['B1'],
     energyRelated: true,
     crossDomain: true,

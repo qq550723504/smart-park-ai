@@ -4,8 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.nio.file.Path;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -62,6 +63,31 @@ class FileOrchestrationRunStoreTest {
                 "retry-key", "fingerprint", FileOrchestrationRunStoreTest::run);
         assertThat(retry.created()).isTrue();
         assertThat(Files.exists(blockedParent.resolve("runs.json"))).isTrue();
+    }
+
+    @Test
+    void unsupportedAtomicReplacementFailsClosedAndPreservesTheAuthoritativeSnapshot() throws Exception {
+        Path file = temporaryDirectory.resolve("atomic-runs.json");
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        FileOrchestrationRunStore initial = new FileOrchestrationRunStore(file, mapper);
+        OrchestrationRun created = run();
+        initial.createOrGet("key", "fingerprint", () -> created);
+        String authoritativeSnapshot = Files.readString(file);
+        FileOrchestrationRunStore unsupported = new FileOrchestrationRunStore(file, mapper,
+                (source, target) -> {
+                    throw new AtomicMoveNotSupportedException(source.toString(), target.toString(),
+                            "atomic replacement unavailable");
+                });
+
+        assertThatThrownBy(() -> unsupported.update(created.id(), current -> current.copy(
+                current.status(), current.startedAt(), null, "must not persist",
+                current.steps(), current.evidence(), null, null, false, current.traceEvents())))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("unable to persist orchestration state")
+                .hasCauseInstanceOf(AtomicMoveNotSupportedException.class);
+
+        assertThat(unsupported.find(created.id()).orElseThrow().revision()).isEqualTo(created.revision());
+        assertThat(Files.readString(file)).isEqualTo(authoritativeSnapshot);
     }
 
     @Test

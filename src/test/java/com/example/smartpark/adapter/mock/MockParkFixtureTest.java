@@ -66,6 +66,18 @@ class MockParkFixtureTest {
     }
 
     @Test
+    void orchestrationAlertAndDeviceShareTheB1Identity() {
+        Alert alert = fixture.alerts().getAlert("ALT-ORCH-ENERGY-B1-001");
+
+        assertThat(alert.buildingId()).isEqualTo("B1");
+        assertThat(alert.deviceId()).isEqualTo("DEV-ENERGY-B1-001");
+        assertThat(alert.classification())
+                .isEqualTo(com.example.smartpark.model.alert.AlertClassification.ENERGY);
+        assertThat(alert.riskHint()).isEqualTo(RiskLevel.LOW);
+        assertThat(fixture.devices().getDevice(alert.deviceId()).buildingId()).isEqualTo("B1");
+    }
+
+    @Test
     void highRiskPowerAlertRequiresTheHighRiskFixture() {
         Alert alert = fixture.alerts().getAlert("ALT-POWER-001");
 

@@ -4,7 +4,6 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -29,12 +28,18 @@ public final class FileOrchestrationRunStore implements OrchestrationRunStore {
 
     private final Path stateFile;
     private final ObjectMapper mapper;
+    private final AtomicReplacer atomicReplacer;
     private final Map<UUID, OrchestrationRun> runs = new LinkedHashMap<>();
     private final Map<String, UUID> idempotencyIndex = new LinkedHashMap<>();
 
     public FileOrchestrationRunStore(Path stateFile, ObjectMapper mapper) {
+        this(stateFile, mapper, FileOrchestrationRunStore::atomicReplace);
+    }
+
+    FileOrchestrationRunStore(Path stateFile, ObjectMapper mapper, AtomicReplacer atomicReplacer) {
         this.stateFile = stateFile.toAbsolutePath().normalize();
         this.mapper = mapper.copy().findAndRegisterModules();
+        this.atomicReplacer = java.util.Objects.requireNonNull(atomicReplacer, "atomicReplacer");
         load();
     }
 
@@ -108,17 +113,21 @@ public final class FileOrchestrationRunStore implements OrchestrationRunStore {
             Path temporary = Files.createTempFile(parent, stateFile.getFileName().toString(), ".tmp");
             try {
                 mapper.writeValue(temporary.toFile(), new ArrayList<>(snapshot));
-                try {
-                    Files.move(temporary, stateFile, StandardCopyOption.ATOMIC_MOVE,
-                            StandardCopyOption.REPLACE_EXISTING);
-                } catch (AtomicMoveNotSupportedException unsupported) {
-                    Files.move(temporary, stateFile, StandardCopyOption.REPLACE_EXISTING);
-                }
+                atomicReplacer.replace(temporary, stateFile);
             } finally {
                 Files.deleteIfExists(temporary);
             }
         } catch (IOException failure) {
             throw new IllegalStateException("unable to persist orchestration state", failure);
         }
+    }
+
+    private static void atomicReplace(Path source, Path target) throws IOException {
+        Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    @FunctionalInterface
+    interface AtomicReplacer {
+        void replace(Path source, Path target) throws IOException;
     }
 }
