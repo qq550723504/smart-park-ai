@@ -667,7 +667,7 @@ public final class OrchestrationService {
                                           Instant approvalDeadline) {
         try (RunLockLease ignored = acquireRunLock(runId)) {
             if (!startStep(runId, stepId, "调用现有 Alert Workflow")) return null;
-            WorkflowOutcome outcome = workflow.start(alertId, approvalDeadline);
+            WorkflowOutcome outcome = workflow.startOwned(alertId, approvalDeadline);
             rememberChildReference(runId, stepId, outcome.workflowId());
             return outcome;
         }

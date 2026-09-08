@@ -31,6 +31,13 @@ public interface WorkflowExecutionStore {
             CompiledGraph compiledGraph,
             AlertWorkflowState initialState);
 
+    Execution registerExclusive(
+            String workflowId,
+            String alertId,
+            String graphThreadId,
+            CompiledGraph compiledGraph,
+            AlertWorkflowState initialState);
+
     Optional<Execution> execution(String workflowId);
 
     static WorkflowExecutionStore inMemory() {
@@ -43,6 +50,7 @@ public interface WorkflowExecutionStore {
         private final String graphThreadId;
         private final CompiledGraph compiledGraph;
         private final AlertWorkflowState initialState;
+        private final boolean reusableByAlert;
         private volatile InterruptionMetadata interruption;
         private volatile Throwable failureCause;
         private final Map<UUID, Instant> pendingApprovalAttempts = new ConcurrentHashMap<>();
@@ -52,12 +60,14 @@ public interface WorkflowExecutionStore {
                 String alertId,
                 String graphThreadId,
                 CompiledGraph compiledGraph,
-                AlertWorkflowState initialState) {
+                AlertWorkflowState initialState,
+                boolean reusableByAlert) {
             this.workflowId = Objects.requireNonNull(workflowId, "workflowId");
             this.alertId = Objects.requireNonNull(alertId, "alertId");
             this.graphThreadId = Objects.requireNonNull(graphThreadId, "graphThreadId");
             this.compiledGraph = Objects.requireNonNull(compiledGraph, "compiledGraph");
             this.initialState = Objects.requireNonNull(initialState, "initialState");
+            this.reusableByAlert = reusableByAlert;
         }
 
         public String workflowId() {
@@ -74,6 +84,10 @@ public interface WorkflowExecutionStore {
 
         public CompiledGraph compiledGraph() {
             return compiledGraph;
+        }
+
+        boolean reusableByAlert() {
+            return reusableByAlert;
         }
 
         public Optional<InterruptionMetadata> interruption() {
@@ -135,7 +149,7 @@ final class InMemoryWorkflowExecutionStore implements WorkflowExecutionStore {
     @Override
     public Optional<WorkflowSnapshot> findByAlertId(String alertId) {
         return executions.values().stream()
-                .filter(execution -> execution.alertId().equals(alertId))
+                .filter(execution -> execution.reusableByAlert() && execution.alertId().equals(alertId))
                 // Prefer a reusable execution over an old failed attempt. This keeps
                 // retries idempotent once a new attempt is running or completed.
                 .sorted(Comparator.comparing(execution -> isRetryable(execution.snapshot().status())))
@@ -167,7 +181,24 @@ final class InMemoryWorkflowExecutionStore implements WorkflowExecutionStore {
         if (executions.containsKey(workflowId)) {
             throw new IllegalStateException("Workflow already exists: " + workflowId);
         }
-        Execution execution = new Execution(workflowId, alertId, graphThreadId, compiledGraph, initialState);
+        Execution execution = new Execution(
+                workflowId, alertId, graphThreadId, compiledGraph, initialState, true);
+        executions.put(workflowId, execution);
+        return execution;
+    }
+
+    @Override
+    public synchronized Execution registerExclusive(
+            String workflowId,
+            String alertId,
+            String graphThreadId,
+            CompiledGraph compiledGraph,
+            AlertWorkflowState initialState) {
+        if (executions.containsKey(workflowId)) {
+            throw new IllegalStateException("Workflow already exists: " + workflowId);
+        }
+        Execution execution = new Execution(
+                workflowId, alertId, graphThreadId, compiledGraph, initialState, false);
         executions.put(workflowId, execution);
         return execution;
     }

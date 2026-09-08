@@ -54,6 +54,10 @@ public final class OrchestrationPorts {
             return start(alertId);
         }
 
+        default WorkflowOutcome startOwned(String alertId, Instant approvalExpiresAt) {
+            return start(alertId, approvalExpiresAt);
+        }
+
         WorkflowOutcome get(String workflowId);
 
         default WorkflowOutcome expireApproval(String workflowId, Instant approvalExpiresAt) {

@@ -179,29 +179,38 @@ public final class AlertWorkflow {
     }
 
     public WorkflowSnapshot start(String alertId, Instant approvalExpiresAt) {
+        return start(alertId, approvalExpiresAt, false);
+    }
+
+    public WorkflowSnapshot startExclusive(String alertId, Instant approvalExpiresAt) {
+        return start(alertId, approvalExpiresAt, true);
+    }
+
+    private WorkflowSnapshot start(String alertId, Instant approvalExpiresAt, boolean exclusive) {
         String requiredAlertId = requireIdentifier(alertId, "alertId");
         Instant now = Instant.now(clock);
         if (approvalExpiresAt != null && !approvalExpiresAt.isAfter(now)) {
             throw new IllegalArgumentException("approvalExpiresAt must be in the future");
         }
-        Optional<WorkflowSnapshot> existing = executionStore.findByAlertId(requiredAlertId);
-        if (existing.filter(snapshot -> !isRetryable(snapshot.status())).isPresent()) {
-            WorkflowSnapshot snapshot = existing.get();
-            return approvalExpiresAt == null || snapshot.status() != WorkflowStatus.WAITING_APPROVAL
-                    ? snapshot : bindApprovalDeadline(snapshot.workflowId(), approvalExpiresAt);
+        if (!exclusive) {
+            Optional<WorkflowSnapshot> existing = executionStore.findByAlertId(requiredAlertId);
+            if (existing.filter(snapshot -> !isRetryable(snapshot.status())).isPresent()) {
+                WorkflowSnapshot snapshot = existing.get();
+                return approvalExpiresAt == null || snapshot.status() != WorkflowStatus.WAITING_APPROVAL
+                        ? snapshot : bindApprovalDeadline(snapshot.workflowId(), approvalExpiresAt);
+            }
         }
 
         String workflowId = requireIdentifier(workflowIds.get(), "workflowId");
         String graphThreadId = workflowId;
         AlertWorkflowState initialState = AlertWorkflowState.initial(
                 workflowId, requiredAlertId, now, approvalExpiresAt);
-        WorkflowExecutionStore.Execution execution = executionStore.register(
-                workflowId,
-                requiredAlertId,
-                graphThreadId,
-                compiledGraph,
-                initialState);
-        if (!execution.workflowId().equals(workflowId)) {
+        WorkflowExecutionStore.Execution execution = exclusive
+                ? executionStore.registerExclusive(workflowId, requiredAlertId, graphThreadId,
+                    compiledGraph, initialState)
+                : executionStore.register(workflowId, requiredAlertId, graphThreadId,
+                    compiledGraph, initialState);
+        if (!exclusive && !execution.workflowId().equals(workflowId)) {
             return executionStore.get(execution.workflowId()).orElseThrow();
         }
 

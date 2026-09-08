@@ -152,6 +152,14 @@ public class OrchestrationConfiguration {
             }
 
             @Override
+            public OrchestrationPorts.WorkflowOutcome startOwned(
+                    String alertId, java.time.Instant approvalExpiresAt) {
+                AlertWorkflow service = workflowProvider.getIfAvailable();
+                if (service == null) throw new IllegalStateException("alert workflow unavailable");
+                return workflowOutcome(service.startExclusive(alertId, approvalExpiresAt));
+            }
+
+            @Override
             public OrchestrationPorts.WorkflowOutcome get(String workflowId) {
                 AlertWorkflow service = workflowProvider.getIfAvailable();
                 if (service == null) throw new IllegalStateException("alert workflow unavailable");

@@ -179,6 +179,37 @@ class AlertWorkflowTest {
     }
 
     @Test
+    void exclusiveStartsForTheSameAlertHaveIndependentApprovalOwnership() {
+        Fixture fixture = fixture("ALT-POWER-001", 0.96, "HIGH", null, sequentialIds());
+        Instant deadline = NOW.plus(Duration.ofMinutes(5));
+        WorkflowSnapshot first = fixture.workflow.startExclusive("ALT-POWER-001", deadline);
+        WorkflowSnapshot second = fixture.workflow.startExclusive("ALT-POWER-001", deadline);
+
+        WorkflowSnapshot cancelled = fixture.workflow.cancel(first.workflowId());
+        WorkflowSnapshot approved = fixture.workflow.approve(second.workflowId(),
+                approvedAt("exclusive-second", NOW.toString()));
+
+        assertThat(first.workflowId()).isNotEqualTo(second.workflowId());
+        assertThat(cancelled.status()).isEqualTo(WorkflowStatus.FAILED);
+        assertThat(approved.status()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThat(fixture.parkSystem.workOrders().findByWorkflowId(first.workflowId())).isEmpty();
+        assertThat(fixture.parkSystem.workOrders().findByWorkflowId(second.workflowId())).hasSize(1);
+    }
+
+    @Test
+    void ordinaryAlertIdempotencyDoesNotAttachToAnOwnedExecution() {
+        Fixture fixture = fixture("ALT-POWER-001", 0.96, "HIGH", null, sequentialIds());
+        WorkflowSnapshot owned = fixture.workflow.startExclusive(
+                "ALT-POWER-001", NOW.plus(Duration.ofMinutes(5)));
+
+        WorkflowSnapshot ordinary = fixture.workflow.start("ALT-POWER-001");
+        WorkflowSnapshot replay = fixture.workflow.start("ALT-POWER-001");
+
+        assertThat(ordinary.workflowId()).isNotEqualTo(owned.workflowId());
+        assertThat(replay.workflowId()).isEqualTo(ordinary.workflowId());
+    }
+
+    @Test
     void expirationDefersToAnApprovalRequestReceivedBeforeTheDeadline() throws Exception {
         MutableClock clock = new MutableClock(NOW);
         Fixture fixture = fixture("ALT-POWER-001", 0.96, 0.96, "HIGH", null,
@@ -500,14 +531,17 @@ class AlertWorkflowTest {
             KnowledgePort knowledgePort,
             Supplier<String> workflowIds,
             Clock clock) {
-        TestChatModel triageModel = new TestChatModel(triageJson(alertId, classificationConfidence, riskLevel));
+        String triageResponse = triageJson(alertId, classificationConfidence, riskLevel);
+        TestChatModel triageModel = new TestChatModel(
+                triageResponse, triageResponse, triageResponse, triageResponse);
         String knowledgeQuery = alertId.contains("POWER") ? "power" : "temperature";
+        String diagnosisResponse = diagnosisJson(
+                alertId,
+                riskLevel,
+                diagnosisConfidence,
+                knowledgePort.search(KnowledgeDomain.ALERT_OPERATIONS, knowledgeQuery).isEmpty());
         TestChatModel diagnosisModel = new TestChatModel(
-                diagnosisJson(
-                        alertId,
-                        riskLevel,
-                        diagnosisConfidence,
-                        knowledgePort.search(KnowledgeDomain.ALERT_OPERATIONS, knowledgeQuery).isEmpty()));
+                diagnosisResponse, diagnosisResponse, diagnosisResponse, diagnosisResponse);
         AlertTriageAgent triageAgent = new AlertTriageAgent(triageModel);
         AlertDiagnosisAgent diagnosisAgent = new AlertDiagnosisAgent(
                 diagnosisModel,

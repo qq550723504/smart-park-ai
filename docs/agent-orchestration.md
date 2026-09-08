@@ -94,6 +94,12 @@ after that process is replaced. Orchestration recovery reports this limitation
 fail-closed; replacing the existing workflow checkpoint store is a separate
 architecture change, not duplicated inside the orchestrator.
 
+Each orchestration starts an owned Alert Workflow execution. It reuses the
+existing graph, agents, approval and work-order logic, but never attaches two
+parents to the same mutable child run. The ordinary Alert Workflow API keeps
+its existing alert-level idempotency independently. This one-parent/one-child
+ownership is what makes cancellation and approval deadlines deterministic.
+
 ## Idempotency and concurrency
 
 `POST /api/orchestrations/runs` requires `Idempotency-Key`. The durable store

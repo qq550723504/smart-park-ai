@@ -756,6 +756,32 @@ class OrchestrationServiceTest {
         assertThat(observed.cancelRequested()).isFalse();
     }
 
+    @Test
+    void orchestrationStartsAnOwnedWorkflowExecution() {
+        AtomicBoolean ownedStart = new AtomicBoolean();
+        OrchestrationPorts.WorkflowRunner workflow = new OrchestrationPorts.WorkflowRunner() {
+            @Override public WorkflowOutcome start(String alertId) {
+                throw new AssertionError("shared alert start must not be used");
+            }
+            @Override public WorkflowOutcome startOwned(String alertId, Instant approvalExpiresAt) {
+                ownedStart.set(true);
+                return workflowOutcome("COMPLETED");
+            }
+            @Override public WorkflowOutcome get(String workflowId) { return workflowOutcome("COMPLETED"); }
+        };
+        Harness harness = harness(new Capabilities(true, false, false, false, true), Runnable::run,
+                input -> availableSecurity(), workflow);
+        OrchestrationInput input = new OrchestrationInput("处置告警", "ALT-001", List.of(),
+                false, false, false, true);
+
+        OrchestrationRun completed = harness.service.start(
+                OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                input, "owned-workflow", null, "OPERATOR").run();
+
+        assertThat(ownedStart).isTrue();
+        assertThat(completed.status()).isEqualTo(OrchestrationStatus.COMPLETED);
+    }
+
     private Harness harness(Capabilities capabilities, java.util.concurrent.Executor executor) {
         return harness(capabilities, executor, input -> availableSecurity());
     }
