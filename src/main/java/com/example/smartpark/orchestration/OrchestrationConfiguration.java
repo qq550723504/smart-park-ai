@@ -165,6 +165,13 @@ public class OrchestrationConfiguration {
                 if (service == null) throw new IllegalStateException("alert workflow unavailable");
                 return workflowOutcome(service.expireApproval(workflowId, approvalExpiresAt));
             }
+
+            @Override
+            public OrchestrationPorts.WorkflowOutcome cancel(String workflowId) {
+                AlertWorkflow service = workflowProvider.getIfAvailable();
+                if (service == null) throw new IllegalStateException("alert workflow unavailable");
+                return workflowOutcome(service.cancel(workflowId));
+            }
         };
         return new OrchestrationService(store,
                 () -> {
@@ -267,7 +274,10 @@ public class OrchestrationConfiguration {
         String approval = snapshot.approval().map(decision -> decision.decision().name()).orElse(null);
         String status = snapshot.status() == com.example.smartpark.model.common.WorkflowStatus.FAILED
                 && snapshot.errors().contains("Approval deadline expired")
-                ? "APPROVAL_EXPIRED" : snapshot.status().name();
+                ? "APPROVAL_EXPIRED"
+                : snapshot.status() == com.example.smartpark.model.common.WorkflowStatus.FAILED
+                    && snapshot.errors().contains("Workflow cancelled by orchestration")
+                    ? "CANCELLED" : snapshot.status().name();
         return new OrchestrationPorts.WorkflowOutcome(snapshot.workflowId(), status,
                 "告警工作流状态 " + snapshot.status(), evidence, approval,
                 snapshot.errors().isEmpty() ? null : "告警工作流未完成",

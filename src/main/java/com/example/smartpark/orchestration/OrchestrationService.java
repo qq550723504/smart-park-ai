@@ -167,6 +167,13 @@ public final class OrchestrationService {
                     .filter(step -> step.status() == OrchestrationStepStatus.RUNNING
                             || step.status() == OrchestrationStepStatus.WAITING_APPROVAL)
                     .map(OrchestrationStep::type).findFirst().orElse(null);
+            if (activeType == OrchestrationStepType.ALERT_WORKFLOW
+                    && childReference != null && workflow != null) {
+                WorkflowOutcome child = workflow.cancel(childReference);
+                if (!"CANCELLED".equals(child.status())) {
+                    return resolveWorkflowCancellationRace(runId, current, child);
+                }
+            }
             Instant now = clock.instant();
             OrchestrationRun cancelled = store.update(runId, run -> run.copy(
                     OrchestrationStatus.CANCELLED, run.startedAt(), now, "编排已取消",
@@ -184,6 +191,40 @@ public final class OrchestrationService {
             publishProjection(cancelled);
             return cancelled;
         }
+    }
+
+    private OrchestrationRun resolveWorkflowCancellationRace(UUID runId, OrchestrationRun current,
+                                                               WorkflowOutcome child) {
+        OrchestrationStep step = current.steps().stream()
+                .filter(item -> item.type() == OrchestrationStepType.ALERT_WORKFLOW
+                        && (item.status() == OrchestrationStepStatus.RUNNING
+                            || item.status() == OrchestrationStepStatus.WAITING_APPROVAL))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("approval step is no longer cancellable"));
+        if ("APPROVAL_EXPIRED".equals(child.status())) {
+            if (step.status() == OrchestrationStepStatus.WAITING_APPROVAL) {
+                expireApprovalLocked(runId, step);
+            } else {
+                failStep(runId, step.id(), "人工审批等待超时", false);
+                executor.execute(() -> execute(runId));
+            }
+            return getStored(runId);
+        }
+        boolean completed = "COMPLETED".equals(child.status()) || "REJECTED".equals(child.status());
+        if (!completed) {
+            throw new IllegalStateException("approval child could not be cancelled: " + child.status());
+        }
+        String summary = "REJECTED".equals(child.status())
+                ? "人工拒绝了处置动作" : "处置工作流已完成";
+        if (step.status() == OrchestrationStepStatus.WAITING_APPROVAL) {
+            commitApprovalResume(runId, step.id(), true, summary, child.workflowId(),
+                    child.evidenceReferences(), child.approvalResult());
+        } else {
+            completeStep(runId, step.id(), summary, child.workflowId(), child.evidenceReferences(),
+                    List.of(), List.of(), null, child.approvalResult());
+        }
+        executor.execute(() -> execute(runId));
+        return getStored(runId);
     }
 
     /** Called once after dependency wiring to recover persisted non-terminal records. */
@@ -851,6 +892,8 @@ public final class OrchestrationService {
                 operations.cancel(UUID.fromString(reference));
             } else if (type == OrchestrationStepType.EXPERT_COLLABORATION && collaboration != null) {
                 collaboration.cancel(UUID.fromString(reference));
+            } else if (type == OrchestrationStepType.ALERT_WORKFLOW && workflow != null) {
+                workflow.cancel(reference);
             }
         } catch (RuntimeException ignored) {
             // Orchestration is already terminal; an uninterruptible child cannot launch later steps.

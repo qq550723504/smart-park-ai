@@ -60,8 +60,8 @@ public final class OrchestrationPorts {
             return get(workflowId);
         }
 
-        default void cancel(String workflowId) {
-            // The current Alert Workflow has no safe interrupt boundary.
+        default WorkflowOutcome cancel(String workflowId) {
+            throw new UnsupportedOperationException("workflow cancellation is unavailable");
         }
     }
 

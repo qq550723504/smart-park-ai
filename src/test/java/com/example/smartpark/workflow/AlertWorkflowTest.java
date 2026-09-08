@@ -163,6 +163,22 @@ class AlertWorkflowTest {
     }
 
     @Test
+    void cancellingAWaitingWorkflowRejectsLaterApprovalAndCreatesNoWorkOrder() {
+        Fixture fixture = fixture("ALT-POWER-001", 0.96, "HIGH", null, sequentialIds());
+        WorkflowSnapshot waiting = fixture.workflow.start("ALT-POWER-001");
+
+        WorkflowSnapshot cancelled = fixture.workflow.cancel(waiting.workflowId());
+
+        assertThat(cancelled.status()).isEqualTo(WorkflowStatus.FAILED);
+        assertThat(cancelled.errors()).contains("Workflow cancelled by orchestration");
+        assertThatThrownBy(() -> fixture.workflow.approve(waiting.workflowId(),
+                approvedAt("approval-after-cancel", NOW.toString())))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("must be WAITING_APPROVAL");
+        assertThat(fixture.parkSystem.workOrders().findByWorkflowId(waiting.workflowId())).isEmpty();
+    }
+
+    @Test
     void expirationDefersToAnApprovalRequestReceivedBeforeTheDeadline() throws Exception {
         MutableClock clock = new MutableClock(NOW);
         Fixture fixture = fixture("ALT-POWER-001", 0.96, 0.96, "HIGH", null,

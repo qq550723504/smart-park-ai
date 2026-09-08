@@ -107,8 +107,10 @@ maps the key to a request fingerprint (definition, role and normalized input):
 - access to the singleton Operations Analysis runner is serialized; a busy
   direct analysis makes orchestration wait instead of permanently failing, and
   cancellation stops the wait before a child is admitted;
-- cancellation is persisted before the child is interrupted, so late results
-cannot overwrite `CANCELLED`;
+- Operations/Collaboration cancellation is persisted before the child is
+  interrupted, so late results cannot overwrite `CANCELLED`; an Alert Workflow
+  waiting for approval is first terminalized at its work-order side-effect
+  boundary, and only then is the parent reported `CANCELLED`;
 - duplicate approval observation sees an already terminal step/run and is a
   no-op.
 
@@ -117,7 +119,9 @@ Human approval is persisted as its typed decision (`APPROVED`, `REJECTED`, or
 Terminal run locks are reference-counted and removed when their last user exits.
 If retention compacts a run while its SSE projection is still cached, the trace
 archive treats it as unknown rather than allowing the cache to bypass role
-authorization.
+authorization. The in-memory replay registry also retains at most 512 runs,
+evicts the oldest terminal histories first, and refuses new histories when all
+slots are active rather than allowing heap growth without bound.
 
 The UI exposes the launch action only when the required Operations Analysis
 capability is reported available; the backend independently rechecks that
@@ -128,7 +132,8 @@ capability before the required step starts.
 - `POST /api/orchestrations/runs` — start or idempotently replay a run.
 - `GET /api/orchestrations/runs/{runId}` — read the complete safe run projection.
 - `POST /api/orchestrations/runs/{runId}/cancel` — cancel future steps and abort
-  the current Operations/Collaboration child when supported.
+  the current Operations/Collaboration child or terminalize a waiting Alert
+  Workflow before returning cancellation.
 - `GET /api/executions/{runId}/events` — existing Execution Trace SSE endpoint;
   orchestration traces require the owning `X-Demo-Role` (or `ADMIN`). Native
   browser `EventSource` clients may send the same demo role as the `role` query

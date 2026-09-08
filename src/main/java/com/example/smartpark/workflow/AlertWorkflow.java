@@ -42,6 +42,7 @@ public final class AlertWorkflow {
 
     private static final double CONFIDENCE_THRESHOLD = 0.75;
     private static final String APPROVAL_DEADLINE_EXPIRED = "Approval deadline expired";
+    private static final String CANCELLED_BY_ORCHESTRATION = "Workflow cancelled by orchestration";
 
     private final WorkflowExecutionStore executionStore;
     private final WorkflowEventPublisher eventPublisher;
@@ -324,6 +325,17 @@ public final class AlertWorkflow {
         }
     }
 
+    public WorkflowSnapshot cancel(String workflowId) {
+        String requiredWorkflowId = requireIdentifier(workflowId, "workflowId");
+        WorkflowExecutionStore.Execution execution = executionStore.execution(requiredWorkflowId)
+                .orElseThrow(() -> new NoSuchElementException("Unknown workflow: " + requiredWorkflowId));
+        synchronized (execution) {
+            WorkflowSnapshot current = execution.snapshot();
+            if (current.status() != WorkflowStatus.WAITING_APPROVAL) return current;
+            return terminalizeWaitingApproval(execution, CANCELLED_BY_ORCHESTRATION);
+        }
+    }
+
     private WorkflowSnapshot bindApprovalDeadline(String workflowId, Instant requestedDeadline) {
         WorkflowExecutionStore.Execution execution = executionStore.execution(workflowId)
                 .orElseThrow(() -> new NoSuchElementException("Unknown workflow: " + workflowId));
@@ -347,14 +359,19 @@ public final class AlertWorkflow {
 
     private WorkflowSnapshot expireApprovalLocked(WorkflowExecutionStore.Execution execution,
                                                     WorkflowSnapshot current) {
+        return terminalizeWaitingApproval(execution, APPROVAL_DEADLINE_EXPIRED);
+    }
+
+    private WorkflowSnapshot terminalizeWaitingApproval(WorkflowExecutionStore.Execution execution,
+                                                         String reason) {
         long sequence = nodes.publish(execution.workflowId(), WorkflowEvent.EventType.FAILED,
-                AlertWorkflowNodes.HUMAN_APPROVAL, APPROVAL_DEADLINE_EXPIRED);
+                AlertWorkflowNodes.HUMAN_APPROVAL, reason);
         updateGraphState(execution, Map.of(
                 AlertWorkflowState.STATUS, WorkflowStatus.FAILED.name(),
-                AlertWorkflowState.ERRORS, List.of(APPROVAL_DEADLINE_EXPIRED),
+                AlertWorkflowState.ERRORS, List.of(reason),
                 AlertWorkflowState.EVENT_SEQUENCE, sequence,
                 AlertWorkflowState.UPDATED_AT, Instant.now(clock).toString()));
-        execution.failureCause(new IllegalStateException(APPROVAL_DEADLINE_EXPIRED));
+        execution.failureCause(new IllegalStateException(reason));
         eventPublisher.complete(execution.workflowId());
         return execution.snapshot();
     }

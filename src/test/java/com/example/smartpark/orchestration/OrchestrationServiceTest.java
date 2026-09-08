@@ -683,6 +683,11 @@ class OrchestrationServiceTest {
             public WorkflowOutcome get(String workflowId) {
                 return workflowOutcome("WAITING_APPROVAL");
             }
+
+            @Override
+            public WorkflowOutcome cancel(String workflowId) {
+                return workflowOutcome("CANCELLED");
+            }
         };
         Harness harness = harness(new Capabilities(true, false, false, false, true), executor,
                 input -> availableSecurity(), workflow);
@@ -701,6 +706,54 @@ class OrchestrationServiceTest {
 
         assertThat(cancelled.status()).isEqualTo(OrchestrationStatus.CANCELLED);
         assertThat(step(cancelled, "alert-workflow").runReference()).isEqualTo("wf-1");
+    }
+
+    @Test
+    void cancellationTerminalizesAWaitingApprovalChildBeforeReturning() throws Exception {
+        executor = Executors.newSingleThreadExecutor();
+        AtomicBoolean childCancelled = new AtomicBoolean();
+        OrchestrationPorts.WorkflowRunner workflow = new OrchestrationPorts.WorkflowRunner() {
+            @Override public WorkflowOutcome start(String alertId) { return workflowOutcome("WAITING_APPROVAL"); }
+            @Override public WorkflowOutcome get(String workflowId) { return workflowOutcome("WAITING_APPROVAL"); }
+            @Override public WorkflowOutcome cancel(String workflowId) {
+                childCancelled.set(true);
+                return workflowOutcome("CANCELLED");
+            }
+        };
+        Harness harness = harness(new Capabilities(true, false, false, false, true), executor,
+                input -> availableSecurity(), workflow);
+        OrchestrationInput input = new OrchestrationInput("处置告警", "ALT-001", List.of(),
+                false, false, false, true);
+        OrchestrationRun accepted = harness.service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                input, "cancel-waiting-workflow", null, "OPERATOR").run();
+        awaitStep(harness.service, accepted.id(), "alert-workflow", OrchestrationStepStatus.WAITING_APPROVAL);
+
+        OrchestrationRun cancelled = harness.service.cancel(accepted.id());
+
+        assertThat(childCancelled).isTrue();
+        assertThat(cancelled.status()).isEqualTo(OrchestrationStatus.CANCELLED);
+        assertThat(step(cancelled, "alert-workflow").status()).isEqualTo(OrchestrationStepStatus.CANCELLED);
+    }
+
+    @Test
+    void cancellationDoesNotClaimSuccessWhenApprovalWonTheChildRace() {
+        OrchestrationPorts.WorkflowRunner workflow = new OrchestrationPorts.WorkflowRunner() {
+            @Override public WorkflowOutcome start(String alertId) { return workflowOutcome("WAITING_APPROVAL"); }
+            @Override public WorkflowOutcome get(String workflowId) { return workflowOutcome("COMPLETED"); }
+            @Override public WorkflowOutcome cancel(String workflowId) { return workflowOutcome("COMPLETED"); }
+        };
+        Harness harness = harness(new Capabilities(true, false, false, false, true), Runnable::run,
+                input -> availableSecurity(), workflow);
+        OrchestrationInput input = new OrchestrationInput("处置告警", "ALT-001", List.of(),
+                false, false, false, true);
+        OrchestrationRun accepted = harness.service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                input, "cancel-after-approval", null, "OPERATOR").run();
+
+        OrchestrationRun observed = harness.service.cancel(accepted.id());
+
+        assertThat(observed.status()).isEqualTo(OrchestrationStatus.COMPLETED);
+        assertThat(step(observed, "alert-workflow").status()).isEqualTo(OrchestrationStepStatus.COMPLETED);
+        assertThat(observed.cancelRequested()).isFalse();
     }
 
     private Harness harness(Capabilities capabilities, java.util.concurrent.Executor executor) {

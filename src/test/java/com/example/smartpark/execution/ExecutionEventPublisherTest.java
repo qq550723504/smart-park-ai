@@ -193,6 +193,32 @@ class ExecutionEventPublisherTest {
         assertThat(publisher.history(running)).isNotEmpty();
     }
 
+    @Test
+    void boundsReplayRunCountAndNeverEvictsAnActiveRun() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-08-24T00:00:00Z"));
+        InMemoryExecutionEventPublisher bounded = new InMemoryExecutionEventPublisher(
+                java.time.Duration.ofMinutes(30), clock, 2);
+        UUID oldestFinished = UUID.randomUUID();
+        UUID active = UUID.randomUUID();
+        UUID newest = UUID.randomUUID();
+        bounded.publish(event(oldestFinished, "old done", true));
+        clock.advance(java.time.Duration.ofSeconds(1));
+        bounded.publish(event(active, "active", false));
+
+        bounded.publish(event(newest, "new", false));
+
+        assertThat(bounded.history(oldestFinished)).isEmpty();
+        assertThat(bounded.history(active)).hasSize(1);
+        assertThat(bounded.history(newest)).hasSize(1);
+
+        InMemoryExecutionEventPublisher allActive = new InMemoryExecutionEventPublisher(
+                java.time.Duration.ofMinutes(30), clock, 1);
+        allActive.publish(event(active, "active", false));
+        assertThatThrownBy(() -> allActive.publish(event(newest, "rejected", false)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("capacity");
+    }
+
     private void await(CountDownLatch latch) {
         try {
             latch.await(5, TimeUnit.SECONDS);

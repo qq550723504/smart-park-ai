@@ -134,6 +134,8 @@ async function start(): Promise<void> {
     if (requestGeneration !== generation) return
     acceptedRunId = accepted.runId
     remember(accepted.runId)
+    run.value = null
+    tracedRunId = null
     restoring.value = true
     localStorage.removeItem(requestPendingKey)
     const startedRun = await getOrchestration(props.role, accepted.runId)

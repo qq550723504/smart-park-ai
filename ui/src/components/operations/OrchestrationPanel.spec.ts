@@ -178,6 +178,37 @@ describe('OrchestrationPanel', () => {
     wrapper.unmount()
   })
 
+  it('polls the newly accepted run when its immediate GET fails after an old terminal run', async () => {
+    vi.useFakeTimers()
+    try {
+      const oldRun = run('COMPLETED', 'COMPLETED')
+      const newRunId = '22222222-2222-2222-2222-222222222222'
+      localStorage.setItem('smartpark.orchestration.last.OPERATOR', oldRun.runId)
+      vi.mocked(startOrchestration).mockResolvedValue({ runId: newRunId, status: 'RUNNING',
+        statusUrl: '/status', traceUrl: '/trace', idempotentReplay: false })
+      vi.mocked(getOrchestration)
+        .mockResolvedValueOnce({ ...oldRun, role: 'OPERATOR' })
+        .mockRejectedValueOnce(new Error('temporary post-start GET failure'))
+        .mockResolvedValueOnce({ ...run(), runId: newRunId, traceId: newRunId, role: 'OPERATOR' })
+      const wrapper = mount(OrchestrationPanel, { props: { role: 'OPERATOR', available: true } })
+      await flushPromises()
+
+      await wrapper.get('[data-start-orchestration]').trigger('click')
+      await flushPromises()
+      expect(localStorage.getItem('smartpark.orchestration.last.OPERATOR')).toBe(newRunId)
+      expect(wrapper.text()).toContain('temporary post-start GET failure')
+
+      await vi.advanceTimersByTimeAsync(1000)
+      await flushPromises()
+
+      expect(getOrchestration).toHaveBeenLastCalledWith('OPERATOR', newRunId)
+      expect(wrapper.get('[data-run-status="RUNNING"]').text()).toBe('执行中')
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('retries a transient refresh failure with capped exponential backoff', async () => {
     vi.useFakeTimers()
     try {
