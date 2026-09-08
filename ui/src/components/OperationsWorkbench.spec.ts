@@ -63,8 +63,8 @@ const traceRailStub = defineComponent({
 })
 
 const operationsBoardStub = defineComponent({
-  emits: ['open-trace'],
-  template: '<button type="button" data-board-trace @click="$emit(\'open-trace\', \'run-board-1\')">打开看板轨迹</button>',
+  emits: ['open-trace', 'open-view'],
+  template: '<div><button type="button" data-board-trace @click="$emit(\'open-trace\', \'run-board-1\')">打开看板轨迹</button><button type="button" data-board-view @click="$emit(\'open-view\', \'collaboration\')">打开专家协作</button></div>',
 })
 
 const workflowStub = defineComponent({
@@ -207,6 +207,18 @@ describe('OperationsWorkbench', () => {
     await nextTick()
 
     expect(wrapper.get('[data-testid="trace-status"]').text()).toBe('streaming')
+  })
+
+  it('opens an available existing Agent view from the operations cockpit', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'operations' },
+      global: { stubs: { ...operatorStubs, OperationsBoard: operationsBoardStub } },
+    })
+    await settleCapabilities()
+
+    await wrapper.get('[data-board-view]').trigger('click')
+
+    expect(wrapper.get('[data-workbench-view="collaboration"]').classes()).toContain('active')
   })
 
   it('shows security incident review only to approver roles and hands off to collaboration center', async () => {

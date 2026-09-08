@@ -179,6 +179,10 @@ function openAnalysisFromBoard(question: string): void {
   switchView('analytics')
 }
 
+function openViewFromBoard(view: WorkbenchView): void {
+  if (navItems.value.some((item) => item.value === view && item.available)) switchView(view)
+}
+
 function openTraceFromBoard(runId: string): void {
   const normalized = runId.trim()
   if (!normalized) return
@@ -410,8 +414,11 @@ function confidence(value?: number) {
       :role="role"
       :trace="trace"
       :active="props.active && activeView === 'operations'"
+      :collaboration-available="capabilities?.collaborationEnabled === true"
+      :security-incident-available="capabilities?.securityIncidentEnabled === true && ['ADMIN', 'APPROVER'].includes(role)"
       @open-analysis="openAnalysisFromBoard"
       @open-trace="openTraceFromBoard"
+      @open-view="openViewFromBoard"
     />
 
     <main v-show="activeView === 'workflow'" class="main-content">
