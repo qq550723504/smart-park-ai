@@ -375,6 +375,7 @@ class OrchestrationServiceTest {
         assertThat(resumed.revision()).isEqualTo(waiting.revision() + 1);
         assertThat(resumed.status()).isEqualTo(OrchestrationStatus.RUNNING);
         assertThat(step(resumed, "alert-workflow").status()).isEqualTo(OrchestrationStepStatus.FAILED);
+        assertThat(resumed.evidence()).contains("alert-workflow:wf-1");
         assertThat(resumed.traceEvents()).extracting(OrchestrationTraceRecord::eventType)
                 .endsWith(ExecutionEventType.APPROVAL_RESUMED, ExecutionEventType.STEP_FAILED);
         assertThat(continuation).doesNotHaveNullValue();

@@ -400,7 +400,7 @@ public final class OrchestrationService {
         }
         if (step.runReference() == null || workflow == null) {
             commitApprovalResume(runId, step.id(), false, "审批子运行无法恢复",
-                    step.runReference(), List.of(), "审批子运行无法恢复");
+                    step.runReference(), null, "审批子运行无法恢复");
             executor.execute(() -> execute(runId));
             return;
         }
@@ -416,7 +416,7 @@ public final class OrchestrationService {
             executor.execute(() -> execute(runId));
         } catch (RuntimeException missingChild) {
             commitApprovalResume(runId, step.id(), false, "服务恢复后无法确认审批子运行",
-                    step.runReference(), List.of(), "审批子运行不可恢复");
+                    step.runReference(), null, "审批子运行不可恢复");
             executor.execute(() -> execute(runId));
         }
     }
@@ -455,20 +455,22 @@ public final class OrchestrationService {
     private void commitApprovalResume(UUID runId, String stepId, boolean completed, String stepSummary,
                                       String workflowId, List<String> evidence, String approvalResult) {
         Instant now = clock.instant();
-        List<String> safeEvidence = evidence == null ? List.of() : List.copyOf(evidence);
+        List<String> suppliedEvidence = evidence == null ? null : List.copyOf(evidence);
         OrchestrationRun current = getStored(runId);
         int firstNewTraceIndex = current.traceEvents().size();
         OrchestrationRun resumed = store.update(runId, run -> {
             List<OrchestrationStep> steps = new ArrayList<>(run.steps());
             int index = stepIndex(steps, stepId);
             OrchestrationStep currentStep = steps.get(index);
+            List<String> resultEvidence = suppliedEvidence == null
+                    ? currentStep.evidenceReferences() : suppliedEvidence;
             steps.set(index, completed
-                    ? currentStep.complete(now, stepSummary, workflowId, safeEvidence,
+                    ? currentStep.complete(now, stepSummary, workflowId, resultEvidence,
                             List.of(), List.of(), null)
                     : currentStep.transition(OrchestrationStepStatus.FAILED, now, null, null,
-                            workflowId, safeEvidence, stepSummary));
+                            workflowId, resultEvidence, stepSummary));
             LinkedHashSet<String> mergedEvidence = new LinkedHashSet<>(run.evidence());
-            mergedEvidence.addAll(safeEvidence);
+            mergedEvidence.addAll(resultEvidence);
             List<OrchestrationTraceRecord> trace = appendedTrace(run.traceEvents(), "orchestrator",
                     ExecutionStage.HUMAN_APPROVAL, ExecutionEventType.APPROVAL_RESUMED,
                     ExecutionStatus.RUNNING, "人工审批等待已结束");
