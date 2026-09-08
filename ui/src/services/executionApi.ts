@@ -49,8 +49,9 @@ interface DisposableLike {
   [Symbol.dispose]?: () => void
 }
 
-export function subscribeToExecutionEvents(runId: string, handlers: ExecutionStreamHandlers): ExecutionStream {
-  const source = new EventSource(`/api/executions/${encodeURIComponent(runId)}/events`)
+export function subscribeToExecutionEvents(runId: string, handlers: ExecutionStreamHandlers, role?: string): ExecutionStream {
+  const roleQuery = role ? `?role=${encodeURIComponent(role)}` : ''
+  const source = new EventSource(`/api/executions/${encodeURIComponent(runId)}/events${roleQuery}`)
   let closedByTerminal = false
 
   function close(): void {

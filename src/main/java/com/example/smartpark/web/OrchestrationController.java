@@ -40,7 +40,7 @@ public class OrchestrationController {
                 "runId", run.id().toString(),
                 "status", run.status().name(),
                 "statusUrl", "/api/orchestrations/runs/" + run.id(),
-                "traceUrl", "/api/executions/" + run.traceId() + "/events",
+                "traceUrl", "/api/executions/" + run.traceId() + "/events?role=" + run.role(),
                 "idempotentReplay", !started.created()));
     }
 

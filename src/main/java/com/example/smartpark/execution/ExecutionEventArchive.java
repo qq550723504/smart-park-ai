@@ -8,4 +8,8 @@ import java.util.UUID;
 /** Optional durable source used to rehydrate an in-memory execution stream after restart. */
 public interface ExecutionEventArchive {
     List<ExecutionEvent> history(UUID runId);
+
+    /** Applies archive-specific access control before any live or restored event is exposed. */
+    default void authorize(UUID runId, String role) {
+    }
 }

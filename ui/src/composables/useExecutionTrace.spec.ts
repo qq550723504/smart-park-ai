@@ -77,6 +77,14 @@ describe('useExecutionTrace', () => {
     expect(trace.events.value).toHaveLength(1)
   })
 
+  it('encodes the orchestration role for native EventSource authorization', () => {
+    const trace = useExecutionTrace()
+    trace.subscribe('run/1', 'APPROVER')
+
+    expect(FakeEventSource.instances.at(-1)!.url)
+      .toBe('/api/executions/run%2F1/events?role=APPROVER')
+  })
+
   it('reorders out-of-sequence events by sequence', () => {
     const trace = useExecutionTrace()
     trace.subscribe('run-1')

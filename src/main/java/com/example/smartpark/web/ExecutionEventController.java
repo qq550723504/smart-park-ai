@@ -7,6 +7,8 @@ import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.beans.factory.ObjectProvider;
 import reactor.core.publisher.Flux;
@@ -32,13 +34,20 @@ class ExecutionEventController {
     }
 
     @GetMapping("/api/executions/{runId}")
-    ExecutionDtos.ExecutionRunDto summary(@PathVariable UUID runId) {
+    ExecutionDtos.ExecutionRunDto summary(
+            @PathVariable UUID runId,
+            @RequestHeader(value = "X-Demo-Role", required = false) String role) {
+        authorize(runId, role);
         requireKnownRun(runId);
         return ExecutionDtos.ExecutionRunDto.of(publisher.status(runId), publisher.history(runId).size());
     }
 
     @GetMapping(value = "/api/executions/{runId}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    Flux<ServerSentEvent<ExecutionDtos.ExecutionEventDto>> events(@PathVariable UUID runId) {
+    Flux<ServerSentEvent<ExecutionDtos.ExecutionEventDto>> events(
+            @PathVariable UUID runId,
+            @RequestHeader(value = "X-Demo-Role", required = false) String role,
+            @RequestParam(value = "role", required = false) String queryRole) {
+        authorize(runId, role == null ? queryRole : role);
         hydrate(runId);
         Sinks.Many<ExecutionDtos.ExecutionEventDto> sink = Sinks.many().unicast().onBackpressureBuffer();
         try {
@@ -64,6 +73,10 @@ class ExecutionEventController {
         if (publisher.history(runId).isEmpty() && "UNKNOWN".equals(publisher.status(runId))) {
             throw new NoSuchElementException("Unknown execution run: " + runId);
         }
+    }
+
+    private void authorize(UUID runId, String role) {
+        archives.orderedStream().forEach(archive -> archive.authorize(runId, role));
     }
 
     private void hydrate(UUID runId) {

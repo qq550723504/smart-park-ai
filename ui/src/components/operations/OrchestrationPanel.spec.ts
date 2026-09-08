@@ -115,6 +115,35 @@ describe('OrchestrationPanel', () => {
     wrapper.unmount()
   })
 
+  it('does not let an older polling response overwrite a newer cancelled state', async () => {
+    vi.useFakeTimers()
+    let resolvePoll!: (value: OrchestrationRun) => void
+    try {
+      localStorage.setItem('smartpark.orchestration.last.OPERATOR', run().runId)
+      vi.mocked(getOrchestration)
+        .mockResolvedValueOnce({ ...run(), role: 'OPERATOR', revision: 4 })
+        .mockReturnValueOnce(new Promise((resolve) => { resolvePoll = resolve }))
+      vi.mocked(cancelOrchestration).mockResolvedValue({
+        ...run('CANCELLED', 'CANCELLED'), role: 'OPERATOR', revision: 6,
+      })
+      const wrapper = mount(OrchestrationPanel, {
+        props: { role: 'OPERATOR', available: true },
+      })
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(1000)
+
+      await wrapper.get('[data-cancel-orchestration]').trigger('click')
+      await flushPromises()
+      resolvePoll({ ...run(), role: 'OPERATOR', revision: 5 })
+      await flushPromises()
+
+      expect(wrapper.get('[data-run-status="CANCELLED"]').text()).toBe('已取消')
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('cancels through the backend and renders the returned terminal state', async () => {
     localStorage.setItem('smartpark.orchestration.last.OPERATOR', run().runId)
     vi.mocked(getOrchestration).mockResolvedValue({ ...run(), role: 'OPERATOR' })

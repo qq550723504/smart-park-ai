@@ -51,9 +51,12 @@ public final class FileOrchestrationRunStore implements OrchestrationRunStore {
             return new StartResult(existing, false);
         }
         OrchestrationRun created = factory.get();
-        runs.put(created.id(), created);
+        Map<UUID, OrchestrationRun> nextRuns = new LinkedHashMap<>(runs);
+        nextRuns.put(created.id(), created);
+        persist(nextRuns.values());
+        runs.clear();
+        runs.putAll(nextRuns);
         idempotencyIndex.put(key, created.id());
-        persist();
         return new StartResult(created, true);
     }
 
@@ -69,8 +72,11 @@ public final class FileOrchestrationRunStore implements OrchestrationRunStore {
         OrchestrationRun updated = transition.apply(current);
         if (!runId.equals(updated.id())) throw new IllegalArgumentException("run transition changed identity");
         if (updated.revision() <= current.revision()) throw new IllegalArgumentException("run revision must advance");
-        runs.put(runId, updated);
-        persist();
+        Map<UUID, OrchestrationRun> nextRuns = new LinkedHashMap<>(runs);
+        nextRuns.put(runId, updated);
+        persist(nextRuns.values());
+        runs.clear();
+        runs.putAll(nextRuns);
         return updated;
     }
 
@@ -95,13 +101,13 @@ public final class FileOrchestrationRunStore implements OrchestrationRunStore {
         }
     }
 
-    private void persist() {
+    private void persist(java.util.Collection<OrchestrationRun> snapshot) {
         try {
             Path parent = stateFile.getParent();
             if (parent != null) Files.createDirectories(parent);
             Path temporary = Files.createTempFile(parent, stateFile.getFileName().toString(), ".tmp");
             try {
-                mapper.writeValue(temporary.toFile(), new ArrayList<>(runs.values()));
+                mapper.writeValue(temporary.toFile(), new ArrayList<>(snapshot));
                 try {
                     Files.move(temporary, stateFile, StandardCopyOption.ATOMIC_MOVE,
                             StandardCopyOption.REPLACE_EXISTING);

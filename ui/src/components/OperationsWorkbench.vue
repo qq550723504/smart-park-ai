@@ -224,7 +224,7 @@ function openViewFromBoard(view: WorkbenchView): void {
 function openTraceFromBoard(runId: string): void {
   const normalized = runId.trim()
   if (!normalized) return
-  trace.subscribe(normalized)
+  trace.subscribe(normalized, role.value)
 }
 
 async function openCollaborationView(view: 'workflow' | 'customer' | 'security-incident', workflowId?: string, _ticketId?: string): Promise<void> {

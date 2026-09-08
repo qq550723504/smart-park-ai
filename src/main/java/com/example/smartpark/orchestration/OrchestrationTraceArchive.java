@@ -5,6 +5,7 @@ import com.example.smartpark.execution.model.ExecutionEvent;
 import com.example.smartpark.execution.model.ExecutionScenario;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 public final class OrchestrationTraceArchive implements ExecutionEventArchive {
@@ -21,5 +22,15 @@ public final class OrchestrationTraceArchive implements ExecutionEventArchive {
                         event.timestamp(), ExecutionScenario.ORCHESTRATION, event.actor(), event.stage(),
                         event.eventType(), event.status(), event.safeSummary(), null))
                 .toList()).orElseGet(List::of);
+    }
+
+    @Override
+    public void authorize(UUID runId, String role) {
+        store.find(runId).ifPresent(run -> {
+            String normalized = role == null ? "" : role.trim().toUpperCase(Locale.ROOT);
+            if (!"ADMIN".equals(normalized) && !run.role().equals(normalized)) {
+                throw new SecurityException("role is not allowed to read orchestration trace");
+            }
+        });
     }
 }

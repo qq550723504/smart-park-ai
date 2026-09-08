@@ -5,11 +5,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class FileOrchestrationRunStoreTest {
     @TempDir
@@ -42,6 +44,40 @@ class FileOrchestrationRunStoreTest {
                     assertThat(event.scenario().name()).isEqualTo("ORCHESTRATION");
                     assertThat(event.safeSummary()).isEqualTo("started");
                 });
+    }
+
+    @Test
+    void failedInitialPersistenceDoesNotPoisonTheInMemoryIdempotencyIndex() throws Exception {
+        Path blockedParent = temporaryDirectory.resolve("blocked");
+        Files.writeString(blockedParent, "not a directory");
+        FileOrchestrationRunStore store = new FileOrchestrationRunStore(
+                blockedParent.resolve("runs.json"), new ObjectMapper().findAndRegisterModules());
+
+        assertThatThrownBy(() -> store.createOrGet("retry-key", "fingerprint", FileOrchestrationRunStoreTest::run))
+                .isInstanceOf(IllegalStateException.class);
+
+        Files.delete(blockedParent);
+        Files.createDirectory(blockedParent);
+        OrchestrationRunStore.StartResult retry = store.createOrGet(
+                "retry-key", "fingerprint", FileOrchestrationRunStoreTest::run);
+        assertThat(retry.created()).isTrue();
+        assertThat(Files.exists(blockedParent.resolve("runs.json"))).isTrue();
+    }
+
+    @Test
+    void traceArchiveAllowsOnlyTheOwningRoleOrAdmin() {
+        FileOrchestrationRunStore store = new FileOrchestrationRunStore(
+                temporaryDirectory.resolve("authorized-runs.json"), new ObjectMapper().findAndRegisterModules());
+        OrchestrationRun created = run();
+        store.createOrGet("key", "fingerprint", () -> created);
+        OrchestrationTraceArchive archive = new OrchestrationTraceArchive(store);
+
+        archive.authorize(created.traceId(), "operator");
+        archive.authorize(created.traceId(), "ADMIN");
+        assertThatThrownBy(() -> archive.authorize(created.traceId(), "VIEWER"))
+                .isInstanceOf(SecurityException.class);
+        assertThatThrownBy(() -> archive.authorize(created.traceId(), null))
+                .isInstanceOf(SecurityException.class);
     }
 
     private static OrchestrationRun run() {

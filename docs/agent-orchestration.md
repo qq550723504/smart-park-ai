@@ -113,7 +113,10 @@ capability before the required step starts.
 - `GET /api/orchestrations/runs/{runId}` — read the complete safe run projection.
 - `POST /api/orchestrations/runs/{runId}/cancel` — cancel future steps and abort
   the current Operations/Collaboration child when supported.
-- `GET /api/executions/{runId}/events` — existing Execution Trace SSE endpoint.
+- `GET /api/executions/{runId}/events` — existing Execution Trace SSE endpoint;
+  orchestration traces require the owning `X-Demo-Role` (or `ADMIN`). Native
+  browser `EventSource` clients may send the same demo role as the `role` query
+  parameter because that API cannot set a custom request header.
 - `POST /api/workflows/{workflowId}/approval` — existing Human Approval API;
   orchestration observes the child workflow result and resumes.
 

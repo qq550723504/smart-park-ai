@@ -87,6 +87,7 @@ async function refresh(): Promise<void> {
   try {
     const current = await getOrchestration(props.role, runId)
     if (requestGeneration !== generation) return
+    if (run.value && current.revision < run.value.revision) return
     run.value = current
     trace(current)
     if (['COMPLETED', 'PARTIAL', 'FAILED', 'CANCELLED'].includes(current.status)) stopPolling()
@@ -123,15 +124,22 @@ async function start(): Promise<void> {
 
 async function cancel(): Promise<void> {
   if (!run.value || terminal.value) return
+  generation += 1
+  const requestGeneration = generation
+  const runId = run.value.runId
   loading.value = true
   error.value = ''
   try {
-    run.value = await cancelOrchestration(props.role, run.value.runId)
+    const cancelled = await cancelOrchestration(props.role, runId)
+    if (requestGeneration !== generation) return
+    run.value = cancelled
     stopPolling()
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : '取消编排失败'
+    if (requestGeneration === generation) {
+      error.value = cause instanceof Error ? cause.message : '取消编排失败'
+    }
   } finally {
-    loading.value = false
+    if (requestGeneration === generation) loading.value = false
   }
 }
 

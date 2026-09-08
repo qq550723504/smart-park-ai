@@ -130,7 +130,7 @@ public final class OrchestrationService {
                             || step.status() == OrchestrationStepStatus.WAITING_APPROVAL)
                     .map(OrchestrationStep::type).findFirst().orElse(null);
             Instant now = clock.instant();
-            store.update(runId, run -> run.copy(
+            OrchestrationRun cancelled = store.update(runId, run -> run.copy(
                     OrchestrationStatus.CANCELLED, run.startedAt(), now, "编排已取消",
                     run.steps().stream().map(step ->
                             step.status() == OrchestrationStepStatus.PENDING
@@ -138,11 +138,13 @@ public final class OrchestrationService {
                                     || step.status() == OrchestrationStepStatus.WAITING_APPROVAL
                             ? step.transition(OrchestrationStepStatus.CANCELLED, now, null, null,
                                     null, null, "编排已取消") : step).toList(),
-                    run.evidence(), "编排已取消", run.result(), true, run.traceEvents()));
+                    run.evidence(), "编排已取消", run.result(), true,
+                    appendedTrace(run, "orchestrator", ExecutionStage.COMPLETION,
+                            ExecutionEventType.RUN_CANCELLED, ExecutionStatus.INTERRUPTED,
+                            "园区异常联合研判已取消")));
             cancelChild(activeType, childReference);
-            publish(runId, "orchestrator", ExecutionStage.COMPLETION,
-                    ExecutionEventType.RUN_CANCELLED, ExecutionStatus.INTERRUPTED, "园区异常联合研判已取消");
-            return getStored(runId);
+            publishProjection(cancelled);
+            return cancelled;
         }
     }
 
@@ -226,6 +228,9 @@ public final class OrchestrationService {
             if (!"COMPLETED".equals(outcome.status())) {
                 String reason = "NEEDS_CLARIFICATION".equals(outcome.status())
                         ? "运营分析需要澄清，编排未猜测用户选择" : "运营分析未完成";
+                if ("NEEDS_CLARIFICATION".equals(outcome.status())) {
+                    cancelChild(OrchestrationStepType.OPERATIONS_ANALYSIS, child.runId().toString());
+                }
                 failStep(runId, step.id(), reason, true);
                 return false;
             }
@@ -598,11 +603,13 @@ public final class OrchestrationService {
                     recommendations, current.evidence(),
                     sourceReferences(current), childRuns, skipped, partialReasons, approval);
             Instant now = clock.instant();
-            store.update(runId, run -> run.copy(status, run.startedAt(), now, conclusion,
-                    run.steps(), run.evidence(), null, result, run.cancelRequested(), run.traceEvents()));
-            publish(runId, "orchestrator", ExecutionStage.COMPLETION, ExecutionEventType.RUN_COMPLETED,
-                    ExecutionStatus.SUCCEEDED, status == OrchestrationStatus.PARTIAL
-                            ? "园区异常联合研判部分完成" : "园区异常联合研判完成");
+            String terminalSummary = status == OrchestrationStatus.PARTIAL
+                    ? "园区异常联合研判部分完成" : "园区异常联合研判完成";
+            OrchestrationRun completed = store.update(runId, run -> run.copy(status, run.startedAt(), now,
+                    conclusion, run.steps(), run.evidence(), null, result, run.cancelRequested(),
+                    appendedTrace(run, "orchestrator", ExecutionStage.COMPLETION,
+                            ExecutionEventType.RUN_COMPLETED, ExecutionStatus.SUCCEEDED, terminalSummary)));
+            publishProjection(completed);
         }
     }
 
@@ -619,11 +626,12 @@ public final class OrchestrationService {
             OrchestrationRun current = getStored(runId);
             if (current.status().isTerminal()) return;
             Instant now = clock.instant();
-            store.update(runId, run -> run.copy(OrchestrationStatus.FAILED,
+            OrchestrationRun failed = store.update(runId, run -> run.copy(OrchestrationStatus.FAILED,
                     run.startedAt(), now, "编排失败", run.steps(), run.evidence(),
-                    reason, run.result(), run.cancelRequested(), run.traceEvents()));
-            publish(runId, "orchestrator", ExecutionStage.FAILURE,
-                    ExecutionEventType.RUN_FAILED, ExecutionStatus.FAILED, "园区异常联合研判失败");
+                    reason, run.result(), run.cancelRequested(),
+                    appendedTrace(run, "orchestrator", ExecutionStage.FAILURE,
+                            ExecutionEventType.RUN_FAILED, ExecutionStatus.FAILED, "园区异常联合研判失败")));
+            publishProjection(failed);
         }
     }
 
@@ -631,21 +639,32 @@ public final class OrchestrationService {
                          ExecutionEventType type, ExecutionStatus status, String summary) {
         synchronized (lock(runId)) {
             OrchestrationRun updated = store.update(runId, run -> {
-                long sequence = run.traceEvents().size() + 1L;
-                List<OrchestrationTraceRecord> trace = new ArrayList<>(run.traceEvents());
-                trace.add(new OrchestrationTraceRecord(UUID.randomUUID(), sequence, clock.instant(), actor,
-                        stage, type, status, summary));
                 return run.copy(run.status(), run.startedAt(), run.completedAt(), run.summary(), run.steps(),
-                        run.evidence(), run.failureReason(), run.result(), run.cancelRequested(), trace);
+                        run.evidence(), run.failureReason(), run.result(), run.cancelRequested(),
+                        appendedTrace(run, actor, stage, type, status, summary));
             });
-            OrchestrationTraceRecord record = updated.traceEvents().get(updated.traceEvents().size() - 1);
-            try {
-                events.publish(new ExecutionEvent(record.eventId(), updated.traceId(), record.sequence(),
-                        record.timestamp(), ExecutionScenario.ORCHESTRATION, record.actor(), record.stage(),
-                        record.eventType(), record.status(), record.safeSummary(), null));
-            } catch (IllegalArgumentException | IllegalStateException duplicateOrClosed) {
-                // Durable trace remains authoritative and can rehydrate the in-memory projection.
-            }
+            publishProjection(updated);
+        }
+    }
+
+    private List<OrchestrationTraceRecord> appendedTrace(OrchestrationRun run, String actor,
+                                                          ExecutionStage stage, ExecutionEventType type,
+                                                          ExecutionStatus status, String summary) {
+        long sequence = run.traceEvents().size() + 1L;
+        List<OrchestrationTraceRecord> trace = new ArrayList<>(run.traceEvents());
+        trace.add(new OrchestrationTraceRecord(UUID.randomUUID(), sequence, clock.instant(), actor,
+                stage, type, status, summary));
+        return trace;
+    }
+
+    private void publishProjection(OrchestrationRun updated) {
+        OrchestrationTraceRecord record = updated.traceEvents().get(updated.traceEvents().size() - 1);
+        try {
+            events.publish(new ExecutionEvent(record.eventId(), updated.traceId(), record.sequence(),
+                    record.timestamp(), ExecutionScenario.ORCHESTRATION, record.actor(), record.stage(),
+                    record.eventType(), record.status(), record.safeSummary(), null));
+        } catch (IllegalArgumentException | IllegalStateException duplicateOrClosed) {
+            // Durable trace remains authoritative and can rehydrate the in-memory projection.
         }
     }
 

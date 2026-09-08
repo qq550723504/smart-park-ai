@@ -51,7 +51,8 @@ class OrchestrationControllerTest {
                                 """))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.runId").value(run.id().toString()))
-                .andExpect(jsonPath("$.traceUrl").value("/api/executions/" + run.id() + "/events"))
+                .andExpect(jsonPath("$.traceUrl").value(
+                        "/api/executions/" + run.id() + "/events?role=OPERATOR"))
                 .andExpect(jsonPath("$.requestFingerprint").doesNotExist())
                 .andExpect(jsonPath("$.idempotencyKey").doesNotExist());
     }

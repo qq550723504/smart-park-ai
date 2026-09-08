@@ -13,7 +13,7 @@ export interface ExecutionTrace {
   error: Ref<string>
   lastSequence: Ref<number>
   isTerminal: Ref<boolean>
-  subscribe(runId: string): void
+  subscribe(runId: string, role?: string): void
   reset(): void
 }
 
@@ -77,7 +77,7 @@ export function useExecutionTrace(): ExecutionTrace {
     }
   }
 
-  function subscribe(runId: string): void {
+  function subscribe(runId: string, role?: string): void {
     reset()
     status.value = 'streaming'
     stream = subscribeToExecutionEvents(runId, {
@@ -89,7 +89,7 @@ export function useExecutionTrace(): ExecutionTrace {
         // trace.
         error.value = message
       },
-    })
+    }, role)
   }
 
   function reset(): void {

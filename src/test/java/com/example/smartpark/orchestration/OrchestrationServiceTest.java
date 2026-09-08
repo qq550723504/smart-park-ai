@@ -60,6 +60,8 @@ class OrchestrationServiceTest {
                 .startsWith(ExecutionEventType.RUN_STARTED, ExecutionEventType.STEP_STARTED,
                         ExecutionEventType.STEP_COMPLETED)
                 .endsWith(ExecutionEventType.RUN_COMPLETED);
+        assertThat(run.traceEvents()).extracting(OrchestrationTraceRecord::eventType)
+                .endsWith(ExecutionEventType.RUN_COMPLETED);
     }
 
     @Test
@@ -74,6 +76,8 @@ class OrchestrationServiceTest {
         assertThat(step(run, "final-summary").status()).isEqualTo(OrchestrationStepStatus.PENDING);
         assertThat(harness.events.history(run.id())).extracting(event -> event.eventType())
                 .endsWith(ExecutionEventType.STEP_FAILED, ExecutionEventType.RUN_FAILED);
+        assertThat(run.traceEvents()).extracting(OrchestrationTraceRecord::eventType)
+                .endsWith(ExecutionEventType.RUN_FAILED);
     }
 
     @Test
@@ -185,6 +189,34 @@ class OrchestrationServiceTest {
     }
 
     @Test
+    void clarificationReleasesTheOperationsChildSlotBeforeFailingTheRun() {
+        UUID childId = UUID.randomUUID();
+        AtomicReference<UUID> cancelledChild = new AtomicReference<>();
+        OrchestrationPorts.OperationsRunner operations = new OrchestrationPorts.OperationsRunner() {
+            @Override
+            public StartedChild start(String question) {
+                ChildOutcome clarification = new ChildOutcome(childId, "NEEDS_CLARIFICATION",
+                        "需要选择园区", List.of(), "请选择园区");
+                return new StartedChild(childId, CompletableFuture.completedFuture(clarification));
+            }
+
+            @Override
+            public void cancel(UUID runId) {
+                cancelledChild.set(runId);
+            }
+        };
+        Harness harness = harness(new Capabilities(true, false, false, false, false), Runnable::run,
+                input -> availableSecurity(), completedWorkflow(), operations);
+
+        OrchestrationRun run = harness.service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                simpleInput(), "clarification", null, "OPERATOR").run();
+
+        assertThat(cancelledChild).hasValue(childId);
+        assertThat(run.status()).isEqualTo(OrchestrationStatus.FAILED);
+        assertThat(step(run, "operations-analysis").failureReason()).contains("需要澄清");
+    }
+
+    @Test
     void waitsForExistingApprovalAndResumesIdempotently() {
         AtomicReference<String> workflowStatus = new AtomicReference<>("WAITING_APPROVAL");
         OrchestrationPorts.WorkflowRunner workflow = new OrchestrationPorts.WorkflowRunner() {
@@ -235,6 +267,8 @@ class OrchestrationServiceTest {
         assertThat(cancelled.status()).isEqualTo(OrchestrationStatus.CANCELLED);
         assertThat(harness.service.get(accepted.id()).status()).isEqualTo(OrchestrationStatus.CANCELLED);
         assertThat(harness.events.history(accepted.id())).extracting(event -> event.eventType())
+                .endsWith(ExecutionEventType.RUN_CANCELLED);
+        assertThat(cancelled.traceEvents()).extracting(OrchestrationTraceRecord::eventType)
                 .endsWith(ExecutionEventType.RUN_CANCELLED);
     }
 
