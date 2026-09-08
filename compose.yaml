@@ -21,6 +21,7 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
+      SMARTPARK_ORCHESTRATION_STATE_FILE: /var/lib/smartpark/orchestration/runs.json
       SPRING_AI_DASHSCOPE_ENABLED: "false"
       SMARTPARK_ANALYTICS_ENABLED: "false"
       SMARTPARK_ANALYTICS_DEMO_DATA_REFRESH_ENABLED: "false"
@@ -29,6 +30,8 @@ services:
       SMARTPARK_ANALYTICS_DB_USER: smartpark_analytics_ro
     ports:
       - "127.0.0.1:8080:8080"
+    volumes:
+      - orchestration-state:/var/lib/smartpark/orchestration
     depends_on:
       analytics-postgres:
         condition: service_healthy
@@ -59,3 +62,4 @@ services:
 
 volumes:
   analytics-postgres-data:
+  orchestration-state:

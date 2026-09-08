@@ -1,5 +1,6 @@
 .worktrees/
 target/
+data/
 *.log
 *.tmp
 *.swp
