@@ -19,7 +19,7 @@ import { demoAlerts, type DemoRole } from '../types/workflow'
 import { useWorkflow } from '../composables/useWorkflow'
 import { useExecutionTrace } from '../composables/useExecutionTrace'
 import { useGuidedLaunch } from '../composables/useGuidedLaunch'
-import { getOperationsCapabilities, submitFeedback } from '../services/workflowApi'
+import { getOperationsCapabilities, submitFeedback, type OperationsCapabilities } from '../services/workflowApi'
 import { customerIntentLabel, workflowNodeLabel } from '../utils/labels'
 import { alertWorkflowRunId } from '../utils/runId'
 import type { GuidedLaunchUpdate, ScenarioLaunchRequest, ShowcaseLaunchInput, ShowcaseScenarioId, WorkbenchEvidenceItem, WorkbenchNavItem, WorkbenchView } from '../types/workbench'
@@ -36,8 +36,9 @@ const emit = defineEmits<{
   'retry-guided-launch': [scenarioId: ShowcaseScenarioId, launchInput: ShowcaseLaunchInput]
 }>()
 
-const capabilities = ref<{ knowledgeMode: string; customerAnswerMode: string; vectorStore: string; analyticsEnabled: boolean; collaborationEnabled: boolean; voiceEnabled: boolean; securityIncidentEnabled: boolean } | null>(null)
+const capabilities = ref<OperationsCapabilities | null>(null)
 const capabilityLoadState = ref<'loading' | 'ready' | 'failed'>('loading')
+const role = ref<DemoRole>('ADMIN')
 const capabilityLabels = computed(() => capabilities.value ? {
   knowledge: capabilities.value.knowledgeMode === 'mock' ? 'Mock' : 'RAG',
   customer: capabilities.value.customerAnswerMode === 'mock' ? 'Mock' : 'DashScope',
@@ -59,46 +60,83 @@ const navItems = computed<WorkbenchNavItem[]>(() => [
   { value: 'voice', label: '实时语音', available: capabilities.value?.voiceEnabled === true },
   { value: 'governance', label: '治理中心', available: true },
 ])
-onMounted(() => {
-  void getOperationsCapabilities()
-    .then((value) => {
-      capabilities.value = value
-      capabilityLoadState.value = 'ready'
-    })
-    .catch(() => {
-      capabilities.value = null
-      capabilityLoadState.value = 'failed'
-    })
-})
 const selectedAlertId = ref(demoAlerts[0].id)
-const activeView = ref<WorkbenchView>(props.initialView)
+const activeView = ref<WorkbenchView>(resolveRequestedView(props.initialView))
 let navigationGeneration = 0
+let pendingCapabilityView: { view: WorkbenchView; navigationGeneration: number } | null = activeView.value === props.initialView
+  ? null
+  : { view: props.initialView, navigationGeneration }
 const selectedAnalysisQuestion = ref<string | null>(null)
 const selectedAnalysisQuestionToken = ref(0)
 const customerQueueRefreshToken = ref(0)
 const collaborationTargetWorkItemId = ref<string | null>(null)
 const collaborationRefreshToken = ref(0)
 const securityIncidentTargetId = ref<string | null>(null)
-const hasVisitedWorkflow = ref(props.initialView === 'workflow')
-function switchView(view: WorkbenchView): void {
-  navigationGeneration += 1
-  if (view !== 'workflow') cancelPendingLoad()
-  activeView.value = view
+const hasVisitedWorkflow = ref(activeView.value === 'workflow')
+function isViewAvailable(view: WorkbenchView): boolean {
+  return navItems.value.some((item) => item.value === view && item.available)
 }
-watch(() => props.initialView, (view) => { switchView(view) })
-watch(() => props.active, (active) => {
-  if (active) switchView(props.initialView)
+
+function resolveRequestedView(view: WorkbenchView): WorkbenchView {
+  return isViewAvailable(view) ? view : 'workflow'
+}
+
+function canMountView(view: WorkbenchView): boolean {
+  return isViewAvailable(view)
+}
+
+function beginNavigation(): number {
+  pendingCapabilityView = null
+  navigationGeneration += 1
+  return navigationGeneration
+}
+
+function switchView(view: WorkbenchView): void {
+  const nextView = resolveRequestedView(view)
+  beginNavigation()
+  if (nextView !== 'workflow') cancelPendingLoad()
+  if (nextView === 'workflow') hasVisitedWorkflow.value = true
+  activeView.value = nextView
+}
+function requestView(view: WorkbenchView): void {
+  switchView(view)
+  if (capabilityLoadState.value === 'loading' && activeView.value !== view) {
+    pendingCapabilityView = { view, navigationGeneration }
+  }
+}
+watch([() => props.initialView, () => props.active], ([view, active]) => {
+  if (active) requestView(view)
 })
 watch(activeView, async (view) => {
   if (view !== 'workflow' || hasVisitedWorkflow.value) return
   await nextTick()
   if (activeView.value === 'workflow') hasVisitedWorkflow.value = true
 })
-const role = ref<DemoRole>('ADMIN')
 watch(role, (nextRole, previousRole) => {
   if (nextRole === previousRole) return
-  const currentItem = navItems.value.find((item) => item.value === activeView.value)
-  if (currentItem && !currentItem.available) switchView('workflow')
+  if (!isViewAvailable(activeView.value)) switchView('workflow')
+})
+function reconcileViewAfterCapabilityLoad(): void {
+  const pendingView = pendingCapabilityView
+  pendingCapabilityView = null
+  if (props.active && pendingView?.navigationGeneration === navigationGeneration) {
+    switchView(pendingView.view)
+    return
+  }
+  if (!isViewAvailable(activeView.value)) switchView('workflow')
+}
+onMounted(() => {
+  void getOperationsCapabilities()
+    .then((value) => {
+      capabilities.value = value
+      capabilityLoadState.value = 'ready'
+      reconcileViewAfterCapabilityLoad()
+    })
+    .catch(() => {
+      capabilities.value = null
+      capabilityLoadState.value = 'failed'
+      reconcileViewAfterCapabilityLoad()
+    })
 })
 const reviewer = ref('')
 const comment = ref('')
@@ -179,6 +217,10 @@ function openAnalysisFromBoard(question: string): void {
   switchView('analytics')
 }
 
+function openViewFromBoard(view: WorkbenchView): void {
+  if (navItems.value.some((item) => item.value === view && item.available)) switchView(view)
+}
+
 function openTraceFromBoard(runId: string): void {
   const normalized = runId.trim()
   if (!normalized) return
@@ -186,7 +228,7 @@ function openTraceFromBoard(runId: string): void {
 }
 
 async function openCollaborationView(view: 'workflow' | 'customer' | 'security-incident', workflowId?: string, _ticketId?: string): Promise<void> {
-  const generation = ++navigationGeneration
+  const generation = beginNavigation()
   if (view === 'security-incident') {
     if (!['ADMIN', 'APPROVER'].includes(role.value) || capabilities.value?.securityIncidentEnabled !== true) return
     securityIncidentTargetId.value = workflowId ?? null
@@ -343,7 +385,7 @@ function confidence(value?: number) {
     @back-to-showcase="emit('back-to-showcase')"
     @retry-guided-launch="retryGuidedLaunch"
   >
-    <main v-show="activeView === 'analytics'" class="main-content">
+    <main v-if="canMountView('analytics')" v-show="activeView === 'analytics'" class="main-content">
       <section class="hero-row"><div><span class="eyebrow">运营分析 · 03</span><h2>自然语言直达<br /><em>真实只读数据</em></h2><p class="hero-copy">问题解析、指标口径、AST 安全校验、EXPLAIN 成本与只读执行全程可见。</p></div></section>
       <OperationsAnalysisPage
         :trace="trace"
@@ -368,7 +410,7 @@ function confidence(value?: number) {
       />
     </main>
 
-    <main v-show="activeView === 'voice'" class="main-content">
+    <main v-if="canMountView('voice')" v-show="activeView === 'voice'" class="main-content">
       <VoiceAssistantPage
         :trace="trace"
         :active="props.active && activeView === 'voice'"
@@ -377,7 +419,7 @@ function confidence(value?: number) {
       />
     </main>
 
-    <main v-show="activeView === 'collaboration'" class="main-content">
+    <main v-if="canMountView('collaboration')" v-show="activeView === 'collaboration'" class="main-content">
       <ExpertCollaborationPage
         :trace="trace"
         :active="props.active && activeView === 'collaboration'"
@@ -387,6 +429,7 @@ function confidence(value?: number) {
     </main>
 
     <CollaborationCenter
+      v-if="canMountView('collaboration-center')"
       v-show="activeView === 'collaboration-center'"
       :role="role"
       :active="props.active && activeView === 'collaboration-center'"
@@ -396,6 +439,7 @@ function confidence(value?: number) {
     />
 
     <SecurityIncidentCenter
+      v-if="canMountView('security-incidents')"
       v-show="activeView === 'security-incidents'"
       :role="role"
       :active="props.active && activeView === 'security-incidents'"
@@ -406,12 +450,16 @@ function confidence(value?: number) {
     <GovernanceCenter v-show="activeView === 'governance'" :role="role" :active="props.active && activeView === 'governance'" />
 
     <OperationsBoard
+      v-if="canMountView('operations')"
       v-show="activeView === 'operations'"
       :role="role"
       :trace="trace"
       :active="props.active && activeView === 'operations'"
+      :collaboration-available="capabilities?.collaborationEnabled === true"
+      :security-incident-available="capabilities?.securityIncidentEnabled === true && ['ADMIN', 'APPROVER'].includes(role)"
       @open-analysis="openAnalysisFromBoard"
       @open-trace="openTraceFromBoard"
+      @open-view="openViewFromBoard"
     />
 
     <main v-show="activeView === 'workflow'" class="main-content">

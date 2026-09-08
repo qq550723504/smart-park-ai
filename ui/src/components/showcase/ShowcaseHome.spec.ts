@@ -101,6 +101,58 @@ beforeEach(() => {
 })
 
 describe('ShowcaseHome truthful catalog selection', () => {
+  it('labels cockpit capabilities without presenting missing data as runnable', async () => {
+    vi.mocked(getShowcaseScenarios).mockResolvedValue(catalog([
+      scenario('ALERT_WORKFLOW', 'READY', true, null),
+      scenario('OPERATIONS_ANALYSIS', 'NOT_READY', false, '在线验证已过期'),
+      scenario('EXPERT_COLLABORATION', 'READY', true, null),
+    ]))
+
+    const wrapper = await mountLoaded()
+    const workflow = wrapper.get('[data-cockpit-capability="运维剧本"]')
+    const energy = wrapper.get('[data-cockpit-capability="节能优化"]')
+    const predictiveMaintenance = wrapper.get('[data-cockpit-capability="预测性维护"]')
+    const allAgents = wrapper.get('[data-cockpit-capability="完整演示"]')
+
+    expect(workflow.attributes('data-mapping')).toBe('DIRECT_REUSE')
+    expect(workflow.attributes('data-capability-state')).toBe('READY')
+    expect(energy.attributes('data-capability-state')).toBe('NOT_READY')
+    expect(energy.attributes('disabled')).toBeDefined()
+    expect(predictiveMaintenance.attributes('data-mapping')).toBe('NOT_READY')
+    expect(predictiveMaintenance.attributes('data-capability-state')).toBe('NOT_READY')
+    expect(predictiveMaintenance.attributes('disabled')).toBeDefined()
+    expect(predictiveMaintenance.attributes('title')).toContain('预测模型')
+    expect(allAgents.attributes('data-mapping')).toBe('NOT_READY')
+    expect(allAgents.attributes('title')).toContain('多场景编排 API')
+  })
+
+  it('counts the unavailable cockpit capabilities represented by the risk metric', async () => {
+    vi.mocked(getShowcaseScenarios).mockResolvedValue(catalog([
+      scenario('ALERT_WORKFLOW', 'READY', true, null),
+      scenario('OPERATIONS_ANALYSIS', 'READY', true, null),
+      scenario('EXPERT_COLLABORATION', 'READY', true, null),
+    ]))
+
+    const wrapper = await mountLoaded()
+
+    expect(wrapper.get('[data-showcase-metric="risk"] dd').text()).toBe('7')
+    expect(wrapper.get('[data-showcase-metric="risk"] small').text()).toContain('UNAVAILABLE')
+  })
+
+  it('opens an available adapted security capability in its real workbench view', async () => {
+    vi.mocked(getShowcaseScenarios).mockResolvedValue(catalog([
+      scenario('EXPERT_COLLABORATION', 'READY', true, null),
+    ]))
+
+    const wrapper = await mountLoaded()
+    const security = wrapper.get('[data-cockpit-capability="安防剧本"]')
+    expect(security.attributes('data-mapping')).toBe('ADAPTED')
+    expect(security.attributes('data-capability-state')).toBe('AVAILABLE')
+
+    await security.trigger('click')
+    expect(wrapper.emitted('enter-workbench')).toEqual([['security-incidents']])
+  })
+
   it('renders the platform positioning tagline on the homepage', async () => {
     vi.mocked(getShowcaseScenarios).mockResolvedValue(catalog([
       scenario('CUSTOMER_SERVICE', 'READY', true, null),
@@ -349,7 +401,17 @@ describe('ShowcaseHome truthful catalog selection', () => {
     expect(wrapper.get('[data-catalog-stamp]').text()).not.toContain('正在检查')
     expect(wrapper.get('[data-catalog-stamp]').attributes('data-catalog-state')).toBe('failed')
     expect(wrapper.get('[data-start-showcase]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-showcase-metric="verified"] dd').text()).toBe('—')
+    expect(wrapper.get('[data-showcase-metric="verified"] small').text()).toContain('/ — 个场景')
+    expect(wrapper.get('[data-showcase-metric="risk"] dd').text()).toBe('—')
+    expect(wrapper.get('[data-showcase-metric="verified"]').text()).not.toContain('0 / 0')
     expect(wrapper.text()).not.toContain('internal service detail')
+    for (const label of ['运维剧本', '节能优化']) {
+      const capability = wrapper.get(`[data-cockpit-capability="${label}"]`)
+      expect(capability.attributes('data-capability-state')).toBe('UNAVAILABLE')
+      expect(capability.attributes('disabled')).toBeDefined()
+      expect(capability.attributes('title')).toBe('当前无法确认对应能力')
+    }
   })
 
   it('recovers from a transient catalog failure through the visible retry action', async () => {
@@ -437,6 +499,12 @@ describe('ShowcaseHome truthful catalog selection', () => {
 
     expect(wrapper.text()).toContain('治理状态暂不可用')
     expect(wrapper.text()).toContain('跨域专家协作')
+    for (const label of ['安防剧本', '安防完整']) {
+      const capability = wrapper.get(`[data-cockpit-capability="${label}"]`)
+      expect(capability.attributes('data-capability-state')).toBe('UNAVAILABLE')
+      expect(capability.attributes('disabled')).toBeDefined()
+      expect(capability.attributes('title')).toBe('当前无法确认对应能力')
+    }
     wrapper.unmount()
   })
 })

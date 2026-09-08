@@ -83,12 +83,14 @@
 }
 
 .trace-rail {
-  padding: 24px;
+  padding: 18px;
   display: flex;
   flex-direction: column;
   gap: 14px;
   min-height: 0;
 }
+.trace-rail .section-heading { padding-bottom: 12px; border-bottom: 1px solid rgba(112, 232, 255, .14); }
+.trace-rail .section-heading h2 { margin-bottom: 0; font-size: 1.12rem; }
 .trace-list {
   list-style: none;
   margin: 0;

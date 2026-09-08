@@ -158,6 +158,16 @@ describe('App surface coordinator', () => {
     expect(wrapper.getComponent(OperationsWorkbench).props('launchRequest')).toBeNull()
   })
 
+  it('opens a requested cockpit view without creating a guided run', async () => {
+    const wrapper = mountApp()
+
+    wrapper.getComponent(ShowcaseHome).vm.$emit('enter-workbench', 'security-incidents')
+    await nextTick()
+
+    expect(wrapper.getComponent(OperationsWorkbench).props('initialView')).toBe('security-incidents')
+    expect(wrapper.getComponent(OperationsWorkbench).props('launchRequest')).toBeNull()
+  })
+
   it('issues a fresh request id after returning to the showcase', async () => {
     const wrapper = mountApp()
 

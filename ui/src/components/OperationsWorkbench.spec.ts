@@ -15,6 +15,16 @@ const unmounts = {
   workflow: 0,
 }
 
+const restrictedMounts = {
+  operations: 0,
+  security: 0,
+}
+
+const restrictedRequests = {
+  operations: 0,
+  security: 0,
+}
+
 const alertLaunchInput = { alertId: 'ALT-POWER-001', question: null }
 const collaborationLaunchInput = {
   alertId: null,
@@ -63,8 +73,14 @@ const traceRailStub = defineComponent({
 })
 
 const operationsBoardStub = defineComponent({
-  emits: ['open-trace'],
-  template: '<button type="button" data-board-trace @click="$emit(\'open-trace\', \'run-board-1\')">打开看板轨迹</button>',
+  emits: ['open-trace', 'open-view'],
+  setup() {
+    onMounted(() => {
+      restrictedMounts.operations += 1
+      restrictedRequests.operations += 1
+    })
+  },
+  template: '<div><button type="button" data-board-trace @click="$emit(\'open-trace\', \'run-board-1\')">打开看板轨迹</button><button type="button" data-board-view @click="$emit(\'open-view\', \'collaboration\')">打开专家协作</button></div>',
 })
 
 const workflowStub = defineComponent({
@@ -100,6 +116,12 @@ const collaborationCenterStub = defineComponent({
 
 const securityIncidentStub = defineComponent({
   emits: ['open-collaboration'],
+  setup() {
+    onMounted(() => {
+      restrictedMounts.security += 1
+      restrictedRequests.security += 1
+    })
+  },
   template: '<div data-testid="security-incident-stub"><button type="button" data-security-handoff @click="$emit(\'open-collaboration\', { incidentId: \'INC-1\', workItemId: \'SECURITY_INCIDENT:INC-1\' })">转协同</button></div>',
 })
 
@@ -152,6 +174,10 @@ describe('OperationsWorkbench', () => {
     mounts.workflow = 0
     unmounts.analysis = 0
     unmounts.workflow = 0
+    restrictedMounts.operations = 0
+    restrictedMounts.security = 0
+    restrictedRequests.operations = 0
+    restrictedRequests.security = 0
     originalFetch = globalThis.fetch
     globalThis.fetch = (async () => new Response(JSON.stringify({
       knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
@@ -190,6 +216,172 @@ describe('OperationsWorkbench', () => {
     expect(wrapper.get('[data-workbench-view="workflow"]').classes()).toContain('active')
   })
 
+  it.each([
+    ['security-incidents', 'security'],
+    ['operations', 'operations'],
+  ] as const)('fails closed when a cached customer-agent workbench is asked to open %s', async (requestedView, mountKey) => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow', active: true },
+      global: { stubs: { ...operatorStubs, OperationsBoard: operationsBoardStub } },
+    })
+    await settleCapabilities()
+
+    wrapper.getComponent(ImmersiveWorkbenchShell).vm.$emit('update:role', 'CUSTOMER_AGENT')
+    await nextTick()
+    restrictedMounts[mountKey] = 0
+    restrictedRequests[mountKey] = 0
+
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ initialView: requestedView })
+    await wrapper.setProps({ active: true })
+    await nextTick()
+
+    expect(wrapper.get('[data-workbench-view="workflow"]').classes()).toContain('active')
+    expect(wrapper.find(`[data-workbench-view="${requestedView}"]`).exists()).toBe(false)
+    expect(restrictedMounts[mountKey]).toBe(0)
+    expect(restrictedRequests[mountKey]).toBe(0)
+  })
+
+  it.each([
+    ['operations', 'analyticsEnabled', 'operations'],
+    ['security-incidents', 'securityIncidentEnabled', 'security'],
+  ] as const)('does not mount %s when %s is disabled', async (requestedView, disabledCapability, mountKey) => {
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+      analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
+      [disabledCapability]: false,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as typeof fetch
+
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: requestedView, active: true },
+      global: { stubs: { ...operatorStubs, OperationsBoard: operationsBoardStub } },
+    })
+
+    expect(restrictedMounts[mountKey]).toBe(0)
+    await settleCapabilities()
+
+    expect(wrapper.get('[data-workbench-view="workflow"]').classes()).toContain('active')
+    expect(wrapper.find(`[data-workbench-view="${requestedView}"]`).exists()).toBe(false)
+    expect(restrictedMounts[mountKey]).toBe(0)
+    expect(restrictedRequests[mountKey]).toBe(0)
+  })
+
+  it.each([
+    ['ADMIN', 'security-incidents', 'security'],
+    ['ADMIN', 'operations', 'operations'],
+    ['APPROVER', 'security-incidents', 'security'],
+    ['APPROVER', 'operations', 'operations'],
+  ] as const)('lets %s enter an available %s view', async (nextRole, requestedView, mountKey) => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow', active: true },
+      global: { stubs: { ...operatorStubs, OperationsBoard: operationsBoardStub } },
+    })
+    await settleCapabilities()
+
+    wrapper.getComponent(ImmersiveWorkbenchShell).vm.$emit('update:role', nextRole)
+    await nextTick()
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ initialView: requestedView })
+    await wrapper.setProps({ active: true })
+    await nextTick()
+
+    expect(wrapper.get(`[data-workbench-view="${requestedView}"]`).classes()).toContain('active')
+    expect(restrictedMounts[mountKey]).toBeGreaterThan(0)
+  })
+
+  it('preserves an allowed navigation made while capabilities are loading', async () => {
+    const pendingCapabilities = deferred<Response>()
+    globalThis.fetch = (() => pendingCapabilities.promise) as typeof fetch
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow', active: true },
+      global: { stubs: operatorStubs },
+    })
+
+    wrapper.getComponent(ImmersiveWorkbenchShell).vm.$emit('switch-view', 'customer')
+    await nextTick()
+    expect(wrapper.get('[data-workbench-view="customer"]').classes()).toContain('active')
+
+    pendingCapabilities.resolve(new Response(JSON.stringify({
+      knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+      analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    await settleCapabilities()
+
+    expect(wrapper.get('[data-workbench-view="customer"]').classes()).toContain('active')
+  })
+
+  it('opens an always-available initial customer view before capabilities settle', async () => {
+    const pendingCapabilities = deferred<Response>()
+    globalThis.fetch = (() => pendingCapabilities.promise) as typeof fetch
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'customer', active: true },
+      global: { stubs: operatorStubs },
+    })
+
+    await nextTick()
+    expect(wrapper.get('[data-workbench-view="customer"]').classes()).toContain('active')
+    expect(wrapper.get('[data-workbench-view="workflow"]').classes()).not.toContain('active')
+
+    pendingCapabilities.resolve(new Response(JSON.stringify({
+      knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+      analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    await settleCapabilities()
+
+    expect(wrapper.get('[data-workbench-view="customer"]').classes()).toContain('active')
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['analytics', 'analysis'],
+    ['security-incidents', 'security'],
+  ] as const)('reapplies a cached %s request after capabilities settle', async (requestedView, mountKey) => {
+    const pendingCapabilities = deferred<Response>()
+    globalThis.fetch = (() => pendingCapabilities.promise) as typeof fetch
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow', active: true },
+      global: { stubs: operatorStubs },
+    })
+
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ initialView: requestedView })
+    await wrapper.setProps({ active: true })
+    await nextTick()
+
+    expect(wrapper.get('[data-workbench-view="workflow"]').classes()).toContain('active')
+    expect(wrapper.find(`[data-workbench-view="${requestedView}"]`).exists()).toBe(false)
+    expect(mountKey === 'analysis' ? mounts.analysis : restrictedMounts.security).toBe(0)
+
+    pendingCapabilities.resolve(new Response(JSON.stringify({
+      knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+      analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    await settleCapabilities()
+
+    expect(wrapper.get(`[data-workbench-view="${requestedView}"]`).classes()).toContain('active')
+    expect(mountKey === 'analysis' ? mounts.analysis : restrictedMounts.security).toBeGreaterThan(0)
+    wrapper.unmount()
+  })
+
+  it('mounts the visible default workflow graph without waiting for capabilities', async () => {
+    const pendingCapabilities = deferred<Response>()
+    globalThis.fetch = (() => pendingCapabilities.promise) as typeof fetch
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow', active: true },
+      global: { stubs: { ...operatorStubs, WorkflowGraph: workflowStub } },
+    })
+
+    await nextTick()
+    expect(mounts.workflow).toBe(1)
+
+    pendingCapabilities.resolve(new Response(JSON.stringify({
+      knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+      analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    await settleCapabilities()
+    wrapper.unmount()
+  })
+
   it('subscribes the unified trace when the operations board provides a run id', async () => {
     vi.stubGlobal('EventSource', class {
       onmessage: ((event: MessageEvent) => void) | null = null
@@ -207,6 +399,18 @@ describe('OperationsWorkbench', () => {
     await nextTick()
 
     expect(wrapper.get('[data-testid="trace-status"]').text()).toBe('streaming')
+  })
+
+  it('opens an available existing Agent view from the operations cockpit', async () => {
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'operations' },
+      global: { stubs: { ...operatorStubs, OperationsBoard: operationsBoardStub } },
+    })
+    await settleCapabilities()
+
+    await wrapper.get('[data-board-view]').trigger('click')
+
+    expect(wrapper.get('[data-workbench-view="collaboration"]').classes()).toContain('active')
   })
 
   it('shows security incident review only to approver roles and hands off to collaboration center', async () => {
@@ -265,7 +469,9 @@ describe('OperationsWorkbench', () => {
     expect(unmounts.analysis).toBe(0)
   })
 
-  it('defers the workflow graph until its visible view is first opened', async () => {
+  it('mounts the workflow graph immediately when a gated initial view falls back', async () => {
+    const pendingCapabilities = deferred<Response>()
+    globalThis.fetch = (() => pendingCapabilities.promise) as typeof fetch
     const wrapper = mount(OperationsWorkbench, {
       props: { initialView: 'collaboration' },
       global: {
@@ -276,14 +482,17 @@ describe('OperationsWorkbench', () => {
       },
     })
 
-    await settleCapabilities()
-    expect(mounts.workflow).toBe(0)
-
-    await wrapper.get('[data-workbench-view="workflow"]').trigger('click')
     await nextTick()
+    expect(wrapper.get('[data-workbench-view="workflow"]').classes()).toContain('active')
+    expect(wrapper.find('[data-workbench-view="collaboration"]').exists()).toBe(false)
     expect(mounts.workflow).toBe(1)
 
-    await wrapper.get('[data-workbench-view="collaboration"]').trigger('click')
+    pendingCapabilities.resolve(new Response(JSON.stringify({
+      knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+      analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    await settleCapabilities()
+    expect(wrapper.get('[data-workbench-view="collaboration"]').classes()).toContain('active')
     expect(mounts.workflow).toBe(1)
     expect(unmounts.workflow).toBe(0)
   })
@@ -299,6 +508,7 @@ describe('OperationsWorkbench', () => {
       },
     })
 
+    await settleCapabilities()
     expect(wrapper.get('[data-testid="voice-active"]').text()).toBe('true')
     await wrapper.setProps({ active: false })
     expect(wrapper.get('[data-testid="voice-active"]').text()).toBe('false')
@@ -441,6 +651,49 @@ describe('OperationsWorkbench', () => {
 
       expect(wrapper.get('[data-workbench-view="workflow"]').classes()).toContain('active')
       expect(wrapper.text()).toContain('wf-selected')
+      expect(wrapper.get('[data-selected-alert]').text()).toBe('ALT-POWER-001')
+      wrapper.unmount()
+    } finally {
+      globalThis.EventSource = originalEventSource
+    }
+  })
+
+  it('does not cancel a queue workflow load when capabilities settle', async () => {
+    const originalEventSource = globalThis.EventSource
+    const pendingCapabilities = deferred<Response>()
+    const pendingWorkflow = deferred<Response>()
+    globalThis.EventSource = class {
+      onerror: ((event: Event) => void) | null = null
+      constructor(_url: string | URL) {}
+      addEventListener(): void {}
+      close(): void {}
+    } as unknown as typeof EventSource
+    globalThis.fetch = ((url: RequestInfo | URL) => String(url).includes('/api/workflows/wf-selected')
+      ? pendingWorkflow.promise
+      : pendingCapabilities.promise) as typeof fetch
+
+    try {
+      const wrapper = mount(OperationsWorkbench, {
+        props: { initialView: 'collaboration-center' },
+        global: { stubs: { ...operatorStubs, CollaborationCenter: collaborationWorkflowStub } },
+      })
+      await nextTick()
+      await wrapper.get('[data-open-selected-workflow]').trigger('click')
+
+      pendingCapabilities.resolve(new Response(JSON.stringify({
+        knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+        analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      await settleCapabilities()
+      expect(wrapper.get('[data-workbench-view="collaboration-center"]').classes()).toContain('active')
+
+      pendingWorkflow.resolve(new Response(JSON.stringify({
+        workflowId: 'wf-selected', alertId: 'ALT-POWER-001', status: 'WAITING_APPROVAL',
+        diagnosis: null, approval: null, workOrder: null, errors: [], eventSequence: 2, riskReasons: [],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      await flushPromises()
+
+      expect(wrapper.get('[data-workbench-view="workflow"]').classes()).toContain('active')
       expect(wrapper.get('[data-selected-alert]').text()).toBe('ALT-POWER-001')
       wrapper.unmount()
     } finally {

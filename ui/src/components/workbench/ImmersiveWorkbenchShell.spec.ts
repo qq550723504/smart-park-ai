@@ -125,6 +125,8 @@ describe('ImmersiveWorkbenchShell', () => {
 
     expect(wrapper.get('[data-workbench-view="workflow"]').attributes('aria-current')).toBe('page')
     expect(wrapper.get('[data-workbench-view="analytics"]').attributes('aria-current')).toBeUndefined()
+    expect(wrapper.get('[data-workbench-view="workflow"]').attributes('data-workbench-layer')).toBe('L3')
+    expect(wrapper.get('[data-workbench-view="analytics"]').attributes('data-workbench-layer')).toBe('L3')
   })
 
   it('emits back and retry actions from the supplied guided status', async () => {

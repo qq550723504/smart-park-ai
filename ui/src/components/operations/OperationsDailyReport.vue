@@ -49,12 +49,12 @@ function formatTimeRange(resolution: OperationsReportTimeResolution): string {
 <template>
   <section v-if="canRun" class="panel operations-report" data-testid="operations-daily-report">
     <div class="section-heading compact">
-      <div><span class="eyebrow">会话级快照</span><h2>运营日报</h2></div>
+      <div><span class="eyebrow">AI REPORT / DIRECT_REUSE</span><h2>运营日报</h2></div>
       <button type="button" class="operations-report__start" :disabled="reportState.busy.value || !props.active" @click="start">
         {{ reportState.busy.value ? '生成中…' : '生成运营日报' }}
       </button>
     </div>
-    <p class="operations-report__hint">固定三项只读指标，结果仅保留在本次会话中，不会改写设备或工单。</p>
+    <p class="operations-report__hint">能耗基线偏差、停车利用率与告警风险均由后端逐项执行；结果仅保留在本次会话中，不会改写设备或工单。</p>
     <p v-if="reportState.error.value" class="operations-report__error" data-testid="report-error">{{ reportState.error.value }}</p>
     <div v-if="reportState.report.value" class="operations-report__body" data-testid="report-body">
       <div class="operations-report__status">
@@ -87,14 +87,14 @@ function formatTimeRange(resolution: OperationsReportTimeResolution): string {
 </template>
 
 <style scoped>
-.operations-report { margin-bottom: 18px; padding: 24px; }
-.operations-report__start { border: 1px solid var(--showcase-cyan); color: var(--showcase-cyan); background: transparent; padding: 9px 14px; cursor: pointer; }
+.operations-report { padding: 26px; overflow: hidden; background: linear-gradient(135deg, rgba(8, 24, 39, .86), rgba(13, 15, 32, .78)); }
+.operations-report__start { border: 1px solid var(--showcase-cyan); color: #041019; background: linear-gradient(100deg, #58dfff, #829cff); padding: 9px 14px; cursor: pointer; font-weight: 800; }
 .operations-report__start:disabled { opacity: .55; cursor: not-allowed; }
 .operations-report__hint, .operations-report__empty { color: var(--showcase-muted); }
 .operations-report__error, .operations-report__failure { color: var(--showcase-danger, #ff8a8a); }
 .operations-report__body { display: grid; gap: 10px; }
 .operations-report__status { display: flex; justify-content: space-between; border-top: 1px solid var(--showcase-border-soft); padding-top: 12px; }
-.operations-report__section { border: 1px solid var(--showcase-border-soft); padding: 14px; background: rgba(12, 17, 26, .42); }
+.operations-report__section { border: 1px solid rgba(112, 232, 255, .14); padding: 16px; background: rgba(5, 14, 27, .58); }
 .operations-report__section-head { display: flex; justify-content: space-between; gap: 12px; }
 .operations-report__section-head strong, .operations-report__section-head small { display: block; }
 .operations-report__section-head small { color: var(--showcase-muted); margin-top: 4px; }

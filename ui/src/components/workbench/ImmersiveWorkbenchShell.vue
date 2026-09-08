@@ -27,6 +27,17 @@ const railMediaQuery = typeof window !== 'undefined' && typeof window.matchMedia
   : null
 const wideRailViewport = ref(railMediaQuery?.matches ?? false)
 const railOpen = computed(() => wideRailViewport.value || props.railPriority)
+const navLayer: Record<WorkbenchView, 'L2' | 'L3' | 'L4'> = {
+  operations: 'L2',
+  workflow: 'L3',
+  customer: 'L3',
+  voice: 'L3',
+  collaboration: 'L3',
+  'security-incidents': 'L3',
+  analytics: 'L3',
+  'collaboration-center': 'L3',
+  governance: 'L4',
+}
 
 function handleRailViewportChange(event: MediaQueryListEvent): void {
   wideRailViewport.value = event.matches
@@ -41,9 +52,9 @@ function updateRole(role: DemoRole): void { emit('update:role', role) }
 <template>
   <div class="immersive-workbench" data-testid="immersive-workbench-shell">
     <header class="immersive-workbench__topbar">
-      <div class="immersive-workbench__brand"><Monitor aria-hidden="true" /><div><span>智慧园区 · 智能运营</span><strong>智慧园区智能运营中心</strong></div></div>
+      <div class="immersive-workbench__brand"><Monitor aria-hidden="true" /><div><span>AI AGENT · WORKFLOW · EVIDENCE</span><strong>智慧园区智能运营中心</strong></div></div>
       <nav class="immersive-workbench__nav" aria-label="场景导航">
-        <button v-for="item in availableNavItems" :key="item.value" type="button" :class="{ active: item.value === activeView }" :aria-current="item.value === activeView ? 'page' : undefined" :data-workbench-view="item.value" @click="emit('switch-view', item.value)">{{ item.label }}</button>
+        <button v-for="item in availableNavItems" :key="item.value" type="button" :class="{ active: item.value === activeView }" :aria-current="item.value === activeView ? 'page' : undefined" :data-workbench-view="item.value" :data-workbench-layer="navLayer[item.value]" @click="emit('switch-view', item.value)">{{ item.label }}</button>
       </nav>
       <div class="immersive-workbench__actions">
         <el-select :model-value="role" :teleported="false" aria-label="演示角色" @update:model-value="updateRole">
@@ -57,7 +68,7 @@ function updateRole(role: DemoRole): void { emit('update:role', role) }
     </header>
     <div class="immersive-workbench__workspace">
       <section class="immersive-workbench__stage" data-workbench-stage><slot /></section>
-      <details class="immersive-workbench__rail" data-workbench-rail :open="railOpen"><summary>执行轨迹</summary><div class="immersive-workbench__rail-content"><slot name="rail" /></div></details>
+      <details class="immersive-workbench__rail" data-workbench-rail :open="railOpen"><summary><span>Execution Trace</span><small>真实后端事件</small></summary><div class="immersive-workbench__rail-content"><slot name="rail" /></div></details>
     </div>
     <WorkbenchEvidenceRibbon :items="evidenceItems" />
   </div>

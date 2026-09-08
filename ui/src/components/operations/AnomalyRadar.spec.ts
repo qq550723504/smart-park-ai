@@ -25,10 +25,25 @@ describe('AnomalyRadar', () => {
     const wrapper = mount(AnomalyRadar, { props: { role: 'ADMIN', active: true } })
     await vi.waitFor(() => expect(wrapper.get('[data-anomaly-radar]').text()).toContain('3'))
 
+    expect(wrapper.get('[data-anomaly-radar] h2').text()).toBe('园区运营异常雷达')
+    expect(wrapper.get('[data-anomaly-radar] h2').text()).not.toContain('实时')
     expect(wrapper.text()).toContain('近 7 天告警')
     expect(wrapper.text()).toContain('最近 1 天离线设备')
     expect(wrapper.text()).toContain('2026/08/27')
     expect(wrapper.text()).toContain('B1')
+    expect(wrapper.get('[data-radar-panel="energy-deviation"] progress').attributes('value')).toBe('20')
+    expect(wrapper.get('[data-radar-panel="device-health"]').attributes('data-feature-state')).toBe('ADAPTED')
+    expect(wrapper.get('[data-radar-panel="device-health"]').text()).not.toMatch(/\b\d{1,3}\s*\/\s*100\b/)
+  })
+
+  it('does not expose backend error details in the cockpit state', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: 'jdbc password invalid at internal-host' }), { status: 500 })))
+
+    const wrapper = mount(AnomalyRadar, { props: { role: 'ADMIN', active: true } })
+    await vi.waitFor(() => expect(wrapper.text()).toContain('异常聚合暂不可用'))
+
+    expect(wrapper.text()).not.toContain('jdbc password')
+    expect(wrapper.text()).not.toContain('internal-host')
   })
 
   it('shows partial-domain status instead of turning unavailable energy into zero', async () => {

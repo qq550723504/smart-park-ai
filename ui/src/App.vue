@@ -52,11 +52,11 @@ function startScenario(id: ShowcaseScenarioId, launchInput?: ShowcaseLaunchInput
   void showWorkbench(view)
 }
 
-function enterWorkbench() {
+function enterWorkbench(view: WorkbenchView = 'workflow') {
   requestedLaunch.value = null
   // Keep the long-lived workbench instance: an analytics run may still be
   // polling or waiting for clarification while the showcase is visible.
-  void showWorkbench('workflow')
+  void showWorkbench(view)
 }
 
 async function returnToShowcase() {
