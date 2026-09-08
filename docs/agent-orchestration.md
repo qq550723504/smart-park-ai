@@ -84,7 +84,10 @@ with `429`; when retained capacity is full it atomically compacts the oldest
 terminal runs and their idempotency keys. Active runs are never evicted.
 
 Browser refresh/reconnect loads the saved run and resumes real polling. After a
-backend restart, completed runs and their orchestration trace are rehydrated.
+backend restart, the complete durable trace prefix is hydrated before any
+recovery transition is scheduled, so newly appended events continue at the next
+contiguous sequence. Completed runs and their orchestration trace are rehydrated
+on demand.
 For a non-terminal child run, the coordinator never guesses that work
 succeeded: a lost in-memory child is recorded as failed/blocked and recovery
 continues only where safe.

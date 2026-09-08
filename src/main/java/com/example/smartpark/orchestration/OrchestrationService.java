@@ -317,7 +317,13 @@ public final class OrchestrationService {
 
     /** Called once after dependency wiring to recover persisted non-terminal records. */
     public void recover() {
-        store.nonTerminalRuns().forEach(run -> executor.execute(() -> recover(run.id())));
+        store.nonTerminalRuns().forEach(run -> {
+            // Recovery may run with a fresh in-memory publisher after process
+            // restart. Reconcile the complete durable prefix synchronously
+            // before any transition can append and project sequence N + 1.
+            hydrateProjection(run);
+            executor.execute(() -> recover(run.id()));
+        });
     }
 
     private void recover(UUID runId) {
@@ -973,9 +979,7 @@ public final class OrchestrationService {
     private void publishProjections(OrchestrationRun updated, int firstTraceIndex) {
         for (int index = firstTraceIndex; index < updated.traceEvents().size(); index++) {
             OrchestrationTraceRecord record = updated.traceEvents().get(index);
-            ExecutionEvent projection = new ExecutionEvent(record.eventId(), updated.traceId(), record.sequence(),
-                    record.timestamp(), ExecutionScenario.ORCHESTRATION, record.actor(), record.stage(),
-                    record.eventType(), record.status(), record.safeSummary(), null);
+            ExecutionEvent projection = projection(updated, record);
             try {
                 events.publish(projection);
             } catch (IllegalArgumentException | IllegalStateException duplicateOrClosed) {
@@ -984,6 +988,18 @@ public final class OrchestrationService {
                 if (!exactProjectionAlreadyExists) throw duplicateOrClosed;
             }
         }
+    }
+
+    private void hydrateProjection(OrchestrationRun run) {
+        events.hydrate(run.traceId(), run.traceEvents().stream()
+                .map(record -> projection(run, record))
+                .toList());
+    }
+
+    private static ExecutionEvent projection(OrchestrationRun run, OrchestrationTraceRecord record) {
+        return new ExecutionEvent(record.eventId(), run.traceId(), record.sequence(),
+                record.timestamp(), ExecutionScenario.ORCHESTRATION, record.actor(), record.stage(),
+                record.eventType(), record.status(), record.safeSummary(), null);
     }
 
     private void validateActionScope(OrchestrationInput input) {

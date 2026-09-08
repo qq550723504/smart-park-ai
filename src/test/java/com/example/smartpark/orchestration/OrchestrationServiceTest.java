@@ -676,6 +676,47 @@ class OrchestrationServiceTest {
     }
 
     @Test
+    void restartHydratesTheDurableTraceBeforeSchedulingRecoveryTransitions() {
+        InMemoryOrchestrationRunStore store = new InMemoryOrchestrationRunStore();
+        ConcurrentLinkedQueue<Runnable> originalTasks = new ConcurrentLinkedQueue<>();
+        OrchestrationPorts.OperationsRunner operations = question -> {
+            UUID id = UUID.randomUUID();
+            return new StartedChild(id, CompletableFuture.completedFuture(completedChild(id)));
+        };
+        OrchestrationService original = new OrchestrationService(store,
+                () -> new Capabilities(true, false, false, false, false), operations,
+                null, null, null, null, new InMemoryExecutionEventPublisher(), originalTasks::add, CLOCK);
+        OrchestrationRun persisted = original.start(
+                OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                simpleInput(), "restart-trace-hydration", null, "OPERATOR").run();
+        assertThat(originalTasks).hasSize(1);
+
+        InMemoryExecutionEventPublisher recoveredEvents = new InMemoryExecutionEventPublisher();
+        ConcurrentLinkedQueue<Runnable> recoveryTasks = new ConcurrentLinkedQueue<>();
+        OrchestrationService recovered = new OrchestrationService(store,
+                () -> new Capabilities(true, false, false, false, false), operations,
+                null, null, null, null, recoveredEvents, recoveryTasks::add, CLOCK);
+
+        recovered.recover();
+
+        assertThat(recoveredEvents.history(persisted.traceId()))
+                .extracting(ExecutionEvent::sequence, ExecutionEvent::eventType)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(1L, ExecutionEventType.RUN_STARTED));
+        assertThat(recoveryTasks).hasSize(1);
+
+        recoveryTasks.remove().run();
+
+        OrchestrationRun completed = recovered.snapshot(persisted.id());
+        assertThat(completed.status()).isEqualTo(OrchestrationStatus.COMPLETED);
+        assertThat(recoveredEvents.history(persisted.traceId()))
+                .extracting(ExecutionEvent::sequence)
+                .containsExactlyElementsOf(java.util.stream.LongStream.rangeClosed(
+                        1, completed.traceEvents().size()).boxed().toList());
+        assertThat(recoveredEvents.history(persisted.traceId()))
+                .extracting(ExecutionEvent::eventType).endsWith(ExecutionEventType.RUN_COMPLETED);
+    }
+
+    @Test
     void duplicateRecoveryTasksCannotStartTheSamePendingStepTwice() throws Exception {
         InMemoryOrchestrationRunStore delegate = new InMemoryOrchestrationRunStore();
         AtomicBoolean armed = new AtomicBoolean();
