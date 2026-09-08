@@ -65,6 +65,13 @@ public class OrchestrationController {
         return OrchestrationDtos.RunResponse.from(service.cancel(runId));
     }
 
+    @PostMapping("/maintenance/reconcile-approvals")
+    public Map<String, Integer> reconcileApprovals(
+            @RequestHeader("X-Demo-Role") String role) {
+        DemoRole.require(role, DemoRole.ADMIN);
+        return Map.of("expiredRuns", service.reconcileWaitingApprovals());
+    }
+
     private static void requireRunAccess(OrchestrationRun run, DemoRole requester) {
         if (requester != DemoRole.ADMIN && !requester.name().equals(run.role())) {
             throw new ForbiddenOperationException("Demo role cannot access another role's orchestration run");

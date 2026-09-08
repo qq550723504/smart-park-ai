@@ -13,15 +13,20 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -299,21 +304,32 @@ class OrchestrationServiceTest {
     }
 
     @Test
-    void idempotencyFingerprintCannotCollideThroughRecordDelimiters() {
+    void idempotencyFingerprintFramesStructuredFieldsIndependently() {
         Harness harness = harness(new Capabilities(true, false, false, false, false), Runnable::run);
         OrchestrationInput first = new OrchestrationInput("a, alertId=b", null, List.of(),
                 false, false, false, false);
-        OrchestrationInput collidingToString = new OrchestrationInput("a", "b, alertId=null", List.of(),
+        OrchestrationInput differentlyStructured = new OrchestrationInput("a", "b", List.of(),
                 false, false, false, false);
-        assertThat(first.toString()).isEqualTo(collidingToString.toString());
 
         harness.service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
                 first, "delimiter-collision", null, "OPERATOR");
 
         assertThatThrownBy(() -> harness.service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
-                collidingToString, "delimiter-collision", null, "OPERATOR"))
+                differentlyStructured, "delimiter-collision", null, "OPERATOR"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Idempotency-Key");
+    }
+
+    @Test
+    void rejectsUnboundedOrMalformedAlertIdentifiersBeforeAdmission() {
+        assertThatThrownBy(() -> new OrchestrationInput("question", "A".repeat(101), List.of(),
+                false, false, false, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("alertId");
+        assertThatThrownBy(() -> new OrchestrationInput("question", "ALT/../../runs", List.of(),
+                false, false, false, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("alertId");
     }
 
     @Test
@@ -480,6 +496,137 @@ class OrchestrationServiceTest {
     }
 
     @Test
+    void rejectedContinuationDoesNotRewriteADurablyCompletedApprovalStep() {
+        AtomicReference<String> workflowStatus = new AtomicReference<>("WAITING_APPROVAL");
+        OrchestrationPorts.WorkflowRunner workflow = new OrchestrationPorts.WorkflowRunner() {
+            @Override public WorkflowOutcome start(String alertId) { return workflowOutcome(workflowStatus.get()); }
+            @Override public WorkflowOutcome get(String workflowId) { return workflowOutcome(workflowStatus.get()); }
+        };
+        AtomicInteger submissions = new AtomicInteger();
+        java.util.concurrent.Executor rejectingAfterStart = command -> {
+            if (submissions.getAndIncrement() == 0) command.run();
+            else throw new RejectedExecutionException("shutdown");
+        };
+        Harness harness = harness(new Capabilities(true, false, false, false, true), rejectingAfterStart,
+                input -> availableSecurity(), workflow);
+        OrchestrationInput input = new OrchestrationInput("处置告警", "ALT-001", List.of(),
+                false, false, false, true);
+        OrchestrationRun waiting = harness.service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                input, "rejected-approval-continuation", null, "APPROVER").run();
+        workflowStatus.set("COMPLETED");
+
+        assertThatThrownBy(() -> harness.service.get(waiting.id()))
+                .isInstanceOf(RejectedExecutionException.class);
+
+        OrchestrationRun durable = harness.service.snapshot(waiting.id());
+        assertThat(durable.status()).isEqualTo(OrchestrationStatus.RUNNING);
+        assertThat(step(durable, "alert-workflow").status()).isEqualTo(OrchestrationStepStatus.COMPLETED);
+        assertThat(step(durable, "alert-workflow").approvalResult()).isEqualTo("APPROVED");
+    }
+
+    @Test
+    void expiredApprovalIsTerminalizedBeforeTheNextCapacityCheck() {
+        MutableClock clock = new MutableClock(NOW);
+        InMemoryOrchestrationRunStore store = new InMemoryOrchestrationRunStore(
+                new OrchestrationStoreLimits(3, 1));
+        OrchestrationPorts.WorkflowRunner workflow = new OrchestrationPorts.WorkflowRunner() {
+            @Override public WorkflowOutcome start(String alertId) { return workflowOutcome("WAITING_APPROVAL"); }
+            @Override public WorkflowOutcome get(String workflowId) { return workflowOutcome("WAITING_APPROVAL"); }
+        };
+        InMemoryExecutionEventPublisher events = new InMemoryExecutionEventPublisher();
+        OrchestrationPorts.OperationsRunner operations = question -> {
+            UUID id = UUID.randomUUID();
+            return new StartedChild(id, CompletableFuture.completedFuture(completedChild(id)));
+        };
+        OrchestrationService service = new OrchestrationService(store,
+                () -> new Capabilities(true, false, false, false, true), operations,
+                null, null, null, workflow, events, Runnable::run, clock, Duration.ofMinutes(5));
+        OrchestrationInput input = new OrchestrationInput("处置告警", "ALT-001", List.of(),
+                false, false, false, true);
+        OrchestrationRun first = service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                input, "approval-capacity-1", null, "APPROVER").run();
+
+        assertThat(step(first, "alert-workflow").approvalExpiresAt()).isEqualTo(NOW.plusSeconds(300));
+        clock.advance(Duration.ofMinutes(6));
+        OrchestrationRun second = service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                input, "approval-capacity-2", null, "APPROVER").run();
+
+        OrchestrationRun expired = service.snapshot(first.id());
+        assertThat(expired.status()).isEqualTo(OrchestrationStatus.FAILED);
+        assertThat(expired.failureReason()).isEqualTo("人工审批等待超时");
+        assertThat(step(expired, "alert-workflow").approvalResult()).isNull();
+        assertThat(second.status()).isEqualTo(OrchestrationStatus.WAITING_APPROVAL);
+    }
+
+    @Test
+    void duplicateRecoveryTasksCannotStartTheSamePendingStepTwice() throws Exception {
+        InMemoryOrchestrationRunStore delegate = new InMemoryOrchestrationRunStore();
+        AtomicBoolean armed = new AtomicBoolean();
+        ThreadLocal<Integer> findsByWorker = ThreadLocal.withInitial(() -> 0);
+        CyclicBarrier selectedPendingSnapshot = new CyclicBarrier(2);
+        OrchestrationRunStore barrierStore = new OrchestrationRunStore() {
+            @Override
+            public StartResult createOrGet(String key, String fingerprint,
+                                           java.util.function.Supplier<OrchestrationRun> factory) {
+                return delegate.createOrGet(key, fingerprint, factory);
+            }
+
+            @Override
+            public java.util.Optional<OrchestrationRun> find(UUID runId) {
+                if (armed.get()) {
+                    int count = findsByWorker.get() + 1;
+                    findsByWorker.set(count);
+                    if (count == 2) {
+                        try {
+                            selectedPendingSnapshot.await(2, TimeUnit.SECONDS);
+                        } catch (Exception failure) {
+                            throw new IllegalStateException(failure);
+                        }
+                    }
+                }
+                return delegate.find(runId);
+            }
+
+            @Override
+            public OrchestrationRun update(UUID runId,
+                                           java.util.function.UnaryOperator<OrchestrationRun> transition) {
+                return delegate.update(runId, transition);
+            }
+
+            @Override
+            public List<OrchestrationRun> nonTerminalRuns() {
+                return delegate.nonTerminalRuns();
+            }
+        };
+        ConcurrentLinkedQueue<Runnable> scheduled = new ConcurrentLinkedQueue<>();
+        AtomicInteger childStarts = new AtomicInteger();
+        OrchestrationPorts.OperationsRunner operations = question -> {
+            childStarts.incrementAndGet();
+            UUID id = UUID.randomUUID();
+            return new StartedChild(id, CompletableFuture.completedFuture(completedChild(id)));
+        };
+        OrchestrationService service = new OrchestrationService(barrierStore,
+                () -> new Capabilities(true, false, false, false, false), operations,
+                null, null, null, null, new InMemoryExecutionEventPublisher(), scheduled::add, CLOCK);
+        OrchestrationRun run = service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                simpleInput(), "duplicate-recovery", null, "OPERATOR").run();
+        scheduled.remove();
+        service.recover();
+        service.recover();
+        Runnable firstRecovery = scheduled.remove();
+        Runnable secondRecovery = scheduled.remove();
+        armed.set(true);
+        executor = Executors.newFixedThreadPool(2);
+        executor.execute(firstRecovery);
+        executor.execute(secondRecovery);
+        executor.shutdown();
+        assertThat(executor.awaitTermination(3, TimeUnit.SECONDS)).isTrue();
+
+        assertThat(childStarts).hasValue(1);
+        assertThat(service.snapshot(run.id()).status()).isEqualTo(OrchestrationStatus.COMPLETED);
+    }
+
+    @Test
     void cancellationStopsARealChildAndLateCompletionCannotOverwriteTerminalState() throws Exception {
         executor = Executors.newSingleThreadExecutor();
         CompletableFuture<ChildOutcome> pending = new CompletableFuture<>();
@@ -607,6 +754,22 @@ class OrchestrationServiceTest {
             @Override public WorkflowOutcome start(String alertId) { return workflowOutcome("COMPLETED"); }
             @Override public WorkflowOutcome get(String workflowId) { return workflowOutcome("COMPLETED"); }
         };
+    }
+
+    private static final class MutableClock extends Clock {
+        private Instant current;
+
+        private MutableClock(Instant current) {
+            this.current = current;
+        }
+
+        void advance(Duration duration) {
+            current = current.plus(duration);
+        }
+
+        @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+        @Override public Clock withZone(ZoneId zone) { return this; }
+        @Override public Instant instant() { return current; }
     }
 
     private static WorkflowOutcome workflowOutcome(String status) {

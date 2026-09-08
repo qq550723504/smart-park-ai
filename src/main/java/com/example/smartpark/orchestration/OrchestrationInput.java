@@ -13,13 +13,15 @@ public record OrchestrationInput(
         boolean requestAction) {
 
     public static final int MAX_QUESTION_LENGTH = 500;
+    public static final int MAX_ALERT_ID_LENGTH = 100;
+    private static final String ALERT_ID_PATTERN = "[A-Za-z0-9][A-Za-z0-9._:-]{0,99}";
 
     public OrchestrationInput {
         if (question == null || question.isBlank() || question.trim().length() > MAX_QUESTION_LENGTH) {
             throw new IllegalArgumentException("question must contain 1..500 characters");
         }
         question = question.trim();
-        alertId = normalizeOptional(alertId);
+        alertId = normalizeAlertId(alertId);
         LinkedHashSet<String> normalizedBuildings = new LinkedHashSet<>();
         for (String buildingId : buildingIds == null ? List.<String>of() : buildingIds) {
             if (buildingId == null || !buildingId.trim().toUpperCase().matches("B[0-9]{1,10}")) {
@@ -42,7 +44,12 @@ public record OrchestrationInput(
         }
     }
 
-    private static String normalizeOptional(String value) {
-        return value == null || value.isBlank() ? null : value.trim();
+    private static String normalizeAlertId(String value) {
+        if (value == null || value.isBlank()) return null;
+        String normalized = value.trim();
+        if (normalized.length() > MAX_ALERT_ID_LENGTH || !normalized.matches(ALERT_ID_PATTERN)) {
+            throw new IllegalArgumentException("invalid alertId");
+        }
+        return normalized;
     }
 }

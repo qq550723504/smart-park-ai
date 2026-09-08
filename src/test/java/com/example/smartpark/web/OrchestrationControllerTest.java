@@ -105,6 +105,22 @@ class OrchestrationControllerTest {
         verify(service, never()).cancel(run.id());
     }
 
+    @Test
+    void approvalMaintenanceIsAdminOnly() throws Exception {
+        when(service.reconcileWaitingApprovals()).thenReturn(2);
+
+        mockMvc.perform(post("/api/orchestrations/runs/maintenance/reconcile-approvals")
+                        .header("X-Demo-Role", "OPERATOR"))
+                .andExpect(status().isForbidden());
+        verify(service, never()).reconcileWaitingApprovals();
+
+        mockMvc.perform(post("/api/orchestrations/runs/maintenance/reconcile-approvals")
+                        .header("X-Demo-Role", "ADMIN"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.expiredRuns").value(2));
+        verify(service).reconcileWaitingApprovals();
+    }
+
     private static OrchestrationRun run(String role, OrchestrationStatus status) {
         Instant now = Instant.parse("2026-09-08T00:00:00Z");
         UUID id = UUID.randomUUID();

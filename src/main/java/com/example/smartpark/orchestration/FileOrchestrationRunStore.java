@@ -26,33 +26,50 @@ import java.util.function.UnaryOperator;
  */
 public final class FileOrchestrationRunStore implements OrchestrationRunStore {
     private static final TypeReference<List<OrchestrationRun>> RUN_LIST = new TypeReference<>() { };
+    static final int DEFAULT_MAX_RUN_BYTES = 128 * 1024;
 
     private final Path stateFile;
     private final ObjectMapper mapper;
     private final AtomicReplacer atomicReplacer;
     private final OrchestrationStoreLimits limits;
+    private final int maxRunBytes;
     private final Map<UUID, OrchestrationRun> runs = new LinkedHashMap<>();
     private final Map<String, UUID> idempotencyIndex = new LinkedHashMap<>();
 
     public FileOrchestrationRunStore(Path stateFile, ObjectMapper mapper) {
-        this(stateFile, mapper, OrchestrationStoreLimits.defaults(), FileOrchestrationRunStore::atomicReplace);
+        this(stateFile, mapper, OrchestrationStoreLimits.defaults(), DEFAULT_MAX_RUN_BYTES,
+                FileOrchestrationRunStore::atomicReplace);
     }
 
     public FileOrchestrationRunStore(Path stateFile, ObjectMapper mapper,
                                      int maxRetainedRuns, int maxActiveRuns) {
         this(stateFile, mapper, new OrchestrationStoreLimits(maxRetainedRuns, maxActiveRuns),
-                FileOrchestrationRunStore::atomicReplace);
+                DEFAULT_MAX_RUN_BYTES, FileOrchestrationRunStore::atomicReplace);
+    }
+
+    public FileOrchestrationRunStore(Path stateFile, ObjectMapper mapper,
+                                     int maxRetainedRuns, int maxActiveRuns, int maxRunBytes) {
+        this(stateFile, mapper, new OrchestrationStoreLimits(maxRetainedRuns, maxActiveRuns),
+                maxRunBytes, FileOrchestrationRunStore::atomicReplace);
     }
 
     FileOrchestrationRunStore(Path stateFile, ObjectMapper mapper, AtomicReplacer atomicReplacer) {
-        this(stateFile, mapper, OrchestrationStoreLimits.defaults(), atomicReplacer);
+        this(stateFile, mapper, OrchestrationStoreLimits.defaults(), DEFAULT_MAX_RUN_BYTES, atomicReplacer);
     }
 
     FileOrchestrationRunStore(Path stateFile, ObjectMapper mapper,
                               OrchestrationStoreLimits limits, AtomicReplacer atomicReplacer) {
+        this(stateFile, mapper, limits, DEFAULT_MAX_RUN_BYTES, atomicReplacer);
+    }
+
+    FileOrchestrationRunStore(Path stateFile, ObjectMapper mapper,
+                              OrchestrationStoreLimits limits, int maxRunBytes,
+                              AtomicReplacer atomicReplacer) {
         this.stateFile = stateFile.toAbsolutePath().normalize();
         this.mapper = mapper.copy().findAndRegisterModules();
         this.limits = Objects.requireNonNull(limits, "limits");
+        if (maxRunBytes < 1024) throw new IllegalArgumentException("maxRunBytes must be at least 1024");
+        this.maxRunBytes = maxRunBytes;
         this.atomicReplacer = Objects.requireNonNull(atomicReplacer, "atomicReplacer");
         load();
     }
@@ -108,10 +125,16 @@ public final class FileOrchestrationRunStore implements OrchestrationRunStore {
     private void load() {
         if (!Files.exists(stateFile)) return;
         try {
+            long maximumFileBytes = (long) limits.maxRetainedRuns() * maxRunBytes
+                    + limits.maxRetainedRuns() + 2L;
+            if (Files.size(stateFile) > maximumFileBytes) {
+                throw new IllegalStateException("orchestration state file exceeds configured byte limit");
+            }
             List<OrchestrationRun> restored = mapper.readValue(stateFile.toFile(), RUN_LIST);
             Map<UUID, OrchestrationRun> loaded = new LinkedHashMap<>();
             Map<String, UUID> loadedKeys = new LinkedHashMap<>();
             for (OrchestrationRun run : restored) {
+                validateRunSize(run);
                 loaded.put(run.id(), run);
                 UUID duplicate = loadedKeys.putIfAbsent(run.idempotencyKey(), run.id());
                 if (duplicate != null && !duplicate.equals(run.id())) {
@@ -140,6 +163,7 @@ public final class FileOrchestrationRunStore implements OrchestrationRunStore {
 
     private void persist(java.util.Collection<OrchestrationRun> snapshot) {
         try {
+            snapshot.forEach(this::validateRunSize);
             Path parent = stateFile.getParent();
             if (parent != null) Files.createDirectories(parent);
             Path temporary = Files.createTempFile(parent, stateFile.getFileName().toString(), ".tmp");
@@ -151,6 +175,16 @@ public final class FileOrchestrationRunStore implements OrchestrationRunStore {
             }
         } catch (IOException failure) {
             throw new IllegalStateException("unable to persist orchestration state", failure);
+        }
+    }
+
+    private void validateRunSize(OrchestrationRun run) {
+        try {
+            if (mapper.writeValueAsBytes(run).length > maxRunBytes) {
+                throw new IllegalArgumentException("orchestration run exceeds configured byte limit");
+            }
+        } catch (com.fasterxml.jackson.core.JsonProcessingException failure) {
+            throw new IllegalStateException("unable to size orchestration run", failure);
         }
     }
 

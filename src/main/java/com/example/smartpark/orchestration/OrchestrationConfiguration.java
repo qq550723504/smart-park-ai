@@ -25,12 +25,15 @@ import org.springframework.context.annotation.Configuration;
 
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 
@@ -47,12 +50,13 @@ public class OrchestrationConfiguration {
     OrchestrationRunStore orchestrationRunStore(
             @Value("${smartpark.orchestration.state-file:./data/orchestration/runs.json}") String stateFile,
             @Value("${smartpark.orchestration.max-retained-runs:200}") int maxRetainedRuns,
-            @Value("${smartpark.orchestration.max-active-runs:8}") int maxActiveRuns) {
+            @Value("${smartpark.orchestration.max-active-runs:8}") int maxActiveRuns,
+            @Value("${smartpark.orchestration.max-run-bytes:131072}") int maxRunBytes) {
         // Spring Boot 4's HTTP stack uses tools.jackson. The graph dependencies
         // still carry com.fasterxml Jackson, so the durable adapter deliberately
         // owns its mapper instead of coupling the two incompatible bean types.
         return new FileOrchestrationRunStore(Path.of(stateFile), new ObjectMapper().findAndRegisterModules(),
-                maxRetainedRuns, maxActiveRuns);
+                maxRetainedRuns, maxActiveRuns, maxRunBytes);
     }
 
     @Bean
@@ -72,6 +76,16 @@ public class OrchestrationConfiguration {
         });
     }
 
+    @Bean(destroyMethod = "shutdownNow")
+    @Qualifier("orchestrationMaintenanceExecutor")
+    ScheduledExecutorService orchestrationMaintenanceExecutor() {
+        return Executors.newSingleThreadScheduledExecutor(task -> {
+            Thread thread = new Thread(task, "orchestration-maintenance");
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
     @Bean
     OrchestrationService orchestrationService(
             OrchestrationRunStore store,
@@ -83,7 +97,8 @@ public class OrchestrationConfiguration {
             ObjectProvider<AlertWorkflow> workflowProvider,
             ExecutionEventPublisher events,
             @Qualifier("orchestrationExecutor") ExecutorService executor,
-            @Qualifier("orchestrationClock") Clock clock) {
+            @Qualifier("orchestrationClock") Clock clock,
+            @Value("${smartpark.orchestration.approval-timeout-seconds:900}") long approvalTimeoutSeconds) {
         OrchestrationPorts.OperationsRunner operations = new OrchestrationPorts.OperationsRunner() {
             @Override
             public OrchestrationPorts.StartedChild start(String question) {
@@ -149,12 +164,22 @@ public class OrchestrationConfiguration {
                 buildings -> energyOutcome(energyProvider.getIfAvailable(), buildings),
                 collaboration,
                 input -> securityOutcome(securityProvider.getIfAvailable(), input),
-                workflow, events, executor, clock);
+                workflow, events, executor, clock, Duration.ofSeconds(approvalTimeoutSeconds));
     }
 
     @Bean
-    ApplicationRunner recoverOrchestrationRuns(OrchestrationService service) {
-        return args -> service.recover();
+    ApplicationRunner recoverOrchestrationRuns(
+            OrchestrationService service,
+            @Qualifier("orchestrationMaintenanceExecutor") ScheduledExecutorService maintenance,
+            @Value("${smartpark.orchestration.maintenance-interval-seconds:30}") long intervalSeconds) {
+        if (intervalSeconds < 1 || intervalSeconds > 300) {
+            throw new IllegalArgumentException("orchestration maintenance interval must be 1..300 seconds");
+        }
+        return args -> {
+            service.recover();
+            maintenance.scheduleWithFixedDelay(service::reconcileWaitingApprovals,
+                    intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
+        };
     }
 
     static OrchestrationPorts.ChildOutcome operationsOutcome(AnalysisRunStore.RunRecord run) {

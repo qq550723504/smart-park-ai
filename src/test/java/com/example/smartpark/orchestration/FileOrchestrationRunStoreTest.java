@@ -195,6 +195,25 @@ class FileOrchestrationRunStoreTest {
     }
 
     @Test
+    void rejectsAnOversizedRunBeforeReplacingTheAuthoritativeSnapshot() throws Exception {
+        Path file = temporaryDirectory.resolve("bounded-record.json");
+        FileOrchestrationRunStore store = new FileOrchestrationRunStore(
+                file, new ObjectMapper().findAndRegisterModules(), 3, 3, 8 * 1024);
+        OrchestrationRun created = run();
+        store.createOrGet("key", "fingerprint", () -> created);
+        String authoritativeSnapshot = Files.readString(file);
+
+        assertThatThrownBy(() -> store.update(created.id(), current -> current.copy(
+                current.status(), current.startedAt(), null, "x".repeat(20_000),
+                current.steps(), current.evidence(), null, null, false, current.traceEvents())))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("byte limit");
+
+        assertThat(store.find(created.id()).orElseThrow().revision()).isEqualTo(created.revision());
+        assertThat(Files.readString(file)).isEqualTo(authoritativeSnapshot);
+    }
+
+    @Test
     void traceArchiveAllowsOnlyTheOwningRoleOrAdmin() {
         FileOrchestrationRunStore store = new FileOrchestrationRunStore(
                 temporaryDirectory.resolve("authorized-runs.json"), new ObjectMapper().findAndRegisterModules());

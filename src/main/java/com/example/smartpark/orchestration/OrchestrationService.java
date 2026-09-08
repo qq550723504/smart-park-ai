@@ -11,12 +11,15 @@ import com.example.smartpark.orchestration.OrchestrationPorts.ChildOutcome;
 import com.example.smartpark.orchestration.OrchestrationPorts.EvidenceOutcome;
 import com.example.smartpark.orchestration.OrchestrationPorts.StartedChild;
 import com.example.smartpark.orchestration.OrchestrationPorts.WorkflowOutcome;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -37,10 +40,13 @@ import java.util.function.Supplier;
  * the child services and is referenced by run id.
  */
 public final class OrchestrationService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(OrchestrationService.class);
     private static final Set<String> START_ROLES = Set.of("VIEWER", "OPERATOR", "APPROVER", "ADMIN");
     private static final Set<String> SECURITY_ROLES = Set.of("APPROVER", "ADMIN");
     private static final Set<String> WORKFLOW_ROLES = Set.of("OPERATOR", "APPROVER", "ADMIN");
     private static final String SAFE_STEP_FAILURE = "步骤执行失败，未采用未确认结果";
+    private static final Duration DEFAULT_APPROVAL_TIMEOUT = Duration.ofMinutes(15);
+    private static final Duration MAX_APPROVAL_TIMEOUT = Duration.ofDays(1);
 
     private final OrchestrationRunStore store;
     private final OrchestrationPorts.CapabilityReader capabilities;
@@ -52,6 +58,7 @@ public final class OrchestrationService {
     private final ExecutionEventPublisher events;
     private final Executor executor;
     private final Clock clock;
+    private final Duration approvalTimeout;
     private final ConcurrentHashMap<UUID, RunLock> runLocks = new ConcurrentHashMap<>();
 
     public OrchestrationService(OrchestrationRunStore store,
@@ -64,6 +71,21 @@ public final class OrchestrationService {
                                 ExecutionEventPublisher events,
                                 Executor executor,
                                 Clock clock) {
+        this(store, capabilities, operations, energy, collaboration, security, workflow,
+                events, executor, clock, DEFAULT_APPROVAL_TIMEOUT);
+    }
+
+    public OrchestrationService(OrchestrationRunStore store,
+                                OrchestrationPorts.CapabilityReader capabilities,
+                                OrchestrationPorts.OperationsRunner operations,
+                                OrchestrationPorts.EnergyReader energy,
+                                OrchestrationPorts.CollaborationRunner collaboration,
+                                OrchestrationPorts.SecurityReader security,
+                                OrchestrationPorts.WorkflowRunner workflow,
+                                ExecutionEventPublisher events,
+                                Executor executor,
+                                Clock clock,
+                                Duration approvalTimeout) {
         this.store = store;
         this.capabilities = capabilities;
         this.operations = operations;
@@ -74,6 +96,11 @@ public final class OrchestrationService {
         this.events = events;
         this.executor = executor;
         this.clock = clock;
+        if (approvalTimeout == null || approvalTimeout.isZero() || approvalTimeout.isNegative()
+                || approvalTimeout.compareTo(MAX_APPROVAL_TIMEOUT) > 0) {
+            throw new IllegalArgumentException("approvalTimeout must be positive and no greater than one day");
+        }
+        this.approvalTimeout = approvalTimeout;
     }
 
     public OrchestrationRunStore.StartResult start(String definitionId, OrchestrationInput input,
@@ -84,8 +111,10 @@ public final class OrchestrationService {
         if (!START_ROLES.contains(normalizedRole)) {
             throw new SecurityException("role is not allowed to start orchestration");
         }
+        java.util.Objects.requireNonNull(input, "input");
         OrchestrationDefinition.steps(definitionId);
         String fingerprint = fingerprint(definitionId, input, normalizedRole);
+        reconcileWaitingApprovals();
         Instant now = clock.instant();
         OrchestrationRunStore.StartResult result = store.createOrGet(idempotencyKey.trim(), fingerprint, () -> {
             UUID id = UUID.randomUUID();
@@ -391,43 +420,100 @@ public final class OrchestrationService {
         return true;
     }
 
-    private void reconcileApproval(UUID runId) {
+    private boolean reconcileApproval(UUID runId) {
         try (RunLockLease ignored = acquireRunLock(runId)) {
-            reconcileApprovalLocked(runId);
+            return reconcileApprovalLocked(runId);
         }
     }
 
-    private void reconcileApprovalLocked(UUID runId) {
+    private boolean reconcileApprovalLocked(UUID runId) {
         OrchestrationRun run = getStored(runId);
-        if (run.status() != OrchestrationStatus.WAITING_APPROVAL) return;
+        if (run.status() != OrchestrationStatus.WAITING_APPROVAL) return false;
         OrchestrationStep step = run.steps().stream()
                 .filter(item -> item.status() == OrchestrationStepStatus.WAITING_APPROVAL)
                 .findFirst().orElse(null);
         if (step == null) {
             failRun(runId, "等待审批的编排缺少对应步骤");
-            return;
+            return false;
+        }
+        if (approvalExpired(step, clock.instant())) {
+            expireApprovalLocked(runId, step);
+            return true;
         }
         if (step.runReference() == null || workflow == null) {
             commitApprovalResume(runId, step.id(), false, "审批子运行无法恢复",
                     step.runReference(), null, "审批子运行无法恢复");
             executor.execute(() -> execute(runId));
-            return;
+            return false;
         }
+        WorkflowOutcome outcome;
         try {
-            WorkflowOutcome outcome = workflow.get(step.runReference());
-            if ("WAITING_APPROVAL".equals(outcome.status())) return;
-            boolean completed = "COMPLETED".equals(outcome.status()) || "REJECTED".equals(outcome.status());
-            String summary = "REJECTED".equals(outcome.status())
-                    ? "人工拒绝了处置动作"
-                    : completed ? "处置工作流已完成" : "处置工作流未完成";
-            commitApprovalResume(runId, step.id(), completed, summary, outcome.workflowId(),
-                    outcome.evidenceReferences(), outcome.approvalResult());
-            executor.execute(() -> execute(runId));
-        } catch (RuntimeException missingChild) {
+            outcome = workflow.get(step.runReference());
+        } catch (NoSuchElementException missingChild) {
             commitApprovalResume(runId, step.id(), false, "服务恢复后无法确认审批子运行",
                     step.runReference(), null, "审批子运行不可恢复");
             executor.execute(() -> execute(runId));
+            return false;
         }
+        if ("WAITING_APPROVAL".equals(outcome.status())) return false;
+        boolean completed = "COMPLETED".equals(outcome.status()) || "REJECTED".equals(outcome.status());
+        String summary = "REJECTED".equals(outcome.status())
+                ? "人工拒绝了处置动作"
+                : completed ? "处置工作流已完成" : "处置工作流未完成";
+        commitApprovalResume(runId, step.id(), completed, summary, outcome.workflowId(),
+                outcome.evidenceReferences(), outcome.approvalResult());
+        executor.execute(() -> execute(runId));
+        return false;
+    }
+
+    /** Reconciles waiting children and terminalizes approvals whose durable deadline elapsed. */
+    public int reconcileWaitingApprovals() {
+        int expired = 0;
+        for (OrchestrationRun run : store.nonTerminalRuns()) {
+            if (run.status() != OrchestrationStatus.WAITING_APPROVAL) continue;
+            try {
+                if (reconcileApproval(run.id())) expired++;
+            } catch (RuntimeException failure) {
+                LOGGER.warn("Unable to reconcile orchestration approval {}", run.id(), failure);
+            }
+        }
+        return expired;
+    }
+
+    private boolean approvalExpired(OrchestrationStep step, Instant now) {
+        Instant deadline = step.approvalExpiresAt();
+        if (deadline == null) {
+            deadline = step.startedAt() == null ? Instant.MIN : step.startedAt().plus(approvalTimeout);
+        }
+        return !now.isBefore(deadline);
+    }
+
+    private void expireApprovalLocked(UUID runId, OrchestrationStep waitingStep) {
+        OrchestrationRun current = getStored(runId);
+        int firstNewTraceIndex = current.traceEvents().size();
+        Instant now = clock.instant();
+        OrchestrationRun expired = store.update(runId, run -> {
+            List<OrchestrationStep> steps = new ArrayList<>(run.steps());
+            int index = stepIndex(steps, waitingStep.id());
+            OrchestrationStep step = steps.get(index);
+            if (run.status() != OrchestrationStatus.WAITING_APPROVAL
+                    || step.status() != OrchestrationStepStatus.WAITING_APPROVAL) {
+                return run.copy(run.status(), run.startedAt(), run.completedAt(), run.summary(), steps,
+                        run.evidence(), run.failureReason(), run.result(), run.cancelRequested(), run.traceEvents());
+            }
+            steps.set(index, step.transition(OrchestrationStepStatus.FAILED, now,
+                    null, null, null, null, "人工审批等待超时"));
+            List<OrchestrationTraceRecord> trace = appendedTrace(run.traceEvents(), step.id(),
+                    ExecutionStage.FAILURE, ExecutionEventType.STEP_FAILED,
+                    ExecutionStatus.FAILED, "人工审批等待超时");
+            trace = appendedTrace(trace, "orchestrator", ExecutionStage.FAILURE,
+                    ExecutionEventType.RUN_FAILED, ExecutionStatus.FAILED,
+                    "园区异常联合研判因审批超时终止");
+            return run.copy(OrchestrationStatus.FAILED, run.startedAt(), now,
+                    "编排因审批超时终止", steps, run.evidence(),
+                    "人工审批等待超时", run.result(), run.cancelRequested(), trace);
+        });
+        publishProjections(expired, firstNewTraceIndex);
     }
 
     private boolean applyWorkflowOutcome(UUID runId, String stepId, WorkflowOutcome outcome) {
@@ -449,9 +535,8 @@ public final class OrchestrationService {
             OrchestrationRun waiting = store.update(runId, run -> {
                 List<OrchestrationStep> steps = new ArrayList<>(run.steps());
                 int index = stepIndex(steps, stepId);
-                steps.set(index, steps.get(index).transition(OrchestrationStepStatus.WAITING_APPROVAL,
-                        now, null, "等待现有 Human Approval", outcome.workflowId(),
-                        outcome.evidenceReferences(), null));
+                steps.set(index, steps.get(index).waitForApproval(now, now.plus(approvalTimeout),
+                        "等待现有 Human Approval", outcome.workflowId(), outcome.evidenceReferences()));
                 return run.copy(OrchestrationStatus.WAITING_APPROVAL,
                         run.startedAt(), null, "等待人工审批", steps, run.evidence(), null,
                         run.result(), run.cancelRequested(),
@@ -498,7 +583,10 @@ public final class OrchestrationService {
 
     private boolean startStep(UUID runId, String stepId, String inputSummary) {
         try (RunLockLease ignored = acquireRunLock(runId)) {
-            if (getStored(runId).status().isTerminal()) return false;
+            OrchestrationRun current = getStored(runId);
+            if (current.status() != OrchestrationStatus.RUNNING) return false;
+            int currentIndex = stepIndex(current.steps(), stepId);
+            if (current.steps().get(currentIndex).status() != OrchestrationStepStatus.PENDING) return false;
             Instant now = clock.instant();
             OrchestrationRun started = store.update(runId, run -> {
                 List<OrchestrationStep> steps = new ArrayList<>(run.steps());

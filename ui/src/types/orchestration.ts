@@ -28,6 +28,8 @@ export interface OrchestrationStep {
   sourceReferences: string[]
   recommendations: string[]
   failureReason: string | null
+  approvalResult: string | null
+  approvalExpiresAt: string | null
 }
 
 export interface OrchestrationResult {

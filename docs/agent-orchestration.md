@@ -75,6 +75,8 @@ trace events. `SMARTPARK_ORCHESTRATION_STATE_FILE` selects the path. Compose
 mounts `/var/lib/smartpark/orchestration` on the `orchestration-state` named
 volume. Storage is bounded by `SMARTPARK_ORCHESTRATION_MAX_RETAINED_RUNS`
 (default `200`) and `SMARTPARK_ORCHESTRATION_MAX_ACTIVE_RUNS` (default `8`).
+Each durable run is capped by `SMARTPARK_ORCHESTRATION_MAX_RUN_BYTES` (default
+`131072`), and request identifiers are validated before admission.
 Admission first preserves idempotent replay, then rejects excess active work
 with `429`; when retained capacity is full it atomically compacts the oldest
 terminal runs and their idempotency keys. Active runs are never evicted.
@@ -133,6 +135,14 @@ capability before the required step starts.
   parameter because that API cannot set a custom request header.
 - `POST /api/workflows/{workflowId}/approval` — existing Human Approval API;
   orchestration observes the child workflow result and resumes.
+- `POST /api/orchestrations/runs/maintenance/reconcile-approvals` — `ADMIN`-only
+  immediate reconciliation and expired-wait cleanup.
+
+Waiting approvals carry a durable deadline controlled by
+`SMARTPARK_ORCHESTRATION_APPROVAL_TIMEOUT_SECONDS` (default `900`). A background
+reconciliation sweep runs every
+`SMARTPARK_ORCHESTRATION_MAINTENANCE_INTERVAL_SECONDS` (default `30`). Expired
+waits fail closed and release active-run capacity.
 
 The start/get/cancel APIs reuse `X-Demo-Role`. `CUSTOMER_AGENT` cannot start an
 operations orchestration; security evidence remains limited to
