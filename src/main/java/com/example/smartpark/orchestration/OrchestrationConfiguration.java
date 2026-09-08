@@ -10,7 +10,6 @@ import com.example.smartpark.execution.ExecutionEventArchive;
 import com.example.smartpark.execution.ExecutionEventPublisher;
 import com.example.smartpark.operations.OperationsCapabilitiesService;
 import com.example.smartpark.securityincident.SecurityIncident;
-import com.example.smartpark.securityincident.SecurityIncidentQuery;
 import com.example.smartpark.securityincident.SecurityIncidentService;
 import com.example.smartpark.workflow.AlertWorkflow;
 import com.example.smartpark.workflow.WorkflowSnapshot;
@@ -176,10 +175,7 @@ public class OrchestrationConfiguration {
     private static OrchestrationPorts.EvidenceOutcome securityOutcome(SecurityIncidentService service,
                                                                        OrchestrationInput input) {
         if (service == null) throw new IllegalStateException("security incident unavailable");
-        List<SecurityIncident> matched = service.list(new SecurityIncidentQuery(null, 0, 100)).items().stream()
-                .filter(incident -> input.buildingIds().contains(incident.buildingId())
-                        || (input.alertId() != null && incident.alertIds().contains(input.alertId())))
-                .toList();
+        List<SecurityIncident> matched = service.findMatching(input.buildingIds(), input.alertId());
         if (matched.isEmpty()) {
             return new OrchestrationPorts.EvidenceOutcome("UNAVAILABLE", "没有匹配的安全事件证据",
                     List.of(), List.of("security-incident"), List.of(), "没有匹配事件");

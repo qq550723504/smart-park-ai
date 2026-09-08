@@ -99,9 +99,13 @@ maps the key to a request fingerprint (definition, role and normalized input):
 - child references are persisted before awaiting completion, allowing cancel to
   invoke the existing child abort seam;
 - cancellation is persisted before the child is interrupted, so late results
-  cannot overwrite `CANCELLED`;
+cannot overwrite `CANCELLED`;
 - duplicate approval observation sees an already terminal step/run and is a
   no-op.
+
+The UI exposes the launch action only when the required Operations Analysis
+capability is reported available; the backend independently rechecks that
+capability before the required step starts.
 
 ## API
 

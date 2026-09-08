@@ -4,7 +4,10 @@ import { cancelOrchestration, getOrchestration, startOrchestration } from '../..
 import type { OrchestrationInput, OrchestrationRun } from '../../types/orchestration'
 import type { DemoRole } from '../../types/workflow'
 
-const props = withDefaults(defineProps<{ role: DemoRole; active?: boolean }>(), { active: true })
+const props = withDefaults(defineProps<{ role: DemoRole; active?: boolean; available?: boolean }>(), {
+  active: true,
+  available: false,
+})
 const emit = defineEmits<{ 'open-trace': [runId: string] }>()
 
 const run = ref<OrchestrationRun | null>(null)
@@ -18,7 +21,7 @@ const storageKey = computed(() => `smartpark.orchestration.last.${props.role}`)
 const pendingKey = computed(() => `smartpark.orchestration.pending.${props.role}`)
 const terminal = computed(() => run.value && ['COMPLETED', 'PARTIAL', 'FAILED', 'CANCELLED'].includes(run.value.status))
 const canStart = computed(() => props.role !== 'CUSTOMER_AGENT'
-  && props.active && !loading.value && (!run.value || terminal.value))
+  && props.active && props.available && !loading.value && (!run.value || terminal.value))
 
 const labels: Record<string, string> = {
   'collect-context': '收集上下文',
@@ -132,10 +135,11 @@ async function cancel(): Promise<void> {
   }
 }
 
-watch(() => [props.active, props.role] as const, ([active]) => {
+watch(() => [props.active, props.role, props.available] as const, ([active]) => {
   generation += 1
   stopPolling()
   run.value = null
+  loading.value = false
   error.value = ''
   tracedRunId = null
   if (active) void refresh().then(startPolling)
@@ -148,9 +152,9 @@ onBeforeUnmount(stopPolling)
   <section class="orchestration-panel panel" data-orchestration-panel>
     <header>
       <div><span class="eyebrow">JOINT ANOMALY ASSESSMENT</span><h2>园区异常联合研判</h2></div>
-      <strong :data-run-status="run?.status ?? 'IDLE'">{{ run ? stateLabel(run.status) : '可启动' }}</strong>
+      <strong :data-run-status="run?.status ?? 'IDLE'">{{ run ? stateLabel(run.status) : props.available ? '可启动' : '未启用' }}</strong>
     </header>
-    <p v-if="!run">按当前角色与实时 capability 执行已有分析、证据和处置能力；不会强制运行不适用的 Agent。</p>
+    <p v-if="!run">{{ props.available ? '按当前角色与实时 capability 执行已有分析、证据和处置能力；不会强制运行不适用的 Agent。' : '必需的 Operations Analysis 当前未启用，完整研判不可启动。' }}</p>
     <p v-if="error" class="orchestration-panel__error" role="alert">{{ error }}</p>
     <ol v-if="run" class="orchestration-panel__steps">
       <li v-for="step in run.steps" :key="step.id" :data-step-status="step.status">
@@ -161,6 +165,7 @@ onBeforeUnmount(stopPolling)
     </ol>
     <section v-if="run?.result" class="orchestration-panel__result">
       <h3>最终结论</h3><p>{{ run.result.conclusion }}</p>
+      <div v-if="run.result.recommendations.length"><strong>建议动作：</strong><ul><li v-for="item in run.result.recommendations" :key="item">{{ item }}</li></ul></div>
       <p v-if="run.result.partialReasons.length"><strong>未完成项：</strong>{{ run.result.partialReasons.join('；') }}</p>
       <details v-if="run.result.evidenceReferences.length"><summary>证据引用（{{ run.result.evidenceReferences.length }}）</summary><ul><li v-for="item in run.result.evidenceReferences" :key="item"><code>{{ item }}</code></li></ul></details>
     </section>

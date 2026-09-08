@@ -43,7 +43,7 @@ describe('OrchestrationPanel', () => {
     vi.mocked(startOrchestration).mockResolvedValue({ runId: run().runId, status: 'RUNNING',
       statusUrl: '/status', traceUrl: '/trace', idempotentReplay: false })
     vi.mocked(getOrchestration).mockResolvedValue(run())
-    const wrapper = mount(OrchestrationPanel, { props: { role: 'ADMIN' } })
+    const wrapper = mount(OrchestrationPanel, { props: { role: 'ADMIN', available: true } })
 
     await wrapper.get('[data-start-orchestration]').trigger('click')
     await flushPromises()
@@ -59,12 +59,13 @@ describe('OrchestrationPanel', () => {
   it('shows skipped, partial and evidence from the server without claiming full completion', async () => {
     localStorage.setItem('smartpark.orchestration.last.ADMIN', run().runId)
     vi.mocked(getOrchestration).mockResolvedValue(run('PARTIAL', 'SKIPPED'))
-    const wrapper = mount(OrchestrationPanel, { props: { role: 'ADMIN' } })
+    const wrapper = mount(OrchestrationPanel, { props: { role: 'ADMIN', available: true } })
     await flushPromises()
 
     expect(wrapper.get('[data-run-status="PARTIAL"]').text()).toBe('部分完成')
     expect(wrapper.get('[data-step-status="SKIPPED"]').text()).toContain('已跳过')
     expect(wrapper.text()).toContain('安全域未完成研判')
+    expect(wrapper.text()).toContain('人工复核')
     expect(wrapper.text()).toContain('analysis:child-run')
     wrapper.unmount()
   })
@@ -72,7 +73,7 @@ describe('OrchestrationPanel', () => {
   it('restores a saved run on refresh and never starts a duplicate', async () => {
     localStorage.setItem('smartpark.orchestration.last.APPROVER', run().runId)
     vi.mocked(getOrchestration).mockResolvedValue(run('WAITING_APPROVAL', 'WAITING_APPROVAL'))
-    const wrapper = mount(OrchestrationPanel, { props: { role: 'APPROVER' } })
+    const wrapper = mount(OrchestrationPanel, { props: { role: 'APPROVER', available: true } })
     await flushPromises()
 
     expect(getOrchestration).toHaveBeenCalledWith('APPROVER', run().runId)
@@ -82,8 +83,35 @@ describe('OrchestrationPanel', () => {
   })
 
   it('does not expose a launch action to customer agent', () => {
-    const wrapper = mount(OrchestrationPanel, { props: { role: 'CUSTOMER_AGENT' } })
+    const wrapper = mount(OrchestrationPanel, { props: { role: 'CUSTOMER_AGENT', available: true } })
     expect(wrapper.get('[data-start-orchestration]').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('stays unavailable when the required analytics capability is offline', () => {
+    const wrapper = mount(OrchestrationPanel, { props: { role: 'ADMIN', available: false } })
+
+    expect(wrapper.get('[data-start-orchestration]').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('Operations Analysis 当前未启用')
+    wrapper.unmount()
+  })
+
+  it('clears loading when an in-flight launch is invalidated', async () => {
+    let resolveStart!: (value: Awaited<ReturnType<typeof startOrchestration>>) => void
+    vi.mocked(startOrchestration).mockReturnValue(new Promise((resolve) => { resolveStart = resolve }))
+    const wrapper = mount(OrchestrationPanel, { props: { role: 'ADMIN', active: true, available: true } })
+
+    await wrapper.get('[data-start-orchestration]').trigger('click')
+    expect(wrapper.get('[data-start-orchestration]').text()).toBe('处理中…')
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+
+    expect(wrapper.get('[data-start-orchestration]').text()).toBe('运行完整研判')
+    expect(wrapper.get('[data-start-orchestration]').attributes('disabled')).toBeUndefined()
+    resolveStart({ runId: run().runId, status: 'RUNNING', statusUrl: '/status',
+      traceUrl: '/trace', idempotentReplay: false })
+    await flushPromises()
+    expect(getOrchestration).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
@@ -91,7 +119,7 @@ describe('OrchestrationPanel', () => {
     localStorage.setItem('smartpark.orchestration.last.OPERATOR', run().runId)
     vi.mocked(getOrchestration).mockResolvedValue({ ...run(), role: 'OPERATOR' })
     vi.mocked(cancelOrchestration).mockResolvedValue({ ...run('CANCELLED', 'CANCELLED'), role: 'OPERATOR' })
-    const wrapper = mount(OrchestrationPanel, { props: { role: 'OPERATOR' } })
+    const wrapper = mount(OrchestrationPanel, { props: { role: 'OPERATOR', available: true } })
     await flushPromises()
     await wrapper.get('[data-cancel-orchestration]').trigger('click')
     await flushPromises()

@@ -455,6 +455,7 @@ function confidence(value?: number) {
       :role="role"
       :trace="trace"
       :active="props.active && activeView === 'operations'"
+      :analytics-available="capabilities?.analyticsEnabled === true"
       :collaboration-available="capabilities?.collaborationEnabled === true"
       :security-incident-available="capabilities?.securityIncidentEnabled === true && ['ADMIN', 'APPROVER'].includes(role)"
       @open-analysis="openAnalysisFromBoard"

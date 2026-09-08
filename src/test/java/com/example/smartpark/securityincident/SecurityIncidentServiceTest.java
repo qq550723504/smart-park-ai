@@ -69,6 +69,21 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void findsMatchingIncidentBeyondTheFirstListPageFromOneSnapshot() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-TARGET", "TARGET", "ACCESS", BASE)));
+        for (int index = 1; index <= 100; index++) {
+            events.add(event("SEC-NEW-" + index, "NEW-" + index, "ACCESS", BASE.plusSeconds(index * 60L)));
+        }
+        SecurityIncidentService service = service(events, List.of(), 200);
+
+        assertThat(service.list(new SecurityIncidentQuery(null, 0, 100)).items())
+                .extracting(SecurityIncident::buildingId).doesNotContain("TARGET");
+        assertThat(service.findMatching(List.of("TARGET"), null))
+                .singleElement().satisfies(incident ->
+                        assertThat(incident.eventIds()).containsExactly("SEC-TARGET"));
+    }
+
+    @Test
     void doesNotExposeHandedOffIncidentsWhoseWorkItemsWereEvicted() {
         List<SecurityEvent> events = new ArrayList<>();
         for (int index = 0; index < 101; index++) {

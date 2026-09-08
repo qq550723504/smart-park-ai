@@ -350,10 +350,9 @@ public final class OrchestrationService {
             skipStep(runId, step.id(), "告警工作流能力不可用", true);
             return true;
         }
-        if (!startStep(runId, step.id(), "调用现有 Alert Workflow")) return false;
         try {
-            WorkflowOutcome outcome = workflow.start(run.input().alertId());
-            if (!rememberChildReference(runId, step.id(), outcome.workflowId())) return false;
+            WorkflowOutcome outcome = startWorkflow(runId, step.id(), run.input().alertId());
+            if (outcome == null) return false;
             if (cancelled(runId)) return false;
             if ("WAITING_APPROVAL".equals(outcome.status())) {
                 waitForApproval(runId, step.id(), outcome);
@@ -426,12 +425,16 @@ public final class OrchestrationService {
         synchronized (lock(runId)) {
             if (getStored(runId).status().isTerminal()) return;
             Instant now = clock.instant();
-            updateStep(runId, stepId, step -> step.transition(OrchestrationStepStatus.WAITING_APPROVAL,
-                    now, null, "等待现有 Human Approval", outcome.workflowId(),
-                    outcome.evidenceReferences(), null));
-            store.update(runId, run -> run.copy(OrchestrationStatus.WAITING_APPROVAL,
-                    run.startedAt(), null, "等待人工审批", run.steps(), run.evidence(), null,
-                    run.result(), run.cancelRequested(), run.traceEvents()));
+            store.update(runId, run -> {
+                List<OrchestrationStep> steps = new ArrayList<>(run.steps());
+                int index = stepIndex(steps, stepId);
+                steps.set(index, steps.get(index).transition(OrchestrationStepStatus.WAITING_APPROVAL,
+                        now, null, "等待现有 Human Approval", outcome.workflowId(),
+                        outcome.evidenceReferences(), null));
+                return run.copy(OrchestrationStatus.WAITING_APPROVAL,
+                        run.startedAt(), null, "等待人工审批", steps, run.evidence(), null,
+                        run.result(), run.cancelRequested(), run.traceEvents());
+            });
             publish(runId, "orchestrator", ExecutionStage.HUMAN_APPROVAL,
                     ExecutionEventType.WAITING_APPROVAL, ExecutionStatus.RUNNING, "等待人工审批");
         }
@@ -462,6 +465,15 @@ public final class OrchestrationService {
             StartedChild child = start.get();
             rememberChildReference(runId, stepId, child.runId().toString());
             return child;
+        }
+    }
+
+    private WorkflowOutcome startWorkflow(UUID runId, String stepId, String alertId) {
+        synchronized (lock(runId)) {
+            if (!startStep(runId, stepId, "调用现有 Alert Workflow")) return null;
+            WorkflowOutcome outcome = workflow.start(alertId);
+            rememberChildReference(runId, stepId, outcome.workflowId());
+            return outcome;
         }
     }
 
@@ -545,13 +557,18 @@ public final class OrchestrationService {
                             java.util.function.UnaryOperator<OrchestrationStep> transition) {
         store.update(runId, run -> {
             List<OrchestrationStep> steps = new ArrayList<>(run.steps());
-            int index = -1;
-            for (int i = 0; i < steps.size(); i++) if (steps.get(i).id().equals(stepId)) { index = i; break; }
-            if (index < 0) throw new NoSuchElementException("Unknown orchestration step");
+            int index = stepIndex(steps, stepId);
             steps.set(index, transition.apply(steps.get(index)));
             return run.copy(run.status(), run.startedAt(), run.completedAt(), run.summary(), steps,
                     run.evidence(), run.failureReason(), run.result(), run.cancelRequested(), run.traceEvents());
         });
+    }
+
+    private static int stepIndex(List<OrchestrationStep> steps, String stepId) {
+        for (int i = 0; i < steps.size(); i++) {
+            if (steps.get(i).id().equals(stepId)) return i;
+        }
+        throw new NoSuchElementException("Unknown orchestration step");
     }
 
     private void completeRun(UUID runId) {

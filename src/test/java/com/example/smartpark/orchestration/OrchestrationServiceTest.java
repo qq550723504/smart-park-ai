@@ -18,6 +18,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -235,6 +236,48 @@ class OrchestrationServiceTest {
         assertThat(harness.service.get(accepted.id()).status()).isEqualTo(OrchestrationStatus.CANCELLED);
         assertThat(harness.events.history(accepted.id())).extracting(event -> event.eventType())
                 .endsWith(ExecutionEventType.RUN_CANCELLED);
+    }
+
+    @Test
+    void cancellationCannotCompleteBeforeWorkflowStartupPersistsItsReference() throws Exception {
+        executor = Executors.newSingleThreadExecutor();
+        CountDownLatch workflowStarted = new CountDownLatch(1);
+        CountDownLatch releaseWorkflow = new CountDownLatch(1);
+        OrchestrationPorts.WorkflowRunner workflow = new OrchestrationPorts.WorkflowRunner() {
+            @Override
+            public WorkflowOutcome start(String alertId) {
+                workflowStarted.countDown();
+                try {
+                    releaseWorkflow.await();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("interrupted", interrupted);
+                }
+                return workflowOutcome("WAITING_APPROVAL");
+            }
+
+            @Override
+            public WorkflowOutcome get(String workflowId) {
+                return workflowOutcome("WAITING_APPROVAL");
+            }
+        };
+        Harness harness = harness(new Capabilities(true, false, false, false, true), executor,
+                input -> availableSecurity(), workflow);
+        OrchestrationInput input = new OrchestrationInput("处置告警", "ALT-001", List.of(),
+                false, false, false, true);
+        OrchestrationRun accepted = harness.service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                input, "cancel-workflow-start", null, "OPERATOR").run();
+        assertThat(workflowStarted.await(1, TimeUnit.SECONDS)).isTrue();
+
+        CompletableFuture<OrchestrationRun> cancellation = CompletableFuture.supplyAsync(
+                () -> harness.service.cancel(accepted.id()));
+        Thread.sleep(50);
+        assertThat(cancellation).isNotDone();
+        releaseWorkflow.countDown();
+        OrchestrationRun cancelled = cancellation.get(2, TimeUnit.SECONDS);
+
+        assertThat(cancelled.status()).isEqualTo(OrchestrationStatus.CANCELLED);
+        assertThat(step(cancelled, "alert-workflow").runReference()).isEqualTo("wf-1");
     }
 
     private Harness harness(Capabilities capabilities, java.util.concurrent.Executor executor) {
