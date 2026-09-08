@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.time.Instant;
 
 public record WorkflowSnapshot(
         String workflowId,
@@ -48,5 +49,11 @@ public record WorkflowSnapshot(
                 state.workOrder().orElse(null),
                 state.errors(),
                 state.eventSequence());
+    }
+
+    public Optional<Instant> approvalExpiresAt() {
+        Object value = statePayload.get(AlertWorkflowState.APPROVAL_EXPIRES_AT);
+        if (value == null) return Optional.empty();
+        return Optional.of(value instanceof Instant instant ? instant : Instant.parse(String.valueOf(value)));
     }
 }

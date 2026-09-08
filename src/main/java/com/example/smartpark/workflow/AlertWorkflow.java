@@ -41,6 +41,7 @@ import static com.alibaba.cloud.ai.graph.action.AsyncEdgeAction.edge_async;
 public final class AlertWorkflow {
 
     private static final double CONFIDENCE_THRESHOLD = 0.75;
+    private static final String APPROVAL_DEADLINE_EXPIRED = "Approval deadline expired";
 
     private final WorkflowExecutionStore executionStore;
     private final WorkflowEventPublisher eventPublisher;
@@ -173,15 +174,26 @@ public final class AlertWorkflow {
     }
 
     public WorkflowSnapshot start(String alertId) {
+        return start(alertId, null);
+    }
+
+    public WorkflowSnapshot start(String alertId, Instant approvalExpiresAt) {
         String requiredAlertId = requireIdentifier(alertId, "alertId");
+        Instant now = Instant.now(clock);
+        if (approvalExpiresAt != null && !approvalExpiresAt.isAfter(now)) {
+            throw new IllegalArgumentException("approvalExpiresAt must be in the future");
+        }
         Optional<WorkflowSnapshot> existing = executionStore.findByAlertId(requiredAlertId);
         if (existing.filter(snapshot -> !isRetryable(snapshot.status())).isPresent()) {
-            return existing.get();
+            WorkflowSnapshot snapshot = existing.get();
+            return approvalExpiresAt == null || snapshot.status() != WorkflowStatus.WAITING_APPROVAL
+                    ? snapshot : bindApprovalDeadline(snapshot.workflowId(), approvalExpiresAt);
         }
 
         String workflowId = requireIdentifier(workflowIds.get(), "workflowId");
         String graphThreadId = workflowId;
-        AlertWorkflowState initialState = AlertWorkflowState.initial(workflowId, requiredAlertId, Instant.now(clock));
+        AlertWorkflowState initialState = AlertWorkflowState.initial(
+                workflowId, requiredAlertId, now, approvalExpiresAt);
         WorkflowExecutionStore.Execution execution = executionStore.register(
                 workflowId,
                 requiredAlertId,
@@ -231,54 +243,120 @@ public final class AlertWorkflow {
         WorkflowExecutionStore.Execution execution = executionStore.execution(requiredWorkflowId)
                 .orElseThrow(() -> new NoSuchElementException("Unknown workflow: " + requiredWorkflowId));
 
-        synchronized (execution) {
-            WorkflowSnapshot current = status(requiredWorkflowId);
-            if (current.approval().isPresent()) {
-                ApprovalDecision recorded = current.approval().orElseThrow();
-                if (recorded.idempotencyKey().equals(requiredDecision.idempotencyKey())) {
-                    if (recorded.hasSameRequestPayloadAs(requiredDecision)) {
-                        return current;
+        Instant receivedAt = Instant.now(clock);
+        UUID approvalAttemptId = UUID.randomUUID();
+        execution.beginApprovalAttempt(approvalAttemptId, receivedAt);
+        try {
+            synchronized (execution) {
+                WorkflowSnapshot current = status(requiredWorkflowId);
+                if (current.approval().isPresent()) {
+                    ApprovalDecision recorded = current.approval().orElseThrow();
+                    if (recorded.idempotencyKey().equals(requiredDecision.idempotencyKey())) {
+                        if (recorded.hasSameRequestPayloadAs(requiredDecision)) {
+                            return current;
+                        }
+                        throw new IllegalArgumentException(
+                                "idempotencyKey was already used for a different approval decision");
                     }
-                    throw new IllegalArgumentException(
-                            "idempotencyKey was already used for a different approval decision");
+                }
+                Optional<Instant> deadline = current.approvalExpiresAt();
+                if (deadline.isPresent() && !receivedAt.isBefore(deadline.orElseThrow())) {
+                    if (current.status() == WorkflowStatus.WAITING_APPROVAL) {
+                        expireApprovalLocked(execution, current);
+                    }
+                    throw new IllegalStateException(APPROVAL_DEADLINE_EXPIRED);
+                }
+                if (current.status() != WorkflowStatus.WAITING_APPROVAL) {
+                    throw new IllegalStateException(
+                            "Workflow must be WAITING_APPROVAL before approval: " + current.status());
+                }
+                InterruptionMetadata interruption = execution.interruption()
+                        .orElseThrow(() -> new IllegalStateException("Workflow has no approval interruption"));
+                long resumedSequence = nodes.publish(
+                        requiredWorkflowId,
+                        WorkflowEvent.EventType.RESUMED,
+                        AlertWorkflowNodes.HUMAN_APPROVAL,
+                        "operator approval resumed workflow");
+                try {
+                    updateGraphState(execution, Map.of(
+                            AlertWorkflowState.APPROVAL, AlertWorkflowState.serializable(requiredDecision),
+                            AlertWorkflowState.STATUS, WorkflowStatus.RUNNING.name(),
+                            AlertWorkflowState.EVENT_SEQUENCE, resumedSequence,
+                            AlertWorkflowState.UPDATED_AT, Instant.now(clock).toString()));
+                    InterruptionMetadata feedback = InterruptionMetadata.builder(interruption)
+                            .addMetadata("approvalDecision", requiredDecision)
+                            .build();
+                    RunnableConfig resumeConfig = RunnableConfig.builder()
+                            .threadId(execution.graphThreadId())
+                            .addHumanFeedback(feedback)
+                            .build();
+                    NodeOutput output = execution.compiledGraph()
+                            .invokeAndGetOutput(Map.of(), resumeConfig)
+                            .orElseThrow(() -> new IllegalStateException("Graph produced no output after approval"));
+                    if (output instanceof InterruptionMetadata) {
+                        throw new IllegalStateException("Workflow interrupted again after approval");
+                    }
+                    return completeFromState(execution, AlertWorkflowState.from(output.state()));
+                }
+                catch (RuntimeException exception) {
+                    return fail(execution, current.alertId(), exception);
                 }
             }
-            if (current.status() != WorkflowStatus.WAITING_APPROVAL) {
-                throw new IllegalStateException(
-                        "Workflow must be WAITING_APPROVAL before approval: " + current.status());
-            }
-            InterruptionMetadata interruption = execution.interruption()
-                    .orElseThrow(() -> new IllegalStateException("Workflow has no approval interruption"));
-            long resumedSequence = nodes.publish(
-                    requiredWorkflowId,
-                    WorkflowEvent.EventType.RESUMED,
-                    AlertWorkflowNodes.HUMAN_APPROVAL,
-                    "operator approval resumed workflow");
-            try {
-                updateGraphState(execution, Map.of(
-                        AlertWorkflowState.APPROVAL, AlertWorkflowState.serializable(requiredDecision),
-                        AlertWorkflowState.STATUS, WorkflowStatus.RUNNING.name(),
-                        AlertWorkflowState.EVENT_SEQUENCE, resumedSequence,
-                        AlertWorkflowState.UPDATED_AT, Instant.now(clock).toString()));
-                InterruptionMetadata feedback = InterruptionMetadata.builder(interruption)
-                        .addMetadata("approvalDecision", requiredDecision)
-                        .build();
-                RunnableConfig resumeConfig = RunnableConfig.builder()
-                        .threadId(execution.graphThreadId())
-                        .addHumanFeedback(feedback)
-                        .build();
-                NodeOutput output = execution.compiledGraph()
-                        .invokeAndGetOutput(Map.of(), resumeConfig)
-                        .orElseThrow(() -> new IllegalStateException("Graph produced no output after approval"));
-                if (output instanceof InterruptionMetadata) {
-                    throw new IllegalStateException("Workflow interrupted again after approval");
-                }
-                return completeFromState(execution, AlertWorkflowState.from(output.state()));
-            }
-            catch (RuntimeException exception) {
-                return fail(execution, current.alertId(), exception);
-            }
+        } finally {
+            execution.endApprovalAttempt(approvalAttemptId);
         }
+    }
+
+    public WorkflowSnapshot expireApproval(String workflowId, Instant approvalExpiresAt) {
+        String requiredWorkflowId = requireIdentifier(workflowId, "workflowId");
+        Instant requiredDeadline = Objects.requireNonNull(approvalExpiresAt, "approvalExpiresAt");
+        WorkflowExecutionStore.Execution execution = executionStore.execution(requiredWorkflowId)
+                .orElseThrow(() -> new NoSuchElementException("Unknown workflow: " + requiredWorkflowId));
+        synchronized (execution) {
+            WorkflowSnapshot current = bindApprovalDeadlineLocked(execution, requiredDeadline);
+            Instant effectiveDeadline = current.approvalExpiresAt().orElse(requiredDeadline);
+            if (current.status() != WorkflowStatus.WAITING_APPROVAL
+                    || Instant.now(clock).isBefore(effectiveDeadline)
+                    || execution.hasApprovalAttemptBefore(effectiveDeadline)) {
+                return current;
+            }
+            return expireApprovalLocked(execution, current);
+        }
+    }
+
+    private WorkflowSnapshot bindApprovalDeadline(String workflowId, Instant requestedDeadline) {
+        WorkflowExecutionStore.Execution execution = executionStore.execution(workflowId)
+                .orElseThrow(() -> new NoSuchElementException("Unknown workflow: " + workflowId));
+        synchronized (execution) {
+            return bindApprovalDeadlineLocked(execution, requestedDeadline);
+        }
+    }
+
+    private WorkflowSnapshot bindApprovalDeadlineLocked(WorkflowExecutionStore.Execution execution,
+                                                         Instant requestedDeadline) {
+        WorkflowSnapshot current = execution.snapshot();
+        Instant effective = current.approvalExpiresAt()
+                .filter(existing -> existing.isBefore(requestedDeadline))
+                .orElse(requestedDeadline);
+        if (current.approvalExpiresAt().filter(effective::equals).isPresent()) return current;
+        updateGraphState(execution, Map.of(
+                AlertWorkflowState.APPROVAL_EXPIRES_AT, effective.toString(),
+                AlertWorkflowState.UPDATED_AT, Instant.now(clock).toString()));
+        return execution.snapshot();
+    }
+
+    private WorkflowSnapshot expireApprovalLocked(WorkflowExecutionStore.Execution execution,
+                                                    WorkflowSnapshot current) {
+        long sequence = nodes.publish(execution.workflowId(), WorkflowEvent.EventType.FAILED,
+                AlertWorkflowNodes.HUMAN_APPROVAL, APPROVAL_DEADLINE_EXPIRED);
+        updateGraphState(execution, Map.of(
+                AlertWorkflowState.STATUS, WorkflowStatus.FAILED.name(),
+                AlertWorkflowState.ERRORS, List.of(APPROVAL_DEADLINE_EXPIRED),
+                AlertWorkflowState.EVENT_SEQUENCE, sequence,
+                AlertWorkflowState.UPDATED_AT, Instant.now(clock).toString()));
+        execution.failureCause(new IllegalStateException(APPROVAL_DEADLINE_EXPIRED));
+        eventPublisher.complete(execution.workflowId());
+        return execution.snapshot();
     }
 
     public WorkflowSnapshot status(String workflowId) {

@@ -23,8 +23,11 @@ import org.junit.jupiter.api.Test;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -97,6 +100,95 @@ class AlertWorkflowTest {
                 .collectList()
                 .block(Duration.ofSeconds(2));
         assertThat(eventTypes).contains(WorkflowEvent.EventType.PAUSED, WorkflowEvent.EventType.RESUMED);
+    }
+
+    @Test
+    void approvalCompletedBeforeItsDeadlineRemainsAuthoritativeWhenObservedLater() {
+        MutableClock clock = new MutableClock(NOW);
+        Fixture fixture = fixture("ALT-POWER-001", 0.96, 0.96, "HIGH", null,
+                sequentialIds(), clock);
+        Instant deadline = NOW.plus(Duration.ofMinutes(5));
+        WorkflowSnapshot waiting = fixture.workflow.start("ALT-POWER-001", deadline);
+        clock.advance(Duration.ofMinutes(4));
+
+        WorkflowSnapshot completed = fixture.workflow.approve(waiting.workflowId(),
+                approvedAt("approval-before-deadline", clock.instant().toString()));
+        clock.advance(Duration.ofMinutes(2));
+        WorkflowSnapshot observedAfterDeadline = fixture.workflow.expireApproval(waiting.workflowId(), deadline);
+
+        assertThat(completed.status()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThat(observedAfterDeadline.status()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThat(observedAfterDeadline.approval()).contains(completed.approval().orElseThrow());
+        assertThat(fixture.parkSystem.workOrders().findByWorkflowId(waiting.workflowId())).hasSize(1);
+    }
+
+    @Test
+    void expiredChildApprovalIsTerminalAndRejectsLateWorkOrderCreation() {
+        MutableClock clock = new MutableClock(NOW);
+        Fixture fixture = fixture("ALT-POWER-001", 0.96, 0.96, "HIGH", null,
+                sequentialIds(), clock);
+        Instant deadline = NOW.plus(Duration.ofMinutes(5));
+        WorkflowSnapshot waiting = fixture.workflow.start("ALT-POWER-001", deadline);
+        clock.advance(Duration.ofMinutes(6));
+
+        WorkflowSnapshot expired = fixture.workflow.expireApproval(waiting.workflowId(), deadline);
+
+        assertThat(expired.status()).isEqualTo(WorkflowStatus.FAILED);
+        assertThat(expired.errors()).contains("Approval deadline expired");
+        assertThatThrownBy(() -> fixture.workflow.approve(waiting.workflowId(),
+                approvedAt("late-approval", clock.instant().toString())))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("deadline expired");
+        assertThat(fixture.parkSystem.workOrders().findByWorkflowId(waiting.workflowId())).isEmpty();
+    }
+
+    @Test
+    void reusingAWaitingWorkflowCannotExtendItsApprovalDeadline() {
+        MutableClock clock = new MutableClock(NOW);
+        Fixture fixture = fixture("ALT-POWER-001", 0.96, 0.96, "HIGH", null,
+                sequentialIds(), clock);
+        Instant originalDeadline = NOW.plus(Duration.ofMinutes(5));
+        WorkflowSnapshot waiting = fixture.workflow.start("ALT-POWER-001", originalDeadline);
+
+        WorkflowSnapshot reused = fixture.workflow.start(
+                "ALT-POWER-001", originalDeadline.plus(Duration.ofMinutes(5)));
+        clock.advance(Duration.ofMinutes(6));
+        WorkflowSnapshot expired = fixture.workflow.expireApproval(
+                waiting.workflowId(), originalDeadline.plus(Duration.ofMinutes(5)));
+
+        assertThat(reused.workflowId()).isEqualTo(waiting.workflowId());
+        assertThat(reused.approvalExpiresAt()).contains(originalDeadline);
+        assertThat(expired.status()).isEqualTo(WorkflowStatus.FAILED);
+        assertThat(fixture.parkSystem.workOrders().findByWorkflowId(waiting.workflowId())).isEmpty();
+    }
+
+    @Test
+    void expirationDefersToAnApprovalRequestReceivedBeforeTheDeadline() throws Exception {
+        MutableClock clock = new MutableClock(NOW);
+        Fixture fixture = fixture("ALT-POWER-001", 0.96, 0.96, "HIGH", null,
+                sequentialIds(), clock);
+        Instant deadline = NOW.plus(Duration.ofMinutes(5));
+        WorkflowSnapshot waiting = fixture.workflow.start("ALT-POWER-001", deadline);
+        WorkflowExecutionStore.Execution execution = fixture.store.execution(waiting.workflowId()).orElseThrow();
+        clock.advance(Duration.ofMinutes(4));
+        CompletableFuture<WorkflowSnapshot> approval;
+
+        synchronized (execution) {
+            approval = CompletableFuture.supplyAsync(() -> fixture.workflow.approve(waiting.workflowId(),
+                    approvedAt("in-flight-before-deadline", clock.instant().toString())));
+            long waitUntil = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (!execution.hasApprovalAttemptBefore(deadline) && System.nanoTime() < waitUntil) {
+                Thread.sleep(5);
+            }
+            assertThat(execution.hasApprovalAttemptBefore(deadline)).isTrue();
+            clock.advance(Duration.ofMinutes(2));
+            assertThat(fixture.workflow.expireApproval(waiting.workflowId(), deadline).status())
+                    .isEqualTo(WorkflowStatus.WAITING_APPROVAL);
+        }
+
+        WorkflowSnapshot completed = approval.get(2, TimeUnit.SECONDS);
+        assertThat(completed.status()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThat(fixture.parkSystem.workOrders().findByWorkflowId(waiting.workflowId())).hasSize(1);
     }
 
     @Test
@@ -344,6 +436,18 @@ class AlertWorkflowTest {
             String riskLevel,
             KnowledgePort knowledgePort,
             Supplier<String> workflowIds) {
+        return fixture(alertId, classificationConfidence, diagnosisConfidence, riskLevel,
+                knowledgePort, workflowIds, CLOCK);
+    }
+
+    private static Fixture fixture(
+            String alertId,
+            double classificationConfidence,
+            double diagnosisConfidence,
+            String riskLevel,
+            KnowledgePort knowledgePort,
+            Supplier<String> workflowIds,
+            Clock clock) {
         MockParkFixture parkSystem = new MockParkFixture();
         return fixture(
                 parkSystem,
@@ -353,7 +457,8 @@ class AlertWorkflowTest {
                 diagnosisConfidence,
                 riskLevel,
                 knowledgePort == null ? parkSystem.knowledge() : knowledgePort,
-                workflowIds);
+                workflowIds,
+                clock);
     }
 
     private static Fixture fixture(
@@ -365,6 +470,20 @@ class AlertWorkflowTest {
             String riskLevel,
             KnowledgePort knowledgePort,
             Supplier<String> workflowIds) {
+        return fixture(parkSystem, workOrderPort, alertId, classificationConfidence,
+                diagnosisConfidence, riskLevel, knowledgePort, workflowIds, CLOCK);
+    }
+
+    private static Fixture fixture(
+            MockParkFixture parkSystem,
+            WorkOrderPort workOrderPort,
+            String alertId,
+            double classificationConfidence,
+            double diagnosisConfidence,
+            String riskLevel,
+            KnowledgePort knowledgePort,
+            Supplier<String> workflowIds,
+            Clock clock) {
         TestChatModel triageModel = new TestChatModel(triageJson(alertId, classificationConfidence, riskLevel));
         String knowledgeQuery = alertId.contains("POWER") ? "power" : "temperature";
         TestChatModel diagnosisModel = new TestChatModel(
@@ -391,7 +510,7 @@ class AlertWorkflowTest {
                 knowledgePort,
                 store,
                 publisher,
-                CLOCK,
+                clock,
                 workflowIds);
         return new Fixture(workflow, parkSystem, store, publisher);
     }
@@ -422,6 +541,22 @@ class AlertWorkflowTest {
     private static Supplier<String> sequentialIds() {
         AtomicInteger sequence = new AtomicInteger();
         return () -> "wf-" + sequence.incrementAndGet();
+    }
+
+    private static final class MutableClock extends Clock {
+        private Instant current;
+
+        private MutableClock(Instant current) {
+            this.current = current;
+        }
+
+        void advance(Duration duration) {
+            current = current.plus(duration);
+        }
+
+        @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+        @Override public Clock withZone(ZoneId zone) { return this; }
+        @Override public Instant instant() { return current; }
     }
 
     private static String triageJson(String alertId, double confidence, String riskLevel) {

@@ -394,11 +394,14 @@ public final class OrchestrationService {
             return true;
         }
         try {
-            WorkflowOutcome outcome = startWorkflow(runId, step.id(), run.input().alertId());
+            Instant approvalDeadline = clock.instant().plus(approvalTimeout);
+            WorkflowOutcome outcome = startWorkflow(
+                    runId, step.id(), run.input().alertId(), approvalDeadline);
             if (outcome == null) return false;
             if (cancelled(runId)) return false;
             if ("WAITING_APPROVAL".equals(outcome.status())) {
-                waitForApproval(runId, step.id(), outcome);
+                waitForApproval(runId, step.id(), outcome,
+                        outcome.approvalExpiresAt() == null ? approvalDeadline : outcome.approvalExpiresAt());
                 return false;
             }
             return applyWorkflowOutcome(runId, step.id(), outcome);
@@ -436,10 +439,6 @@ public final class OrchestrationService {
             failRun(runId, "等待审批的编排缺少对应步骤");
             return false;
         }
-        if (approvalExpired(step, clock.instant())) {
-            expireApprovalLocked(runId, step);
-            return true;
-        }
         if (step.runReference() == null || workflow == null) {
             commitApprovalResume(runId, step.id(), false, "审批子运行无法恢复",
                     step.runReference(), null, "审批子运行无法恢复");
@@ -448,12 +447,18 @@ public final class OrchestrationService {
         }
         WorkflowOutcome outcome;
         try {
-            outcome = workflow.get(step.runReference());
+            outcome = approvalExpired(step, clock.instant())
+                    ? workflow.expireApproval(step.runReference(), approvalDeadline(step))
+                    : workflow.get(step.runReference());
         } catch (NoSuchElementException missingChild) {
             commitApprovalResume(runId, step.id(), false, "服务恢复后无法确认审批子运行",
                     step.runReference(), null, "审批子运行不可恢复");
             executor.execute(() -> execute(runId));
             return false;
+        }
+        if ("APPROVAL_EXPIRED".equals(outcome.status())) {
+            expireApprovalLocked(runId, step);
+            return true;
         }
         if ("WAITING_APPROVAL".equals(outcome.status())) return false;
         boolean completed = "COMPLETED".equals(outcome.status()) || "REJECTED".equals(outcome.status());
@@ -481,11 +486,12 @@ public final class OrchestrationService {
     }
 
     private boolean approvalExpired(OrchestrationStep step, Instant now) {
-        Instant deadline = step.approvalExpiresAt();
-        if (deadline == null) {
-            deadline = step.startedAt() == null ? Instant.MIN : step.startedAt().plus(approvalTimeout);
-        }
-        return !now.isBefore(deadline);
+        return !now.isBefore(approvalDeadline(step));
+    }
+
+    private Instant approvalDeadline(OrchestrationStep step) {
+        if (step.approvalExpiresAt() != null) return step.approvalExpiresAt();
+        return step.startedAt() == null ? Instant.MIN : step.startedAt().plus(approvalTimeout);
     }
 
     private void expireApprovalLocked(UUID runId, OrchestrationStep waitingStep) {
@@ -527,7 +533,8 @@ public final class OrchestrationService {
         return true;
     }
 
-    private void waitForApproval(UUID runId, String stepId, WorkflowOutcome outcome) {
+    private void waitForApproval(UUID runId, String stepId, WorkflowOutcome outcome,
+                                 Instant approvalDeadline) {
         try (RunLockLease ignored = acquireRunLock(runId)) {
             OrchestrationRun current = getStored(runId);
             if (current.status().isTerminal()) return;
@@ -535,7 +542,7 @@ public final class OrchestrationService {
             OrchestrationRun waiting = store.update(runId, run -> {
                 List<OrchestrationStep> steps = new ArrayList<>(run.steps());
                 int index = stepIndex(steps, stepId);
-                steps.set(index, steps.get(index).waitForApproval(now, now.plus(approvalTimeout),
+                steps.set(index, steps.get(index).waitForApproval(now, approvalDeadline,
                         "等待现有 Human Approval", outcome.workflowId(), outcome.evidenceReferences()));
                 return run.copy(OrchestrationStatus.WAITING_APPROVAL,
                         run.startedAt(), null, "等待人工审批", steps, run.evidence(), null,
@@ -615,10 +622,11 @@ public final class OrchestrationService {
         return child;
     }
 
-    private WorkflowOutcome startWorkflow(UUID runId, String stepId, String alertId) {
+    private WorkflowOutcome startWorkflow(UUID runId, String stepId, String alertId,
+                                          Instant approvalDeadline) {
         try (RunLockLease ignored = acquireRunLock(runId)) {
             if (!startStep(runId, stepId, "调用现有 Alert Workflow")) return null;
-            WorkflowOutcome outcome = workflow.start(alertId);
+            WorkflowOutcome outcome = workflow.start(alertId, approvalDeadline);
             rememberChildReference(runId, stepId, outcome.workflowId());
             return outcome;
         }

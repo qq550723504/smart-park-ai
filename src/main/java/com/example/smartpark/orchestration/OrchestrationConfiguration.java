@@ -145,10 +145,25 @@ public class OrchestrationConfiguration {
             }
 
             @Override
+            public OrchestrationPorts.WorkflowOutcome start(String alertId, java.time.Instant approvalExpiresAt) {
+                AlertWorkflow service = workflowProvider.getIfAvailable();
+                if (service == null) throw new IllegalStateException("alert workflow unavailable");
+                return workflowOutcome(service.start(alertId, approvalExpiresAt));
+            }
+
+            @Override
             public OrchestrationPorts.WorkflowOutcome get(String workflowId) {
                 AlertWorkflow service = workflowProvider.getIfAvailable();
                 if (service == null) throw new IllegalStateException("alert workflow unavailable");
                 return workflowOutcome(service.status(workflowId));
+            }
+
+            @Override
+            public OrchestrationPorts.WorkflowOutcome expireApproval(
+                    String workflowId, java.time.Instant approvalExpiresAt) {
+                AlertWorkflow service = workflowProvider.getIfAvailable();
+                if (service == null) throw new IllegalStateException("alert workflow unavailable");
+                return workflowOutcome(service.expireApproval(workflowId, approvalExpiresAt));
             }
         };
         return new OrchestrationService(store,
@@ -250,8 +265,12 @@ public class OrchestrationConfiguration {
         evidence.add("alert-workflow:" + snapshot.workflowId());
         if (snapshot.workOrder() != null) evidence.add("work-order:" + snapshot.workOrder().id());
         String approval = snapshot.approval().map(decision -> decision.decision().name()).orElse(null);
-        return new OrchestrationPorts.WorkflowOutcome(snapshot.workflowId(), snapshot.status().name(),
+        String status = snapshot.status() == com.example.smartpark.model.common.WorkflowStatus.FAILED
+                && snapshot.errors().contains("Approval deadline expired")
+                ? "APPROVAL_EXPIRED" : snapshot.status().name();
+        return new OrchestrationPorts.WorkflowOutcome(snapshot.workflowId(), status,
                 "告警工作流状态 " + snapshot.status(), evidence, approval,
-                snapshot.errors().isEmpty() ? null : "告警工作流未完成");
+                snapshot.errors().isEmpty() ? null : "告警工作流未完成",
+                snapshot.approvalExpiresAt().orElse(null));
     }
 }

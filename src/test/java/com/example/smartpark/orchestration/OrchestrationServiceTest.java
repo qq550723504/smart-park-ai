@@ -532,6 +532,11 @@ class OrchestrationServiceTest {
         OrchestrationPorts.WorkflowRunner workflow = new OrchestrationPorts.WorkflowRunner() {
             @Override public WorkflowOutcome start(String alertId) { return workflowOutcome("WAITING_APPROVAL"); }
             @Override public WorkflowOutcome get(String workflowId) { return workflowOutcome("WAITING_APPROVAL"); }
+            @Override public WorkflowOutcome expireApproval(String workflowId, Instant approvalExpiresAt) {
+                return new WorkflowOutcome(workflowId, "APPROVAL_EXPIRED", "approval expired",
+                        List.of("alert-workflow:" + workflowId), null,
+                        "approval expired", approvalExpiresAt);
+            }
         };
         InMemoryExecutionEventPublisher events = new InMemoryExecutionEventPublisher();
         OrchestrationPorts.OperationsRunner operations = question -> {

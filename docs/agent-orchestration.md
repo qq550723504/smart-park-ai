@@ -142,7 +142,9 @@ Waiting approvals carry a durable deadline controlled by
 `SMARTPARK_ORCHESTRATION_APPROVAL_TIMEOUT_SECONDS` (default `900`). A background
 reconciliation sweep runs every
 `SMARTPARK_ORCHESTRATION_MAINTENANCE_INTERVAL_SECONDS` (default `30`). Expired
-waits fail closed and release active-run capacity.
+waits are enforced atomically by the child Alert Workflow before the parent is
+terminalized: decisions received before the deadline remain authoritative,
+late decisions cannot create a work order, and active-run capacity is released.
 
 The start/get/cancel APIs reuse `X-Demo-Role`. `CUSTOMER_AGENT` cannot start an
 operations orchestration; security evidence remains limited to

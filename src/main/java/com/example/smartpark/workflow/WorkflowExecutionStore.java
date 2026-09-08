@@ -11,6 +11,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Comparator;
 import java.util.concurrent.ConcurrentHashMap;
+import java.time.Instant;
+import java.util.UUID;
 
 public interface WorkflowExecutionStore {
 
@@ -43,6 +45,7 @@ public interface WorkflowExecutionStore {
         private final AlertWorkflowState initialState;
         private volatile InterruptionMetadata interruption;
         private volatile Throwable failureCause;
+        private final Map<UUID, Instant> pendingApprovalAttempts = new ConcurrentHashMap<>();
 
         Execution(
                 String workflowId,
@@ -87,6 +90,18 @@ public interface WorkflowExecutionStore {
 
         public void failureCause(Throwable failureCause) {
             this.failureCause = Objects.requireNonNull(failureCause, "failureCause");
+        }
+
+        void beginApprovalAttempt(UUID attemptId, Instant receivedAt) {
+            pendingApprovalAttempts.put(attemptId, receivedAt);
+        }
+
+        void endApprovalAttempt(UUID attemptId) {
+            pendingApprovalAttempts.remove(attemptId);
+        }
+
+        boolean hasApprovalAttemptBefore(Instant deadline) {
+            return pendingApprovalAttempts.values().stream().anyMatch(receivedAt -> receivedAt.isBefore(deadline));
         }
 
         AlertWorkflowState currentState() {

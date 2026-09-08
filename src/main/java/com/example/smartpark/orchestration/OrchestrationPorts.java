@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BooleanSupplier;
+import java.time.Instant;
 
 public final class OrchestrationPorts {
     private OrchestrationPorts() {
@@ -49,7 +50,15 @@ public final class OrchestrationPorts {
     public interface WorkflowRunner {
         WorkflowOutcome start(String alertId);
 
+        default WorkflowOutcome start(String alertId, Instant approvalExpiresAt) {
+            return start(alertId);
+        }
+
         WorkflowOutcome get(String workflowId);
+
+        default WorkflowOutcome expireApproval(String workflowId, Instant approvalExpiresAt) {
+            return get(workflowId);
+        }
 
         default void cancel(String workflowId) {
             // The current Alert Workflow has no safe interrupt boundary.
@@ -84,9 +93,15 @@ public final class OrchestrationPorts {
 
     public record WorkflowOutcome(String workflowId, String status, String summary,
                                   List<String> evidenceReferences, String approvalResult,
-                                  String failureReason) {
+                                  String failureReason, Instant approvalExpiresAt) {
         public WorkflowOutcome {
             evidenceReferences = List.copyOf(evidenceReferences == null ? List.of() : evidenceReferences);
+        }
+
+        public WorkflowOutcome(String workflowId, String status, String summary,
+                               List<String> evidenceReferences, String approvalResult,
+                               String failureReason) {
+            this(workflowId, status, summary, evidenceReferences, approvalResult, failureReason, null);
         }
     }
 }
