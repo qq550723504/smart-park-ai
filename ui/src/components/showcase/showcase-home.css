@@ -44,7 +44,8 @@
 .showcase-home__top-actions button { padding: 10px 14px; color: #dcf9ff; border: 1px solid rgba(112, 232, 255, 0.44); border-radius: 8px; background: rgba(21, 105, 151, 0.22); cursor: pointer; }
 .showcase-home__top-actions button:hover { border-color: var(--showcase-cyan); background: rgba(35, 139, 190, 0.3); }
 
-.showcase-home__capabilities { display: flex; gap: 8px; padding: 13px 0; overflow-x: auto; scrollbar-width: thin; }
+.showcase-home__capabilities { display: flex; gap: 8px; padding: 13px 0; overflow-x: auto; scrollbar-width: none; }
+.showcase-home__capabilities::-webkit-scrollbar { display: none; }
 .showcase-home__capabilities button { display: grid; flex: 0 0 auto; min-width: 112px; gap: 3px; padding: 8px 11px; color: #d6e4ef; text-align: left; border: 1px solid rgba(126, 160, 187, 0.2); border-radius: 7px; background: rgba(8, 18, 31, 0.72); cursor: pointer; }
 .showcase-home__capabilities button small { color: #54d8ff; font-size: 0.62rem; font-weight: 800; letter-spacing: 0.08em; }
 .showcase-home__capabilities button[data-mapping='ADAPTED'] small { color: #b9a3ff; }
