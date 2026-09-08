@@ -14,6 +14,7 @@ const run = ref<OrchestrationRun | null>(null)
 const loading = ref(false)
 const error = ref('')
 let pollHandle: number | null = null
+let pollFailures = 0
 let generation = 0
 let tracedRunId: string | null = null
 
@@ -76,8 +77,13 @@ function stopPolling(): void {
 
 function startPolling(): void {
   stopPolling()
-  if (!run.value || terminal.value || !props.active) return
-  pollHandle = window.setInterval(() => void refresh(), 1000)
+  if (!(run.value?.runId ?? localStorage.getItem(storageKey.value)) || terminal.value || !props.active) return
+  const delay = Math.min(1000 * (2 ** pollFailures), 10_000)
+  pollHandle = window.setTimeout(async () => {
+    pollHandle = null
+    await refresh()
+    startPolling()
+  }, delay)
 }
 
 async function refresh(): Promise<void> {
@@ -88,13 +94,15 @@ async function refresh(): Promise<void> {
     const current = await getOrchestration(props.role, runId)
     if (requestGeneration !== generation) return
     if (run.value && current.revision < run.value.revision) return
+    pollFailures = 0
+    error.value = ''
     run.value = current
     trace(current)
     if (['COMPLETED', 'PARTIAL', 'FAILED', 'CANCELLED'].includes(current.status)) stopPolling()
   } catch (cause) {
     if (requestGeneration !== generation) return
+    pollFailures = Math.min(pollFailures + 1, 4)
     error.value = cause instanceof Error ? cause.message : '无法查询编排状态'
-    stopPolling()
   }
 }
 
@@ -111,8 +119,9 @@ async function start(): Promise<void> {
     if (requestGeneration !== generation) return
     remember(accepted.runId)
     localStorage.removeItem(pendingKey.value)
-    run.value = await getOrchestration(props.role, accepted.runId)
+    const startedRun = await getOrchestration(props.role, accepted.runId)
     if (requestGeneration !== generation) return
+    run.value = startedRun
     trace(run.value)
     startPolling()
   } catch (cause) {
@@ -127,6 +136,7 @@ async function cancel(): Promise<void> {
   generation += 1
   const requestGeneration = generation
   const runId = run.value.runId
+  stopPolling()
   loading.value = true
   error.value = ''
   try {
@@ -137,6 +147,7 @@ async function cancel(): Promise<void> {
   } catch (cause) {
     if (requestGeneration === generation) {
       error.value = cause instanceof Error ? cause.message : '取消编排失败'
+      startPolling()
     }
   } finally {
     if (requestGeneration === generation) loading.value = false
@@ -146,6 +157,7 @@ async function cancel(): Promise<void> {
 watch(() => [props.active, props.role, props.available] as const, ([active]) => {
   generation += 1
   stopPolling()
+  pollFailures = 0
   run.value = null
   loading.value = false
   error.value = ''

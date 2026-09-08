@@ -89,13 +89,15 @@ public final class OrchestrationService {
             UUID id = UUID.randomUUID();
             List<OrchestrationStep> steps = OrchestrationDefinition.steps(definitionId).stream()
                     .map(OrchestrationStep::pending).toList();
+            List<OrchestrationTraceRecord> trace = List.of(new OrchestrationTraceRecord(
+                    UUID.randomUUID(), 1L, now, "orchestrator", ExecutionStage.INITIALIZATION,
+                    ExecutionEventType.RUN_STARTED, ExecutionStatus.RUNNING, "园区异常联合研判已启动"));
             return new OrchestrationRun(id, definitionId, OrchestrationStatus.RUNNING, now, now, null,
                     normalizeActor(requestedBy), normalizedRole, input, "编排已启动", steps, List.of(), id,
-                    null, null, idempotencyKey.trim(), fingerprint, false, 0, List.of());
+                    null, null, idempotencyKey.trim(), fingerprint, false, 0, trace);
         });
         if (result.created()) {
-            publish(result.run().id(), "orchestrator", ExecutionStage.INITIALIZATION,
-                    ExecutionEventType.RUN_STARTED, ExecutionStatus.RUNNING, "园区异常联合研判已启动");
+            publishProjection(result.run());
             try {
                 executor.execute(() -> execute(result.run().id()));
             } catch (RuntimeException rejected) {
@@ -509,14 +511,32 @@ public final class OrchestrationService {
 
     private void failStep(UUID runId, String stepId, String reason, boolean required) {
         synchronized (lock(runId)) {
-            if (getStored(runId).status().isTerminal()) return;
+            OrchestrationRun current = getStored(runId);
+            if (current.status().isTerminal()) return;
             Instant now = clock.instant();
-            updateStep(runId, stepId, step -> step.transition(required
-                            ? OrchestrationStepStatus.BLOCKED : OrchestrationStepStatus.FAILED,
+            if (required) {
+                int firstNewTraceIndex = current.traceEvents().size();
+                OrchestrationRun failed = store.update(runId, run -> {
+                    List<OrchestrationStep> steps = new ArrayList<>(run.steps());
+                    int index = stepIndex(steps, stepId);
+                    steps.set(index, steps.get(index).transition(OrchestrationStepStatus.BLOCKED,
+                            now, null, null, null, null, reason));
+                    List<OrchestrationTraceRecord> trace = appendedTrace(run.traceEvents(), stepId,
+                            ExecutionStage.FAILURE, ExecutionEventType.STEP_FAILED,
+                            ExecutionStatus.FAILED, reason);
+                    trace = appendedTrace(trace, "orchestrator", ExecutionStage.FAILURE,
+                            ExecutionEventType.RUN_FAILED, ExecutionStatus.FAILED,
+                            "园区异常联合研判失败");
+                    return run.copy(OrchestrationStatus.FAILED, run.startedAt(), now, "编排失败",
+                            steps, run.evidence(), reason, run.result(), run.cancelRequested(), trace);
+                });
+                publishProjections(failed, firstNewTraceIndex);
+                return;
+            }
+            updateStep(runId, stepId, step -> step.transition(OrchestrationStepStatus.FAILED,
                     now, null, null, null, null, reason));
             publish(runId, stepId, ExecutionStage.FAILURE, ExecutionEventType.STEP_FAILED,
                     ExecutionStatus.FAILED, reason);
-            if (required) failRun(runId, reason);
         }
     }
 
@@ -650,21 +670,34 @@ public final class OrchestrationService {
     private List<OrchestrationTraceRecord> appendedTrace(OrchestrationRun run, String actor,
                                                           ExecutionStage stage, ExecutionEventType type,
                                                           ExecutionStatus status, String summary) {
-        long sequence = run.traceEvents().size() + 1L;
-        List<OrchestrationTraceRecord> trace = new ArrayList<>(run.traceEvents());
+        return appendedTrace(run.traceEvents(), actor, stage, type, status, summary);
+    }
+
+    private List<OrchestrationTraceRecord> appendedTrace(List<OrchestrationTraceRecord> current,
+                                                          String actor, ExecutionStage stage,
+                                                          ExecutionEventType type, ExecutionStatus status,
+                                                          String summary) {
+        long sequence = current.size() + 1L;
+        List<OrchestrationTraceRecord> trace = new ArrayList<>(current);
         trace.add(new OrchestrationTraceRecord(UUID.randomUUID(), sequence, clock.instant(), actor,
                 stage, type, status, summary));
         return trace;
     }
 
     private void publishProjection(OrchestrationRun updated) {
-        OrchestrationTraceRecord record = updated.traceEvents().get(updated.traceEvents().size() - 1);
-        try {
-            events.publish(new ExecutionEvent(record.eventId(), updated.traceId(), record.sequence(),
-                    record.timestamp(), ExecutionScenario.ORCHESTRATION, record.actor(), record.stage(),
-                    record.eventType(), record.status(), record.safeSummary(), null));
-        } catch (IllegalArgumentException | IllegalStateException duplicateOrClosed) {
-            // Durable trace remains authoritative and can rehydrate the in-memory projection.
+        publishProjections(updated, updated.traceEvents().size() - 1);
+    }
+
+    private void publishProjections(OrchestrationRun updated, int firstTraceIndex) {
+        for (int index = firstTraceIndex; index < updated.traceEvents().size(); index++) {
+            OrchestrationTraceRecord record = updated.traceEvents().get(index);
+            try {
+                events.publish(new ExecutionEvent(record.eventId(), updated.traceId(), record.sequence(),
+                        record.timestamp(), ExecutionScenario.ORCHESTRATION, record.actor(), record.stage(),
+                        record.eventType(), record.status(), record.safeSummary(), null));
+            } catch (IllegalArgumentException | IllegalStateException duplicateOrClosed) {
+                // Durable trace remains authoritative and can rehydrate the in-memory projection.
+            }
         }
     }
 

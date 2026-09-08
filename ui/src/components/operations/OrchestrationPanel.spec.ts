@@ -115,6 +115,49 @@ describe('OrchestrationPanel', () => {
     wrapper.unmount()
   })
 
+  it('does not assign a post-start response after the role changes', async () => {
+    let resolveGet!: (value: OrchestrationRun) => void
+    vi.mocked(startOrchestration).mockResolvedValue({ runId: run().runId, status: 'RUNNING',
+      statusUrl: '/status', traceUrl: '/trace', idempotentReplay: false })
+    vi.mocked(getOrchestration).mockReturnValue(new Promise((resolve) => { resolveGet = resolve }))
+    const wrapper = mount(OrchestrationPanel, { props: { role: 'ADMIN', available: true } })
+
+    await wrapper.get('[data-start-orchestration]').trigger('click')
+    await flushPromises()
+    await wrapper.setProps({ role: 'VIEWER' })
+    resolveGet(run())
+    await flushPromises()
+
+    expect(wrapper.find('[data-run-status="RUNNING"]').exists()).toBe(false)
+    expect(wrapper.emitted('open-trace')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('retries a transient refresh failure with capped exponential backoff', async () => {
+    vi.useFakeTimers()
+    try {
+      localStorage.setItem('smartpark.orchestration.last.OPERATOR', run().runId)
+      vi.mocked(getOrchestration)
+        .mockRejectedValueOnce(new Error('temporary outage'))
+        .mockResolvedValueOnce({ ...run('COMPLETED', 'COMPLETED'), role: 'OPERATOR' })
+      const wrapper = mount(OrchestrationPanel, { props: { role: 'OPERATOR', available: true } })
+      await flushPromises()
+
+      expect(wrapper.text()).toContain('temporary outage')
+      await vi.advanceTimersByTimeAsync(1999)
+      expect(getOrchestration).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1)
+      await flushPromises()
+
+      expect(getOrchestration).toHaveBeenCalledTimes(2)
+      expect(wrapper.get('[data-run-status="COMPLETED"]').text()).toBe('已完成')
+      expect(wrapper.text()).not.toContain('temporary outage')
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('does not let an older polling response overwrite a newer cancelled state', async () => {
     vi.useFakeTimers()
     let resolvePoll!: (value: OrchestrationRun) => void

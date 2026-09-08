@@ -77,7 +77,7 @@ class OrchestrationServiceTest {
         assertThat(harness.events.history(run.id())).extracting(event -> event.eventType())
                 .endsWith(ExecutionEventType.STEP_FAILED, ExecutionEventType.RUN_FAILED);
         assertThat(run.traceEvents()).extracting(OrchestrationTraceRecord::eventType)
-                .endsWith(ExecutionEventType.RUN_FAILED);
+                .endsWith(ExecutionEventType.STEP_FAILED, ExecutionEventType.RUN_FAILED);
     }
 
     @Test
@@ -186,6 +186,46 @@ class OrchestrationServiceTest {
         assertThatThrownBy(() -> harness.service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
                 new OrchestrationInput("另一个问题", null, List.of(), false, false, false, false),
                 "same-key", null, "OPERATOR")).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void initialSnapshotAlreadyContainsTheStartEventBeforeTheRunIsScheduled() {
+        InMemoryOrchestrationRunStore delegate = new InMemoryOrchestrationRunStore();
+        OrchestrationRunStore createOnly = new OrchestrationRunStore() {
+            @Override
+            public StartResult createOrGet(String key, String fingerprint,
+                                           java.util.function.Supplier<OrchestrationRun> factory) {
+                return delegate.createOrGet(key, fingerprint, factory);
+            }
+
+            @Override
+            public java.util.Optional<OrchestrationRun> find(UUID runId) {
+                return delegate.find(runId);
+            }
+
+            @Override
+            public OrchestrationRun update(UUID runId,
+                                           java.util.function.UnaryOperator<OrchestrationRun> transition) {
+                throw new AssertionError("start must not require a second persistence before scheduling");
+            }
+
+            @Override
+            public List<OrchestrationRun> nonTerminalRuns() {
+                return delegate.nonTerminalRuns();
+            }
+        };
+        AtomicReference<Runnable> scheduled = new AtomicReference<>();
+        InMemoryExecutionEventPublisher events = new InMemoryExecutionEventPublisher();
+        OrchestrationService service = new OrchestrationService(createOnly,
+                () -> new Capabilities(true, false, false, false, false),
+                null, null, null, null, null, events, scheduled::set, CLOCK);
+
+        OrchestrationRun run = service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                simpleInput(), "atomic-start", null, "OPERATOR").run();
+
+        assertThat(scheduled).doesNotHaveNullValue();
+        assertThat(run.traceEvents()).extracting(OrchestrationTraceRecord::eventType)
+                .containsExactly(ExecutionEventType.RUN_STARTED);
     }
 
     @Test
