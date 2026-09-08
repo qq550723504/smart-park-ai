@@ -164,6 +164,9 @@ function retryGuidedLaunch(): void {
 
 // 统一执行轨迹：告警工作流通过确定性 runId 同时出现在右侧轨迹栏。
 const trace = useExecutionTrace()
+watch(role, (nextRole, previousRole) => {
+  if (nextRole !== previousRole) trace.reset()
+})
 watch(activeView, (view, previousView) => {
   if (view === 'governance' && previousView !== 'governance') trace.reset()
 })

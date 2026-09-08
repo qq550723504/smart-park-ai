@@ -12,6 +12,7 @@ import com.example.smartpark.orchestration.OrchestrationPorts.EvidenceOutcome;
 import com.example.smartpark.orchestration.OrchestrationPorts.StartedChild;
 import com.example.smartpark.orchestration.OrchestrationPorts.WorkflowOutcome;
 
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -784,11 +785,30 @@ public final class OrchestrationService {
     private static String fingerprint(String definitionId, OrchestrationInput input, String role) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest((definitionId + "\n" + role + "\n" + input)
-                    .getBytes(StandardCharsets.UTF_8));
-            return java.util.HexFormat.of().formatHex(hash);
+            updateFingerprint(digest, "orchestration-fingerprint-v1");
+            updateFingerprint(digest, definitionId);
+            updateFingerprint(digest, role);
+            updateFingerprint(digest, input.question());
+            updateFingerprint(digest, input.alertId());
+            digest.update(ByteBuffer.allocate(Integer.BYTES).putInt(input.buildingIds().size()).array());
+            input.buildingIds().forEach(value -> updateFingerprint(digest, value));
+            digest.update((byte) (input.energyRelated() ? 1 : 0));
+            digest.update((byte) (input.crossDomain() ? 1 : 0));
+            digest.update((byte) (input.securityRelated() ? 1 : 0));
+            digest.update((byte) (input.requestAction() ? 1 : 0));
+            return java.util.HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException impossible) {
             throw new IllegalStateException("SHA-256 is unavailable", impossible);
         }
+    }
+
+    private static void updateFingerprint(MessageDigest digest, String value) {
+        if (value == null) {
+            digest.update(ByteBuffer.allocate(Integer.BYTES).putInt(-1).array());
+            return;
+        }
+        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+        digest.update(ByteBuffer.allocate(Integer.BYTES).putInt(bytes.length).array());
+        digest.update(bytes);
     }
 }

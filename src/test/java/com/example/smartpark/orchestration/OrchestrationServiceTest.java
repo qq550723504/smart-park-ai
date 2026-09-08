@@ -222,6 +222,24 @@ class OrchestrationServiceTest {
     }
 
     @Test
+    void idempotencyFingerprintCannotCollideThroughRecordDelimiters() {
+        Harness harness = harness(new Capabilities(true, false, false, false, false), Runnable::run);
+        OrchestrationInput first = new OrchestrationInput("a, alertId=b", null, List.of(),
+                false, false, false, false);
+        OrchestrationInput collidingToString = new OrchestrationInput("a", "b, alertId=null", List.of(),
+                false, false, false, false);
+        assertThat(first.toString()).isEqualTo(collidingToString.toString());
+
+        harness.service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                first, "delimiter-collision", null, "OPERATOR");
+
+        assertThatThrownBy(() -> harness.service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                collidingToString, "delimiter-collision", null, "OPERATOR"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Idempotency-Key");
+    }
+
+    @Test
     void initialSnapshotAlreadyContainsTheStartEventBeforeTheRunIsScheduled() {
         InMemoryOrchestrationRunStore delegate = new InMemoryOrchestrationRunStore();
         OrchestrationRunStore createOnly = new OrchestrationRunStore() {

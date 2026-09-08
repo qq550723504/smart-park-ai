@@ -401,6 +401,31 @@ describe('OperationsWorkbench', () => {
     expect(wrapper.get('[data-testid="trace-status"]').text()).toBe('streaming')
   })
 
+  it('closes and clears the shared trace when the role changes', async () => {
+    const close = vi.fn()
+    vi.stubGlobal('EventSource', class {
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+      addEventListener(): void {}
+      close(): void { close() }
+    })
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'operations' },
+      global: { stubs: { ...operatorStubs, OperationsBoard: operationsBoardStub } },
+    })
+    await settleCapabilities()
+    await wrapper.get('[data-board-trace]').trigger('click')
+    await nextTick()
+    expect(wrapper.get('[data-testid="trace-status"]').text()).toBe('streaming')
+
+    wrapper.getComponent(ImmersiveWorkbenchShell).vm.$emit('update:role', 'VIEWER')
+    await nextTick()
+
+    expect(close).toHaveBeenCalledOnce()
+    expect(wrapper.get('[data-testid="trace-status"]').text()).toBe('idle')
+    wrapper.unmount()
+  })
+
   it('opens an available existing Agent view from the operations cockpit', async () => {
     const wrapper = mount(OperationsWorkbench, {
       props: { initialView: 'operations' },
