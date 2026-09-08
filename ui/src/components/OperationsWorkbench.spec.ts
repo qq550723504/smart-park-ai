@@ -289,6 +289,46 @@ describe('OperationsWorkbench', () => {
     expect(restrictedMounts[mountKey]).toBeGreaterThan(0)
   })
 
+  it('preserves an allowed navigation made while capabilities are loading', async () => {
+    const pendingCapabilities = deferred<Response>()
+    globalThis.fetch = (() => pendingCapabilities.promise) as typeof fetch
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow', active: true },
+      global: { stubs: operatorStubs },
+    })
+
+    wrapper.getComponent(ImmersiveWorkbenchShell).vm.$emit('switch-view', 'customer')
+    await nextTick()
+    expect(wrapper.get('[data-workbench-view="customer"]').classes()).toContain('active')
+
+    pendingCapabilities.resolve(new Response(JSON.stringify({
+      knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+      analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    await settleCapabilities()
+
+    expect(wrapper.get('[data-workbench-view="customer"]').classes()).toContain('active')
+  })
+
+  it('mounts the visible default workflow graph without waiting for capabilities', async () => {
+    const pendingCapabilities = deferred<Response>()
+    globalThis.fetch = (() => pendingCapabilities.promise) as typeof fetch
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'workflow', active: true },
+      global: { stubs: { ...operatorStubs, WorkflowGraph: workflowStub } },
+    })
+
+    await nextTick()
+    expect(mounts.workflow).toBe(1)
+
+    pendingCapabilities.resolve(new Response(JSON.stringify({
+      knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+      analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    await settleCapabilities()
+    wrapper.unmount()
+  })
+
   it('subscribes the unified trace when the operations board provides a run id', async () => {
     vi.stubGlobal('EventSource', class {
       onmessage: ((event: MessageEvent) => void) | null = null

@@ -83,8 +83,11 @@ function capabilityState(capability: CockpitCapability): string {
   }
   if (capability.view === 'security-incidents') {
     if (governanceLoading.value) return 'CHECKING'
+    if (governanceFailed.value || !governanceOverview.value) return 'UNAVAILABLE'
     return governanceOverview.value?.capabilities.securityIncidentEnabled ? 'AVAILABLE' : 'NOT_READY'
   }
+  if (governanceLoading.value) return 'CHECKING'
+  if (governanceFailed.value || !governanceOverview.value) return 'UNAVAILABLE'
   return governanceOverview.value?.capabilities.analyticsEnabled ? 'AVAILABLE' : 'NOT_READY'
 }
 
@@ -94,7 +97,10 @@ function capabilityReason(capability: CockpitCapability): string {
     const scenario = catalog.value?.scenarios.find((item) => item.id === capability.scenarioId)
     return scenario && !isSelectable(scenario) ? safeUnavailableReason(scenario) : capability.mapping
   }
-  return capabilityState(capability) === 'NOT_READY' ? '当前部署未启用对应能力' : capability.mapping
+  const state = capabilityState(capability)
+  if (state === 'CHECKING') return '正在检查对应能力'
+  if (state === 'UNAVAILABLE') return '当前无法确认对应能力'
+  return state === 'NOT_READY' ? '当前部署未启用对应能力' : capability.mapping
 }
 
 function scenarioIcon(id: ShowcaseScenario['id']) {
@@ -190,7 +196,7 @@ watch(() => props.active, (active) => {
     </header>
 
     <nav class="showcase-home__capabilities" aria-label="驾驶舱能力映射">
-      <button v-for="capability in cockpitCapabilities" :key="capability.label" type="button" :disabled="['NOT_READY', 'DISABLED', 'CHECKING'].includes(capabilityState(capability))" :data-cockpit-capability="capability.label" :data-mapping="capability.mapping" :data-capability-state="capabilityState(capability)" :title="capabilityReason(capability)" @click="activateCapability(capability)"><span>{{ capability.label }}</span><small>{{ capabilityState(capability) }}</small></button>
+      <button v-for="capability in cockpitCapabilities" :key="capability.label" type="button" :disabled="['NOT_READY', 'DISABLED', 'CHECKING', 'UNAVAILABLE'].includes(capabilityState(capability))" :data-cockpit-capability="capability.label" :data-mapping="capability.mapping" :data-capability-state="capabilityState(capability)" :title="capabilityReason(capability)" @click="activateCapability(capability)"><span>{{ capability.label }}</span><small>{{ capabilityState(capability) }}</small></button>
     </nav>
 
     <section class="showcase-home__overview" aria-label="管理者总览">

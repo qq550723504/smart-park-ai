@@ -69,7 +69,7 @@ const customerQueueRefreshToken = ref(0)
 const collaborationTargetWorkItemId = ref<string | null>(null)
 const collaborationRefreshToken = ref(0)
 const securityIncidentTargetId = ref<string | null>(null)
-const hasVisitedWorkflow = ref(false)
+const hasVisitedWorkflow = ref(props.initialView === 'workflow')
 function isViewAvailable(view: WorkbenchView): boolean {
   return navItems.value.some((item) => item.value === view && item.available)
 }
@@ -101,17 +101,24 @@ watch(role, (nextRole, previousRole) => {
   if (nextRole === previousRole) return
   if (!isViewAvailable(activeView.value)) switchView('workflow')
 })
+function reconcileViewAfterCapabilityLoad(navigationGenerationAtRequest: number): void {
+  const view = props.active && navigationGeneration === navigationGenerationAtRequest
+    ? props.initialView
+    : activeView.value
+  switchView(view)
+}
 onMounted(() => {
+  const navigationGenerationAtRequest = navigationGeneration
   void getOperationsCapabilities()
     .then((value) => {
       capabilities.value = value
       capabilityLoadState.value = 'ready'
-      switchView(props.active ? props.initialView : activeView.value)
+      reconcileViewAfterCapabilityLoad(navigationGenerationAtRequest)
     })
     .catch(() => {
       capabilities.value = null
       capabilityLoadState.value = 'failed'
-      switchView(props.active ? props.initialView : activeView.value)
+      reconcileViewAfterCapabilityLoad(navigationGenerationAtRequest)
     })
 })
 const reviewer = ref('')

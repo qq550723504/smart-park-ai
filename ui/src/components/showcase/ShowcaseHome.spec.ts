@@ -475,6 +475,12 @@ describe('ShowcaseHome truthful catalog selection', () => {
 
     expect(wrapper.text()).toContain('治理状态暂不可用')
     expect(wrapper.text()).toContain('跨域专家协作')
+    for (const label of ['预测性维护', '安防剧本', '安防完整']) {
+      const capability = wrapper.get(`[data-cockpit-capability="${label}"]`)
+      expect(capability.attributes('data-capability-state')).toBe('UNAVAILABLE')
+      expect(capability.attributes('disabled')).toBeDefined()
+      expect(capability.attributes('title')).toBe('当前无法确认对应能力')
+    }
     wrapper.unmount()
   })
 })

@@ -50,7 +50,8 @@
 .showcase-home__capabilities button small { color: #54d8ff; font-size: 0.62rem; font-weight: 800; letter-spacing: 0.08em; }
 .showcase-home__capabilities button[data-mapping='ADAPTED'] small { color: #b9a3ff; }
 .showcase-home__capabilities button[data-capability-state='NOT_READY'] small,
-.showcase-home__capabilities button[data-capability-state='DISABLED'] small { color: #e4b76b; }
+.showcase-home__capabilities button[data-capability-state='DISABLED'] small,
+.showcase-home__capabilities button[data-capability-state='UNAVAILABLE'] small { color: #e4b76b; }
 .showcase-home__capabilities button:disabled { cursor: not-allowed; opacity: 0.58; }
 .showcase-home__capabilities button:not(:disabled):hover { border-color: rgba(112, 232, 255, 0.66); transform: translateY(-1px); }
 
