@@ -1107,6 +1107,45 @@ class OrchestrationServiceTest {
     }
 
     @Test
+    void parentCancellationAfterUnpersistedSettledOutcomeReleasesRetention() {
+        FailNextUpdateStore store = new FailNextUpdateStore();
+        AtomicInteger retentionReleases = new AtomicInteger();
+        AtomicReference<OrchestrationService> service = new AtomicReference<>();
+        OrchestrationPorts.WorkflowRunner workflow = new OrchestrationPorts.WorkflowRunner() {
+            @Override public WorkflowOutcome start(String alertId) {
+                throw new AssertionError("shared alert start must not be used");
+            }
+            @Override public WorkflowOutcome startOwned(String alertId, Instant approvalExpiresAt) {
+                store.failNextUpdate();
+                return workflowOutcome("WAITING_APPROVAL");
+            }
+            @Override public WorkflowOutcome get(String workflowId) { return workflowOutcome("COMPLETED"); }
+            @Override public WorkflowOutcome cancel(String workflowId) {
+                store.runBeforeNextFind(runId -> service.get().cancel(runId));
+                return workflowOutcome("COMPLETED");
+            }
+            @Override public void releaseRetention(String workflowId) {
+                retentionReleases.incrementAndGet();
+            }
+        };
+        Harness harness = harness(new Capabilities(true, false, false, false, true), Runnable::run,
+                input -> availableSecurity(), workflow,
+                question -> {
+                    UUID id = UUID.randomUUID();
+                    return new StartedChild(id, CompletableFuture.completedFuture(completedChild(id)));
+                }, alertId -> "B1", store);
+        service.set(harness.service);
+        OrchestrationInput input = new OrchestrationInput("处置告警", "ALT-001", List.of(),
+                false, false, false, true);
+
+        OrchestrationRun run = harness.service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                input, "cancel-unpersisted-settled-child", null, "OPERATOR").run();
+
+        assertThat(run.status()).isEqualTo(OrchestrationStatus.CANCELLED);
+        assertThat(retentionReleases).hasValue(1);
+    }
+
+    @Test
     void approvalWaitProjectionFailureKeepsTheDurableRecoverableState() {
         AtomicReference<String> workflowStatus = new AtomicReference<>("WAITING_APPROVAL");
         AtomicInteger cancellations = new AtomicInteger();
@@ -1292,6 +1331,7 @@ class OrchestrationServiceTest {
         private final InMemoryOrchestrationRunStore delegate = new InMemoryOrchestrationRunStore();
         private final AtomicInteger updateCount = new AtomicInteger();
         private final AtomicInteger failingUpdate = new AtomicInteger(-1);
+        private final AtomicReference<java.util.function.Consumer<UUID>> beforeNextFind = new AtomicReference<>();
 
         void failNextUpdate() {
             failAfterSuccessfulUpdates(0);
@@ -1299,6 +1339,10 @@ class OrchestrationServiceTest {
 
         void failAfterSuccessfulUpdates(int successfulUpdates) {
             failingUpdate.set(updateCount.get() + successfulUpdates + 1);
+        }
+
+        void runBeforeNextFind(java.util.function.Consumer<UUID> action) {
+            beforeNextFind.set(action);
         }
 
         @Override
@@ -1309,6 +1353,8 @@ class OrchestrationServiceTest {
 
         @Override
         public Optional<OrchestrationRun> find(UUID runId) {
+            java.util.function.Consumer<UUID> action = beforeNextFind.getAndSet(null);
+            if (action != null) action.accept(runId);
             return delegate.find(runId);
         }
 

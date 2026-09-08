@@ -534,15 +534,25 @@ public final class OrchestrationService {
         }
         try {
             Instant approvalDeadline = clock.instant().plus(approvalTimeout);
-            WorkflowOutcome outcome = startWorkflow(
+            StartedWorkflow started = startWorkflow(
                     runId, step.id(), run.input().alertId(), approvalDeadline);
-            if (outcome == null) return false;
-            if (cancelled(runId)) return false;
-            if ("WAITING_APPROVAL".equals(outcome.status())) {
-                return waitForApproval(runId, step.id(), outcome,
-                        outcome.approvalExpiresAt() == null ? approvalDeadline : outcome.approvalExpiresAt());
+            if (started == null) return false;
+            WorkflowOutcome outcome = started.outcome();
+            boolean releaseUnpersistedRetention = !started.referencePersisted();
+            try {
+                if (cancelled(runId)) return false;
+                if ("WAITING_APPROVAL".equals(outcome.status())) {
+                    return waitForApproval(runId, step.id(), outcome,
+                            outcome.approvalExpiresAt() == null ? approvalDeadline : outcome.approvalExpiresAt());
+                }
+                // applyWorkflowOutcome owns release, including when its durable update fails.
+                releaseUnpersistedRetention = false;
+                return applyWorkflowOutcome(runId, step.id(), outcome);
+            } finally {
+                if (releaseUnpersistedRetention) {
+                    releaseWorkflowRetention(outcome.workflowId());
+                }
             }
-            return applyWorkflowOutcome(runId, step.id(), outcome);
         } catch (RuntimeException failure) {
             if (cancelled(runId)) return false;
             failStep(runId, step.id(), SAFE_STEP_FAILURE, false);
@@ -805,7 +815,7 @@ public final class OrchestrationService {
         return child;
     }
 
-    private WorkflowOutcome startWorkflow(UUID runId, String stepId, String alertId,
+    private StartedWorkflow startWorkflow(UUID runId, String stepId, String alertId,
                                           Instant approvalDeadline) {
         try (RunLockLease ignored = acquireRunLock(runId)) {
             if (!startStep(runId, stepId, "调用现有 Alert Workflow")) return null;
@@ -815,7 +825,7 @@ public final class OrchestrationService {
                 remembered = rememberChildReference(runId, stepId, outcome.workflowId());
             } catch (RuntimeException persistenceFailure) {
                 WorkflowOutcome settled = compensateOwnedWorkflow(outcome.workflowId(), persistenceFailure);
-                if (settled != null) return settled;
+                if (settled != null) return new StartedWorkflow(settled, false);
                 throw persistenceFailure;
             }
             if (!remembered) {
@@ -826,7 +836,7 @@ public final class OrchestrationService {
                 }
                 return null;
             }
-            return outcome;
+            return new StartedWorkflow(outcome, true);
         }
     }
 
@@ -845,6 +855,9 @@ public final class OrchestrationService {
             primaryFailure.addSuppressed(cleanupFailure);
         }
         return null;
+    }
+
+    private record StartedWorkflow(WorkflowOutcome outcome, boolean referencePersisted) {
     }
 
     private void releaseWorkflowRetention(String workflowId) {
