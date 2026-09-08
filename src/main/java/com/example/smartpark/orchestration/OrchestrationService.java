@@ -249,7 +249,11 @@ public final class OrchestrationService {
                     cancelledEvidence(run, settledChild), "编排已取消", run.result(), true,
                     cancelledTrace(run, settledChild)));
             if (!childCancellationAttempted) cancelChild(activeType, childReference);
-            publishProjections(cancelled, firstNewTraceIndex);
+            try {
+                publishProjections(cancelled, firstNewTraceIndex);
+            } finally {
+                if (childCancellationAttempted) releaseWorkflowRetention(childReference);
+            }
             return cancelled;
         }
     }
@@ -654,18 +658,26 @@ public final class OrchestrationService {
                     "编排因审批超时终止", steps, run.evidence(),
                     "人工审批等待超时", run.result(), run.cancelRequested(), trace);
         });
-        publishProjections(expired, firstNewTraceIndex);
+        try {
+            publishProjections(expired, firstNewTraceIndex);
+        } finally {
+            releaseWorkflowRetention(waitingStep.runReference());
+        }
     }
 
     private boolean applyWorkflowOutcome(UUID runId, String stepId, WorkflowOutcome outcome) {
-        if ("COMPLETED".equals(outcome.status()) || "REJECTED".equals(outcome.status())) {
-            String summary = "REJECTED".equals(outcome.status()) ? "人工拒绝了处置动作" : "处置工作流已完成";
-            completeStep(runId, stepId, summary, outcome.workflowId(), outcome.evidenceReferences(),
-                    List.of(), List.of(), null, outcome.approvalResult());
+        try {
+            if ("COMPLETED".equals(outcome.status()) || "REJECTED".equals(outcome.status())) {
+                String summary = "REJECTED".equals(outcome.status()) ? "人工拒绝了处置动作" : "处置工作流已完成";
+                completeStep(runId, stepId, summary, outcome.workflowId(), outcome.evidenceReferences(),
+                        List.of(), List.of(), null, outcome.approvalResult());
+                return true;
+            }
+            failStep(runId, stepId, "处置工作流未完成", false);
             return true;
+        } finally {
+            releaseWorkflowRetention(outcome.workflowId());
         }
-        failStep(runId, stepId, "处置工作流未完成", false);
-        return true;
     }
 
     private void waitForApproval(UUID runId, String stepId, WorkflowOutcome outcome,
@@ -720,7 +732,11 @@ public final class OrchestrationService {
                     approvalResult == null ? "审批后恢复编排" : approvalResult,
                     steps, List.copyOf(mergedEvidence), null, run.result(), run.cancelRequested(), trace);
         });
-        publishProjections(resumed, firstNewTraceIndex);
+        try {
+            publishProjections(resumed, firstNewTraceIndex);
+        } finally {
+            releaseWorkflowRetention(workflowId);
+        }
     }
 
     private boolean startStep(UUID runId, String stepId, String inputSummary) {
@@ -762,8 +778,21 @@ public final class OrchestrationService {
         try (RunLockLease ignored = acquireRunLock(runId)) {
             if (!startStep(runId, stepId, "调用现有 Alert Workflow")) return null;
             WorkflowOutcome outcome = workflow.startOwned(alertId, approvalDeadline);
-            rememberChildReference(runId, stepId, outcome.workflowId());
+            if (!rememberChildReference(runId, stepId, outcome.workflowId())) {
+                try {
+                    workflow.cancel(outcome.workflowId());
+                } finally {
+                    releaseWorkflowRetention(outcome.workflowId());
+                }
+                return null;
+            }
             return outcome;
+        }
+    }
+
+    private void releaseWorkflowRetention(String workflowId) {
+        if (workflow != null && workflowId != null) {
+            workflow.releaseRetention(workflowId);
         }
     }
 

@@ -182,6 +182,12 @@ public class OrchestrationConfiguration {
                 if (service == null) throw new IllegalStateException("alert workflow unavailable");
                 return workflowOutcome(service.cancel(workflowId));
             }
+
+            @Override
+            public void releaseRetention(String workflowId) {
+                AlertWorkflow service = workflowProvider.getIfAvailable();
+                if (service != null) service.releaseExclusiveRetention(workflowId);
+            }
         };
         return new OrchestrationService(store,
                 () -> {

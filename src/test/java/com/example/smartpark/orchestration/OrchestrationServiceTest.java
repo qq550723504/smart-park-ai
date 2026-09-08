@@ -98,6 +98,7 @@ class OrchestrationServiceTest {
 
     @Test
     void completedActionWithoutHumanDecisionKeepsApprovalResultNull() {
+        AtomicInteger retentionReleases = new AtomicInteger();
         OrchestrationPorts.WorkflowRunner workflow = new OrchestrationPorts.WorkflowRunner() {
             @Override
             public WorkflowOutcome start(String alertId) {
@@ -108,6 +109,11 @@ class OrchestrationServiceTest {
             @Override
             public WorkflowOutcome get(String workflowId) {
                 throw new AssertionError("completed workflow must not be polled");
+            }
+
+            @Override
+            public void releaseRetention(String workflowId) {
+                retentionReleases.incrementAndGet();
             }
         };
         Harness harness = harness(new Capabilities(true, false, false, false, true), Runnable::run,
@@ -121,6 +127,7 @@ class OrchestrationServiceTest {
         assertThat(run.status()).isEqualTo(OrchestrationStatus.COMPLETED);
         assertThat(step(run, "alert-workflow").approvalResult()).isNull();
         assertThat(run.result().humanApprovalResult()).isNull();
+        assertThat(retentionReleases).hasValue(1);
     }
 
     @Test
@@ -515,9 +522,11 @@ class OrchestrationServiceTest {
     @Test
     void waitsForExistingApprovalAndResumesIdempotently() {
         AtomicReference<String> workflowStatus = new AtomicReference<>("WAITING_APPROVAL");
+        AtomicInteger retentionReleases = new AtomicInteger();
         OrchestrationPorts.WorkflowRunner workflow = new OrchestrationPorts.WorkflowRunner() {
             @Override public WorkflowOutcome start(String alertId) { return workflowOutcome(workflowStatus.get()); }
             @Override public WorkflowOutcome get(String workflowId) { return workflowOutcome(workflowStatus.get()); }
+            @Override public void releaseRetention(String workflowId) { retentionReleases.incrementAndGet(); }
         };
         Harness harness = harness(new Capabilities(true, false, false, false, true), Runnable::run,
                 input -> availableSecurity(), workflow);
@@ -538,6 +547,7 @@ class OrchestrationServiceTest {
         assertThat(duplicateGet.revision()).isEqualTo(completed.revision());
         assertThat(harness.events.history(run.id()).stream()
                 .filter(event -> event.eventType() == ExecutionEventType.APPROVAL_RESUMED)).hasSize(1);
+        assertThat(retentionReleases).hasValue(1);
     }
 
     @Test
@@ -865,6 +875,7 @@ class OrchestrationServiceTest {
     void cancellationTerminalizesAWaitingApprovalChildBeforeReturning() throws Exception {
         executor = Executors.newSingleThreadExecutor();
         AtomicBoolean childCancelled = new AtomicBoolean();
+        AtomicInteger retentionReleases = new AtomicInteger();
         OrchestrationPorts.WorkflowRunner workflow = new OrchestrationPorts.WorkflowRunner() {
             @Override public WorkflowOutcome start(String alertId) { return workflowOutcome("WAITING_APPROVAL"); }
             @Override public WorkflowOutcome get(String workflowId) { return workflowOutcome("WAITING_APPROVAL"); }
@@ -872,6 +883,7 @@ class OrchestrationServiceTest {
                 childCancelled.set(true);
                 return workflowOutcome("CANCELLED");
             }
+            @Override public void releaseRetention(String workflowId) { retentionReleases.incrementAndGet(); }
         };
         Harness harness = harness(new Capabilities(true, false, false, false, true), executor,
                 input -> availableSecurity(), workflow);
@@ -886,6 +898,7 @@ class OrchestrationServiceTest {
         assertThat(childCancelled).isTrue();
         assertThat(cancelled.status()).isEqualTo(OrchestrationStatus.CANCELLED);
         assertThat(step(cancelled, "alert-workflow").status()).isEqualTo(OrchestrationStepStatus.CANCELLED);
+        assertThat(retentionReleases).hasValue(1);
     }
 
     @ParameterizedTest

@@ -109,6 +109,14 @@ class AlertWorkflowTest {
         WorkflowExecutionStore.Execution firstExecution = store.execution(first.workflowId()).orElseThrow();
         WorkflowSnapshot second = fixture.workflow.startExclusive("ALT-TEMP-001", null);
 
+        // Both terminal children stay pinned while their owning parents have
+        // not durably reconciled the outcome, even though the unpinned bound is one.
+        assertThat(store.execution(first.workflowId())).isPresent();
+        assertThat(store.execution(second.workflowId())).isPresent();
+
+        fixture.workflow.releaseExclusiveRetention(first.workflowId());
+        fixture.workflow.releaseExclusiveRetention(second.workflowId());
+
         assertThat(store.execution(first.workflowId())).isEmpty();
         assertThat(store.execution(second.workflowId())).isPresent();
         assertThat(publisher.history(first.workflowId())).isEmpty();

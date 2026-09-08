@@ -50,6 +50,12 @@ public interface WorkflowExecutionStore {
      */
     void markTerminalAndCompact(Execution execution, Consumer<Execution> cleanup);
 
+    /**
+     * Releases the parent-owned retention lease of an exclusive execution after its outcome has
+     * been persisted by the parent, then retries bounded terminal compaction.
+     */
+    void releaseExclusiveRetention(String workflowId, Consumer<Execution> cleanup);
+
     static WorkflowExecutionStore inMemory() {
         return inMemory(200);
     }
@@ -68,6 +74,7 @@ public interface WorkflowExecutionStore {
         private volatile InterruptionMetadata interruption;
         private volatile Throwable failureCause;
         private volatile long terminalSequence;
+        private boolean exclusiveRetentionHeld;
         private final Map<UUID, Instant> pendingApprovalAttempts = new ConcurrentHashMap<>();
 
         Execution(
@@ -83,6 +90,7 @@ public interface WorkflowExecutionStore {
             this.compiledGraph = Objects.requireNonNull(compiledGraph, "compiledGraph");
             this.initialState = Objects.requireNonNull(initialState, "initialState");
             this.reusableByAlert = reusableByAlert;
+            this.exclusiveRetentionHeld = !reusableByAlert;
         }
 
         public String workflowId() {
@@ -117,6 +125,14 @@ public interface WorkflowExecutionStore {
             if (this.terminalSequence == 0) {
                 this.terminalSequence = terminalSequence;
             }
+        }
+
+        boolean exclusiveRetentionHeld() {
+            return exclusiveRetentionHeld;
+        }
+
+        void releaseExclusiveRetention() {
+            exclusiveRetentionHeld = false;
         }
 
         public Optional<InterruptionMetadata> interruption() {
@@ -275,8 +291,26 @@ final class InMemoryWorkflowExecutionStore implements WorkflowExecutionStore {
             throw new IllegalStateException("Workflow execution is not registered: " + execution.workflowId());
         }
         execution.markTerminal(++terminalSequence);
+        compactTerminalExclusive(cleanup);
+    }
+
+    @Override
+    public synchronized void releaseExclusiveRetention(
+            String workflowId,
+            Consumer<Execution> cleanup) {
+        Objects.requireNonNull(workflowId, "workflowId");
+        Objects.requireNonNull(cleanup, "cleanup");
+        Execution execution = executions.get(workflowId);
+        if (execution == null || execution.reusableByAlert()) return;
+        execution.releaseExclusiveRetention();
+        compactTerminalExclusive(cleanup);
+    }
+
+    private void compactTerminalExclusive(Consumer<Execution> cleanup) {
         List<Execution> terminalExclusive = executions.values().stream()
-                .filter(candidate -> !candidate.reusableByAlert() && candidate.terminal())
+                .filter(candidate -> !candidate.reusableByAlert()
+                        && candidate.terminal()
+                        && !candidate.exclusiveRetentionHeld())
                 .sorted(Comparator.comparingLong(Execution::terminalSequence))
                 .toList();
         int excess = terminalExclusive.size() - maxRetainedExclusiveExecutions;

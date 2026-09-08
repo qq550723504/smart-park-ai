@@ -72,6 +72,10 @@ public final class OrchestrationPorts {
         default WorkflowOutcome cancel(String workflowId) {
             throw new UnsupportedOperationException("workflow cancellation is unavailable");
         }
+
+        /** Parent outcome is durable; the owned child may now enter bounded terminal retention. */
+        default void releaseRetention(String workflowId) {
+        }
     }
 
     public record ChildOutcome(UUID runId, String status, String summary,

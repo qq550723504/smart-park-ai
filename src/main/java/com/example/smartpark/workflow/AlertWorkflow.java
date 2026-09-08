@@ -191,6 +191,18 @@ public final class AlertWorkflow {
         return start(alertId, approvalExpiresAt, true);
     }
 
+    /** Releases an owned execution only after its parent persisted the terminal child outcome. */
+    public void releaseExclusiveRetention(String workflowId) {
+        try {
+            executionStore.releaseExclusiveRetention(
+                    requireIdentifier(workflowId, "workflowId"), this::releaseWorkflowResources);
+        } catch (RuntimeException cleanupFailure) {
+            // Parent state is already durable. Keep cleanup retryable without
+            // turning a successful child reconciliation into an API failure.
+            LOGGER.warn("Unable to release terminal exclusive workflow retention", cleanupFailure);
+        }
+    }
+
     private WorkflowSnapshot start(String alertId, Instant approvalExpiresAt, boolean exclusive) {
         String requiredAlertId = requireIdentifier(alertId, "alertId");
         Instant now = Instant.now(clock);

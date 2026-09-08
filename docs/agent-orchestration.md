@@ -109,8 +109,10 @@ creation is atomic and idempotent by alert ID, so independent orchestration keys
 for the same alert reuse the first work order. Terminal owned executions, graph
 checkpoints, legacy events and projected unified trace events are retained up to
 `SMARTPARK_WORKFLOW_MAX_RETAINED_EXCLUSIVE_EXECUTIONS` (default `200`) and then
-removed oldest-first. Active owned executions and reusable direct Alert Workflow
-executions are not eligible for that compaction. If the initial child trace cannot
+removed oldest-first. A terminal owned child remains pinned until its parent has
+durably recorded the outcome, so an asynchronous approval sweep cannot mistake a
+successful action for a missing child. Active owned executions and reusable direct
+Alert Workflow executions are not eligible for compaction. If the initial child trace cannot
 be admitted, its pre-start execution registration, checkpoint and partial legacy
 events are rolled back immediately instead of waiting for terminal compaction.
 Before admitting a requested action with an explicit building scope, the
