@@ -61,7 +61,7 @@ const navItems = computed<WorkbenchNavItem[]>(() => [
   { value: 'governance', label: '治理中心', available: true },
 ])
 const selectedAlertId = ref(demoAlerts[0].id)
-const activeView = ref<WorkbenchView>('workflow')
+const activeView = ref<WorkbenchView>(resolveRequestedView(props.initialView))
 let navigationGeneration = 0
 const selectedAnalysisQuestion = ref<string | null>(null)
 const selectedAnalysisQuestionToken = ref(0)

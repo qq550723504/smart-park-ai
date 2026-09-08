@@ -78,8 +78,10 @@ function safeUnavailableReason(scenario: ShowcaseScenario) {
 function capabilityState(capability: CockpitCapability): string {
   if (capability.mapping === 'NOT_READY') return 'NOT_READY'
   if (capability.scenarioId) {
+    if (loading.value) return 'CHECKING'
+    if (failed.value || !catalog.value) return 'UNAVAILABLE'
     const scenario = catalog.value?.scenarios.find((item) => item.id === capability.scenarioId)
-    return scenario && isSelectable(scenario) ? 'READY' : scenario?.status ?? 'CHECKING'
+    return scenario && isSelectable(scenario) ? 'READY' : scenario?.status ?? 'UNAVAILABLE'
   }
   if (capability.view === 'security-incidents') {
     if (governanceLoading.value) return 'CHECKING'
@@ -94,6 +96,9 @@ function capabilityState(capability: CockpitCapability): string {
 function capabilityReason(capability: CockpitCapability): string {
   if (capability.unavailableReason) return capability.unavailableReason
   if (capability.scenarioId) {
+    const state = capabilityState(capability)
+    if (state === 'CHECKING') return '正在检查对应能力'
+    if (state === 'UNAVAILABLE') return '当前无法确认对应能力'
     const scenario = catalog.value?.scenarios.find((item) => item.id === capability.scenarioId)
     return scenario && !isSelectable(scenario) ? safeUnavailableReason(scenario) : capability.mapping
   }

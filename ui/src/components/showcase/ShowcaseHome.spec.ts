@@ -388,6 +388,12 @@ describe('ShowcaseHome truthful catalog selection', () => {
     expect(wrapper.get('[data-showcase-metric="risk"] dd').text()).toBe('—')
     expect(wrapper.get('[data-showcase-metric="verified"]').text()).not.toContain('0 / 0')
     expect(wrapper.text()).not.toContain('internal service detail')
+    for (const label of ['运维剧本', '节能优化']) {
+      const capability = wrapper.get(`[data-cockpit-capability="${label}"]`)
+      expect(capability.attributes('data-capability-state')).toBe('UNAVAILABLE')
+      expect(capability.attributes('disabled')).toBeDefined()
+      expect(capability.attributes('title')).toBe('当前无法确认对应能力')
+    }
   })
 
   it('recovers from a transient catalog failure through the visible retry action', async () => {

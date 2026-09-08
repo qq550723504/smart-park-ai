@@ -310,6 +310,28 @@ describe('OperationsWorkbench', () => {
     expect(wrapper.get('[data-workbench-view="customer"]').classes()).toContain('active')
   })
 
+  it('opens an always-available initial customer view before capabilities settle', async () => {
+    const pendingCapabilities = deferred<Response>()
+    globalThis.fetch = (() => pendingCapabilities.promise) as typeof fetch
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'customer', active: true },
+      global: { stubs: operatorStubs },
+    })
+
+    await nextTick()
+    expect(wrapper.get('[data-workbench-view="customer"]').classes()).toContain('active')
+    expect(wrapper.get('[data-workbench-view="workflow"]').classes()).not.toContain('active')
+
+    pendingCapabilities.resolve(new Response(JSON.stringify({
+      knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+      analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    await settleCapabilities()
+
+    expect(wrapper.get('[data-workbench-view="customer"]').classes()).toContain('active')
+    wrapper.unmount()
+  })
+
   it('mounts the visible default workflow graph without waiting for capabilities', async () => {
     const pendingCapabilities = deferred<Response>()
     globalThis.fetch = (() => pendingCapabilities.promise) as typeof fetch
