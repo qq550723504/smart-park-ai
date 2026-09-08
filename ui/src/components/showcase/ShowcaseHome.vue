@@ -47,6 +47,7 @@ const cockpitCapabilities: CockpitCapability[] = [
 ]
 
 const isSelectable = (scenario: ShowcaseScenario) => scenario.status === 'READY' && scenario.live
+const hasConfirmedCatalog = computed(() => !loading.value && !failed.value && catalog.value !== null)
 const readyScenarioCount = computed(() => catalog.value?.scenarios.filter(isSelectable).length ?? 0)
 const scenarioCount = computed(() => catalog.value?.scenarios.length ?? 0)
 const unavailableScenarioCount = computed(() => Math.max(0, scenarioCount.value - readyScenarioCount.value))
@@ -201,8 +202,8 @@ watch(() => props.active, (active) => {
           <p class="showcase-home__promise">真实只读数据、执行证据可追溯；不可用能力明确标记，高风险动作由人工确认。</p>
         </div>
         <dl class="showcase-home__pulse" aria-label="园区 AI 运行状态">
-          <div><dt>已验证能力</dt><dd>{{ loading ? '—' : readyScenarioCount }}</dd><small>/ {{ loading ? '—' : scenarioCount }} 个场景</small></div>
-          <div><dt>能力风险</dt><dd>{{ loading ? '—' : unavailableScenarioCount }}</dd><small>NOT_READY / DISABLED</small></div>
+          <div data-showcase-metric="verified"><dt>已验证能力</dt><dd>{{ hasConfirmedCatalog ? readyScenarioCount : '—' }}</dd><small>/ {{ hasConfirmedCatalog ? scenarioCount : '—' }} 个场景</small></div>
+          <div data-showcase-metric="risk"><dt>能力风险</dt><dd>{{ hasConfirmedCatalog ? unavailableScenarioCount : '—' }}</dd><small>NOT_READY / DISABLED</small></div>
           <div><dt>人工治理边界</dt><dd>{{ governanceOverview?.boundaries.length ?? '—' }}</dd><small>{{ governanceFailed ? '治理状态暂不可用' : '服务端治理摘要' }}</small></div>
         </dl>
       </section>

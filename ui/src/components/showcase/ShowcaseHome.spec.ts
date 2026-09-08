@@ -383,6 +383,10 @@ describe('ShowcaseHome truthful catalog selection', () => {
     expect(wrapper.get('[data-catalog-stamp]').text()).not.toContain('正在检查')
     expect(wrapper.get('[data-catalog-stamp]').attributes('data-catalog-state')).toBe('failed')
     expect(wrapper.get('[data-start-showcase]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-showcase-metric="verified"] dd').text()).toBe('—')
+    expect(wrapper.get('[data-showcase-metric="verified"] small').text()).toContain('/ — 个场景')
+    expect(wrapper.get('[data-showcase-metric="risk"] dd').text()).toBe('—')
+    expect(wrapper.get('[data-showcase-metric="verified"]').text()).not.toContain('0 / 0')
     expect(wrapper.text()).not.toContain('internal service detail')
   })
 
