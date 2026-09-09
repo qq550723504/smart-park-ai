@@ -65,6 +65,19 @@ describe('OperationsDailyReport', () => {
     expect(wrapper.get('[data-testid="report-body"]').text()).toContain('2026/9/3 21:00:00')
   })
 
+  it('keeps Java-valid browser-unsupported timezones readable', async () => {
+    const fixedOffsetSummary = { ...summary, timezone: 'GMT+08:00' }
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.includes('?')) return Promise.resolve(new Response(JSON.stringify({ content: [fixedOffsetSummary], page: 0, size: 20, totalElements: 1, hasNext: false }), { status: 200 }))
+      return Promise.resolve(new Response(JSON.stringify({ ...detail, timezone: 'GMT+08:00' }), { status: 200 }))
+    }))
+    const wrapper = mount(OperationsDailyReport, { props: { role: 'OPERATOR' } })
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="report-history"]').text())
+      .toContain('2026-09-09T01:00:00.000Z (GMT+08:00)')
+  })
+
   it('shows real generating state then refreshes history after terminal snapshot', async () => {
     let detailReads = 0
     vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {

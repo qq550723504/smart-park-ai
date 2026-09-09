@@ -50,7 +50,9 @@ The complete JSON collection is written to a temporary file and atomically repla
 Docker named volume mounts `/var/lib/smartpark/reports`. Defaults bound the store to 200 retained reports,
 one active report, 512 KiB per report, 256 KiB per artifact, and list pages of at most 50 items. Oldest
 terminal reports are removed before admitting a new report; active reports are never evicted. If capacity
-cannot be reclaimed, admission fails closed.
+cannot be reclaimed, admission fails closed. Startup has an independent 512 MiB hard ceiling for the complete
+state file, so a deployment can lower retained-count configuration and compact a previously larger valid set
+without making the parse boundary unbounded.
 
 ## Snapshot semantics
 
@@ -115,6 +117,8 @@ The idempotency fingerprint includes role, report type, timezone, and the exact 
 The same key and payload returns the same `reportId` without rerunning sections, including after restart. The
 same key with a different payload returns a conflict. Store admission limits protect double clicks, multiple
 tabs, slow responses, and retry storms; the UI also prevents concurrent clicks and ignores stale callbacks.
+Report sections use a report-owned bounded admission executor and wait for the existing singleton Analytics
+slot, so ordinary interactive analysis contention is queued rather than persisted as a false report failure.
 
 ## Recovery
 

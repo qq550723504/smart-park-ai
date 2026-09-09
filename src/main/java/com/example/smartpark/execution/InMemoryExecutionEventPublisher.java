@@ -113,6 +113,37 @@ public class InMemoryExecutionEventPublisher implements ExecutionEventPublisher 
     }
 
     @Override
+    public void reconcileTerminalHistory(UUID runId, List<ExecutionEvent> durableHistory) {
+        validateTerminalHistory(runId, durableHistory);
+        RunState state = stateFor(runId);
+        state.lock.lock();
+        try {
+            if (state.closed) {
+                if (!state.snapshot().equals(durableHistory)) {
+                    throw new IllegalStateException("terminal history conflicts for run " + runId);
+                }
+                return;
+            }
+            ExecutionEvent durableTerminal = durableHistory.get(durableHistory.size() - 1);
+            ExecutionEvent liveTerminal = new ExecutionEvent(durableTerminal.eventId(), runId,
+                    state.count + 1, durableTerminal.timestamp(), durableTerminal.scenario(),
+                    durableTerminal.actor(), durableTerminal.stage(), durableTerminal.eventType(),
+                    durableTerminal.status(), durableTerminal.safeSummary(), durableTerminal.displayPayload());
+            for (Consumer<ExecutionEvent> consumer : state.consumers) {
+                consumer.accept(liveTerminal);
+            }
+            state.historyBacking.clear();
+            state.historyBacking.addAll(durableHistory);
+            state.count = durableHistory.size();
+            state.terminalAt = clock.instant();
+            state.consumers.clear();
+            state.closed = true;
+        } finally {
+            state.lock.unlock();
+        }
+    }
+
+    @Override
     public List<ExecutionEvent> history(UUID runId) {
         RunState state = runs.get(runId);
         return state == null ? List.of() : state.snapshot();
@@ -180,6 +211,24 @@ public class InMemoryExecutionEventPublisher implements ExecutionEventPublisher 
             // Publish the timestamp before the volatile closed flag so capacity
             // scans that observe closed also observe an eviction candidate.
             state.closed = true;
+        }
+    }
+
+    private static void validateTerminalHistory(UUID runId, List<ExecutionEvent> durableHistory) {
+        if (durableHistory == null || durableHistory.isEmpty()) {
+            throw new IllegalArgumentException("terminal durable history must not be empty");
+        }
+        for (int index = 0; index < durableHistory.size(); index++) {
+            ExecutionEvent event = durableHistory.get(index);
+            if (!runId.equals(event.runId()) || event.sequence() != index + 1L) {
+                throw new IllegalArgumentException("terminal durable history must be contiguous for run " + runId);
+            }
+            if (index + 1 < durableHistory.size() && event.isTerminal()) {
+                throw new IllegalArgumentException("terminal durable history closes before its final event");
+            }
+        }
+        if (!durableHistory.get(durableHistory.size() - 1).isTerminal()) {
+            throw new IllegalArgumentException("terminal durable history must end with a terminal event");
         }
     }
 

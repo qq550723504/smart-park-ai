@@ -2,6 +2,8 @@ package com.example.smartpark.analytics;
 
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -49,6 +51,7 @@ import javax.sql.DataSource;
 
 import java.time.Clock;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -111,6 +114,16 @@ public class AnalyticsConfiguration {
         // an uncooperative worker eventually returns.
         return new ThreadPoolExecutor(2, 2, 0L, TimeUnit.MILLISECONDS,
                 new ArrayBlockingQueue<>(2), new ThreadPoolExecutor.AbortPolicy());
+    }
+
+    @Bean(name = "operationsReportAdmissionExecutor", destroyMethod = "shutdownNow")
+    ExecutorService operationsReportAdmissionExecutor(
+            @Value("${smartpark.reporting.max-active-reports:1}") int maxActiveReports) {
+        if (maxActiveReports < 1) {
+            throw new IllegalArgumentException("smartpark.reporting.max-active-reports must be positive");
+        }
+        return new ThreadPoolExecutor(maxActiveReports, maxActiveReports, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(maxActiveReports), new ThreadPoolExecutor.AbortPolicy());
     }
 
     @Bean
@@ -305,10 +318,16 @@ public class AnalyticsConfiguration {
     }
 
     @Bean
-    OperationsReportSectionRunner operationsReportSectionRunner(OperationsAnalysisService analysisService) {
+    OperationsReportSectionRunner operationsReportSectionRunner(
+            OperationsAnalysisService analysisService,
+            @Qualifier("operationsReportAdmissionExecutor") ExecutorService admissionExecutor) {
         return (section, request) -> {
             String question = operationsReportQuestion(section, request);
-            return analysisService.startAndAwait(question)
+            return CompletableFuture.supplyAsync(
+                            () -> analysisService.startWhenAvailable(question,
+                                    () -> Thread.currentThread().isInterrupted()),
+                            admissionExecutor)
+                    .thenCompose(record -> analysisService.await(record.runId()))
                 .thenApply(record -> {
                     // A clarification is terminal for the report section, but
                     // the underlying analysis still owns an active run until

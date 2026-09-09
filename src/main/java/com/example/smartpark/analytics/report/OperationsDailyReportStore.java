@@ -1,5 +1,7 @@
 package com.example.smartpark.analytics.report;
 
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -28,6 +30,7 @@ public final class OperationsDailyReportStore {
     public static final int DEFAULT_MAX_ACTIVE_REPORTS = 1;
     public static final int DEFAULT_MAX_REPORT_BYTES = 512 * 1024;
     public static final int DEFAULT_MAX_ARTIFACT_BYTES = 256 * 1024;
+    static final long MAX_STATE_FILE_BYTES = 512L * 1024 * 1024;
 
     private final Path stateFile;
     private final ObjectMapper mapper;
@@ -82,7 +85,8 @@ public final class OperationsDailyReportStore {
         if (maxActiveReports < 1 || maxActiveReports > maxRetainedReports) {
             throw new IllegalArgumentException("maxActiveReports is invalid");
         }
-        if (maxReportBytes < 4096 || maxArtifactBytes < 1024 || maxArtifactBytes > maxReportBytes) {
+        if (maxReportBytes < 4096 || maxReportBytes > MAX_STATE_FILE_BYTES
+                || maxArtifactBytes < 1024 || maxArtifactBytes > maxReportBytes) {
             throw new IllegalArgumentException("report byte limits are invalid");
         }
         this.maxRetainedReports = maxRetainedReports;
@@ -177,57 +181,72 @@ public final class OperationsDailyReportStore {
     private void load() {
         if (!Files.exists(stateFile)) return;
         try {
-            long loadRecordLimit = Math.max(maxRetainedReports, DEFAULT_MAX_RETAINED_REPORTS);
-            long maximumFileBytes = loadRecordLimit * maxReportBytes + loadRecordLimit + 2L;
-            if (Files.size(stateFile) > maximumFileBytes) {
-                throw new IllegalStateException("operations report state file exceeds configured byte limit");
-            }
-            JsonNode root = mapper.readTree(stateFile.toFile());
-            if (!(root instanceof ArrayNode array)) {
-                throw new IllegalStateException("operations report state must be a JSON array");
+            if (Files.size(stateFile) > MAX_STATE_FILE_BYTES) {
+                throw new IllegalStateException("operations report state file exceeds global byte limit");
             }
             LinkedHashMap<UUID, OperationsDailyReport> loaded = new LinkedHashMap<>();
+            java.util.Set<UUID> loadedIds = new java.util.HashSet<>();
             java.util.Set<String> loadedKeys = new java.util.HashSet<>();
             List<JsonNode> unsupported = new ArrayList<>();
-            for (JsonNode node : array) {
-                JsonNode version = node.get("schemaVersion");
-                if (version == null || !version.isInt()
-                        || version.intValue() != OperationsDailyReport.CURRENT_SCHEMA_VERSION) {
-                    unsupported.add(node.deepCopy());
-                    continue;
+            int supportedRecordCount = 0;
+            try (JsonParser parser = mapper.getFactory().createParser(stateFile.toFile())) {
+                if (parser.nextToken() != JsonToken.START_ARRAY) {
+                    throw new IllegalStateException("operations report state must be a JSON array");
                 }
-                OperationsDailyReport report = mapper.treeToValue(node, OperationsDailyReport.class);
-                validateReportSize(report);
-                if (loaded.putIfAbsent(report.reportId(), report) != null) {
-                    throw new IllegalStateException("duplicate operations report id");
+                while (parser.nextToken() != JsonToken.END_ARRAY) {
+                    JsonNode node = mapper.readTree(parser);
+                    if (node == null || !node.isObject()) {
+                        throw new IllegalStateException("operations report state record must be an object");
+                    }
+                    JsonNode version = node.get("schemaVersion");
+                    if (version == null || !version.isInt()
+                            || version.intValue() != OperationsDailyReport.CURRENT_SCHEMA_VERSION) {
+                        unsupported.add(node.deepCopy());
+                    } else {
+                        OperationsDailyReport report = mapper.treeToValue(node, OperationsDailyReport.class);
+                        validateReportSize(report);
+                        if (!loadedKeys.add(report.idempotencyKey())) {
+                            throw new IllegalStateException("duplicate operations report idempotency key");
+                        }
+                        if (!loadedIds.add(report.reportId())) {
+                            throw new IllegalStateException("duplicate operations report id");
+                        }
+                        supportedRecordCount++;
+                        loaded.put(report.reportId(), report);
+                    }
+                    int target = maxRetainedReports - unsupported.size();
+                    if (target < 0) {
+                        throw new OperationsReportCapacityException(
+                                "unsupported operations report records exceed retained capacity");
+                    }
+                    loaded = compact(loaded, target);
+                    if (loaded.size() > target) {
+                        throw new OperationsReportCapacityException(
+                                "active operations report records exceed retained capacity");
+                    }
                 }
-                if (!loadedKeys.add(report.idempotencyKey())) {
-                    throw new IllegalStateException("duplicate operations report idempotency key");
+                if (parser.nextToken() != null) {
+                    throw new IllegalStateException("operations report state has trailing content");
                 }
             }
             reports.clear();
             reports.putAll(loaded);
             unsupportedRecords.clear();
             unsupportedRecords.addAll(unsupported);
-            int supportedTarget = maxRetainedReports - unsupported.size();
-            if (supportedTarget < 0) {
-                throw new OperationsReportCapacityException(
-                        "unsupported operations report records exceed retained capacity");
-            }
-            LinkedHashMap<UUID, OperationsDailyReport> compacted = compact(supportedTarget);
-            if (compacted.size() > supportedTarget) {
-                throw new OperationsReportCapacityException(
-                        "active operations report records exceed retained capacity");
-            }
-            if (compacted.size() != loaded.size()) persist(compacted.values());
-            replaceState(compacted);
+            if (supportedRecordCount != loaded.size()) persist(loaded.values());
+            replaceState(loaded);
         } catch (IOException | RuntimeException failure) {
             throw new IllegalStateException("unable to load operations report state", failure);
         }
     }
 
     private LinkedHashMap<UUID, OperationsDailyReport> compact(int targetSize) {
-        LinkedHashMap<UUID, OperationsDailyReport> compacted = new LinkedHashMap<>(reports);
+        return compact(reports, targetSize);
+    }
+
+    private static LinkedHashMap<UUID, OperationsDailyReport> compact(
+            Map<UUID, OperationsDailyReport> source, int targetSize) {
+        LinkedHashMap<UUID, OperationsDailyReport> compacted = new LinkedHashMap<>(source);
         var iterator = compacted.entrySet().iterator();
         while (compacted.size() > targetSize && iterator.hasNext()) {
             if (iterator.next().getValue().status().isTerminal()) iterator.remove();

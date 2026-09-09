@@ -17,7 +17,13 @@ function download(reportId: string): void { void state.download(reportId, props.
 function loadMore(): void { void state.loadHistory(props.role, true) }
 function format(value: string | null | undefined, timezone: string): string {
   if (!value) return '—'
-  return new Date(value).toLocaleString('zh-CN', { hour12: false, timeZone: timezone })
+  const instant = new Date(value)
+  try {
+    return instant.toLocaleString('zh-CN', { hour12: false, timeZone: timezone })
+  } catch (failure) {
+    if (!(failure instanceof RangeError)) throw failure
+    return `${instant.toISOString()} (${timezone})`
+  }
 }
 function resolution(value: OperationsReportTimeResolution | Record<string, never>): OperationsReportTimeResolution | null {
   return 'status' in value ? value as OperationsReportTimeResolution : null

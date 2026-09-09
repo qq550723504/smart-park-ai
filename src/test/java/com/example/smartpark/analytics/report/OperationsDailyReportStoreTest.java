@@ -165,6 +165,28 @@ class OperationsDailyReportStoreTest {
         assertThat(new ObjectMapper().readTree(state.toFile())).hasSize(2);
     }
 
+    @Test
+    void loweringRetentionReadsAndCompactsAValidSetLargerThanTheDefault() throws Exception {
+        Path state = temp.resolve("lowered-from-large-retention.json");
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        List<OperationsDailyReport> prior = new java.util.ArrayList<>();
+        for (int index = 0; index < 250; index++) {
+            OperationsDailyReport base = report("large-key-" + index, "large-fingerprint-" + index,
+                    OperationsReportStatus.COMPLETED);
+            prior.add(base.copy(base.status(), base.startedAt(), base.completedAt(), base.asOf(),
+                    "x".repeat(6000), base.sections(), base.evidence(), base.sourceReferences(),
+                    base.artifact(), base.traceEvents()));
+        }
+        mapper.writeValue(state.toFile(), prior);
+        assertThat(java.nio.file.Files.size(state)).isGreaterThan(200L * 8192);
+
+        OperationsDailyReportStore reduced = store(state, 2, 1, 8192, 1024);
+
+        assertThat(reduced.all()).extracting(OperationsDailyReport::reportId)
+                .containsExactly(prior.get(248).reportId(), prior.get(249).reportId());
+        assertThat(mapper.readTree(state.toFile())).hasSize(2);
+    }
+
     private OperationsDailyReportStore store(Path state, int retained, int active, int reportBytes, int artifactBytes) {
         return new OperationsDailyReportStore(state, new ObjectMapper().findAndRegisterModules(),
                 retained, active, reportBytes, artifactBytes);

@@ -412,6 +412,10 @@ class OperationsDailyReportServiceTest {
                 .isEqualTo(ExecutionEventType.RUN_FAILED);
         assertThat(events.status(failed.traceId())).isEqualTo("RUN_FAILED");
         assertThat(streamed.get(streamed.size() - 1).isTerminal()).isTrue();
+        List<ExecutionEvent> durableTrace = new OperationsReportTraceArchive(store, events)
+                .history(failed.traceId());
+        events.hydrate(failed.traceId(), durableTrace);
+        assertThat(events.history(failed.traceId())).isEqualTo(durableTrace);
         assertThat(service.start(service.defaultRequest(), "after-capacity-key",
                 "demo-role:OPERATOR", "OPERATOR").created()).isTrue();
     }

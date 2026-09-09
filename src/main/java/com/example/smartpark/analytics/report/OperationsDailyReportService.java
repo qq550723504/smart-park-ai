@@ -415,16 +415,12 @@ public final class OperationsDailyReportService {
         List<ExecutionEvent> liveHistory = events.history(report.traceId());
         if (report.status().isTerminal() && !report.traceEvents().isEmpty()
                 && (liveHistory.isEmpty() || !liveHistory.get(liveHistory.size() - 1).isTerminal())) {
-            OperationsReportTraceRecord durableTerminal = report.traceEvents().get(report.traceEvents().size() - 1);
-            ExecutionEvent projection = projection(report, durableTerminal);
-            if (!projection.isTerminal()) {
+            List<ExecutionEvent> durableHistory = report.traceEvents().stream()
+                    .map(trace -> projection(report, trace)).toList();
+            if (!durableHistory.get(durableHistory.size() - 1).isTerminal()) {
                 throw new IllegalStateException("terminal report has no durable terminal trace event");
             }
-            UUID liveEventId = liveHistory.stream().anyMatch(event -> event.eventId().equals(projection.eventId()))
-                    ? UUID.randomUUID() : projection.eventId();
-            events.publish(new ExecutionEvent(liveEventId, projection.runId(), 0,
-                    projection.timestamp(), projection.scenario(), projection.actor(), projection.stage(),
-                    projection.eventType(), projection.status(), projection.safeSummary(), projection.displayPayload()));
+            events.reconcileTerminalHistory(report.traceId(), durableHistory);
         }
     }
 
