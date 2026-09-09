@@ -1,0 +1,37 @@
+package com.example.smartpark.analytics.report;
+
+import com.example.smartpark.execution.ExecutionEventArchive;
+import com.example.smartpark.execution.model.ExecutionEvent;
+import com.example.smartpark.execution.model.ExecutionScenario;
+
+import java.util.List;
+import java.util.Locale;
+import java.util.UUID;
+
+/** Makes durable report traces replayable through the unified execution API. */
+public final class OperationsReportTraceArchive implements ExecutionEventArchive {
+    private final OperationsDailyReportStore store;
+
+    public OperationsReportTraceArchive(OperationsDailyReportStore store) {
+        this.store = store;
+    }
+
+    @Override
+    public List<ExecutionEvent> history(UUID runId) {
+        return store.findByRunId(runId).map(report -> report.traceEvents().stream()
+                .map(trace -> new ExecutionEvent(trace.eventId(), report.traceId(), trace.sequence(),
+                        trace.timestamp(), ExecutionScenario.OPERATIONS_ANALYSIS, trace.actor(), trace.stage(),
+                        trace.eventType(), trace.status(), trace.safeSummary(), null))
+                .toList()).orElseGet(List::of);
+    }
+
+    @Override
+    public void authorize(UUID runId, String role) {
+        store.findByRunId(runId).ifPresent(report -> {
+            String normalized = role == null ? "" : role.trim().toUpperCase(Locale.ROOT);
+            if (!"ADMIN".equals(normalized) && !report.role().equals(normalized)) {
+                throw new SecurityException("role is not allowed to read operations report trace");
+            }
+        });
+    }
+}

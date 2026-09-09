@@ -41,8 +41,6 @@ import com.example.smartpark.workflow.WorkflowExecutionStore;
 import com.example.smartpark.analytics.catalog.MetricCatalog;
 import com.example.smartpark.analytics.sql.QueryCostGuard;
 import com.example.smartpark.analytics.sql.ReadOnlyQueryExecutor;
-import com.example.smartpark.analytics.report.OperationsDailyReportService;
-import com.example.smartpark.analytics.report.OperationsDailyReportStore;
 import com.example.smartpark.analytics.report.OperationsReportSectionRunner;
 
 import javax.sql.DataSource;
@@ -305,13 +303,14 @@ public class AnalyticsConfiguration {
     }
 
     @Bean
-    OperationsDailyReportStore operationsDailyReportStore(Clock analyticsClock) {
-        return new OperationsDailyReportStore(Duration.ofMinutes(30), analyticsClock);
-    }
-
-    @Bean
     OperationsReportSectionRunner operationsReportSectionRunner(OperationsAnalysisService analysisService) {
-        return section -> analysisService.startAndAwait(section.question())
+        return (section, request) -> {
+            java.time.format.DateTimeFormatter formatter = java.time.format.DateTimeFormatter
+                    .ofPattern("yyyy-MM-dd HH:mm:ssXXX").withZone(java.time.ZoneId.of(request.timezone()));
+            String metricQuestion = section.question().replaceFirst("^过去5天", "");
+            String question = formatter.format(request.timeWindow().fromInclusive()) + " 到 "
+                    + formatter.format(request.timeWindow().toExclusive()) + " " + metricQuestion;
+            return analysisService.startAndAwait(question)
                 .thenApply(record -> {
                     // A clarification is terminal for the report section, but
                     // the underlying analysis still owns an active run until
@@ -321,14 +320,7 @@ public class AnalyticsConfiguration {
                     }
                     return record;
                 });
+        };
     }
 
-    @Bean
-    OperationsDailyReportService operationsDailyReportService(
-            OperationsReportSectionRunner sectionRunner,
-            OperationsDailyReportStore reportStore,
-            com.example.smartpark.execution.ExecutionEventPublisher publisher,
-            Clock analyticsClock) {
-        return new OperationsDailyReportService(sectionRunner, reportStore, publisher, analyticsClock);
-    }
 }

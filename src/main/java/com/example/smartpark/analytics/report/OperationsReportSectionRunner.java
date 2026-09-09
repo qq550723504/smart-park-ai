@@ -8,5 +8,6 @@ import java.util.concurrent.CompletableFuture;
 @FunctionalInterface
 public interface OperationsReportSectionRunner {
 
-    CompletableFuture<AnalysisRunStore.RunRecord> run(OperationsReportSection section);
+    CompletableFuture<AnalysisRunStore.RunRecord> run(OperationsReportSection section,
+                                                       OperationsReportRequest request);
 }
