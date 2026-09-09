@@ -13,6 +13,18 @@ describe('CustomerShell', () => {
     expect(wrapper.text()).not.toMatch(/#(?:70|71|72|73)|后续 Issue|联调项/)
   })
 
+  it('serves responsive WebP artwork with a PNG fallback', () => {
+    const wrapper = mount(CustomerShell)
+    const source = wrapper.get('.customer-shell__hero source[type="image/webp"]')
+    const fallback = wrapper.get('.customer-shell__hero img')
+
+    expect(source.attributes('srcset')).toContain('960w')
+    expect(source.attributes('srcset')).toContain('2172w')
+    expect(source.attributes('sizes')).toContain('98vw')
+    expect(fallback.attributes('src')).toContain('campus-banner.png')
+    expect(fallback.attributes('alt')).toBe('')
+  })
+
   it('retains the internal workbench handoff', async () => {
     const wrapper = mount(CustomerShell)
 

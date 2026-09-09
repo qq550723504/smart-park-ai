@@ -2,7 +2,13 @@
 import { computed, ref, watch } from 'vue'
 import { BellFilled, Checked, DataLine, Document, OfficeBuilding, Refresh, Service, TrendCharts, WarningFilled } from '@element-plus/icons-vue'
 import parkAerial from '../../assets/customer/park-aerial-daylight.png'
+import parkAerial720 from '../../assets/customer/park-aerial-daylight-720.webp'
+import parkAerial1200 from '../../assets/customer/park-aerial-daylight-1200.webp'
+import parkAerial1672 from '../../assets/customer/park-aerial-daylight-1672.webp'
 import ecoOperations from '../../assets/customer/eco-operations.png'
+import ecoOperations480 from '../../assets/customer/eco-operations-480.webp'
+import ecoOperations960 from '../../assets/customer/eco-operations-960.webp'
+import ecoOperations1600 from '../../assets/customer/eco-operations-1600.webp'
 import { getAnomalyEvidence, getAnomalyOverview } from '../../services/operationsAnomalyApi'
 import { getEnergyTimeSeries } from '../../services/energyTimeSeriesApi'
 import { getOperationsMetrics, listCollaborationWorkItems } from '../../services/workflowApi'
@@ -424,7 +430,15 @@ watch(() => props.active, (active) => {
         <span class="customer-kpi__icon is-violet"><Service aria-hidden="true" /></span>
         <div><p>人工服务请求</p><strong>{{ formatNumber(metrics?.humanTicketCount, 0) }} <small>件</small></strong><span>{{ metricsLoading ? '正在读取运营指标…' : errors.metrics || '当前运行实例累计' }}</span></div>
       </article>
-      <article class="customer-eco-card" :style="{ backgroundImage: `url(${ecoOperations})` }">
+      <article class="customer-eco-card">
+        <picture class="customer-art" aria-hidden="true">
+          <source
+            type="image/webp"
+            :srcset="`${ecoOperations480} 480w, ${ecoOperations960} 960w, ${ecoOperations1600} 1600w`"
+            sizes="(max-width: 1180px) 96vw, 20vw"
+          />
+          <img :src="ecoOperations" alt="" loading="lazy" />
+        </picture>
         <strong>绿色低碳　智慧运营</strong>
         <span>共建更美好的产业社区</span>
       </article>
@@ -462,7 +476,15 @@ watch(() => props.active, (active) => {
         </button>
       </article>
 
-      <article class="customer-campus" :style="{ backgroundImage: `url(${parkAerial})` }" aria-label="演示园区空间示意">
+      <article class="customer-campus" aria-label="演示园区空间示意">
+        <picture class="customer-art" aria-hidden="true">
+          <source
+            type="image/webp"
+            :srcset="`${parkAerial720} 720w, ${parkAerial1200} 1200w, ${parkAerial1672} 1672w`"
+            sizes="(max-width: 760px) 96vw, (max-width: 1180px) 62vw, 45vw"
+          />
+          <img :src="parkAerial" alt="" loading="lazy" />
+        </picture>
         <header><strong>演示园区</strong><span>空间示意 · 非实时数字孪生</span></header>
         <span class="customer-campus__north" aria-hidden="true">N</span>
         <button

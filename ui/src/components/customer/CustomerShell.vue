@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { Cpu, OfficeBuilding, UserFilled } from '@element-plus/icons-vue'
 import campusBanner from '../../assets/customer/campus-banner.png'
+import campusBanner960 from '../../assets/customer/campus-banner-960.webp'
+import campusBanner1440 from '../../assets/customer/campus-banner-1440.webp'
+import campusBanner2172 from '../../assets/customer/campus-banner-2172.webp'
 
 defineEmits<{ 'enter-workbench': [] }>()
 
@@ -59,7 +62,15 @@ const customerNavigation = [
     </header>
 
     <div class="customer-shell__body">
-      <section class="customer-shell__hero" :style="{ backgroundImage: `url(${campusBanner})` }" aria-labelledby="customer-hero-title">
+      <section class="customer-shell__hero" aria-labelledby="customer-hero-title">
+        <picture class="customer-art" aria-hidden="true">
+          <source
+            type="image/webp"
+            :srcset="`${campusBanner960} 960w, ${campusBanner1440} 1440w, ${campusBanner2172} 2172w`"
+            sizes="(max-width: 760px) 96vw, 98vw"
+          />
+          <img :src="campusBanner" alt="" fetchpriority="high" />
+        </picture>
         <div>
           <h1 id="customer-hero-title">AI 让园区更智慧，让运营更从容</h1>
           <p>安全 · 绿色 · 高效 · 人性化　打造可持续发展的未来园区</p>

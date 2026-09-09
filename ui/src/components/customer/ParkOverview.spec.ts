@@ -144,6 +144,8 @@ describe('ParkOverview', () => {
     expect(wrapper.text()).not.toContain('OPEN 状态')
     expect(wrapper.text()).not.toContain('REDACTED:')
     expect(wrapper.text()).not.toContain('设备运行率')
+    expect(wrapper.get('.customer-campus source[type="image/webp"]').attributes('srcset')).toContain('1672w')
+    expect(wrapper.get('.customer-eco-card source[type="image/webp"]').attributes('srcset')).toContain('480w')
     expect(getAnomalyOverview).toHaveBeenCalledWith('VIEWER', { status: 'OPEN' })
     expect(getEnergyTimeSeries).toHaveBeenCalledWith('VIEWER', {
       buildingIds: ['B1', 'B2', 'B3'],
