@@ -24,7 +24,8 @@ public final class EnergyTimeSeriesService {
     /** Must match the timezone used by analytics.v_energy_hourly's registered date dimensions. */
     public static final ZoneId FACT_TIMEZONE = ZoneId.of("Asia/Shanghai");
 
-    private static final Set<String> SUPPORTED_METRICS = Set.of("energy_kwh", "energy_deviation_pct");
+    private static final Set<String> SUPPORTED_METRICS = Set.of(
+            "energy_kwh", "energy_baseline_kwh", "energy_deviation_pct");
     private static final Duration MAX_WINDOW = Duration.ofDays(31);
     private static final int MAX_BUILDINGS = 20;
     /** Public request bound kept equal to the governed SQL row cap. */

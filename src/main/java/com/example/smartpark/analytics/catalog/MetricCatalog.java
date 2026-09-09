@@ -25,6 +25,13 @@ public class MetricCatalog {
                         "hour_of_day", "day_of_week", "area_sqm", "map_x", "map_y"),
                 "SUM(kwh)", "hour_ts", 7, null));
         register(new MetricDefinition(
+                "energy_baseline_kwh", "能耗基线",
+                java.util.Set.of("能耗基线", "基线用电量", "基线能耗"),
+                "kWh", "analytics.v_energy_hourly",
+                java.util.Set.of("building_id", "building_name", "meter_id", "hour_ts", "stat_date",
+                        "hour_of_day", "day_of_week", "area_sqm", "map_x", "map_y"),
+                "SUM(baseline_kwh)", "hour_ts", 7, null));
+        register(new MetricDefinition(
                 "night_energy_kwh", "夜间能耗（22:00–06:00）",
                 java.util.Set.of("夜间用电量", "夜间能耗", "夜间电量"),
                 "kWh", "analytics.v_energy_hourly",

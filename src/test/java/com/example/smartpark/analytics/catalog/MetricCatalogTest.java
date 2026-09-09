@@ -12,13 +12,15 @@ class MetricCatalogTest {
     private final MetricCatalog catalog = new MetricCatalog();
 
     @Test
-    void exposesTheElevenContractMetricsWithUnits() {
+    void exposesTheTwelveContractMetricsWithUnits() {
         assertThat(catalog.all()).extracting(def -> def.name()).containsExactlyInAnyOrder(
-                "energy_kwh", "night_energy_kwh", "energy_deviation_pct",
+                "energy_kwh", "energy_baseline_kwh", "night_energy_kwh", "energy_deviation_pct",
                 "alert_count", "high_risk_alert_count",
                 "device_offline_count", "parking_entries", "parking_utilization_pct",
                 "peak_kw", "occupancy_avg", "energy_target_completion_pct");
         assertThat(catalog.findByName("energy_kwh").orElseThrow().unit()).isEqualTo("kWh");
+        assertThat(catalog.findByName("energy_baseline_kwh").orElseThrow().expression())
+                .isEqualTo("SUM(baseline_kwh)");
         assertThat(catalog.findByName("energy_deviation_pct").orElseThrow().unit()).isEqualTo("%");
         assertThat(catalog.findByName("alert_count").orElseThrow().sourceView()).isEqualTo("analytics.v_alert_fact");
         assertThat(catalog.findByName("device_offline_count").orElseThrow().sourceView()).isEqualTo("analytics.v_device_snapshot");
