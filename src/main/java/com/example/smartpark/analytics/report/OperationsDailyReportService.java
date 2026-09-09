@@ -249,7 +249,23 @@ public final class OperationsDailyReportService {
                 : status == OperationsReportStatus.PARTIAL ? "运营日报部分完成，未完成章节已明确标记"
                 : "运营日报生成失败，没有可用章节";
         int firstTrace = current.traceEvents().size();
-        OperationsDailyReport terminal = store.update(reportId, report -> {
+        OperationsDailyReport terminal;
+        try {
+            terminal = finishReport(reportId, status, now, summary, true);
+        } catch (OperationsReportCapacityException artifactOrReportTooLarge) {
+            try {
+                terminal = finishReport(reportId, status, now,
+                        summary + "；下载文件超出容量限制", false);
+            } catch (OperationsReportCapacityException terminalMetadataTooLarge) {
+                terminal = terminalizeAtCapacity(reportId, status);
+            }
+        }
+        publishNew(terminal, firstTrace);
+    }
+
+    private OperationsDailyReport finishReport(UUID reportId, OperationsReportStatus status,
+                                                Instant now, String summary, boolean includeArtifact) {
+        return store.update(reportId, report -> {
             ExecutionEventType type = status == OperationsReportStatus.FAILED
                     ? ExecutionEventType.RUN_FAILED : ExecutionEventType.RUN_COMPLETED;
             ExecutionStatus traceStatus = status == OperationsReportStatus.FAILED
@@ -260,12 +276,11 @@ public final class OperationsDailyReportService {
             OperationsDailyReport provisional = report.copy(status, report.startedAt(), now,
                     report.asOf(), summary, report.sections(), report.evidence(),
                     report.sourceReferences(), null, trace);
-            OperationsDailyReport.Artifact artifact = status == OperationsReportStatus.FAILED
+            OperationsDailyReport.Artifact artifact = status == OperationsReportStatus.FAILED || !includeArtifact
                     ? null : renderer.render(provisional, now);
             return report.copy(status, report.startedAt(), now, provisional.asOf(), summary,
                     report.sections(), report.evidence(), report.sourceReferences(), artifact, trace);
         });
-        publishNew(terminal, firstTrace);
     }
 
     private void failReport(UUID reportId, String reason) {
@@ -279,8 +294,14 @@ public final class OperationsDailyReportService {
                     append(report.traceEvents(), "operations-report", ExecutionStage.FAILURE,
                             ExecutionEventType.RUN_FAILED, ExecutionStatus.FAILED, reason)));
             publishNew(failed, firstTrace);
+        } catch (OperationsReportCapacityException capacity) {
+            try {
+                terminalizeAtCapacity(reportId, OperationsReportStatus.FAILED);
+            } catch (RuntimeException ignored) {
+                // The durable state remains non-terminal only when persistence itself is unavailable.
+            }
         } catch (RuntimeException ignored) {
-            // The durable state remains non-terminal only when the persistence boundary itself is unavailable.
+            // The durable state remains non-terminal only when persistence itself is unavailable.
         }
     }
 
@@ -306,7 +327,7 @@ public final class OperationsDailyReportService {
                     } catch (OperationsReportCapacityException stillTooLarge) {
                         // Last-resort terminalization changes only shrinking fields, so any valid
                         // persisted non-terminal record can never trap the application in a restart loop.
-                        recovered = terminalizeInterruptedAtCapacity(interrupted.reportId(), status);
+                        recovered = terminalizeAtCapacity(interrupted.reportId(), status);
                     }
                 }
             }
@@ -343,8 +364,8 @@ public final class OperationsDailyReportService {
         });
     }
 
-    private OperationsDailyReport terminalizeInterruptedAtCapacity(UUID reportId,
-                                                                    OperationsReportStatus status) {
+    private OperationsDailyReport terminalizeAtCapacity(UUID reportId,
+                                                        OperationsReportStatus status) {
         return store.update(reportId, report -> report.copy(status, report.startedAt(), report.completedAt(),
                 report.asOf(), "", report.sections(), report.evidence(), report.sourceReferences(), null,
                 report.traceEvents()));

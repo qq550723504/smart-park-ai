@@ -105,7 +105,9 @@ history, detail, download, and trace replay remain available; only creation is r
 The client cannot submit SQL, HTML, an artifact filename, or a server path. Artifact identifiers and metadata
 are server-generated. The filename contains only the fixed product prefix and report date. Download lookup is
 by `reportId`, applies the same authorization as detail, and never accepts a filesystem path. The artifact
-records content type, byte size, SHA-256 checksum, creation time, and renderer version.
+records content type, byte size, SHA-256 checksum, creation time, and renderer version. If rendering or embedding
+the optional artifact exceeds a configured byte limit, the completed structured snapshot remains successful and
+explicitly marks download unavailable.
 
 ## Idempotency and concurrency
 
@@ -136,9 +138,10 @@ No report remains permanently `GENERATING` after restart.
 Every report includes `schemaVersion` and `generationVersion`; every artifact includes `rendererVersion`.
 The current reader exposes schema version 1. Records with another version are preserved verbatim, excluded from
 current APIs, and count toward retention rather than being silently misread or preventing startup. Retention is
-count-based. When a terminal report is evicted, its terminal in-memory trace projection is removed in the same
-store admission boundary; an orphaned report projection is also rejected by the trace archive. A user-facing
-delete API is intentionally out of scope.
+count-based. Lowering the configured retention compacts the oldest supported terminal records during load and
+fails only when active or unsupported records make the reduced capacity unreclaimable. When a terminal report is
+evicted, its terminal in-memory trace projection is removed in the same store admission boundary; an orphaned
+report projection is also rejected by the trace archive. A user-facing delete API is intentionally out of scope.
 
 ## Known limitations
 

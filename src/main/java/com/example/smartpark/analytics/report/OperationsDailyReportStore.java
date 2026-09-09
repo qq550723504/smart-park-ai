@@ -177,16 +177,14 @@ public final class OperationsDailyReportStore {
     private void load() {
         if (!Files.exists(stateFile)) return;
         try {
-            long maximumFileBytes = (long) maxRetainedReports * maxReportBytes + maxRetainedReports + 2L;
+            long loadRecordLimit = Math.max(maxRetainedReports, DEFAULT_MAX_RETAINED_REPORTS);
+            long maximumFileBytes = loadRecordLimit * maxReportBytes + loadRecordLimit + 2L;
             if (Files.size(stateFile) > maximumFileBytes) {
                 throw new IllegalStateException("operations report state file exceeds configured byte limit");
             }
             JsonNode root = mapper.readTree(stateFile.toFile());
             if (!(root instanceof ArrayNode array)) {
                 throw new IllegalStateException("operations report state must be a JSON array");
-            }
-            if (array.size() > maxRetainedReports) {
-                throw new IllegalStateException("operations report state exceeds retained record limit");
             }
             LinkedHashMap<UUID, OperationsDailyReport> loaded = new LinkedHashMap<>();
             java.util.Set<String> loadedKeys = new java.util.HashSet<>();
@@ -211,7 +209,16 @@ public final class OperationsDailyReportStore {
             reports.putAll(loaded);
             unsupportedRecords.clear();
             unsupportedRecords.addAll(unsupported);
-            LinkedHashMap<UUID, OperationsDailyReport> compacted = compact(maxRetainedReports - unsupported.size());
+            int supportedTarget = maxRetainedReports - unsupported.size();
+            if (supportedTarget < 0) {
+                throw new OperationsReportCapacityException(
+                        "unsupported operations report records exceed retained capacity");
+            }
+            LinkedHashMap<UUID, OperationsDailyReport> compacted = compact(supportedTarget);
+            if (compacted.size() > supportedTarget) {
+                throw new OperationsReportCapacityException(
+                        "active operations report records exceed retained capacity");
+            }
             if (compacted.size() != loaded.size()) persist(compacted.values());
             replaceState(compacted);
         } catch (IOException | RuntimeException failure) {

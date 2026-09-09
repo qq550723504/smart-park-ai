@@ -18,6 +18,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -64,6 +65,28 @@ class OperationsDailyReportServiceTest {
                         ExecutionEventType.STEP_STARTED, ExecutionEventType.STEP_COMPLETED,
                         ExecutionEventType.STEP_STARTED, ExecutionEventType.STEP_COMPLETED,
                         ExecutionEventType.RUN_COMPLETED);
+    }
+
+    @Test
+    void completedReportPreservesStructuredSnapshotWhenArtifactExceedsLimit() {
+        Path state = temp.resolve("artifact-limit.json");
+        OperationsDailyReportService service = new OperationsDailyReportService(
+                (section, request) -> CompletableFuture.completedFuture(
+                        completedValue(section.question(), "x".repeat(2048))),
+                new OperationsDailyReportStore(state, new ObjectMapper().findAndRegisterModules(),
+                        20, 1, 64 * 1024, 1024),
+                new InMemoryExecutionEventPublisher(), new OperationsReportRenderer(), CLOCK);
+
+        UUID reportId = service.start(service.defaultRequest(), "artifact-limit-key",
+                "demo-role:OPERATOR", "OPERATOR").report().reportId();
+        OperationsDailyReport report = service.get(reportId, "OPERATOR");
+
+        assertThat(report.status()).isEqualTo(OperationsReportStatus.COMPLETED);
+        assertThat(report.sections()).allMatch(section ->
+                section.status() == OperationsReportSectionStatus.COMPLETED);
+        assertThat(report.sections().get(0).rows().get(0)).containsExactly("x".repeat(2048));
+        assertThat(report.artifact()).isNull();
+        assertThat(report.summary()).contains("下载文件超出容量限制");
     }
 
     @Test
@@ -336,6 +359,50 @@ class OperationsDailyReportServiceTest {
         assertThat(restarted.list("OPERATOR", null, null, null, null, 0, 20).content())
                 .singleElement().extracting(OperationsDailyReport::status)
                 .isEqualTo(OperationsReportStatus.FAILED);
+    }
+
+    @Test
+    void liveSectionCapacityFailureStillReleasesTheActiveReportSlot() throws Exception {
+        Path state = temp.resolve("live-capacity.json");
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        CompletableFuture<AnalysisRunStore.RunRecord> pending = new CompletableFuture<>();
+        OperationsDailyReportStore store = new OperationsDailyReportStore(state, mapper, 20, 1, 4096, 1024);
+        OperationsDailyReportService service = new OperationsDailyReportService(
+                (section, request) -> pending, store, new InMemoryExecutionEventPublisher(),
+                new OperationsReportRenderer(), CLOCK);
+        UUID reportId = service.start(service.defaultRequest(), "live-capacity-key",
+                "demo-role:OPERATOR", "OPERATOR").report().reportId();
+        OperationsDailyReport current = store.find(reportId).orElseThrow();
+        OperationsDailyReport.SectionResult section = current.sections().get(0);
+        OperationsDailyReport.SectionResult sizingSection = new OperationsDailyReport.SectionResult(
+                section.sectionId(), section.title(), section.question(), OperationsReportSectionStatus.RUNNING,
+                "", 1, false, List.of("metric"), List.of(List.of((Object) "x")), Map.of(),
+                List.of(), List.of(), null, null, null);
+        List<OperationsDailyReport.SectionResult> sizingSections = new ArrayList<>(current.sections());
+        sizingSections.set(0, sizingSection);
+        int baseBytes = mapper.writeValueAsBytes(current.copy(OperationsReportStatus.GENERATING,
+                current.startedAt(), null, null, "", sizingSections, List.of(), List.of(), null,
+                current.traceEvents())).length;
+        int padding = 4096 - baseBytes + 1;
+        assertThat(padding).isPositive();
+        OperationsDailyReport.SectionResult paddedSection = new OperationsDailyReport.SectionResult(
+                section.sectionId(), section.title(), section.question(), OperationsReportSectionStatus.RUNNING,
+                "", 1, false, List.of("metric"), List.of(List.of((Object) "x".repeat(padding))), Map.of(),
+                List.of(), List.of(), null, null, null);
+        store.update(reportId, report -> {
+            List<OperationsDailyReport.SectionResult> sections = new ArrayList<>(report.sections());
+            sections.set(0, paddedSection);
+            return report.copy(OperationsReportStatus.GENERATING, report.startedAt(), null, null, "",
+                    sections, List.of(), List.of(), null, report.traceEvents());
+        });
+
+        pending.complete(completedValue(section.question(), "y".repeat(8192)));
+        OperationsDailyReport failed = service.get(reportId, "OPERATOR");
+
+        assertThat(failed.status()).isEqualTo(OperationsReportStatus.FAILED);
+        assertThat(failed.sections().get(0).rows().get(0)).containsExactly("x".repeat(padding));
+        assertThat(service.start(service.defaultRequest(), "after-capacity-key",
+                "demo-role:OPERATOR", "OPERATOR").created()).isTrue();
     }
 
     @Test

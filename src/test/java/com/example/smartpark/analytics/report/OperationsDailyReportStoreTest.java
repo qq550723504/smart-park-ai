@@ -146,6 +146,25 @@ class OperationsDailyReportStoreTest {
                 .contains("future-v1", "v1");
     }
 
+    @Test
+    void loweringRetentionCompactsOldestTerminalRecordsDuringLoad() throws Exception {
+        Path state = temp.resolve("lowered-retention.json");
+        OperationsDailyReportStore first = store(state, 3, 1, 64 * 1024, 16 * 1024);
+        OperationsDailyReport oldest = first.createOrGet("key-1", "fingerprint-1",
+                () -> report("key-1", "fingerprint-1", OperationsReportStatus.COMPLETED)).report();
+        OperationsDailyReport second = first.createOrGet("key-2", "fingerprint-2",
+                () -> report("key-2", "fingerprint-2", OperationsReportStatus.COMPLETED)).report();
+        OperationsDailyReport newest = first.createOrGet("key-3", "fingerprint-3",
+                () -> report("key-3", "fingerprint-3", OperationsReportStatus.COMPLETED)).report();
+
+        OperationsDailyReportStore reduced = store(state, 2, 1, 64 * 1024, 16 * 1024);
+
+        assertThat(reduced.find(oldest.reportId())).isEmpty();
+        assertThat(reduced.all()).extracting(OperationsDailyReport::reportId)
+                .containsExactly(second.reportId(), newest.reportId());
+        assertThat(new ObjectMapper().readTree(state.toFile())).hasSize(2);
+    }
+
     private OperationsDailyReportStore store(Path state, int retained, int active, int reportBytes, int artifactBytes) {
         return new OperationsDailyReportStore(state, new ObjectMapper().findAndRegisterModules(),
                 retained, active, reportBytes, artifactBytes);

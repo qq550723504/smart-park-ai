@@ -64,6 +64,7 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
     if (busy.value) return
     const current = ++generation
     busy.value = true
+    historyLoading.value = false
     error.value = ''
     let createAccepted = false
     try {

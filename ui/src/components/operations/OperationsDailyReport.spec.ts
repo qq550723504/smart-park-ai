@@ -280,4 +280,27 @@ describe('OperationsDailyReport', () => {
     expect(wrapper.get('[data-generate-report]').attributes('disabled')).toBeDefined()
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(2)
   })
+
+  it('clears a stale initial history spinner when generation is rejected', async () => {
+    let resolveHistory!: (response: Response) => void
+    const history = new Promise<Response>((resolve) => { resolveHistory = resolve })
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      if (url.includes('?')) return history
+      if (init?.method === 'POST') {
+        return Promise.resolve(new Response(JSON.stringify({ message: 'capacity exhausted' }), { status: 429 }))
+      }
+      return Promise.resolve(new Response(JSON.stringify(detail), { status: 200 }))
+    }))
+    const wrapper = mount(OperationsDailyReport, { props: { role: 'OPERATOR' } })
+
+    expect(wrapper.get('[data-testid="report-history"]').text()).toContain('加载中')
+    await wrapper.get('[data-generate-report]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="report-history"]').text()).toContain('0 份')
+    expect(wrapper.get('[data-testid="report-history"]').text()).not.toContain('加载中')
+    resolveHistory(new Response(JSON.stringify({ content: [summary], page: 0, size: 20, totalElements: 1, hasNext: false }), { status: 200 }))
+    await flushPromises()
+    expect(wrapper.get('[data-testid="report-history"]').text()).toContain('0 份')
+  })
 })
