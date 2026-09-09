@@ -164,19 +164,34 @@ class OperationsDailyReportServiceTest {
     }
 
     @Test
-    void rejectsOnlyCreationWhenAnalyticsGenerationIsUnavailable() {
+    void disabledGenerationStillReplaysACompletedReportAfterRestart() {
         Path state = temp.resolve("reports.json");
-        OperationsDailyReportStore store = new OperationsDailyReportStore(state,
-                new ObjectMapper().findAndRegisterModules(), 20, 1, 512 * 1024, 256 * 1024);
-        OperationsDailyReportService service = new OperationsDailyReportService(
-                (section, request) -> CompletableFuture.failedFuture(new AssertionError("must not run")),
-                store, new InMemoryExecutionEventPublisher(), new OperationsReportRenderer(), CLOCK, false);
+        OperationsDailyReportService enabled = service(state,
+                (section, request) -> CompletableFuture.completedFuture(
+                        completed(section.question(), 1)),
+                new InMemoryExecutionEventPublisher());
+        OperationsReportRequest request = enabled.defaultRequest();
+        UUID existingId = enabled.start(request, "completed-key",
+                "demo-role:OPERATOR", "OPERATOR").report().reportId();
 
-        assertThat(service.list("OPERATOR", null, null, null, null, 0, 20).content()).isEmpty();
-        assertThatThrownBy(() -> service.start(service.defaultRequest(), "disabled-key",
+        OperationsDailyReportStore restartedStore = new OperationsDailyReportStore(state,
+                new ObjectMapper().findAndRegisterModules(), 20, 1, 512 * 1024, 256 * 1024);
+        OperationsDailyReportService disabled = new OperationsDailyReportService(
+                (section, ignoredRequest) -> CompletableFuture.failedFuture(new AssertionError("must not run")),
+                restartedStore, new InMemoryExecutionEventPublisher(),
+                new OperationsReportRenderer(), CLOCK, false);
+
+        OperationsDailyReportStore.StartResult replay = disabled.start(request, "completed-key",
+                "demo-role:OPERATOR", "OPERATOR");
+        assertThat(replay.created()).isFalse();
+        assertThat(replay.report().reportId()).isEqualTo(existingId);
+        assertThat(disabled.list("OPERATOR", null, null, null, null, 0, 20).content())
+                .extracting(OperationsDailyReport::reportId).containsExactly(existingId);
+
+        assertThatThrownBy(() -> disabled.start(disabled.defaultRequest(), "disabled-key",
                 "demo-role:OPERATOR", "OPERATOR"))
                 .isInstanceOf(OperationsReportUnavailableException.class);
-        assertThat(store.all()).isEmpty();
+        assertThat(restartedStore.all()).hasSize(1);
     }
 
     @Test

@@ -62,15 +62,15 @@ public final class OperationsDailyReportService {
                                                         String idempotencyKey,
                                                         String requestedBy,
                                                         String role) {
-        if (!generationAvailable) {
-            throw new OperationsReportUnavailableException("operations report generation is unavailable");
-        }
         String key = requireText(idempotencyKey, "Idempotency-Key", 128);
         String normalizedRole = requireText(role, "role", 30).toUpperCase(Locale.ROOT);
         String actor = requireText(requestedBy, "requestedBy", 100);
         String fingerprint = fingerprint(request, normalizedRole);
         Instant now = clock.instant();
         OperationsDailyReportStore.StartResult admitted = store.createOrGet(key, fingerprint, () -> {
+            if (!generationAvailable) {
+                throw new OperationsReportUnavailableException("operations report generation is unavailable");
+            }
             UUID reportId = UUID.randomUUID();
             UUID runId = UUID.randomUUID();
             return new OperationsDailyReport(reportId, request.reportType(), "智慧园区运营日报",
