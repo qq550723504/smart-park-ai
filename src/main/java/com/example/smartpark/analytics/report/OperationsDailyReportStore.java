@@ -290,16 +290,32 @@ public final class OperationsDailyReportStore {
                 snapshot.forEach(report -> output.add(mapper.valueToTree(report)));
                 unsupportedRecords.forEach(record -> output.add(record.deepCopy()));
                 mapper.writeValue(temporary.toFile(), output);
-                if (Files.size(temporary) > maxStateFileBytes) {
-                    throw new OperationsReportCapacityException(
-                            "operations report state exceeds the durable file byte limit");
-                }
+                validateStateCapacity(temporary, snapshot);
                 atomicReplacer.replace(temporary, stateFile);
             } finally {
                 Files.deleteIfExists(temporary);
             }
         } catch (IOException failure) {
             throw new IllegalStateException("unable to persist operations report state", failure);
+        }
+    }
+
+    private void validateStateCapacity(Path temporary,
+                                       java.util.Collection<OperationsDailyReport> snapshot) throws IOException {
+        long projectedBytes = Files.size(temporary);
+        if (projectedBytes > maxStateFileBytes) {
+            throw new OperationsReportCapacityException(
+                    "operations report state exceeds the durable file byte limit");
+        }
+        for (OperationsDailyReport report : snapshot) {
+            if (report.status().isTerminal()) continue;
+            long currentBytes = mapper.writeValueAsBytes(report).length;
+            long reservedGrowth = maxReportBytes - currentBytes;
+            if (reservedGrowth > maxStateFileBytes - projectedBytes) {
+                throw new OperationsReportCapacityException(
+                        "operations report state lacks durable terminalization capacity");
+            }
+            projectedBytes += reservedGrowth;
         }
     }
 

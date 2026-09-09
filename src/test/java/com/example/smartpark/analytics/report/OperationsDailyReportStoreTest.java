@@ -134,6 +134,33 @@ class OperationsDailyReportStoreTest {
     }
 
     @Test
+    void rejectsAdmissionWhenStateCannotReserveTheActiveReportsMaximumTerminalSize() throws Exception {
+        Path state = temp.resolve("terminal-reservation.json");
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        OperationsDailyReportStore store = new OperationsDailyReportStore(state, mapper,
+                2, 1, 8192, 1024, (source, target) -> java.nio.file.Files.move(source, target,
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING),
+                ignored -> { }, 12000);
+        OperationsDailyReport retained = store.createOrGet("key-1", "fingerprint-1",
+                () -> report("key-1", "fingerprint-1", OperationsReportStatus.COMPLETED).copy(
+                        OperationsReportStatus.COMPLETED, NOW, NOW, NOW, "x".repeat(4000),
+                        List.of(), List.of(), List.of(), null, List.of())).report();
+        OperationsDailyReport requested = report("key-2", "fingerprint-2", OperationsReportStatus.REQUESTED);
+        assertThat(mapper.writeValueAsBytes(List.of(retained, requested)).length).isLessThan(12000);
+
+        assertThatThrownBy(() -> store.createOrGet("key-2", "fingerprint-2", () -> requested))
+                .isInstanceOf(OperationsReportCapacityException.class)
+                .hasMessageContaining("terminalization capacity");
+
+        assertThat(store.all()).extracting(OperationsDailyReport::reportId).containsExactly(retained.reportId());
+        OperationsDailyReportStore restarted = new OperationsDailyReportStore(state, mapper,
+                2, 1, 8192, 1024, (source, target) -> java.nio.file.Files.move(source, target,
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING),
+                ignored -> { }, 12000);
+        assertThat(restarted.all()).extracting(OperationsDailyReport::reportId).containsExactly(retained.reportId());
+    }
+
+    @Test
     void atomicReplaceFailureDoesNotPublishNewInMemoryRevision() {
         Path state = temp.resolve("reports.json");
         OperationsDailyReport created = store(state, 2, 1, 64 * 1024, 16 * 1024)
