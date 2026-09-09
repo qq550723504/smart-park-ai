@@ -146,10 +146,7 @@ watch(() => props.active, (active) => {
 
     <OrchestrationPanel :role="props.role" :active="props.active" :available="props.analyticsAvailable" @open-trace="(runId) => emit('open-trace', runId)" />
 
-    <OperationsDailyReport :role="props.role" :trace="props.trace" :active="props.active" />
-    <section class="operations-board__report-gap" data-cockpit-feature="report-history" data-feature-state="NOT_READY">
-      <strong>报告历史 / 下载 · NOT_READY</strong><span>当前后端只保留会话级报告快照，尚无列表或下载 API。</span>
-    </section>
+    <OperationsDailyReport :role="props.role" :trace="props.trace" :active="props.active" :available="props.analyticsAvailable" />
 
     <section class="operations-board__question-grid" aria-label="受控分析入口">
       <section v-for="group in groups" :key="group.title" class="panel operations-board__group" :aria-label="group.title">
@@ -197,8 +194,6 @@ watch(() => props.active, (active) => {
 .operations-board__agent-boundary span, .operations-board__agent-boundary strong { display: block; }
 .operations-board__agent-boundary strong { margin-top: 7px; color: var(--showcase-amber); font-size: .72rem; letter-spacing: .1em; }
 .operations-board__agent-boundary p { margin-bottom: 0; font-size: .82rem; }
-.operations-board__report-gap { display: flex; justify-content: space-between; gap: 18px; padding: 12px 16px; color: var(--showcase-muted); border: 1px solid rgba(255, 210, 122, .2); background: rgba(64, 46, 20, .12); }
-.operations-board__report-gap strong { color: var(--showcase-amber); }
 .operations-board__question-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .operations-board__group { padding: 22px; }
 .operations-board__group:last-child { grid-column: 1 / -1; }
@@ -213,5 +208,5 @@ watch(() => props.active, (active) => {
 .operations-board__card-icon { color: var(--showcase-cyan); font-size: 1.1rem; }
 /* The workbench keeps a 380px trace rail, so the board needs its compact grid before the viewport itself reaches 1100px. */
 @media (max-width: 1600px) { .operations-board__hero, .operations-board__workbench { grid-template-columns: 1fr; } .operations-board__capability-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .operations-board__group:last-child .operations-board__cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 720px) { .operations-board__hero { padding: 20px; } .operations-board__hero-facts, .operations-board__capability-strip, .operations-board__question-grid, .operations-board__cards, .operations-board__group:last-child .operations-board__cards { grid-template-columns: 1fr; } .operations-board__hero-facts div + div { border-left: 0; border-top: 1px solid var(--showcase-border-soft); } .operations-board__group:last-child { grid-column: auto; } .operations-board__report-gap { flex-direction: column; } }
+@media (max-width: 720px) { .operations-board__hero { padding: 20px; } .operations-board__hero-facts, .operations-board__capability-strip, .operations-board__question-grid, .operations-board__cards, .operations-board__group:last-child .operations-board__cards { grid-template-columns: 1fr; } .operations-board__hero-facts div + div { border-left: 0; border-top: 1px solid var(--showcase-border-soft); } .operations-board__group:last-child { grid-column: auto; } }
 </style>

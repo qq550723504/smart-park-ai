@@ -46,7 +46,7 @@ describe('OperationsBoard', () => {
     expect(wrapper.get('[data-cockpit-feature="vibration-telemetry"]').text()).toContain('当前没有振动 datasource')
     expect(wrapper.get('[data-cockpit-feature="run-all-agents"]').attributes('data-feature-state')).toBe('NOT_READY')
     expect(wrapper.get('[data-cockpit-feature="run-all-agents"]').text()).toContain('Operations Analysis 当前未启用')
-    expect(wrapper.get('[data-cockpit-feature="report-history"]').text()).toContain('尚无列表或下载 API')
+    expect(wrapper.text()).not.toContain('报告历史 / 下载 · NOT_READY')
   })
 
   it('exposes orchestration only when its required analytics capability is available', () => {
