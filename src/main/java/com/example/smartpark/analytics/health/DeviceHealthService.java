@@ -83,17 +83,23 @@ public final class DeviceHealthService {
                 reasons.add("存在时间无效的活动告警，未用于当前健康判断");
                 continue;
             }
-            usableAlertTimes.add(alert.occurredAt());
-            int alertSeverity = switch (safeStatus(alert.riskLevel())) {
+            String alertRisk = safeStatus(alert.riskLevel());
+            int alertSeverity = switch (alertRisk) {
                 case "HIGH" -> 4;
                 case "MEDIUM" -> 3;
                 case "LOW" -> 1;
-                default -> 1;
+                default -> -1;
             };
+            if (alertSeverity < 0) {
+                partial = true;
+                reasons.add("存在未登记风险等级的活动告警，未用于当前健康判断");
+                continue;
+            }
+            usableAlertTimes.add(alert.occurredAt());
             severity = Math.max(severity, alertSeverity);
-            reasons.add("存在 " + safeStatus(alert.riskLevel()) + " 风险活动告警 " + alert.alertId());
+            reasons.add("存在 " + alertRisk + " 风险活动告警 " + alert.alertId());
             evidence.add(new DeviceHealthDtos.Evidence("ACTIVE_ALERT", "alert:" + alert.alertId(),
-                    alert.occurredAt(), safeStatus(alert.category()) + " · " + safeStatus(alert.riskLevel())));
+                    alert.occurredAt(), safeStatus(alert.category()) + " · " + alertRisk));
         }
 
         DeviceTelemetryDtos.Response telemetryResponse = null;

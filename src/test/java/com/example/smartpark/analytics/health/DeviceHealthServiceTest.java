@@ -170,6 +170,21 @@ class DeviceHealthServiceTest {
     }
 
     @Test
+    void unknownAlertRiskIsIncompleteAndCannotDeriveSeverity() {
+        var unknownRisk = new DeviceHealthFactsReader.AlertFact("ALT-UNKNOWN", "B1", "AC-B1-07",
+                "TEMPERATURE", "URGENT", "OPEN", NOW.minusSeconds(900));
+
+        var response = service(facts(device("ONLINE", "HVAC"), List.of(unknownRisk)),
+                telemetry(DeviceTelemetryDtos.Status.AVAILABLE, DeviceTelemetryDtos.Freshness.FRESH,
+                        List.of(point(9, "24")))).assess("AC-B1-07");
+
+        assertThat(response.healthStatus()).isEqualTo(DeviceHealthDtos.HealthStatus.UNKNOWN);
+        assertThat(response.availability()).isEqualTo(DeviceHealthDtos.Availability.PARTIAL);
+        assertThat(response.reasons()).contains("存在未登记风险等级的活动告警，未用于当前健康判断");
+        assertThat(response.evidence()).noneMatch(item -> item.reference().contains("ALT-UNKNOWN"));
+    }
+
+    @Test
     void untrustedTelemetryQualityCannotProduceHealthEvidence() {
         DeviceTelemetryDtos.Point suspect = new DeviceTelemetryDtos.Point(
                 Instant.parse("2026-09-08T09:00:00Z"), new BigDecimal("40"), "SUSPECT");
