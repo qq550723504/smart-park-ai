@@ -164,6 +164,24 @@ class DeviceHealthServiceTest {
                 "存在时间无效的活动告警，未用于当前健康判断");
         assertThat(response.evidence()).noneMatch(item -> item.reference().contains("ALT-FUTURE"));
         assertThat(response.asOf()).isBeforeOrEqualTo(NOW);
+        assertThat(response.sources()).filteredOn(source -> source.system().equals("ALERT_FACT"))
+                .singleElement().extracting(DeviceHealthDtos.Source::status)
+                .isEqualTo(DeviceHealthDtos.Availability.PARTIAL);
+    }
+
+    @Test
+    void untrustedTelemetryQualityCannotProduceHealthEvidence() {
+        DeviceTelemetryDtos.Point suspect = new DeviceTelemetryDtos.Point(
+                Instant.parse("2026-09-08T09:00:00Z"), new BigDecimal("40"), "SUSPECT");
+
+        var response = service(facts(device("ONLINE", "HVAC"), List.of()),
+                telemetry(DeviceTelemetryDtos.Status.AVAILABLE, DeviceTelemetryDtos.Freshness.FRESH,
+                        List.of(suspect))).assess("AC-B1-07");
+
+        assertThat(response.healthStatus()).isEqualTo(DeviceHealthDtos.HealthStatus.UNKNOWN);
+        assertThat(response.availability()).isEqualTo(DeviceHealthDtos.Availability.PARTIAL);
+        assertThat(response.reasons()).contains("存在非 GOOD 质量的遥测点，未用于健康判断");
+        assertThat(response.evidence()).noneMatch(item -> item.type().equals("TELEMETRY_THRESHOLD"));
     }
 
     @Test

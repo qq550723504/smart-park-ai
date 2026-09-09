@@ -50,7 +50,8 @@ public final class DeviceHealthService {
         List<DeviceHealthDtos.Evidence> evidence = new ArrayList<>();
         List<DeviceHealthDtos.Source> sources = new ArrayList<>();
         sources.add(new DeviceHealthDtos.Source("DEVICE_SNAPSHOT", DeviceHealthDtos.Availability.AVAILABLE));
-        sources.add(new DeviceHealthDtos.Source("ALERT_FACT", DeviceHealthDtos.Availability.AVAILABLE));
+        sources.add(new DeviceHealthDtos.Source("ALERT_FACT", facts.truncated()
+                ? DeviceHealthDtos.Availability.PARTIAL : DeviceHealthDtos.Availability.AVAILABLE));
         evidence.add(new DeviceHealthDtos.Evidence("CONNECTIVITY", "device-snapshot:" + deviceId,
                 device.snapshotAt(), "设备状态 " + safeStatus(device.status())));
 
@@ -110,7 +111,15 @@ public final class DeviceHealthService {
                 reasons.add("设备遥测窗口不完整，不能据此确认健康");
             }
             DeviceTelemetryDtos.Series series = telemetryResponse.series().stream().findFirst().orElse(null);
-            if (series == null || series.points().isEmpty()) {
+            List<DeviceTelemetryDtos.Point> trustedPoints = series == null ? List.of()
+                    : series.points().stream()
+                            .filter(point -> "GOOD".equalsIgnoreCase(point.quality()))
+                            .toList();
+            if (series != null && trustedPoints.size() != series.points().size()) {
+                partial = true;
+                reasons.add("存在非 GOOD 质量的遥测点，未用于健康判断");
+            }
+            if (trustedPoints.isEmpty()) {
                 reasons.add("没有可用于当前健康判断的设备遥测");
             } else if (series.freshness() != DeviceTelemetryDtos.Freshness.FRESH) {
                 partial = true;
@@ -119,7 +128,7 @@ public final class DeviceHealthService {
                 partial = true;
                 reasons.add("遥测可用但没有已登记阈值，未自动推导异常");
             } else {
-                severity = applyThresholdEvidence(telemetryResponse, series, severity, reasons, evidence);
+                severity = applyThresholdEvidence(telemetryResponse, trustedPoints, severity, reasons, evidence);
             }
         } else {
             partial = true;
@@ -161,10 +170,10 @@ public final class DeviceHealthService {
     }
 
     private static int applyThresholdEvidence(DeviceTelemetryDtos.Response response,
-                                               DeviceTelemetryDtos.Series series, int severity,
+                                               List<DeviceTelemetryDtos.Point> points, int severity,
                                                List<String> reasons,
                                                List<DeviceHealthDtos.Evidence> evidence) {
-        List<DeviceTelemetryDtos.Point> ordered = series.points().stream()
+        List<DeviceTelemetryDtos.Point> ordered = points.stream()
                 .sorted(Comparator.comparing(DeviceTelemetryDtos.Point::timestamp)).toList();
         DeviceTelemetryDtos.Point latest = ordered.get(ordered.size() - 1);
         BigDecimal critical = response.threshold().criticalAbove();

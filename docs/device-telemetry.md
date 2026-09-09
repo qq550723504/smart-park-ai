@@ -90,6 +90,8 @@ Each response includes reasons, typed evidence references, safe source labels, `
 
 Only an explicit, fresh `ONLINE` snapshot can participate in a `HEALTHY` result. Unknown connectivity values, future-dated alerts, and alert-query truncation mark the assessment incomplete; future alerts do not affect severity or `asOf`.
 
+Only telemetry points whose source quality is `GOOD` participate in health rules. Other quality values remain visible in the raw telemetry response but are excluded from threshold evidence and make the health assessment incomplete.
+
 The only threshold profile is explicitly fictional and registered for the HVAC temperature demo:
 
 ```text
