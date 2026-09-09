@@ -79,3 +79,44 @@ The collaboration route initially exposed a Vue Flow warning because the workflo
 - P3 engineering: Vite still reports the pre-existing production chunk-size warning above 500kB. It does not block this visual slice, but route-level code splitting should be handled as a separate performance task.
 
 final result: passed
+
+---
+
+# Issue #69 Design QA
+
+Result: **PASSED**
+
+## Evidence
+
+- Approved reference: `smart-park-ai-approved-designs.zip / 01-park-overview.png` (1672 × 941).
+- Actual browser captures: `docs/evidence/issue-69/overview-1440x900.png` and `docs/evidence/issue-69/overview-1920x1080.png`.
+- Runtime: repository Compose analytics profile with its deterministic PostgreSQL demo facts; the page was opened through the in-app browser at `http://127.0.0.1:15173/`.
+- Responsive check: 1366 × 768 reported `scrollWidth=1351`, `innerWidth=1366`, so no horizontal overflow. The workbench entry, first KPI and building markers were visible.
+
+## Comparison
+
+The approved reference and the 1920 × 1080 implementation capture were reviewed together. The implementation preserves the reference hierarchy and spatial rhythm:
+
+- white customer header with active overview navigation;
+- wide daylight campus banner;
+- four KPI cards plus the green-operation promotion;
+- left attention list, central park image with building markers, and right todo/report column;
+- bottom energy trend, two distributions, and latest-event list;
+- pale blue canvas, white cards, compact radii, restrained shadows, blue/green/coral/violet status accents.
+
+Intentional differences are capability-driven rather than visual drift. Search, weather and live date are omitted because no reliable source exists. Device run rate is replaced by affected buildings because the current API has no total-device denominator. The report and later customer pages are visibly unavailable instead of linking to empty pages. The trend has one observed series rather than fabricated comparison data, and empty todo/service counts remain zero when returned by the running backend.
+
+## Interaction and state checks
+
+- Selecting B2 changed the map selection and latest-event context to `研发大厦 · 同一业务窗口`.
+- Entering the internal workbench hid the customer surface; returning restored the customer surface and retained B2 selection.
+- The four later navigation items are non-link elements with `aria-disabled=true`.
+- The customer surface had no unnamed buttons, duplicate IDs, or browser console warnings/errors.
+- API failures remain explicit and do not fall back to a successful fixture; missing energy buckets stay null and ECharts keeps line breaks.
+
+## Iteration history
+
+1. First live run showed the anomaly data but rejected the energy request with HTTP 400.
+2. Root cause: the overview window carries minute/second precision while the governed hourly time-series API requires exact hour boundaries.
+3. The customer adapter now clamps the requested last-24-hour range to valid hour boundaries; a focused unit test covers the unaligned source window.
+4. The rebuilt live page returned 3,348 kWh from the current demo facts and rendered the trend/distribution charts. Final 1440 × 900 and 1920 × 1080 captures were then taken.
