@@ -77,7 +77,10 @@ public final class DeviceTelemetryService {
                         throw new TelemetryUnavailableException("telemetry identity mismatch");
                     }
                     if (rows != null && row.bucketTimestamp() != null && row.value() != null) {
-                        rows.put(row.bucketTimestamp(), row);
+                        DeviceTelemetryReader.Row previous = rows.putIfAbsent(row.bucketTimestamp(), row);
+                        if (previous != null) {
+                            throw new TelemetryUnavailableException("duplicate telemetry bucket");
+                        }
                     }
                 });
 

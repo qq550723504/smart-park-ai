@@ -113,6 +113,21 @@ class DeviceTelemetryServiceTest {
     }
 
     @Test
+    void failsClosedWhenTheSourceReturnsDuplicateHourlyBuckets() {
+        DeviceTelemetryReader.Row first = row("AC-B1-07", "B1", 6, "24.0");
+        DeviceTelemetryReader.Row duplicate = new DeviceTelemetryReader.Row(
+                "AC-B1-07", "B1", "HVAC", first.bucketTimestamp(),
+                new BigDecimal("35.0"), "GOOD", first.observedAt().plusSeconds(300));
+        FakeReader reader = new FakeReader(DeviceTelemetryReader.Snapshot.available(
+                List.of(device("AC-B1-07", "B1")), List.of(first, duplicate), false));
+
+        assertThatThrownBy(() -> service(reader).query(
+                query("TEMPERATURE", List.of("AC-B1-07"), FROM, TO)))
+                .isInstanceOf(DeviceTelemetryService.TelemetryUnavailableException.class)
+                .hasMessage("duplicate telemetry bucket");
+    }
+
+    @Test
     void rejectsInvalidTypeDeviceWindowCountAndPointVolumeBeforeReading() {
         FakeReader reader = new FakeReader(DeviceTelemetryReader.Snapshot.available(List.of(), List.of(), false));
         DeviceTelemetryService service = service(reader);
