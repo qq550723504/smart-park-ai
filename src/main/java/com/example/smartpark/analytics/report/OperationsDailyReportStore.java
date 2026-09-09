@@ -38,6 +38,7 @@ public final class OperationsDailyReportStore {
     private final int maxActiveReports;
     private final int maxReportBytes;
     private final int maxArtifactBytes;
+    private final long maxStateFileBytes;
     private final AtomicReplacer atomicReplacer;
     private final Consumer<UUID> terminalTraceEvictor;
     private final Map<UUID, OperationsDailyReport> reports = new LinkedHashMap<>();
@@ -79,13 +80,24 @@ public final class OperationsDailyReportStore {
                                int maxReportBytes, int maxArtifactBytes,
                                AtomicReplacer atomicReplacer,
                                Consumer<UUID> terminalTraceEvictor) {
+        this(stateFile, mapper, maxRetainedReports, maxActiveReports, maxReportBytes,
+                maxArtifactBytes, atomicReplacer, terminalTraceEvictor, MAX_STATE_FILE_BYTES);
+    }
+
+    OperationsDailyReportStore(Path stateFile, ObjectMapper mapper,
+                               int maxRetainedReports, int maxActiveReports,
+                               int maxReportBytes, int maxArtifactBytes,
+                               AtomicReplacer atomicReplacer,
+                               Consumer<UUID> terminalTraceEvictor,
+                               long maxStateFileBytes) {
         this.stateFile = stateFile.toAbsolutePath().normalize();
         this.mapper = mapper.copy().findAndRegisterModules();
         if (maxRetainedReports < 1) throw new IllegalArgumentException("maxRetainedReports must be positive");
         if (maxActiveReports < 1 || maxActiveReports > maxRetainedReports) {
             throw new IllegalArgumentException("maxActiveReports is invalid");
         }
-        if (maxReportBytes < 4096 || maxReportBytes > MAX_STATE_FILE_BYTES
+        if (maxStateFileBytes < 4096 || maxStateFileBytes > MAX_STATE_FILE_BYTES
+                || maxReportBytes < 4096 || maxReportBytes > maxStateFileBytes
                 || maxArtifactBytes < 1024 || maxArtifactBytes > maxReportBytes) {
             throw new IllegalArgumentException("report byte limits are invalid");
         }
@@ -93,6 +105,7 @@ public final class OperationsDailyReportStore {
         this.maxActiveReports = maxActiveReports;
         this.maxReportBytes = maxReportBytes;
         this.maxArtifactBytes = maxArtifactBytes;
+        this.maxStateFileBytes = maxStateFileBytes;
         this.atomicReplacer = java.util.Objects.requireNonNull(atomicReplacer, "atomicReplacer");
         this.terminalTraceEvictor = java.util.Objects.requireNonNull(terminalTraceEvictor,
                 "terminalTraceEvictor");
@@ -181,7 +194,7 @@ public final class OperationsDailyReportStore {
     private void load() {
         if (!Files.exists(stateFile)) return;
         try {
-            if (Files.size(stateFile) > MAX_STATE_FILE_BYTES) {
+            if (Files.size(stateFile) > maxStateFileBytes) {
                 throw new IllegalStateException("operations report state file exceeds global byte limit");
             }
             LinkedHashMap<UUID, OperationsDailyReport> loaded = new LinkedHashMap<>();
@@ -277,6 +290,10 @@ public final class OperationsDailyReportStore {
                 snapshot.forEach(report -> output.add(mapper.valueToTree(report)));
                 unsupportedRecords.forEach(record -> output.add(record.deepCopy()));
                 mapper.writeValue(temporary.toFile(), output);
+                if (Files.size(temporary) > maxStateFileBytes) {
+                    throw new OperationsReportCapacityException(
+                            "operations report state exceeds the durable file byte limit");
+                }
                 atomicReplacer.replace(temporary, stateFile);
             } finally {
                 Files.deleteIfExists(temporary);

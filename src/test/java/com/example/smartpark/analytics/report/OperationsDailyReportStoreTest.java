@@ -104,6 +104,36 @@ class OperationsDailyReportStoreTest {
     }
 
     @Test
+    void rejectsStateFileThatWouldBeUnreadableOnRestartAndKeepsPriorSnapshot() throws Exception {
+        Path state = temp.resolve("bounded-state.json");
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        OperationsDailyReportStore store = new OperationsDailyReportStore(state, mapper,
+                2, 1, 8192, 1024, (source, target) -> java.nio.file.Files.move(source, target,
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING),
+                ignored -> { }, 9000);
+        OperationsDailyReport first = store.createOrGet("key-1", "fingerprint-1",
+                () -> report("key-1", "fingerprint-1", OperationsReportStatus.COMPLETED).copy(
+                        OperationsReportStatus.COMPLETED, NOW, NOW, NOW, "x".repeat(4000),
+                        List.of(), List.of(), List.of(), null, List.of())).report();
+        long acceptedSize = java.nio.file.Files.size(state);
+
+        assertThatThrownBy(() -> store.createOrGet("key-2", "fingerprint-2",
+                () -> report("key-2", "fingerprint-2", OperationsReportStatus.COMPLETED).copy(
+                        OperationsReportStatus.COMPLETED, NOW, NOW, NOW, "y".repeat(4000),
+                        List.of(), List.of(), List.of(), null, List.of())))
+                .isInstanceOf(OperationsReportCapacityException.class)
+                .hasMessageContaining("durable file byte limit");
+
+        assertThat(java.nio.file.Files.size(state)).isEqualTo(acceptedSize).isLessThanOrEqualTo(9000);
+        assertThat(store.all()).extracting(OperationsDailyReport::reportId).containsExactly(first.reportId());
+        OperationsDailyReportStore restarted = new OperationsDailyReportStore(state, mapper,
+                2, 1, 8192, 1024, (source, target) -> java.nio.file.Files.move(source, target,
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING),
+                ignored -> { }, 9000);
+        assertThat(restarted.all()).extracting(OperationsDailyReport::reportId).containsExactly(first.reportId());
+    }
+
+    @Test
     void atomicReplaceFailureDoesNotPublishNewInMemoryRevision() {
         Path state = temp.resolve("reports.json");
         OperationsDailyReport created = store(state, 2, 1, 64 * 1024, 16 * 1024)
