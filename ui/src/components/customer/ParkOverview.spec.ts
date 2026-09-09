@@ -7,6 +7,7 @@ import { getEnergyTimeSeries } from '../../services/energyTimeSeriesApi'
 import { getOperationsMetrics, listCollaborationWorkItems } from '../../services/workflowApi'
 import type { EnergyTimeSeriesResponse } from '../../types/energyTimeSeries'
 import type { AnomalyEvidence, AnomalyOverview } from '../../types/operationsAnomaly'
+import type { CollaborationWorkItem } from '../../types/collaborationCenter'
 import type { CustomerChartDatum } from './CustomerOverviewChart.vue'
 
 vi.mock('../../services/operationsAnomalyApi', () => ({
@@ -61,6 +62,22 @@ const evidence: AnomalyEvidence = {
   energy: [],
   domainStatus: { alerts: 'OK', devices: 'OK', energy: 'OK' },
 }
+const activeWorkItem: CollaborationWorkItem = {
+  id: 'ALERT_WORKFLOW:wf-1',
+  source: 'ALERT_WORKFLOW',
+  status: 'WAITING_APPROVAL',
+  priority: 'HIGH',
+  title: 'B2 能耗异常待确认',
+  safeSummary: '等待人工确认',
+  parkId: 'PARK-1',
+  buildingId: 'B2',
+  deviceId: 'DEV-1',
+  updatedAt: '2026-09-08T22:00:00Z',
+  openedAt: '2026-09-08T21:00:00Z',
+  slaDueAt: '2026-09-09T02:00:00Z',
+  slaState: 'DUE_SOON',
+  detailPath: 'workflow',
+}
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -104,22 +121,7 @@ beforeEach(() => {
     knowledgeDocumentCount: 4,
     activeKnowledgeDocumentCount: 4,
   })
-  vi.mocked(listCollaborationWorkItems).mockResolvedValue([{
-    id: 'ALERT_WORKFLOW:wf-1',
-    source: 'ALERT_WORKFLOW',
-    status: 'WAITING_APPROVAL',
-    priority: 'HIGH',
-    title: 'B2 能耗异常待确认',
-    safeSummary: '等待人工确认',
-    parkId: 'PARK-1',
-    buildingId: 'B2',
-    deviceId: 'DEV-1',
-    updatedAt: '2026-09-08T22:00:00Z',
-    openedAt: '2026-09-08T21:00:00Z',
-    slaDueAt: '2026-09-09T02:00:00Z',
-    slaState: 'DUE_SOON',
-    detailPath: 'workflow',
-  }])
+  vi.mocked(listCollaborationWorkItems).mockResolvedValue([activeWorkItem])
 })
 
 afterEach(() => vi.resetAllMocks())
@@ -140,7 +142,67 @@ describe('ParkOverview', () => {
       to: '2026-09-09T00:00:00.000Z',
       granularity: 'HOUR',
     })
-    expect(listCollaborationWorkItems).toHaveBeenCalledWith('CUSTOMER_AGENT', { limit: 4, sort: 'sla' })
+    expect(listCollaborationWorkItems).toHaveBeenCalledWith('CUSTOMER_AGENT', { limit: 50, sort: 'sla' })
+  })
+
+  it('renders overview and energy while an independent work-item request is still pending', async () => {
+    const pendingWorkItems = deferred<CollaborationWorkItem[]>()
+    vi.mocked(listCollaborationWorkItems).mockReturnValue(pendingWorkItems.promise)
+
+    const wrapper = mount(ParkOverview, { global: { stubs: { CustomerOverviewChart: chartStub } } })
+    await vi.waitFor(() => expect(getAnomalyEvidence).toHaveBeenCalled())
+
+    expect(wrapper.get('[data-kpi="energy"] strong').text()).toContain('100')
+    expect(wrapper.text()).toContain('正在读取待办…')
+
+    pendingWorkItems.resolve([activeWorkItem])
+    await flushPromises()
+    expect(wrapper.text()).toContain(activeWorkItem.title)
+  })
+
+  it('filters terminal work items before selecting the first four actionable todos', async () => {
+    vi.mocked(listCollaborationWorkItems).mockResolvedValue([
+      { ...activeWorkItem, id: 'done', status: 'COMPLETED', title: '已完成事项' },
+      { ...activeWorkItem, id: 'closed', status: 'CLOSED', title: '已关闭事项' },
+      { ...activeWorkItem, id: 'cancelled', status: 'CANCELLED', title: '已取消事项' },
+      { ...activeWorkItem, id: 'active-1', title: '仍需处理事项' },
+    ])
+
+    const wrapper = await mountLoaded()
+
+    expect(wrapper.text()).toContain('仍需处理事项')
+    expect(wrapper.text()).not.toContain('已完成事项')
+    expect(wrapper.text()).not.toContain('已关闭事项')
+    expect(wrapper.text()).not.toContain('已取消事项')
+  })
+
+  it('combines alert, device, and energy evidence in timestamp order', async () => {
+    vi.mocked(getAnomalyEvidence).mockResolvedValue({
+      ...evidence,
+      alerts: [{ ...evidence.alerts[0]!, occurredAt: '2026-09-08T20:00:00Z', redactedSummary: '告警证据' }],
+      devices: [{ deviceId: 'DEV-2', snapshotAt: '2026-09-08T23:00:00Z', redactedSummary: '设备证据' }],
+      energy: [{ meterId: 'METER-1', measuredAt: '2026-09-08T22:00:00Z', redactedSummary: '能耗证据' }],
+    })
+
+    const wrapper = await mountLoaded()
+    const rows = wrapper.findAll('.customer-latest__row strong').map((row) => row.text())
+
+    expect(rows).toEqual(['设备证据', '能耗证据', '告警证据'])
+  })
+
+  it('does not describe a zero energy deviation as a deviation', async () => {
+    vi.mocked(getAnomalyOverview).mockResolvedValue({
+      ...overview,
+      buildings: [
+        { buildingId: 'B1', alertCount: 1, highRiskAlertCount: 0, offlineDeviceCount: 0, energyDeviationPct: 0 },
+      ],
+    })
+
+    const wrapper = await mountLoaded()
+    const title = wrapper.get('[data-building-id="B1"] strong').text()
+
+    expect(title).toBe('创新中心存在待关注告警')
+    expect(title).not.toContain('能耗偏离基线')
   })
 
   it('uses one building id for map selection and evidence loading', async () => {

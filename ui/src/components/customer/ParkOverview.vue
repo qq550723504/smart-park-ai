@@ -21,10 +21,22 @@ const workItems = ref<CollaborationWorkItem[]>([])
 const evidence = ref<AnomalyEvidence | null>(null)
 const selectedBuildingId = ref<string | null>(null)
 const loading = ref(false)
+const metricsLoading = ref(false)
+const workItemsLoading = ref(false)
 const detailLoading = ref(false)
 const errors = ref({ overview: '', energy: '', metrics: '', workItems: '', evidence: '' })
 let requestGeneration = 0
 let evidenceGeneration = 0
+
+const terminalWorkItemStatuses = new Set<CollaborationWorkItem['status']>([
+  'COMPLETED',
+  'REJECTED',
+  'FAILED',
+  'WORK_ORDER_FAILED',
+  'RESOLVED',
+  'CLOSED',
+  'CANCELLED',
+])
 
 const buildingCatalog: Record<string, { name: string; position: { left: string; top: string } }> = {
   B1: { name: '创新中心', position: { left: '30%', top: '65%' } },
@@ -89,23 +101,55 @@ async function selectBuilding(buildingId: string): Promise<void> {
   await loadEvidence(buildingId)
 }
 
+async function loadMetrics(generation: number): Promise<void> {
+  metricsLoading.value = true
+  try {
+    const nextMetrics = await getOperationsMetrics()
+    if (generation !== requestGeneration) return
+    metrics.value = nextMetrics
+  } catch {
+    if (generation !== requestGeneration) return
+    errors.value.metrics = '服务请求统计暂不可用。'
+  } finally {
+    if (generation === requestGeneration) metricsLoading.value = false
+  }
+}
+
+async function loadWorkItems(generation: number): Promise<void> {
+  workItemsLoading.value = true
+  try {
+    const nextWorkItems = await listCollaborationWorkItems('CUSTOMER_AGENT', { limit: 50, sort: 'sla' })
+    if (generation !== requestGeneration) return
+    workItems.value = nextWorkItems
+      .filter((item) => !terminalWorkItemStatuses.has(item.status))
+      .slice(0, 4)
+  } catch {
+    if (generation !== requestGeneration) return
+    errors.value.workItems = '我的待办暂不可用。'
+  } finally {
+    if (generation === requestGeneration) workItemsLoading.value = false
+  }
+}
+
 async function refresh(): Promise<void> {
   if (!props.active) return
   const generation = ++requestGeneration
   evidenceGeneration++
   loading.value = true
+  metricsLoading.value = true
+  workItemsLoading.value = true
   detailLoading.value = false
+  metrics.value = null
+  workItems.value = []
   evidence.value = null
   errors.value = { overview: '', energy: '', metrics: '', workItems: '', evidence: '' }
-  const [overviewResult, metricsResult, workItemsResult] = await Promise.allSettled([
-    getAnomalyOverview('VIEWER'),
-    getOperationsMetrics(),
-    listCollaborationWorkItems('CUSTOMER_AGENT', { limit: 4, sort: 'sla' }),
-  ])
-  if (generation !== requestGeneration) return
+  void loadMetrics(generation)
+  void loadWorkItems(generation)
 
-  if (overviewResult.status === 'fulfilled') {
-    overview.value = overviewResult.value
+  try {
+    const nextOverview = await getAnomalyOverview('VIEWER')
+    if (generation !== requestGeneration) return
+    overview.value = nextOverview
     const ids = overview.value.buildings.map((building) => building.buildingId)
     selectedBuildingId.value = selectedBuildingId.value && ids.includes(selectedBuildingId.value)
       ? selectedBuildingId.value
@@ -137,25 +181,16 @@ async function refresh(): Promise<void> {
       energy.value = null
       evidence.value = null
     }
-  } else {
+  } catch {
+    if (generation !== requestGeneration) return
     overview.value = null
     energy.value = null
     selectedBuildingId.value = null
     evidence.value = null
     errors.value.overview = '园区运营总览暂不可用。'
+  } finally {
+    if (generation === requestGeneration) loading.value = false
   }
-
-  if (metricsResult.status === 'fulfilled') metrics.value = metricsResult.value
-  else {
-    metrics.value = null
-    errors.value.metrics = '服务请求统计暂不可用。'
-  }
-  if (workItemsResult.status === 'fulfilled') workItems.value = workItemsResult.value
-  else {
-    workItems.value = []
-    errors.value.workItems = '我的待办暂不可用。'
-  }
-  if (generation === requestGeneration) loading.value = false
 }
 
 const energyTotal = computed(() => energy.value?.status === 'UNAVAILABLE'
@@ -205,12 +240,19 @@ const energyDistribution = computed<CustomerChartDatum[]>(() => energy.value?.se
 const eventDistribution = computed<CustomerChartDatum[]>(() => domainUsable('alerts')
   ? (overview.value?.breakdowns.categories ?? []).map((item) => ({ name: item.key, value: item.count }))
   : [])
-const latestEvents = computed(() => (evidence.value?.alerts ?? []).slice(0, 5))
+const latestEvents = computed(() => [
+  ...(evidence.value?.alerts ?? []),
+  ...(evidence.value?.devices ?? []),
+  ...(evidence.value?.energy ?? []),
+]
+  .sort((left, right) => recordTimestamp(right) - recordTimestamp(left))
+  .slice(0, 5))
 
 function attentionTitle(building: AnomalyBuildingSummary): string {
   if (domainUsable('alerts') && building.highRiskAlertCount > 0) return `${buildingName(building.buildingId)}存在高风险告警`
   if (domainUsable('devices') && building.offlineDeviceCount > 0) return `${buildingName(building.buildingId)}有离线设备`
-  if (domainUsable('energy') && building.energyDeviationPct != null) return `${buildingName(building.buildingId)}能耗偏离基线`
+  if (domainUsable('energy') && building.energyDeviationPct != null && Math.abs(building.energyDeviationPct) > 0) return `${buildingName(building.buildingId)}能耗偏离基线`
+  if (domainUsable('alerts') && building.alertCount > 0) return `${buildingName(building.buildingId)}存在待关注告警`
   return `${buildingName(building.buildingId)}需要运营关注`
 }
 
@@ -243,7 +285,22 @@ function attentionSignal(building: AnomalyBuildingSummary): { label: string; cla
 }
 
 function recordText(record: Record<string, unknown>): string {
-  return typeof record.redactedSummary === 'string' ? record.redactedSummary : '已取得一条安全摘要'
+  if (typeof record.redactedSummary === 'string') return record.redactedSummary
+  if (typeof record.alertId === 'string') return `告警 ${String(record.category ?? '类别未知')} · ${String(record.status ?? '状态未知')}`
+  if (typeof record.deviceId === 'string') return `${String(record.deviceType ?? '设备')} · ${String(record.status ?? '状态未知')}`
+  if (typeof record.meterId === 'string') {
+    return typeof record.deviationPct === 'number'
+      ? `能耗观测 · 基线偏差 ${formatNumber(record.deviationPct)}%`
+      : '已取得能耗观测'
+  }
+  return '已取得一条安全摘要'
+}
+
+function recordTimestamp(record: Record<string, unknown>): number {
+  const value = record.occurredAt ?? record.snapshotAt ?? record.measuredAt
+  if (typeof value !== 'string') return 0
+  const timestamp = Date.parse(value)
+  return Number.isFinite(timestamp) ? timestamp : 0
 }
 
 function recordTime(record: Record<string, unknown>): string {
@@ -259,6 +316,8 @@ watch(() => props.active, (active) => {
     requestGeneration++
     evidenceGeneration++
     loading.value = false
+    metricsLoading.value = false
+    workItemsLoading.value = false
     detailLoading.value = false
   }
 }, { immediate: true })
@@ -281,7 +340,7 @@ watch(() => props.active, (active) => {
       </article>
       <article class="customer-card customer-kpi" data-kpi="service-requests">
         <span class="customer-kpi__icon is-violet"><Service aria-hidden="true" /></span>
-        <div><p>人工服务请求</p><strong>{{ formatNumber(metrics?.humanTicketCount, 0) }} <small>件</small></strong><span>{{ errors.metrics || '当前运行实例累计' }}</span></div>
+        <div><p>人工服务请求</p><strong>{{ formatNumber(metrics?.humanTicketCount, 0) }} <small>件</small></strong><span>{{ metricsLoading ? '正在读取运营指标…' : errors.metrics || '当前运行实例累计' }}</span></div>
       </article>
       <article class="customer-eco-card" :style="{ backgroundImage: `url(${ecoOperations})` }">
         <strong>绿色低碳　智慧运营</strong>
@@ -343,9 +402,9 @@ watch(() => props.active, (active) => {
         <article class="customer-card customer-todos">
           <header><h2><Checked aria-hidden="true" /> 我的待办</h2><small>只读队列</small></header>
           <p v-if="errors.workItems" class="customer-state is-compact">{{ errors.workItems }}</p>
-          <p v-else-if="loading" class="customer-state is-compact">正在读取待办…</p>
+          <p v-else-if="workItemsLoading" class="customer-state is-compact">正在读取待办…</p>
           <p v-else-if="workItems.length === 0" class="customer-state is-compact">当前队列暂无待办</p>
-          <div v-for="item in workItems.slice(0, 4)" :key="item.id" class="customer-todos__item">
+          <div v-for="item in workItems" :key="item.id" class="customer-todos__item">
             <span></span><div><strong>{{ item.title }}</strong><small>{{ locationLabel(item) }} · {{ item.status }}</small></div><time>{{ formatTime(item.slaDueAt ?? item.updatedAt, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }}</time>
           </div>
         </article>
@@ -378,7 +437,7 @@ watch(() => props.active, (active) => {
         <p v-if="detailLoading" class="customer-state is-compact">正在读取楼宇事件…</p>
         <p v-else-if="errors.evidence" class="customer-state is-compact">{{ errors.evidence }}</p>
         <p v-else-if="latestEvents.length === 0" class="customer-state is-compact">当前楼宇暂无事件记录</p>
-        <div v-for="(event, index) in latestEvents" :key="String(event.alertId ?? index)" class="customer-latest__row">
+        <div v-for="(event, index) in latestEvents" :key="String(event.alertId ?? event.deviceId ?? event.meterId ?? index)" class="customer-latest__row">
           <span><WarningFilled v-if="event.riskLevel === 'HIGH'" aria-hidden="true" /><DataLine v-else aria-hidden="true" /></span>
           <strong>{{ recordText(event) }}</strong>
           <time>{{ recordTime(event) }}</time>
