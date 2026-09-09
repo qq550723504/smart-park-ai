@@ -3,7 +3,6 @@ package com.example.smartpark.analytics.report;
 import com.example.smartpark.execution.ExecutionEventArchive;
 import com.example.smartpark.execution.ExecutionEventPublisher;
 import com.example.smartpark.execution.model.ExecutionEvent;
-import com.example.smartpark.execution.model.ExecutionScenario;
 
 import java.util.List;
 import java.util.Locale;
@@ -28,9 +27,7 @@ public final class OperationsReportTraceArchive implements ExecutionEventArchive
     @Override
     public List<ExecutionEvent> history(UUID runId) {
         return store.findByRunId(runId).map(report -> report.traceEvents().stream()
-                .map(trace -> new ExecutionEvent(trace.eventId(), report.traceId(), trace.sequence(),
-                        trace.timestamp(), ExecutionScenario.OPERATIONS_ANALYSIS, trace.actor(), trace.stage(),
-                        trace.eventType(), trace.status(), trace.safeSummary(), null))
+                .map(trace -> trace.toExecutionEvent(report.traceId()))
                 .toList()).orElseGet(List::of);
     }
 

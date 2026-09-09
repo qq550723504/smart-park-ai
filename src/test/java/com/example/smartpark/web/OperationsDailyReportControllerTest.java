@@ -98,6 +98,19 @@ class OperationsDailyReportControllerTest {
     }
 
     @Test
+    void rejectsMalformedTimeWindowAsClientValidationError() throws Exception {
+        mockMvc.perform(post("/api/operations-reports")
+                        .header("X-Demo-Role", "OPERATOR").header("Idempotency-Key", "bad-time")
+                        .contentType(MediaType.APPLICATION_JSON).content("""
+                                {"reportType":"OPERATIONS_DAILY","timeWindow":{
+                                  "fromInclusive":"not-an-instant","toExclusive":"2026-09-09T02:00:00Z"},
+                                  "timezone":"Asia/Shanghai"}
+                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Invalid request"));
+    }
+
+    @Test
     void downloadRejectsUnknownNotReadyUnauthorizedAndArtifactGuessing() throws Exception {
         UUID unknown = UUID.randomUUID();
         UUID notReady = UUID.randomUUID();

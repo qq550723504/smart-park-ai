@@ -25,7 +25,14 @@ public class OperationsReportConfiguration {
             ExecutionEventPublisher publisher) {
         return new OperationsDailyReportStore(Path.of(stateFile), new ObjectMapper().findAndRegisterModules(),
                 maxRetainedReports, maxActiveReports, maxReportBytes, maxArtifactBytes,
-                publisher::remove);
+                report -> {
+                    var durableHistory = report.traceEvents().stream()
+                            .map(trace -> trace.toExecutionEvent(report.traceId())).toList();
+                    if (!durableHistory.isEmpty()) {
+                        publisher.reconcileTerminalHistory(report.traceId(), durableHistory);
+                    }
+                    publisher.remove(report.traceId());
+                });
     }
 
     @Bean

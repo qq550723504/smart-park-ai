@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
@@ -120,9 +121,17 @@ public class OperationsDailyReportController {
             throw new IllegalArgumentException("incomplete timeWindow");
         }
         OperationsReportRequest.TimeWindow window = new OperationsReportRequest.TimeWindow(
-                Instant.parse(text(raw.get("fromInclusive"), "fromInclusive")),
-                Instant.parse(text(raw.get("toExclusive"), "toExclusive")));
+                instant(raw.get("fromInclusive"), "fromInclusive"),
+                instant(raw.get("toExclusive"), "toExclusive"));
         return new OperationsReportRequest(reportType, window, timezone);
+    }
+
+    private static Instant instant(Object value, String field) {
+        try {
+            return Instant.parse(text(value, field));
+        } catch (DateTimeParseException failure) {
+            throw new IllegalArgumentException(field + " is invalid", failure);
+        }
     }
 
     private static String text(Object value, String field) {

@@ -73,7 +73,7 @@ class OperationsDailyReportStoreTest {
         InMemoryExecutionEventPublisher publisher = new InMemoryExecutionEventPublisher();
         OperationsDailyReportStore store = new OperationsDailyReportStore(temp.resolve("reports.json"),
                 new ObjectMapper().findAndRegisterModules(), 2, 1, 64 * 1024, 16 * 1024,
-                traceId -> publisher.remove(traceId));
+                report -> publisher.remove(report.traceId()));
         OperationsDailyReport oldest = store.createOrGet("key-1", "fingerprint-1",
                 () -> report("key-1", "fingerprint-1", OperationsReportStatus.COMPLETED)).report();
         publisher.publish(new ExecutionEvent(UUID.randomUUID(), oldest.traceId(), 0, NOW,
@@ -87,6 +87,53 @@ class OperationsDailyReportStoreTest {
         assertThat(store.find(oldest.reportId())).isEmpty();
         assertThat(store.all()).extracting(OperationsDailyReport::reportId)
                 .containsExactly(second.reportId(), newest.reportId());
+        assertThat(publisher.history(oldest.traceId())).isEmpty();
+    }
+
+    @Test
+    void traceCleanupFailureCannotPartiallyFailCommittedAdmission() {
+        OperationsDailyReportStore store = new OperationsDailyReportStore(temp.resolve("reports.json"),
+                new ObjectMapper().findAndRegisterModules(), 1, 1, 64 * 1024, 16 * 1024,
+                report -> { throw new IllegalStateException("projection is still active"); });
+        OperationsDailyReport oldest = store.createOrGet("key-1", "fingerprint-1",
+                () -> report("key-1", "fingerprint-1", OperationsReportStatus.COMPLETED)).report();
+
+        OperationsDailyReport admitted = store.createOrGet("key-2", "fingerprint-2",
+                () -> report("key-2", "fingerprint-2", OperationsReportStatus.REQUESTED)).report();
+
+        assertThat(store.find(oldest.reportId())).isEmpty();
+        assertThat(store.all()).extracting(OperationsDailyReport::reportId).containsExactly(admitted.reportId());
+    }
+
+    @Test
+    void evictionReconcilesDurableTerminalTraceBeforeRemovingActiveProjection() {
+        InMemoryExecutionEventPublisher publisher = new InMemoryExecutionEventPublisher();
+        OperationsDailyReportStore store = new OperationsDailyReportStore(temp.resolve("reports.json"),
+                new ObjectMapper().findAndRegisterModules(), 1, 1, 64 * 1024, 16 * 1024,
+                report -> {
+                    List<ExecutionEvent> durable = report.traceEvents().stream()
+                            .map(trace -> trace.toExecutionEvent(report.traceId())).toList();
+                    publisher.reconcileTerminalHistory(report.traceId(), durable);
+                    publisher.remove(report.traceId());
+                });
+        OperationsReportTraceRecord started = new OperationsReportTraceRecord(UUID.randomUUID(), 1, NOW,
+                "operations-report", ExecutionStage.INITIALIZATION, ExecutionEventType.RUN_STARTED,
+                ExecutionStatus.RUNNING, "started");
+        OperationsReportTraceRecord completed = new OperationsReportTraceRecord(UUID.randomUUID(), 2, NOW,
+                "operations-report", ExecutionStage.COMPLETION, ExecutionEventType.RUN_COMPLETED,
+                ExecutionStatus.SUCCEEDED, "completed");
+        OperationsDailyReport oldest = store.createOrGet("key-1", "fingerprint-1", () -> {
+            OperationsDailyReport base = report("key-1", "fingerprint-1", OperationsReportStatus.COMPLETED);
+            return base.copy(base.status(), base.startedAt(), base.completedAt(), base.asOf(), base.summary(),
+                    base.sections(), base.evidence(), base.sourceReferences(), base.artifact(),
+                    List.of(started, completed));
+        }).report();
+        publisher.publish(started.toExecutionEvent(oldest.traceId()));
+
+        OperationsDailyReport admitted = store.createOrGet("key-2", "fingerprint-2",
+                () -> report("key-2", "fingerprint-2", OperationsReportStatus.REQUESTED)).report();
+
+        assertThat(store.all()).extracting(OperationsDailyReport::reportId).containsExactly(admitted.reportId());
         assertThat(publisher.history(oldest.traceId())).isEmpty();
     }
 

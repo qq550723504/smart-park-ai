@@ -26,6 +26,8 @@ import java.util.function.UnaryOperator;
 
 /** Bounded atomic file store for structured report snapshots and embedded Markdown artifacts. */
 public final class OperationsDailyReportStore {
+    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(
+            OperationsDailyReportStore.class);
     public static final int DEFAULT_MAX_RETAINED_REPORTS = 200;
     public static final int DEFAULT_MAX_ACTIVE_REPORTS = 1;
     public static final int DEFAULT_MAX_REPORT_BYTES = 512 * 1024;
@@ -40,7 +42,7 @@ public final class OperationsDailyReportStore {
     private final int maxArtifactBytes;
     private final long maxStateFileBytes;
     private final AtomicReplacer atomicReplacer;
-    private final Consumer<UUID> terminalTraceEvictor;
+    private final Consumer<OperationsDailyReport> terminalTraceEvictor;
     private final Map<UUID, OperationsDailyReport> reports = new LinkedHashMap<>();
     private final Map<String, UUID> idempotencyIndex = new LinkedHashMap<>();
     /** Future/older schema records are retained verbatim but deliberately not exposed. */
@@ -70,7 +72,7 @@ public final class OperationsDailyReportStore {
     OperationsDailyReportStore(Path stateFile, ObjectMapper mapper,
                                int maxRetainedReports, int maxActiveReports,
                                int maxReportBytes, int maxArtifactBytes,
-                               Consumer<UUID> terminalTraceEvictor) {
+                               Consumer<OperationsDailyReport> terminalTraceEvictor) {
         this(stateFile, mapper, maxRetainedReports, maxActiveReports, maxReportBytes,
                 maxArtifactBytes, OperationsDailyReportStore::atomicReplace, terminalTraceEvictor);
     }
@@ -79,7 +81,7 @@ public final class OperationsDailyReportStore {
                                int maxRetainedReports, int maxActiveReports,
                                int maxReportBytes, int maxArtifactBytes,
                                AtomicReplacer atomicReplacer,
-                               Consumer<UUID> terminalTraceEvictor) {
+                               Consumer<OperationsDailyReport> terminalTraceEvictor) {
         this(stateFile, mapper, maxRetainedReports, maxActiveReports, maxReportBytes,
                 maxArtifactBytes, atomicReplacer, terminalTraceEvictor, MAX_STATE_FILE_BYTES);
     }
@@ -88,7 +90,7 @@ public final class OperationsDailyReportStore {
                                int maxRetainedReports, int maxActiveReports,
                                int maxReportBytes, int maxArtifactBytes,
                                AtomicReplacer atomicReplacer,
-                               Consumer<UUID> terminalTraceEvictor,
+                               Consumer<OperationsDailyReport> terminalTraceEvictor,
                                long maxStateFileBytes) {
         this.stateFile = stateFile.toAbsolutePath().normalize();
         this.mapper = mapper.copy().findAndRegisterModules();
@@ -135,9 +137,8 @@ public final class OperationsDailyReportStore {
             throw new OperationsReportCapacityException("operations report retained capacity is exhausted");
         }
         LinkedHashMap<UUID, OperationsDailyReport> next = compact(supportedTarget);
-        List<UUID> evictedTraceIds = reports.values().stream()
+        List<OperationsDailyReport> evictedReports = reports.values().stream()
                 .filter(report -> !next.containsKey(report.reportId()))
-                .map(OperationsDailyReport::traceId)
                 .toList();
         if (next.size() + unsupportedRecords.size() >= maxRetainedReports) {
             throw new OperationsReportCapacityException("operations report retained capacity is exhausted");
@@ -149,10 +150,19 @@ public final class OperationsDailyReportStore {
         next.put(created.reportId(), created);
         persist(next.values());
         replaceState(next);
-        // Keep the live execution projection aligned with the durable authorization
-        // source before another request can observe the evicted report.
-        evictedTraceIds.forEach(terminalTraceEvictor);
+        // The durable report store is authoritative. Projection cleanup happens only
+        // after that commit and must never turn a successful admission into a partial failure.
+        evictedReports.forEach(this::evictTerminalTrace);
         return new StartResult(created, true);
+    }
+
+    private void evictTerminalTrace(OperationsDailyReport report) {
+        try {
+            terminalTraceEvictor.accept(report);
+        } catch (RuntimeException failure) {
+            LOGGER.warn("Operations report trace cleanup deferred: exceptionType={}",
+                    failure.getClass().getName());
+        }
     }
 
     public synchronized Optional<OperationsDailyReport> find(UUID reportId) {

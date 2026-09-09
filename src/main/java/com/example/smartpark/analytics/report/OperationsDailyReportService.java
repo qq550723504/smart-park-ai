@@ -4,7 +4,6 @@ import com.example.smartpark.analytics.AnalysisRunStore;
 import com.example.smartpark.execution.ExecutionEventPublisher;
 import com.example.smartpark.execution.model.ExecutionEvent;
 import com.example.smartpark.execution.model.ExecutionEventType;
-import com.example.smartpark.execution.model.ExecutionScenario;
 import com.example.smartpark.execution.model.ExecutionStage;
 import com.example.smartpark.execution.model.ExecutionStatus;
 
@@ -430,9 +429,7 @@ public final class OperationsDailyReportService {
     }
 
     private static ExecutionEvent projection(OperationsDailyReport report, OperationsReportTraceRecord trace) {
-        return new ExecutionEvent(trace.eventId(), report.traceId(), trace.sequence(), trace.timestamp(),
-                ExecutionScenario.OPERATIONS_ANALYSIS, trace.actor(), trace.stage(), trace.eventType(),
-                trace.status(), trace.safeSummary(), null);
+        return trace.toExecutionEvent(report.traceId());
     }
 
     private List<OperationsReportTraceRecord> append(List<OperationsReportTraceRecord> current,
