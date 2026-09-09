@@ -180,6 +180,21 @@ describe('ParkOverview', () => {
     expect(wrapper.get('[data-kpi="energy"] strong').text()).toContain('100')
   })
 
+  it('shows an explicit unavailable state for a valid unavailable energy response', async () => {
+    vi.mocked(getEnergyTimeSeries).mockResolvedValue({
+      ...energy,
+      status: 'UNAVAILABLE',
+      series: [],
+      source: { ...energy.source, status: 'UNAVAILABLE' },
+    })
+
+    const wrapper = await mountLoaded()
+
+    expect(wrapper.get('[data-kpi="energy"] strong').text()).toContain('—')
+    expect(wrapper.get('[data-kpi="energy"]').text()).toContain('最近 24 小时能耗数据源暂不可用')
+    expect(wrapper.text()).not.toContain('当前窗口暂无可绘制的能耗观测')
+  })
+
   it('hides the previous overview while a refreshed overview request is pending', async () => {
     const wrapper = await mountLoaded()
     expect(wrapper.get('[data-kpi="buildings"] strong').text()).toContain('2')
@@ -336,6 +351,21 @@ describe('ParkOverview', () => {
     expect(wrapper.get('[data-building-marker="B2"]').attributes('aria-pressed')).toBe('true')
     expect(wrapper.text()).toContain('B2 · 研发大厦')
     expect(getAnomalyEvidence).toHaveBeenLastCalledWith('VIEWER', 'B2', { from: windowRange.from, to: windowRange.to })
+  })
+
+  it('preserves an explicitly selected catalog building across reactivation', async () => {
+    const wrapper = await mountLoaded()
+    vi.mocked(getAnomalyEvidence).mockResolvedValue({ ...evidence, buildingId: 'B3', alerts: [] })
+
+    await wrapper.get('[data-building-marker="B3"]').trigger('click')
+    await flushPromises()
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+    await flushPromises()
+
+    expect(wrapper.get('[data-building-marker="B3"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.text()).toContain('B3 · 运营中心')
+    expect(getAnomalyEvidence).toHaveBeenLastCalledWith('VIEWER', 'B3', { from: windowRange.from, to: windowRange.to })
   })
 
   it('derives attention badges and map state from each building signal', async () => {

@@ -20,6 +20,7 @@ const metrics = ref<OperationsMetrics | null>(null)
 const workItems = ref<CollaborationWorkItem[]>([])
 const evidence = ref<AnomalyEvidence | null>(null)
 const selectedBuildingId = ref<string | null>(null)
+const selectionWasExplicit = ref(false)
 const loading = ref(false)
 const energyLoading = ref(false)
 const metricsLoading = ref(false)
@@ -99,6 +100,7 @@ async function loadEvidence(buildingId: string, currentGeneration = requestGener
 
 async function selectBuilding(buildingId: string): Promise<void> {
   selectedBuildingId.value = buildingId
+  selectionWasExplicit.value = true
   await loadEvidence(buildingId)
 }
 
@@ -136,6 +138,7 @@ async function refresh(): Promise<void> {
   if (!props.active) return
   const generation = ++requestGeneration
   const preferredBuildingId = selectedBuildingId.value
+  const preserveSelection = selectionWasExplicit.value
   evidenceGeneration++
   loading.value = true
   energyLoading.value = false
@@ -158,9 +161,10 @@ async function refresh(): Promise<void> {
     overview.value = nextOverview
     const ids = Object.keys(buildingCatalog)
     const affectedIds = overview.value.buildings.map((building) => building.buildingId)
-    selectedBuildingId.value = preferredBuildingId && affectedIds.includes(preferredBuildingId)
+    selectedBuildingId.value = preserveSelection && preferredBuildingId && ids.includes(preferredBuildingId)
       ? preferredBuildingId
       : affectedIds[0] ?? null
+    selectionWasExplicit.value = Boolean(preserveSelection && preferredBuildingId && ids.includes(preferredBuildingId))
     if (selectedBuildingId.value) void loadEvidence(selectedBuildingId.value, generation)
     if (ids.length > 0) {
       const window = last24Hours(overview.value.window)
@@ -173,7 +177,10 @@ async function refresh(): Promise<void> {
             to: window.to,
             granularity: 'HOUR',
           })
-          if (generation === requestGeneration) energy.value = nextEnergy
+          if (generation === requestGeneration) {
+            energy.value = nextEnergy
+            if (nextEnergy.status === 'UNAVAILABLE') errors.value.energy = '最近 24 小时能耗数据源暂不可用。'
+          }
         } catch {
           if (generation === requestGeneration) {
             energy.value = null

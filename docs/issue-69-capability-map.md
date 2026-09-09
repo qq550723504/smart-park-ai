@@ -4,7 +4,7 @@
 
 | 展示字段或动作 | 当前来源 | 展示约束 |
 | --- | --- | --- |
-| 最近 24 小时园区能耗、趋势、楼宇分布 | `GET /api/operations/energy-time-series` | 按现有 B1/B2/B3 园区目录查询完整园区，而不是使用异常接口的受影响楼宇清单；`PARTIAL` 明示部分观测；缺失时段保留断点，不补零。 |
+| 最近 24 小时园区能耗、趋势、楼宇分布 | `GET /api/operations/energy-time-series` | 按现有 B1/B2/B3 园区目录查询完整园区，而不是使用异常接口的受影响楼宇清单；`PARTIAL` 明示部分观测，`UNAVAILABLE` 明示数据源不可用；缺失时段保留断点，不补零。 |
 | 受影响楼宇 | `GET /api/operations/anomaly-overview` 的 `affectedBuildingCount` | 任一数据域为 `PARTIAL` / `UNAVAILABLE` 时明示“部分数据域可用”。 |
 | 待处理事件 | `anomaly-overview.breakdowns.statuses[OPEN]` | 不使用总告警数冒充待处理数。 |
 | 人工服务请求 | `GET /api/operations/metrics` 的 `humanTicketCount` | 表示当前运行实例累计，不外推为生产规模；该数据域独立加载，不阻塞园区总览。 |
