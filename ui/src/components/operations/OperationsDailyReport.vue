@@ -15,9 +15,9 @@ function start(): void { void state.start(props.role) }
 function open(reportId: string): void { void state.open(reportId, props.role) }
 function download(reportId: string): void { void state.download(reportId, props.role) }
 function loadMore(): void { void state.loadHistory(props.role, true) }
-function format(value: string | null | undefined): string {
+function format(value: string | null | undefined, timezone: string): string {
   if (!value) return '—'
-  return new Date(value).toLocaleString('zh-CN', { hour12: false })
+  return new Date(value).toLocaleString('zh-CN', { hour12: false, timeZone: timezone })
 }
 function resolution(value: OperationsReportTimeResolution | Record<string, never>): OperationsReportTimeResolution | null {
   return 'status' in value ? value as OperationsReportTimeResolution : null
@@ -56,7 +56,7 @@ watch(() => props.active, (active) => {
       <div class="operations-report__history-title"><strong>最近报告</strong><span>{{ state.historyLoading.value ? '加载中…' : `${state.reports.value.length} 份` }}</span></div>
       <p v-if="!state.historyLoading.value && state.reports.value.length === 0" class="operations-report__empty">暂无历史报告。</p>
       <article v-for="item in state.reports.value" :key="item.reportId" class="operations-report__history-row" :data-status="item.status">
-        <span>{{ format(item.createdAt) }}</span><strong>{{ statusLabels[item.status] }}</strong>
+        <span>{{ format(item.createdAt, item.timezone) }}</span><strong>{{ statusLabels[item.status] }}</strong>
         <button type="button" @click="open(item.reportId)">查看</button>
         <button type="button" :disabled="!item.downloadAvailable" @click="download(item.reportId)">下载</button>
       </article>
@@ -68,9 +68,9 @@ watch(() => props.active, (active) => {
     <div v-if="state.report.value" class="operations-report__body" data-testid="report-body">
       <div class="operations-report__status"><span>报告状态</span><strong>{{ statusLabels[state.report.value.status] }}</strong></div>
       <dl class="operations-report__metadata">
-        <div><dt>生成时间</dt><dd>{{ format(state.report.value.completedAt ?? state.report.value.createdAt) }}</dd></div>
-        <div><dt>数据窗口</dt><dd>{{ format(state.report.value.timeWindow.fromInclusive) }} — {{ format(state.report.value.timeWindow.toExclusive) }}</dd></div>
-        <div><dt>Source As Of</dt><dd>{{ format(state.report.value.asOf) }}</dd></div>
+        <div><dt>生成时间</dt><dd>{{ format(state.report.value.completedAt ?? state.report.value.createdAt, state.report.value.timezone) }}</dd></div>
+        <div><dt>数据窗口</dt><dd>{{ format(state.report.value.timeWindow.fromInclusive, state.report.value.timezone) }} — {{ format(state.report.value.timeWindow.toExclusive, state.report.value.timezone) }}</dd></div>
+        <div><dt>Source As Of</dt><dd>{{ format(state.report.value.asOf, state.report.value.timezone) }}</dd></div>
         <div><dt>Trace</dt><dd><button type="button" @click="props.trace?.subscribe(state.report.value!.traceId, props.role)">{{ state.report.value.traceId }}</button></dd></div>
       </dl>
       <p v-if="state.report.value.summary">{{ state.report.value.summary }}</p>
@@ -89,8 +89,8 @@ watch(() => props.active, (active) => {
       </article>
       <div class="operations-report__evidence">
         <strong>Evidence / Source</strong>
-        <span v-for="evidence in state.report.value.evidence" :key="`${evidence.metric}-${evidence.runReference}`">{{ evidence.sourceSystem }} · {{ evidence.metric }} · {{ evidence.entity }} · {{ format(evidence.observationTime) }} · run {{ evidence.runReference }} · {{ evidence.summary }}</span>
-        <span v-for="source in state.report.value.sourceReferences" :key="`${source.sourceSystem}-${source.metric}`">{{ source.sourceSystem }} · {{ source.metric }} · {{ source.unit }} · {{ source.status }} · as of {{ format(source.asOf) }}</span>
+        <span v-for="evidence in state.report.value.evidence" :key="`${evidence.metric}-${evidence.runReference}`">{{ evidence.sourceSystem }} · {{ evidence.metric }} · {{ evidence.entity }} · {{ format(evidence.observationTime, state.report.value.timezone) }} · run {{ evidence.runReference }} · {{ evidence.summary }}</span>
+        <span v-for="source in state.report.value.sourceReferences" :key="`${source.sourceSystem}-${source.metric}`">{{ source.sourceSystem }} · {{ source.metric }} · {{ source.unit }} · {{ source.status }} · as of {{ format(source.asOf, state.report.value.timezone) }}</span>
       </div>
       <button v-if="state.report.value.downloadAvailable" type="button" data-download-current @click="download(state.report.value.reportId)">下载 Markdown 快照</button>
     </div>

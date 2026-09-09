@@ -296,7 +296,8 @@ public final class OperationsDailyReportService {
             publishNew(failed, firstTrace);
         } catch (OperationsReportCapacityException capacity) {
             try {
-                terminalizeAtCapacity(reportId, OperationsReportStatus.FAILED);
+                OperationsDailyReport failed = terminalizeAtCapacity(reportId, OperationsReportStatus.FAILED);
+                publishNew(failed, firstTrace);
             } catch (RuntimeException ignored) {
                 // The durable state remains non-terminal only when persistence itself is unavailable.
             }
@@ -366,9 +367,32 @@ public final class OperationsDailyReportService {
 
     private OperationsDailyReport terminalizeAtCapacity(UUID reportId,
                                                         OperationsReportStatus status) {
-        return store.update(reportId, report -> report.copy(status, report.startedAt(), report.completedAt(),
-                report.asOf(), "", report.sections(), report.evidence(), report.sourceReferences(), null,
-                report.traceEvents()));
+        Instant completedAt = clock.instant();
+        try {
+            return terminalizeAtCapacity(reportId, status, completedAt);
+        } catch (OperationsReportCapacityException completedTimestampTooLarge) {
+            return terminalizeAtCapacity(reportId, status, null);
+        }
+    }
+
+    private OperationsDailyReport terminalizeAtCapacity(UUID reportId,
+                                                        OperationsReportStatus status,
+                                                        Instant completedAt) {
+        return store.update(reportId, report -> {
+            boolean failed = status == OperationsReportStatus.FAILED;
+            OperationsReportTraceRecord seed = report.traceEvents().isEmpty()
+                    ? null : report.traceEvents().get(0);
+            OperationsReportTraceRecord terminalTrace = new OperationsReportTraceRecord(
+                    UUID.randomUUID(), 1,
+                    seed == null ? clock.instant() : seed.timestamp(),
+                    "report",
+                    failed ? ExecutionStage.FAILURE : ExecutionStage.COMPLETION,
+                    failed ? ExecutionEventType.RUN_FAILED : ExecutionEventType.RUN_COMPLETED,
+                    failed ? ExecutionStatus.FAILED : ExecutionStatus.SUCCEEDED, "");
+            return report.copy(status, report.startedAt(), completedAt,
+                    report.asOf(), "", report.sections(), report.evidence(), report.sourceReferences(), null,
+                    List.of(terminalTrace));
+        });
     }
 
     private void authorize(OperationsDailyReport report, String role) {
@@ -387,6 +411,20 @@ public final class OperationsDailyReportService {
             } catch (IllegalArgumentException | IllegalStateException duplicateOrClosed) {
                 if (events.history(report.traceId()).stream().noneMatch(projection::equals)) throw duplicateOrClosed;
             }
+        }
+        List<ExecutionEvent> liveHistory = events.history(report.traceId());
+        if (report.status().isTerminal() && !report.traceEvents().isEmpty()
+                && (liveHistory.isEmpty() || !liveHistory.get(liveHistory.size() - 1).isTerminal())) {
+            OperationsReportTraceRecord durableTerminal = report.traceEvents().get(report.traceEvents().size() - 1);
+            ExecutionEvent projection = projection(report, durableTerminal);
+            if (!projection.isTerminal()) {
+                throw new IllegalStateException("terminal report has no durable terminal trace event");
+            }
+            UUID liveEventId = liveHistory.stream().anyMatch(event -> event.eventId().equals(projection.eventId()))
+                    ? UUID.randomUUID() : projection.eventId();
+            events.publish(new ExecutionEvent(liveEventId, projection.runId(), 0,
+                    projection.timestamp(), projection.scenario(), projection.actor(), projection.stage(),
+                    projection.eventType(), projection.status(), projection.safeSummary(), projection.displayPayload()));
         }
     }
 

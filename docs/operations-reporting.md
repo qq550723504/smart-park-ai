@@ -127,9 +127,9 @@ At startup, every persisted `REQUESTED` or `GENERATING` report is atomically rec
 - otherwise it becomes `FAILED`;
 - every unfinished section records `GENERATION_INTERRUPTED`, and a matching durable terminal trace event is
   committed with the report state;
-- if that terminal metadata would exceed the structured-report limit, recovery preserves section evidence and
-  compacts the trace to one explicit terminal event. A final status-only shrinking transition is reserved for
-  the pathological case where even that compact snapshot cannot fit, so any valid state file can still start.
+- if terminal metadata would exceed the structured-report limit, recovery or a live callback preserves section
+  evidence and compacts the trace to one explicit terminal event; the unified live projection is also closed by
+  a matching terminal event so subscribers and bounded trace retention cannot remain stuck in a running state.
 
 No report remains permanently `GENERATING` after restart.
 

@@ -47,6 +47,24 @@ describe('OperationsDailyReport', () => {
     expect(trace.subscribe).toHaveBeenCalledWith('run-1', 'OPERATOR')
   })
 
+  it('renders history and snapshot timestamps in the report timezone', async () => {
+    const newYorkSummary = { ...summary, timezone: 'America/New_York' }
+    const newYorkDetail = { ...detail, timezone: 'America/New_York' }
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.includes('?')) return Promise.resolve(new Response(JSON.stringify({ content: [newYorkSummary], page: 0, size: 20, totalElements: 1, hasNext: false }), { status: 200 }))
+      return Promise.resolve(new Response(JSON.stringify(newYorkDetail), { status: 200 }))
+    }))
+    const wrapper = mount(OperationsDailyReport, { props: { role: 'OPERATOR' } })
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="report-history"]').text()).toContain('2026/9/8 21:00:00')
+    await wrapper.get('[data-testid="report-history"] button').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="report-body"]').text()).toContain('2026/9/8 21:01:00')
+    expect(wrapper.get('[data-testid="report-body"]').text()).toContain('2026/9/3 21:00:00')
+  })
+
   it('shows real generating state then refreshes history after terminal snapshot', async () => {
     let detailReads = 0
     vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {

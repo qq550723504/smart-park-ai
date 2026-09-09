@@ -352,10 +352,13 @@ class OperationsDailyReportServiceTest {
 
         assertThat(recovered.status()).isEqualTo(OperationsReportStatus.FAILED);
         assertThat(recovered.summary()).isEmpty();
-        assertThat(recovered.completedAt()).isNull();
         assertThat(recovered.sections()).allMatch(section ->
                 section.status() == OperationsReportSectionStatus.PENDING);
-        assertThat(recovered.traceEvents()).isEqualTo(interrupted.traceEvents());
+        assertThat(recovered.traceEvents()).singleElement().satisfies(trace -> {
+            assertThat(trace.sequence()).isEqualTo(1);
+            assertThat(trace.eventType()).isEqualTo(ExecutionEventType.RUN_FAILED);
+            assertThat(trace.status()).isEqualTo(ExecutionStatus.FAILED);
+        });
         assertThat(restarted.list("OPERATOR", null, null, null, null, 0, 20).content())
                 .singleElement().extracting(OperationsDailyReport::status)
                 .isEqualTo(OperationsReportStatus.FAILED);
@@ -367,12 +370,15 @@ class OperationsDailyReportServiceTest {
         ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
         CompletableFuture<AnalysisRunStore.RunRecord> pending = new CompletableFuture<>();
         OperationsDailyReportStore store = new OperationsDailyReportStore(state, mapper, 20, 1, 4096, 1024);
+        InMemoryExecutionEventPublisher events = new InMemoryExecutionEventPublisher();
         OperationsDailyReportService service = new OperationsDailyReportService(
-                (section, request) -> pending, store, new InMemoryExecutionEventPublisher(),
+                (section, request) -> pending, store, events,
                 new OperationsReportRenderer(), CLOCK);
         UUID reportId = service.start(service.defaultRequest(), "live-capacity-key",
                 "demo-role:OPERATOR", "OPERATOR").report().reportId();
         OperationsDailyReport current = store.find(reportId).orElseThrow();
+        List<ExecutionEvent> streamed = new ArrayList<>();
+        events.subscribe(current.traceId(), streamed::add);
         OperationsDailyReport.SectionResult section = current.sections().get(0);
         OperationsDailyReport.SectionResult sizingSection = new OperationsDailyReport.SectionResult(
                 section.sectionId(), section.title(), section.question(), OperationsReportSectionStatus.RUNNING,
@@ -401,6 +407,11 @@ class OperationsDailyReportServiceTest {
 
         assertThat(failed.status()).isEqualTo(OperationsReportStatus.FAILED);
         assertThat(failed.sections().get(0).rows().get(0)).containsExactly("x".repeat(padding));
+        assertThat(failed.traceEvents()).singleElement()
+                .extracting(OperationsReportTraceRecord::eventType)
+                .isEqualTo(ExecutionEventType.RUN_FAILED);
+        assertThat(events.status(failed.traceId())).isEqualTo("RUN_FAILED");
+        assertThat(streamed.get(streamed.size() - 1).isTerminal()).isTrue();
         assertThat(service.start(service.defaultRequest(), "after-capacity-key",
                 "demo-role:OPERATOR", "OPERATOR").created()).isTrue();
     }
