@@ -55,7 +55,8 @@ public final class DeviceHealthService {
                 device.snapshotAt(), "设备状态 " + safeStatus(device.status())));
 
         int severity = 0;
-        boolean partial = false;
+        boolean partial = facts.truncated();
+        if (facts.truncated()) reasons.add("活动告警结果达到查询上限，健康证据不完整");
         Instant now = clock.instant();
         boolean snapshotFresh = device.snapshotAt() != null && !device.snapshotAt().isAfter(now)
                 && Duration.between(device.snapshotAt(), now).compareTo(SNAPSHOT_FRESHNESS) <= 0;
@@ -68,9 +69,19 @@ public final class DeviceHealthService {
         } else if ("DEGRADED".equalsIgnoreCase(device.status())) {
             severity = Math.max(severity, 1);
             reasons.add("设备快照状态为 DEGRADED");
+        } else if (!"ONLINE".equalsIgnoreCase(device.status())) {
+            partial = true;
+            reasons.add("设备连接状态不是已识别的 ONLINE/OFFLINE/DEGRADED，不能确认健康");
         }
 
+        List<Instant> usableAlertTimes = new ArrayList<>();
         for (DeviceHealthFactsReader.AlertFact alert : facts.activeAlerts()) {
+            if (alert.occurredAt() == null || alert.occurredAt().isAfter(now)) {
+                partial = true;
+                reasons.add("存在时间无效的活动告警，未用于当前健康判断");
+                continue;
+            }
+            usableAlertTimes.add(alert.occurredAt());
             int alertSeverity = switch (safeStatus(alert.riskLevel())) {
                 case "HIGH" -> 4;
                 case "MEDIUM" -> 3;
@@ -119,7 +130,7 @@ public final class DeviceHealthService {
         if (severity == 4) status = DeviceHealthDtos.HealthStatus.CRITICAL;
         else if (severity == 3) status = DeviceHealthDtos.HealthStatus.DEGRADED;
         else if (severity > 0) status = DeviceHealthDtos.HealthStatus.ATTENTION;
-        else if (snapshotFresh && telemetryResponse != null
+        else if (!partial && snapshotFresh && "ONLINE".equalsIgnoreCase(device.status()) && telemetryResponse != null
                 && telemetryResponse.status() == DeviceTelemetryDtos.Status.AVAILABLE
                 && telemetryResponse.threshold() != null
                 && telemetryResponse.series().stream().anyMatch(series ->
@@ -135,9 +146,8 @@ public final class DeviceHealthService {
         DeviceHealthDtos.Availability availability = status == DeviceHealthDtos.HealthStatus.UNKNOWN
                 && evidence.isEmpty() ? DeviceHealthDtos.Availability.UNAVAILABLE
                 : partial ? DeviceHealthDtos.Availability.PARTIAL : DeviceHealthDtos.Availability.AVAILABLE;
-        Instant asOf = latest(device.snapshotAt(), facts.activeAlerts().stream()
-                .map(DeviceHealthFactsReader.AlertFact::occurredAt).toList(),
-                telemetryResponse == null ? null : telemetryResponse.asOf());
+        Instant asOf = latest(device.snapshotAt(), usableAlertTimes,
+                telemetryResponse == null ? null : telemetryResponse.asOf(), now);
         return new DeviceHealthDtos.Response(deviceId, device.buildingId(), device.deviceType(), status,
                 availability, distinct(reasons), evidence, sources, asOf);
     }
@@ -204,10 +214,12 @@ public final class DeviceHealthService {
     }
     private static String safeStatus(String value) { return value == null ? "UNKNOWN" : value.toUpperCase(Locale.ROOT); }
     private static List<String> distinct(List<String> values) { return List.copyOf(new LinkedHashSet<>(values)); }
-    private static Instant latest(Instant first, List<Instant> values, Instant last) {
-        Instant result = first;
-        for (Instant value : values) if (value != null && (result == null || value.isAfter(result))) result = value;
-        if (last != null && (result == null || last.isAfter(result))) result = last;
+    private static Instant latest(Instant first, List<Instant> values, Instant last, Instant upperBound) {
+        Instant result = first != null && !first.isAfter(upperBound) ? first : null;
+        for (Instant value : values) {
+            if (value != null && !value.isAfter(upperBound) && (result == null || value.isAfter(result))) result = value;
+        }
+        if (last != null && !last.isAfter(upperBound) && (result == null || last.isAfter(result))) result = last;
         return result;
     }
 

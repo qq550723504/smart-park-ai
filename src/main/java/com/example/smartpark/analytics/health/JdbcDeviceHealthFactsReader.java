@@ -41,7 +41,7 @@ public final class JdbcDeviceHealthFactsReader implements DeviceHealthFactsReade
                         text(alerts, row, "device_id"), text(alerts, row, "category"),
                         text(alerts, row, "risk_level"), text(alerts, row, "status"),
                         instant(alerts, row, "occurred_at"))).toList();
-                return Facts.available(device, active);
+                return Facts.available(device, active, devices.truncated() || alerts.truncated());
             });
         } catch (Exception exception) {
             LOGGER.warn("Device health facts unavailable: exceptionType={}", exception.getClass().getName());

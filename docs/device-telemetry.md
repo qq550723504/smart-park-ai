@@ -88,6 +88,8 @@ Health is a deterministic state, never an AI-authored sensor fact or numeric sco
 
 Each response includes reasons, typed evidence references, safe source labels, `asOf`, and availability. Alerts are accepted only when both `deviceId` and `buildingId` match the assessed device. A scope mismatch fails closed instead of mixing evidence across devices or buildings.
 
+Only an explicit, fresh `ONLINE` snapshot can participate in a `HEALTHY` result. Unknown connectivity values, future-dated alerts, and alert-query truncation mark the assessment incomplete; future alerts do not affect severity or `asOf`.
+
 The only threshold profile is explicitly fictional and registered for the HVAC temperature demo:
 
 ```text
@@ -102,7 +104,7 @@ It is not an industry recommendation. A production threshold must come from appr
 
 The operations cockpit renders temperature and vibration as separate capabilities. The temperature chart uses API timestamps, units, and source metadata; declared gaps are inserted as `null` to break the ECharts line. `UNAVAILABLE` never mounts a chart. Health displays state, reasons, sources, and evidence count, not a score.
 
-`JOINT_ANOMALY_ASSESSMENT` performs only a minimal conditional read during context collection: an `alertId` must resolve through the analytics alert fact to a device, analytics must be enabled, a telemetry source must be `AVAILABLE` or `PARTIAL`, and device health must return usable non-`UNKNOWN` evidence. Otherwise the optional enrichment is omitted and the existing orchestration remains intact.
+`JOINT_ANOMALY_ASSESSMENT` performs only a minimal conditional read during context collection: an `alertId` must resolve through the analytics alert fact to a device, that analytics `deviceId` and `buildingId` must exactly match the authoritative `AlertPort` identity, analytics must be enabled, a telemetry source must be `AVAILABLE` or `PARTIAL`, and device health must return usable non-`UNKNOWN` evidence. Otherwise the optional enrichment is omitted and the existing orchestration remains intact. The shipped colliding mock/analytics IDs therefore fail closed until an authoritative device mapping exists.
 
 ## Known limitations and predictive-maintenance boundary
 

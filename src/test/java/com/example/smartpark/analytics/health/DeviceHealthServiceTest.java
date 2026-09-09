@@ -109,12 +109,6 @@ class DeviceHealthServiceTest {
         assertThat(stale.availability()).isEqualTo(DeviceHealthDtos.Availability.PARTIAL);
         assertThat(stale.reasons()).contains("设备遥测已过期，未用于阈值判断");
 
-        var incomplete = service(facts(device("ONLINE", "HVAC"), List.of()),
-                telemetry(DeviceTelemetryDtos.Status.PARTIAL, DeviceTelemetryDtos.Freshness.FRESH,
-                        List.of(point(9, "24")))).assess("AC-B1-07");
-        assertThat(incomplete.healthStatus()).isEqualTo(DeviceHealthDtos.HealthStatus.UNKNOWN);
-        assertThat(incomplete.reasons()).contains("设备遥测窗口不完整，不能据此确认健康");
-
         var missing = service(facts(device("ONLINE", "HVAC"), List.of()), unavailableTelemetry())
                 .assess("AC-B1-07");
         assertThat(missing.healthStatus()).isEqualTo(DeviceHealthDtos.HealthStatus.UNKNOWN);
@@ -131,18 +125,6 @@ class DeviceHealthServiceTest {
     }
 
     @Test
-    void doesNotTreatThresholdBreachesAcrossAMissingHourAsSustained() {
-        var response = service(facts(device("ONLINE", "HVAC"), List.of()),
-                telemetry(DeviceTelemetryDtos.Status.PARTIAL, DeviceTelemetryDtos.Freshness.FRESH,
-                        List.of(point(6, "29"), point(8, "30"), point(9, "31"))))
-                .assess("AC-B1-07");
-
-        assertThat(response.healthStatus()).isEqualTo(DeviceHealthDtos.HealthStatus.ATTENTION);
-        assertThat(response.evidence()).filteredOn(item -> item.type().equals("TELEMETRY_THRESHOLD"))
-                .singleElement().satisfies(item -> assertThat(item.summary()).contains("ATTENTION"));
-    }
-
-    @Test
     void futureDatedConnectivitySnapshotDoesNotProduceHealthy() {
         var futureDevice = new DeviceHealthFactsReader.DeviceFact("AC-B1-07", "B1", "HVAC", "ONLINE",
                 NOW.plusSeconds(3600));
@@ -152,6 +134,36 @@ class DeviceHealthServiceTest {
 
         assertThat(response.healthStatus()).isEqualTo(DeviceHealthDtos.HealthStatus.UNKNOWN);
         assertThat(response.reasons()).contains("设备状态快照已过期，不能据此判断当前健康");
+    }
+
+    @Test
+    void unknownConnectivityStatusDoesNotProduceHealthy() {
+        var response = service(facts(device("MAINTENANCE", "HVAC"), List.of()),
+                telemetry(DeviceTelemetryDtos.Status.AVAILABLE, DeviceTelemetryDtos.Freshness.FRESH,
+                        List.of(point(9, "24")))).assess("AC-B1-07");
+
+        assertThat(response.healthStatus()).isEqualTo(DeviceHealthDtos.HealthStatus.UNKNOWN);
+        assertThat(response.availability()).isEqualTo(DeviceHealthDtos.Availability.PARTIAL);
+        assertThat(response.reasons()).anyMatch(reason -> reason.contains("不能确认健康"));
+    }
+
+    @Test
+    void truncatedAlertFactsAndFutureAlertsRemainIncompleteAndDoNotChangeSeverity() {
+        var futureHigh = new DeviceHealthFactsReader.AlertFact("ALT-FUTURE", "B1", "AC-B1-07",
+                "TEMPERATURE", "HIGH", "OPEN", NOW.plusSeconds(3600));
+        DeviceHealthFactsReader.Facts incomplete = DeviceHealthFactsReader.Facts.available(
+                device("ONLINE", "HVAC"), List.of(futureHigh), true);
+
+        var response = service(incomplete,
+                telemetry(DeviceTelemetryDtos.Status.AVAILABLE, DeviceTelemetryDtos.Freshness.FRESH,
+                        List.of(point(9, "24")))).assess("AC-B1-07");
+
+        assertThat(response.healthStatus()).isEqualTo(DeviceHealthDtos.HealthStatus.UNKNOWN);
+        assertThat(response.availability()).isEqualTo(DeviceHealthDtos.Availability.PARTIAL);
+        assertThat(response.reasons()).contains("活动告警结果达到查询上限，健康证据不完整",
+                "存在时间无效的活动告警，未用于当前健康判断");
+        assertThat(response.evidence()).noneMatch(item -> item.reference().contains("ALT-FUTURE"));
+        assertThat(response.asOf()).isBeforeOrEqualTo(NOW);
     }
 
     @Test

@@ -32,11 +32,12 @@ class JdbcDeviceHealthFactsReaderTest {
                 new TabularResult(List.of("alert_id", "building_id", "device_id", "category", "risk_level",
                         "status", "occurred_at"),
                         List.of(List.of("ALT-001", "B1", "AC-B1-07", "TEMPERATURE", "MEDIUM", "OPEN",
-                                Instant.parse("2026-09-08T09:10:00Z"))), false, 5));
+                                Instant.parse("2026-09-08T09:10:00Z"))), true, 5));
 
         var facts = new JdbcDeviceHealthFactsReader(cost, executor).read("AC-B1-07");
 
         assertThat(facts.available()).isTrue();
+        assertThat(facts.truncated()).isTrue();
         assertThat(facts.device().buildingId()).isEqualTo("B1");
         assertThat(facts.activeAlerts()).singleElement().satisfies(alert -> {
             assertThat(alert.alertId()).isEqualTo("ALT-001");

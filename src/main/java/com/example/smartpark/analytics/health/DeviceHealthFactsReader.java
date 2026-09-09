@@ -11,11 +11,15 @@ public interface DeviceHealthFactsReader {
     record DeviceFact(String deviceId, String buildingId, String deviceType, String status, Instant snapshotAt) {}
     record AlertFact(String alertId, String buildingId, String deviceId, String category,
                      String riskLevel, String status, Instant occurredAt) {}
-    record Facts(DeviceFact device, List<AlertFact> activeAlerts, boolean available, String failureCode) {
+    record Facts(DeviceFact device, List<AlertFact> activeAlerts, boolean available,
+                 boolean truncated, String failureCode) {
         public Facts { activeAlerts = List.copyOf(activeAlerts == null ? List.of() : activeAlerts); }
         public static Facts available(DeviceFact device, List<AlertFact> alerts) {
-            return new Facts(device, alerts, true, null);
+            return available(device, alerts, false);
         }
-        public static Facts unavailable(String code) { return new Facts(null, List.of(), false, code); }
+        public static Facts available(DeviceFact device, List<AlertFact> alerts, boolean truncated) {
+            return new Facts(device, alerts, true, truncated, null);
+        }
+        public static Facts unavailable(String code) { return new Facts(null, List.of(), false, false, code); }
     }
 }

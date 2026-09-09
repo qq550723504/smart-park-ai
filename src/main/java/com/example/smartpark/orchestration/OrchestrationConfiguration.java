@@ -203,7 +203,8 @@ public class OrchestrationConfiguration {
                             workflowProvider.getIfAvailable() != null);
                 }, operations,
                 buildings -> energyOutcome(energyProvider.getIfAvailable(), buildings),
-                alertId -> deviceHealthOutcome(deviceHealthProvider.getIfAvailable(), alertId),
+                alertId -> deviceHealthOutcome(deviceHealthProvider.getIfAvailable(),
+                        alertProvider.getIfAvailable(), alertId),
                 collaboration,
                 input -> securityOutcome(securityProvider.getIfAvailable(), input),
                 alertId -> {
@@ -274,15 +275,28 @@ public class OrchestrationConfiguration {
     }
 
     static OrchestrationPorts.EvidenceOutcome deviceHealthOutcome(DeviceHealthService service,
+                                                                  AlertPort alertPort,
                                                                   String alertId) {
-        if (service == null) {
+        if (service == null || alertPort == null) {
             return new OrchestrationPorts.EvidenceOutcome("UNAVAILABLE", "设备健康能力不可用",
                     List.of(), List.of(), List.of(), "设备健康能力不可用");
+        }
+        com.example.smartpark.model.alert.Alert authoritativeAlert;
+        try {
+            authoritativeAlert = alertPort.getAlert(alertId);
+        } catch (RuntimeException unavailable) {
+            return new OrchestrationPorts.EvidenceOutcome("UNAVAILABLE", "无法验证告警设备身份",
+                    List.of(), List.of(), List.of(), "无法验证告警设备身份");
         }
         DeviceHealthDtos.Response response = service.assessByAlertId(alertId).orElse(null);
         if (response == null) {
             return new OrchestrationPorts.EvidenceOutcome("UNAVAILABLE", "告警没有匹配的设备遥测身份",
                     List.of(), List.of(), List.of(), "告警没有匹配的设备遥测身份");
+        }
+        if (!authoritativeAlert.deviceId().equalsIgnoreCase(response.deviceId())
+                || !authoritativeAlert.buildingId().equalsIgnoreCase(response.buildingId())) {
+            return new OrchestrationPorts.EvidenceOutcome("UNAVAILABLE", "告警与遥测设备身份不一致",
+                    List.of(), List.of(), List.of(), "告警与遥测设备身份不一致");
         }
         boolean telemetryUsable = response.sources().stream().anyMatch(source ->
                 !"DEVICE_SNAPSHOT".equals(source.system())

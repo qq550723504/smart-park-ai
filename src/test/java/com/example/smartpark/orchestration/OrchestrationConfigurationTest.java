@@ -6,6 +6,8 @@ import com.example.smartpark.analytics.health.DeviceHealthService;
 import com.example.smartpark.collaboration.model.CollaborationRun;
 import com.example.smartpark.collaboration.model.FindingStatus;
 import com.example.smartpark.collaboration.model.Synthesis;
+import com.example.smartpark.model.alert.Alert;
+import com.example.smartpark.port.alert.AlertPort;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -53,12 +55,13 @@ class OrchestrationConfigurationTest {
     @Test
     void onlyExposesDeviceHealthToOrchestrationWhenTelemetryIsUsable() {
         DeviceHealthService health = mock(DeviceHealthService.class);
+        AlertPort alertPort = matchingAlertPort();
         when(health.assessByAlertId("ALT-1")).thenReturn(Optional.of(healthResponse(
                 new DeviceHealthDtos.Source("OPERATIONS_ANALYTICS_DEMO",
                         DeviceHealthDtos.Availability.UNAVAILABLE))));
 
         OrchestrationPorts.EvidenceOutcome unavailable =
-                OrchestrationConfiguration.deviceHealthOutcome(health, "ALT-1");
+                OrchestrationConfiguration.deviceHealthOutcome(health, alertPort, "ALT-1");
 
         assertThat(unavailable.status()).isEqualTo("UNAVAILABLE");
 
@@ -67,10 +70,39 @@ class OrchestrationConfigurationTest {
                         DeviceHealthDtos.Availability.PARTIAL))));
 
         OrchestrationPorts.EvidenceOutcome usable =
-                OrchestrationConfiguration.deviceHealthOutcome(health, "ALT-1");
+                OrchestrationConfiguration.deviceHealthOutcome(health, alertPort, "ALT-1");
 
         assertThat(usable.status()).isEqualTo("PARTIAL");
         assertThat(usable.evidenceReferences()).contains("device-health:AC-B1-07:DEGRADED");
+    }
+
+    @Test
+    void rejectsAnalyticsHealthWhenAuthoritativeAlertIdentityDoesNotMatch() {
+        DeviceHealthService health = mock(DeviceHealthService.class);
+        when(health.assessByAlertId("ALT-1")).thenReturn(Optional.of(healthResponse(
+                new DeviceHealthDtos.Source("OPERATIONS_ANALYTICS_DEMO",
+                        DeviceHealthDtos.Availability.AVAILABLE))));
+        AlertPort alertPort = mock(AlertPort.class);
+        Alert alert = mock(Alert.class);
+        when(alert.deviceId()).thenReturn("DEV-HVAC-001");
+        when(alert.buildingId()).thenReturn("A1");
+        when(alertPort.getAlert("ALT-1")).thenReturn(alert);
+
+        OrchestrationPorts.EvidenceOutcome outcome =
+                OrchestrationConfiguration.deviceHealthOutcome(health, alertPort, "ALT-1");
+
+        assertThat(outcome.status()).isEqualTo("UNAVAILABLE");
+        assertThat(outcome.evidenceReferences()).isEmpty();
+        assertThat(outcome.failureReason()).contains("身份不一致");
+    }
+
+    private static AlertPort matchingAlertPort() {
+        AlertPort alertPort = mock(AlertPort.class);
+        Alert alert = mock(Alert.class);
+        when(alert.deviceId()).thenReturn("AC-B1-07");
+        when(alert.buildingId()).thenReturn("B1");
+        when(alertPort.getAlert("ALT-1")).thenReturn(alert);
+        return alertPort;
     }
 
     private static DeviceHealthDtos.Response healthResponse(DeviceHealthDtos.Source telemetrySource) {
