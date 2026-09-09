@@ -36,7 +36,7 @@
 .customer-shell__nav .is-current { color: var(--customer-blue); font-weight: 700; }
 .customer-shell__nav .is-current::after { content: ""; position: absolute; right: 14px; bottom: 0; left: 14px; height: 3px; background: var(--customer-blue); border-radius: 3px 3px 0 0; }
 .customer-shell__nav .is-planned { color: #6f83a0; }
-.customer-shell__nav .is-planned::after { content: "后续"; position: absolute; top: 7px; right: 1px; color: #90a5bf; font-size: 8px; transform: scale(.9); }
+.customer-shell__nav .is-planned::after { content: "未开放"; position: absolute; top: 7px; right: 1px; color: #90a5bf; font-size: 8px; transform: scale(.9); }
 .customer-shell__user-zone { display: flex; align-items: center; gap: 16px; flex: none; }
 .customer-shell__scope { color: #8197b1; font-size: 10px; white-space: nowrap; }
 .customer-shell__workbench { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 0; background: transparent; cursor: pointer; text-align: left; }
@@ -84,6 +84,10 @@
 .park-overview__main-grid { display: grid; grid-template-columns: minmax(260px, .92fr) minmax(560px, 1.55fr) minmax(280px, .92fr); gap: 12px; }
 .customer-attention, .customer-todos { padding: 14px 16px; }
 .customer-heading-icon { display: grid; place-items: center; width: 28px; height: 28px; color: #fff; background: linear-gradient(145deg, #6ca1ff, #425cdf); border-radius: 7px; font-size: 11px; }
+.customer-heading-icon svg { width: 15px; height: 15px; }
+.customer-attention__basis { position: relative; color: #7890aa; font-size: 9px; }
+.customer-attention__basis summary { cursor: pointer; list-style-position: inside; white-space: nowrap; }
+.customer-attention__basis p { position: absolute; z-index: 5; top: calc(100% + 7px); right: 0; width: min(270px, 74vw); padding: 9px 11px; color: #536d89; background: #fff; border: 1px solid #dce8f4; border-radius: 8px; box-shadow: 0 8px 22px rgba(39, 82, 126, .12); font-size: 9px; line-height: 1.55; }
 .customer-attention__item { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; gap: 9px; width: 100%; min-height: 67px; padding: 10px 4px; border: 0; border-bottom: 1px solid #edf2f8; background: transparent; cursor: pointer; text-align: left; }
 .customer-attention__item.is-selected { margin: 0 -5px; padding-right: 9px; padding-left: 9px; width: calc(100% + 10px); background: #f3f8ff; border-radius: 8px; }
 .customer-attention__item > span:nth-child(2) { min-width: 0; }

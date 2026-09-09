@@ -134,7 +134,15 @@ describe('ParkOverview', () => {
     expect(wrapper.get('[data-kpi="buildings"] strong').text()).toContain('2')
     expect(wrapper.get('[data-kpi="events"] strong').text()).toContain('2')
     expect(wrapper.get('[data-kpi="service-requests"] strong').text()).toContain('3')
-    expect(wrapper.text()).toContain('运营规则聚合 · 未调用模型')
+    expect(wrapper.text()).toContain('今日重点关注')
+    expect(wrapper.get('[data-attention-basis]').attributes('open')).toBeUndefined()
+    expect(wrapper.get('[data-attention-basis]').text()).toContain('规则汇总，未调用模型')
+    expect(wrapper.get('[data-energy-status]').text()).toBe('数据完整')
+    expect(wrapper.get('[data-work-item-status="WAITING_APPROVAL"]').text()).toContain('待审批')
+    expect(wrapper.text()).toContain('脱敏摘要：能耗告警 · 未处理')
+    expect(wrapper.text()).not.toContain('AI 今日关注')
+    expect(wrapper.text()).not.toContain('OPEN 状态')
+    expect(wrapper.text()).not.toContain('REDACTED:')
     expect(wrapper.text()).not.toContain('设备运行率')
     expect(getAnomalyOverview).toHaveBeenCalledWith('VIEWER', { status: 'OPEN' })
     expect(getEnergyTimeSeries).toHaveBeenCalledWith('VIEWER', {
@@ -192,7 +200,30 @@ describe('ParkOverview', () => {
 
     expect(wrapper.get('[data-kpi="energy"] strong').text()).toContain('—')
     expect(wrapper.get('[data-kpi="energy"]').text()).toContain('最近 24 小时能耗数据源暂不可用')
+    expect(wrapper.get('[data-energy-status]').text()).toBe('暂不可用')
     expect(wrapper.text()).not.toContain('当前窗口暂无可绘制的能耗观测')
+  })
+
+  it('uses an explicit Chinese fallback for unknown customer-visible statuses', async () => {
+    vi.mocked(getEnergyTimeSeries).mockResolvedValue({
+      ...energy,
+      status: 'NEW_STATUS' as EnergyTimeSeriesResponse['status'],
+    })
+    vi.mocked(listCollaborationWorkItems).mockResolvedValue([{
+      ...activeWorkItem,
+      status: 'NEW_STATUS' as CollaborationWorkItem['status'],
+    }])
+    vi.mocked(getAnomalyEvidence).mockResolvedValue({
+      ...evidence,
+      alerts: [{ alertId: 'ALT-UNKNOWN', category: 'ENERGY', status: 'NEW_STATUS', occurredAt: '2026-09-08T22:00:00Z' }],
+    })
+
+    const wrapper = await mountLoaded()
+
+    expect(wrapper.get('[data-energy-status]').text()).toBe('状态未知')
+    expect(wrapper.get('[data-work-item-status="NEW_STATUS"]').text()).toContain('状态未知')
+    expect(wrapper.get('.customer-latest__row strong').text()).toContain('状态未知')
+    expect(wrapper.text()).not.toContain('NEW_STATUS')
   })
 
   it('hides the previous overview while a refreshed overview request is pending', async () => {
@@ -260,7 +291,7 @@ describe('ParkOverview', () => {
     ))
     await flushPromises()
 
-    expect(wrapper.text()).toContain('REDACTED: 能耗告警 · OPEN')
+    expect(wrapper.text()).toContain('脱敏摘要：能耗告警 · 未处理')
     expect(wrapper.get('[data-kpi="energy"]').text()).toContain('正在读取能耗观测…')
 
     const nextBuilding = wrapper.get('[data-building-marker="B2"]')
@@ -453,7 +484,7 @@ describe('ParkOverview', () => {
 
   it('clears old evidence when a refreshed overview contains no buildings', async () => {
     const wrapper = await mountLoaded()
-    expect(wrapper.text()).toContain('REDACTED: 能耗告警 · OPEN')
+    expect(wrapper.text()).toContain('脱敏摘要：能耗告警 · 未处理')
 
     vi.mocked(getAnomalyOverview).mockResolvedValue({
       ...overview,
@@ -464,7 +495,7 @@ describe('ParkOverview', () => {
     await wrapper.setProps({ active: true })
     await flushPromises()
 
-    expect(wrapper.text()).not.toContain('REDACTED: 能耗告警 · OPEN')
+    expect(wrapper.text()).not.toContain('脱敏摘要：能耗告警 · 未处理')
     expect(wrapper.text()).toContain('选择楼宇后查看')
     expect(wrapper.text()).toContain('当前楼宇暂无事件记录')
   })
@@ -536,6 +567,7 @@ describe('ParkOverview', () => {
 
     expect(line.attributes('data-chart-values')).toContain('null')
     expect(wrapper.get('[data-kpi="energy"]').text()).toContain('部分观测，缺口未补零')
+    expect(wrapper.get('[data-energy-status]').text()).toBe('部分可用')
   })
 
   it('shows independent failure states and never substitutes a success fixture', async () => {

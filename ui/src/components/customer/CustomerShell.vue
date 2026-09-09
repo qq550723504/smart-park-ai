@@ -5,11 +5,11 @@ import campusBanner from '../../assets/customer/campus-banner.png'
 defineEmits<{ 'enter-workbench': [] }>()
 
 const customerNavigation = [
-  { id: 'overview', label: '园区总览', current: true, issue: 69 },
-  { id: 'analysis', label: '运营分析', current: false, issue: 70 },
-  { id: 'work-orders', label: '事件与工单', current: false, issue: 71 },
-  { id: 'reports', label: '运营报告', current: false, issue: 72 },
-  { id: 'assistant', label: 'AI 助手', current: false, issue: 73 },
+  { id: 'overview', label: '园区总览', current: true },
+  { id: 'analysis', label: '运营分析', current: false },
+  { id: 'work-orders', label: '事件与工单', current: false },
+  { id: 'reports', label: '运营报告', current: false },
+  { id: 'assistant', label: 'AI 助手', current: false },
 ] as const
 </script>
 
@@ -42,7 +42,7 @@ const customerNavigation = [
             class="is-planned"
             :data-customer-nav="item.id"
             aria-disabled="true"
-            :title="`后续 Issue #${item.issue} 接入`"
+            title="功能暂未开放"
           >
             {{ item.label }}
           </span>

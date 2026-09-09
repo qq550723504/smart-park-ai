@@ -40,6 +40,34 @@ const terminalWorkItemStatuses = new Set<CollaborationWorkItem['status']>([
   'CANCELLED',
 ])
 
+const workItemStatusLabels: Record<CollaborationWorkItem['status'], string> = {
+  RUNNING: '执行中',
+  WAITING_APPROVAL: '待审批',
+  COMPLETED: '已完成',
+  REJECTED: '已拒绝',
+  FAILED: '执行失败',
+  WORK_ORDER_FAILED: '工单失败',
+  WAITING_AGENT: '待客服接入',
+  ASSIGNED: '已分派',
+  IN_PROGRESS: '处理中',
+  WAITING_CUSTOMER: '待用户回复',
+  RESOLVED: '已解决',
+  CLOSED: '已关闭',
+  CANCELLED: '已取消',
+}
+
+const customerStatusLabels: Record<string, string> = {
+  AVAILABLE: '数据完整',
+  PARTIAL: '部分可用',
+  UNAVAILABLE: '暂不可用',
+  OPEN: '未处理',
+  RESOLVED: '已解决',
+  ONLINE: '在线',
+  OFFLINE: '离线',
+  ACTIVE: '运行中',
+  INACTIVE: '未运行',
+}
+
 const buildingCatalog: Record<string, { name: string; position: { left: string; top: string } }> = {
   B1: { name: '创新中心', position: { left: '30%', top: '65%' } },
   B2: { name: '研发大厦', position: { left: '58%', top: '46%' } },
@@ -52,6 +80,21 @@ function buildingName(id: string): string {
 
 function locationLabel(item: CollaborationWorkItem): string {
   return item.buildingId ? buildingName(item.buildingId) : '园区事项'
+}
+
+function workItemStatusLabel(status: string): string {
+  return workItemStatusLabels[status as CollaborationWorkItem['status']] ?? '状态未知'
+}
+
+function customerStatusLabel(status: unknown): string {
+  return typeof status === 'string' ? customerStatusLabels[status.toUpperCase()] ?? '状态未知' : '状态未知'
+}
+
+function localizeSafeSummary(summary: string): string {
+  return summary
+    .replace(/^REDACTED:\s*/i, '脱敏摘要：')
+    .replace(/\b(AVAILABLE|PARTIAL|UNAVAILABLE|OPEN|RESOLVED|ONLINE|OFFLINE|ACTIVE|INACTIVE)\b/g,
+      (status) => customerStatusLabel(status))
 }
 
 function domainUsable(name: 'alerts' | 'devices' | 'energy'): boolean {
@@ -271,6 +314,11 @@ const evidenceAvailabilityMessage = computed(() => {
   if (statuses.some((status) => status === 'PARTIAL')) return '事件数据仅部分可用，当前列表可能不完整'
   return ''
 })
+const energyStatusText = computed(() => {
+  if (energyLoading.value && !energy.value) return '读取中'
+  if (errors.value.energy) return '暂不可用'
+  return customerStatusLabel(energy.value?.status)
+})
 
 function attentionTitle(building: AnomalyBuildingSummary): string {
   if (domainUsable('alerts') && building.highRiskAlertCount > 0) return `${buildingName(building.buildingId)}存在高风险告警`
@@ -312,9 +360,9 @@ function attentionSignal(building: AnomalyBuildingSummary): { label: string; cla
 }
 
 function recordText(record: Record<string, unknown>): string {
-  if (typeof record.redactedSummary === 'string') return record.redactedSummary
-  if (typeof record.alertId === 'string') return `告警 ${String(record.category ?? '类别未知')} · ${String(record.status ?? '状态未知')}`
-  if (typeof record.deviceId === 'string') return `${String(record.deviceType ?? '设备')} · ${String(record.status ?? '状态未知')}`
+  if (typeof record.redactedSummary === 'string') return localizeSafeSummary(record.redactedSummary)
+  if (typeof record.alertId === 'string') return `告警 ${String(record.category ?? '类别未知')} · ${customerStatusLabel(record.status)}`
+  if (typeof record.deviceId === 'string') return `${String(record.deviceType ?? '设备')} · ${customerStatusLabel(record.status)}`
   if (typeof record.meterId === 'string') {
     return typeof record.deviationPct === 'number'
       ? `能耗观测 · 基线偏差 ${formatNumber(record.deviationPct)}%`
@@ -370,7 +418,7 @@ watch(() => props.active, (active) => {
       </article>
       <article class="customer-card customer-kpi" data-kpi="events">
         <span class="customer-kpi__icon is-coral"><BellFilled aria-hidden="true" /></span>
-        <div><p>待处理事件</p><strong>{{ formatNumber(openAlertCount, 0) }} <small>件</small></strong><span>{{ domainUsable('alerts') ? '当前查询窗口 OPEN 状态' : '告警数据暂不可用' }}</span></div>
+        <div><p>待处理事件</p><strong>{{ formatNumber(openAlertCount, 0) }} <small>件</small></strong><span>{{ domainUsable('alerts') ? '当前查询窗口内未处理' : '告警数据暂不可用' }}</span></div>
       </article>
       <article class="customer-card customer-kpi" data-kpi="service-requests">
         <span class="customer-kpi__icon is-violet"><Service aria-hidden="true" /></span>
@@ -390,7 +438,13 @@ watch(() => props.active, (active) => {
 
     <section class="park-overview__main-grid">
       <article class="customer-card customer-attention">
-        <header><h2><span class="customer-heading-icon">AI</span> AI 今日关注</h2><small>运营规则聚合 · 未调用模型</small></header>
+        <header>
+          <h2><span class="customer-heading-icon"><BellFilled aria-hidden="true" /></span> 今日重点关注</h2>
+          <details class="customer-attention__basis" data-attention-basis>
+            <summary>数据依据</summary>
+            <p>基于当前查询窗口内未处理告警、离线设备与能耗偏差的规则汇总，未调用模型。</p>
+          </details>
+        </header>
         <div v-if="loading && !overview" class="customer-state">正在读取园区运营数据…</div>
         <div v-else-if="attentionItems.length === 0" class="customer-state">{{ errors.overview || '当前窗口暂无需要关注的楼宇' }}</div>
         <button
@@ -440,12 +494,12 @@ watch(() => props.active, (active) => {
           <p v-else-if="workItemsLoading" class="customer-state is-compact">正在读取待办…</p>
           <p v-else-if="workItems.length === 0" class="customer-state is-compact">当前队列暂无待办</p>
           <div v-for="item in workItems" :key="item.id" class="customer-todos__item">
-            <span></span><div><strong>{{ item.title }}</strong><small>{{ locationLabel(item) }} · {{ item.status }}</small></div><time>{{ formatTime(item.slaDueAt ?? item.updatedAt, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }}</time>
+            <span></span><div><strong>{{ item.title }}</strong><small :data-work-item-status="item.status">{{ locationLabel(item) }} · {{ workItemStatusLabel(item.status) }}</small></div><time>{{ formatTime(item.slaDueAt ?? item.updatedAt, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }}</time>
           </div>
         </article>
         <article class="customer-report-promo">
           <Document aria-hidden="true" />
-          <div><h2>运营简报入口</h2><p>报告中心将在 #72 接入；本项不生成或伪造报告。</p></div>
+          <div><h2>运营简报入口</h2><p>运营报告功能尚未开放，当前不会生成报告。</p></div>
           <span aria-disabled="true">尚未开放</span>
         </article>
       </aside>
@@ -453,7 +507,7 @@ watch(() => props.active, (active) => {
 
     <section class="park-overview__bottom-grid">
       <article class="customer-card customer-chart-card is-wide">
-        <header><div><h2>园区能耗趋势</h2><small>最近 24 小时 · 实际观测</small></div><span>{{ energy?.status ?? 'UNAVAILABLE' }}</span></header>
+        <header><div><h2>园区能耗趋势</h2><small>最近 24 小时 · 实际观测</small></div><span data-energy-status>{{ energyStatusText }}</span></header>
         <CustomerOverviewChart v-if="energyTrend.length" kind="line" :data="energyTrend" :unit="energy?.unit" label="园区最近二十四小时实际能耗趋势，缺失时段保留断点" />
         <p v-else class="customer-state">{{ energyLoading ? '正在读取能耗观测…' : errors.energy || '当前窗口暂无可绘制的能耗观测' }}</p>
       </article>
