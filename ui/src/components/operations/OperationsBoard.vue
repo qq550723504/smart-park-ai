@@ -4,6 +4,7 @@ import OperationsDailyReport from './OperationsDailyReport.vue'
 import AnomalyRadar from './AnomalyRadar.vue'
 import AnomalyEvidenceDrawer from './AnomalyEvidenceDrawer.vue'
 import EnergyTimeSeriesPanel from './EnergyTimeSeriesPanel.vue'
+import DeviceTelemetryHealthPanel from './DeviceTelemetryHealthPanel.vue'
 import OrchestrationPanel from './OrchestrationPanel.vue'
 import type { ExecutionTraceLike } from '../../composables/useOperationsAnalysis'
 import type { DemoRole } from '../../types/workflow'
@@ -55,6 +56,8 @@ const groups = [
 const selectedBuildingId = ref<string | null>(null)
 const selectedFilters = ref<AnomalyFilters>({})
 const energyTrendStatus = ref<'AVAILABLE' | 'PARTIAL' | 'UNAVAILABLE'>('UNAVAILABLE')
+const temperatureStatus = ref<'AVAILABLE' | 'PARTIAL' | 'UNAVAILABLE'>('UNAVAILABLE')
+const deviceHealthStatus = ref<'AVAILABLE' | 'PARTIAL' | 'UNAVAILABLE'>('UNAVAILABLE')
 
 function openBuilding(buildingId: string, filters: AnomalyFilters): void {
   selectedBuildingId.value = buildingId
@@ -89,14 +92,22 @@ watch(() => props.active, (active) => {
     <section class="operations-board__capability-strip" aria-label="驾驶舱数据能力状态">
       <article data-cockpit-feature="energy-overview" data-feature-state="ADAPTED"><span>能耗总览 / 排行</span><strong>ADAPTED</strong><small>使用真实能耗基线偏差；不冒充实时总量</small><button type="button" @click="emit('open-analysis', '过去5天各楼宇能耗基线偏差')">打开只读分析</button></article>
       <article data-cockpit-feature="energy-trend" :data-feature-state="energyTrendStatus"><span>能耗趋势</span><strong>{{ energyTrendStatus }}</strong><small>真实小时序列；缺失点不补零、不插值</small><button type="button" @click="emit('open-analysis', '过去5天各楼宇能耗基线偏差')">分析基线偏差</button></article>
-      <article data-cockpit-feature="device-health" data-feature-state="ADAPTED"><span>设备健康研判</span><strong>ADAPTED</strong><small>依据离线、告警和偏差，不生成健康分</small><button type="button" @click="emit('open-analysis', '各设备类型离线设备数')">分析设备状态</button></article>
-      <article data-cockpit-feature="telemetry" data-feature-state="NOT_READY"><span>振动 / 温度遥测</span><strong>NOT_READY</strong><small>当前数据源未接入对应设备遥测</small></article>
+      <article data-cockpit-feature="device-health" :data-feature-state="deviceHealthStatus"><span>设备健康研判</span><strong>{{ deviceHealthStatus }}</strong><small>解释性状态与证据；不生成健康分</small><button type="button" @click="emit('open-analysis', '各设备类型离线设备数')">分析设备状态</button></article>
+      <article data-cockpit-feature="temperature-telemetry" :data-feature-state="temperatureStatus"><span>温度遥测</span><strong>{{ temperatureStatus }}</strong><small>确定性 Demo source；非生产 IoT</small></article>
+      <article data-cockpit-feature="vibration-telemetry" data-feature-state="NOT_READY"><span>振动遥测</span><strong>NOT_READY</strong><small>当前没有振动 datasource</small></article>
     </section>
 
     <EnergyTimeSeriesPanel
       :role="props.role"
       :active="props.active"
       @status="(status) => energyTrendStatus = status"
+    />
+
+    <DeviceTelemetryHealthPanel
+      :role="props.role"
+      :active="props.active"
+      @telemetry-status="(status) => temperatureStatus = status"
+      @health-status="(status) => deviceHealthStatus = status"
     />
 
     <AnomalyRadar
@@ -166,7 +177,7 @@ watch(() => props.active, (active) => {
 .operations-board__hero-facts strong, .operations-board__hero-facts span { display: block; }
 .operations-board__hero-facts strong { color: var(--showcase-cyan); font-size: 1.35rem; }
 .operations-board__hero-facts span { margin-top: 5px; color: var(--showcase-muted); font-size: .7rem; }
-.operations-board__capability-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.operations-board__capability-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
 .operations-board__capability-strip article { display: grid; align-content: start; gap: 6px; min-height: 132px; padding: 14px; border: 1px solid var(--showcase-border-soft); background: rgba(7, 16, 29, .72); }
 .operations-board__capability-strip span { color: var(--showcase-ivory); font-size: .84rem; }
 .operations-board__capability-strip strong { color: #b8a5ff; font-size: .7rem; letter-spacing: .1em; }

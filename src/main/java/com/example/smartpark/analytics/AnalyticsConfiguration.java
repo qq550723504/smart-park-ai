@@ -30,6 +30,13 @@ import com.example.smartpark.analytics.anomaly.OperationsAnomalyService;
 import com.example.smartpark.analytics.energy.EnergyTimeSeriesReader;
 import com.example.smartpark.analytics.energy.EnergyTimeSeriesService;
 import com.example.smartpark.analytics.energy.JdbcEnergyTimeSeriesReader;
+import com.example.smartpark.analytics.health.DeviceHealthFactsReader;
+import com.example.smartpark.analytics.health.DeviceHealthService;
+import com.example.smartpark.analytics.health.JdbcDeviceHealthFactsReader;
+import com.example.smartpark.analytics.telemetry.DeviceTelemetryReader;
+import com.example.smartpark.analytics.telemetry.DeviceTelemetryService;
+import com.example.smartpark.analytics.telemetry.JdbcDeviceTelemetryReader;
+import com.example.smartpark.analytics.telemetry.TelemetryCatalog;
 import com.example.smartpark.workflow.WorkflowExecutionStore;
 import com.example.smartpark.analytics.catalog.MetricCatalog;
 import com.example.smartpark.analytics.sql.QueryCostGuard;
@@ -199,6 +206,40 @@ public class AnalyticsConfiguration {
                                                     Clock analyticsClock) {
         return new EnergyTimeSeriesService(metricCatalog, energyTimeSeriesReader, analyticsClock,
                 EnergyTimeSeriesService.FACT_TIMEZONE);
+    }
+
+    @Bean
+    TelemetryCatalog telemetryCatalog() {
+        return new TelemetryCatalog();
+    }
+
+    @Bean
+    DeviceTelemetryReader deviceTelemetryReader(QueryCostGuard queryCostGuard,
+                                                ReadOnlyQueryExecutor readOnlyQueryExecutor) {
+        return new JdbcDeviceTelemetryReader(queryCostGuard, readOnlyQueryExecutor);
+    }
+
+    @Bean
+    DeviceTelemetryService deviceTelemetryService(TelemetryCatalog telemetryCatalog,
+                                                  DeviceTelemetryReader deviceTelemetryReader,
+                                                  Clock analyticsClock) {
+        return new DeviceTelemetryService(telemetryCatalog, deviceTelemetryReader, analyticsClock,
+                DeviceTelemetryService.FACT_TIMEZONE);
+    }
+
+    @Bean
+    DeviceHealthFactsReader deviceHealthFactsReader(QueryCostGuard queryCostGuard,
+                                                    ReadOnlyQueryExecutor readOnlyQueryExecutor) {
+        return new JdbcDeviceHealthFactsReader(queryCostGuard, readOnlyQueryExecutor);
+    }
+
+    @Bean
+    DeviceHealthService deviceHealthService(DeviceHealthFactsReader deviceHealthFactsReader,
+                                            DeviceTelemetryService deviceTelemetryService,
+                                            TelemetryCatalog telemetryCatalog,
+                                            Clock analyticsClock) {
+        return new DeviceHealthService(deviceHealthFactsReader, deviceTelemetryService,
+                telemetryCatalog, analyticsClock);
     }
 
     @Bean

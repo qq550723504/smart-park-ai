@@ -5,6 +5,8 @@ import com.example.smartpark.analytics.OperationsAnalysisService;
 import com.example.smartpark.analytics.energy.EnergyTimeSeriesDtos;
 import com.example.smartpark.analytics.energy.EnergyTimeSeriesQuery;
 import com.example.smartpark.analytics.energy.EnergyTimeSeriesService;
+import com.example.smartpark.analytics.health.DeviceHealthDtos;
+import com.example.smartpark.analytics.health.DeviceHealthService;
 import com.example.smartpark.collaboration.ExpertCollaborationService;
 import com.example.smartpark.collaboration.model.CollaborationRun;
 import com.example.smartpark.collaboration.model.FindingStatus;
@@ -93,6 +95,7 @@ public class OrchestrationConfiguration {
             OperationsCapabilitiesService capabilityService,
             ObjectProvider<OperationsAnalysisService> operationsProvider,
             ObjectProvider<EnergyTimeSeriesService> energyProvider,
+            ObjectProvider<DeviceHealthService> deviceHealthProvider,
             ObjectProvider<ExpertCollaborationService> collaborationProvider,
             ObjectProvider<SecurityIncidentService> securityProvider,
             ObjectProvider<AlertPort> alertProvider,
@@ -200,6 +203,8 @@ public class OrchestrationConfiguration {
                             workflowProvider.getIfAvailable() != null);
                 }, operations,
                 buildings -> energyOutcome(energyProvider.getIfAvailable(), buildings),
+                alertId -> deviceHealthOutcome(deviceHealthProvider.getIfAvailable(),
+                        alertProvider.getIfAvailable(), alertId),
                 collaboration,
                 input -> securityOutcome(securityProvider.getIfAvailable(), input),
                 alertId -> {
@@ -267,6 +272,52 @@ public class OrchestrationConfiguration {
         return new OrchestrationPorts.EvidenceOutcome(response.status().name(), summary, evidence,
                 List.of(response.source().system() + ":" + response.source().metricDefinition()),
                 List.of(), response.status() == EnergyTimeSeriesDtos.Status.UNAVAILABLE ? "无可用能耗数据" : null);
+    }
+
+    static OrchestrationPorts.EvidenceOutcome deviceHealthOutcome(DeviceHealthService service,
+                                                                  AlertPort alertPort,
+                                                                  String alertId) {
+        if (service == null || alertPort == null) {
+            return new OrchestrationPorts.EvidenceOutcome("UNAVAILABLE", "设备健康能力不可用",
+                    List.of(), List.of(), List.of(), "设备健康能力不可用");
+        }
+        com.example.smartpark.model.alert.Alert authoritativeAlert;
+        try {
+            authoritativeAlert = alertPort.getAlert(alertId);
+        } catch (RuntimeException unavailable) {
+            return new OrchestrationPorts.EvidenceOutcome("UNAVAILABLE", "无法验证告警设备身份",
+                    List.of(), List.of(), List.of(), "无法验证告警设备身份");
+        }
+        DeviceHealthDtos.Response response = service.assessByAlertId(alertId).orElse(null);
+        if (response == null) {
+            return new OrchestrationPorts.EvidenceOutcome("UNAVAILABLE", "告警没有匹配的设备遥测身份",
+                    List.of(), List.of(), List.of(), "告警没有匹配的设备遥测身份");
+        }
+        if (!authoritativeAlert.deviceId().equalsIgnoreCase(response.deviceId())
+                || !authoritativeAlert.buildingId().equalsIgnoreCase(response.buildingId())) {
+            return new OrchestrationPorts.EvidenceOutcome("UNAVAILABLE", "告警与遥测设备身份不一致",
+                    List.of(), List.of(), List.of(), "告警与遥测设备身份不一致");
+        }
+        boolean telemetryUsable = response.sources().stream().anyMatch(source ->
+                !"DEVICE_SNAPSHOT".equals(source.system())
+                        && !"ALERT_FACT".equals(source.system())
+                        && !"DEVICE_HEALTH".equals(source.system())
+                        && source.status() != DeviceHealthDtos.Availability.UNAVAILABLE);
+        if (response.availability() == DeviceHealthDtos.Availability.UNAVAILABLE
+                || response.healthStatus() == DeviceHealthDtos.HealthStatus.UNKNOWN
+                || !telemetryUsable) {
+            return new OrchestrationPorts.EvidenceOutcome("UNAVAILABLE", "没有可用设备健康证据",
+                    List.of(), response.sources().stream().map(DeviceHealthDtos.Source::system).toList(),
+                    List.of(), "没有可用设备健康证据");
+        }
+        List<String> evidence = new ArrayList<>();
+        evidence.add("device-health:" + response.deviceId() + ":" + response.healthStatus());
+        response.evidence().forEach(item -> evidence.add(item.reference()));
+        return new OrchestrationPorts.EvidenceOutcome(response.availability().name(),
+                "设备 " + response.deviceId() + " 健康状态 " + response.healthStatus()
+                        + "，证据 " + response.evidence().size() + " 条",
+                evidence, response.sources().stream().map(DeviceHealthDtos.Source::system).distinct().toList(),
+                List.of(), null);
     }
 
     private static OrchestrationPorts.EvidenceOutcome securityOutcome(SecurityIncidentService service,

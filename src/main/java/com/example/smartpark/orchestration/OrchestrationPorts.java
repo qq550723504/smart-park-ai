@@ -36,6 +36,11 @@ public final class OrchestrationPorts {
     }
 
     @FunctionalInterface
+    public interface DeviceHealthReader {
+        EvidenceOutcome query(String alertId);
+    }
+
+    @FunctionalInterface
     public interface CollaborationRunner {
         StartedChild start(String question);
 
