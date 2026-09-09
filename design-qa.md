@@ -89,7 +89,7 @@ Result: **PASSED**
 ## Evidence
 
 - Approved reference: `smart-park-ai-approved-designs.zip / 01-park-overview.png` (1672 × 941).
-- Actual browser captures: `docs/evidence/issue-69/overview-1440x900.png` and `docs/evidence/issue-69/overview-1920x1080.png`, both generated from UI commit `8b361b645f9b5cfd32dc94237f0c881cbc352daa`.
+- Actual browser captures: `docs/evidence/issue-69/overview-1440x900.png` and `docs/evidence/issue-69/overview-1920x1080.png`, both regenerated against the runtime built from UI commit `2e8c7227cec35d158606dd38ef6f3a740ce1420d`. Their PNG bytes remain identical to the customer-copy captures because the responsive asset change preserved the rendered pixels.
 - Runtime: repository Compose analytics profile with its deterministic PostgreSQL demo facts; the page was opened through the in-app browser at `http://127.0.0.1:15173/`.
 - Responsive check: 1366 × 768 reported `scrollWidth=1351`, `innerWidth=1366`, so no horizontal overflow. The workbench entry, first KPI and building markers were visible.
 
@@ -118,13 +118,14 @@ Intentional differences are capability-driven rather than visual drift. Search, 
 
 ## Acceptance closeout regression
 
-- Focused customer suite: `2` files / `26` tests passed, including status localization, unknown fallback, unavailable navigation, no-data, partial data, independent failure/retry, and internal-workbench handoff.
-- Full unit suite: `44` files / `422` tests passed.
+- Focused customer suite: `2` files / `27` tests passed, including status localization, unknown fallback, unavailable navigation, responsive WebP sources with PNG fallback, no-data, partial data, independent failure/retry, and internal-workbench handoff.
+- Full unit suite: `44` files / `423` tests passed.
 - `npm.cmd run typecheck`: passed.
 - `npm.cmd run build`: passed; only the existing Vite chunk-size advisory remains.
 - Normal browser state: passed against the running Compose analytics stack and deterministic PostgreSQL demo facts (`3,384 kWh`, `3` buildings, `4` unhandled alerts at capture time). Demo/simulated-data markers remained visible.
 - Internal workbench: entering from the customer header and returning to the customer surface both passed in the browser.
 - Approved-reference comparison at 1440 × 900 and 1920 × 1080: passed without page redesign; the 1366 × 768 viewport remained free of horizontal document overflow.
+- Browser-selected artwork at 1440 × 900 was `campus-banner-1440.webp`, `eco-operations-480.webp`, and `park-aerial-daylight-720.webp` (about 129 KB total source bytes). At 1920 × 1080 it selected `campus-banner-2172.webp`, `eco-operations-480.webp`, and `park-aerial-daylight-1200.webp` (about 291 KB), instead of transferring the three 5.9 MB source PNGs. PNG files remain only as browser compatibility fallbacks.
 
 ## Iteration history
 
@@ -140,3 +141,4 @@ Intentional differences are capability-driven rather than visual drift. Search, 
 10. The final data-state pass exposes HTTP-200 energy responses with `UNAVAILABLE` status instead of treating them as empty observations, and preserves an explicitly selected catalog building across workbench reactivation even when it has no anomaly row.
 11. The next review pass disables map selection while the overview is revalidating so a pending response cannot overwrite a newer user choice, and treats absent catalog rows as normal only when every anomaly domain completed with `OK`.
 12. The customer-demo closeout localizes raw status and redaction metadata, removes delivery Issue numbers from customer copy, turns future navigation into explicit non-interactive “未开放” entries, moves the rule/no-model statement into expandable data-basis disclosure, and regenerates both approved browser capture sizes from commit `8b361b645f9b5cfd32dc94237f0c881cbc352daa`.
+13. Final-head review identified 5.9 MB of eager source PNG transfers. The page now uses responsive WebP `srcset` variants with PNG fallbacks; actual browser selection at both capture sizes was verified, and the screenshots were regenerated against `2e8c7227cec35d158606dd38ef6f3a740ce1420d` with no visual drift.
