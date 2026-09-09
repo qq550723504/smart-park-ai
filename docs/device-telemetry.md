@@ -81,9 +81,9 @@ Times are bound as UTC `OffsetDateTime` for both EXPLAIN and execution. Public e
 Health is a deterministic state, never an AI-authored sensor fact or numeric score:
 
 - `CRITICAL`: fresh `OFFLINE`, an active `HIGH` alert, or a fresh latest telemetry point above the registered critical threshold.
-- `DEGRADED`: an active `MEDIUM` alert or three consecutive fresh points above the registered attention threshold.
+- `DEGRADED`: an active `MEDIUM` alert or three adjacent hourly fresh points above the registered attention threshold; a missing hour breaks the sequence.
 - `ATTENTION`: an active `LOW` alert, snapshot `DEGRADED`, or a fresh latest point above the attention threshold.
-- `HEALTHY`: only when the device snapshot is fresh, telemetry and its registered threshold are present and fresh, and no registered signal triggers a rule.
+- `HEALTHY`: only when the device snapshot is fresh, the requested telemetry window is `AVAILABLE` (not `PARTIAL`), telemetry and its registered threshold are present and fresh, and no registered signal triggers a rule.
 - `UNKNOWN`: stale/missing telemetry, stale connectivity, an unsupported device type, or otherwise insufficient evidence. Missing evidence never defaults to `HEALTHY`.
 
 Each response includes reasons, typed evidence references, safe source labels, `asOf`, and availability. Alerts are accepted only when both `deviceId` and `buildingId` match the assessed device. A scope mismatch fails closed instead of mixing evidence across devices or buildings.

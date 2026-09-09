@@ -82,6 +82,25 @@ class DeviceHealthServiceTest {
     }
 
     @Test
+    void partialTelemetryCannotProduceHealthyAndGappedPointsAreNotSustained() {
+        var partialBelowThreshold = service(facts(device("ONLINE", "HVAC"), List.of()),
+                telemetry(DeviceTelemetryDtos.Status.PARTIAL, DeviceTelemetryDtos.Freshness.FRESH,
+                        List.of(point(9, "24")))).assess("AC-B1-07");
+        assertThat(partialBelowThreshold.healthStatus()).isEqualTo(DeviceHealthDtos.HealthStatus.UNKNOWN);
+        assertThat(partialBelowThreshold.reasons()).contains("设备遥测窗口不完整，不能据此确认健康");
+
+        var gappedHighPoints = service(facts(device("ONLINE", "HVAC"), List.of()),
+                telemetry(DeviceTelemetryDtos.Status.PARTIAL, DeviceTelemetryDtos.Freshness.FRESH,
+                        List.of(point(6, "29"), point(8, "30"), point(9, "31"))))
+                .assess("AC-B1-07");
+        assertThat(gappedHighPoints.healthStatus()).isEqualTo(DeviceHealthDtos.HealthStatus.ATTENTION);
+        assertThat(gappedHighPoints.reasons()).doesNotContain(
+                "最近 3 个温度点持续超过已登记的 demo attention 阈值");
+        assertThat(gappedHighPoints.evidence()).filteredOn(item -> item.type().equals("TELEMETRY_THRESHOLD"))
+                .hasSize(1);
+    }
+
+    @Test
     void staleMissingOrUnregisteredTelemetryProducesUnknownRatherThanHealthy() {
         var stale = service(facts(device("ONLINE", "HVAC"), List.of()),
                 telemetry(DeviceTelemetryDtos.Status.PARTIAL, DeviceTelemetryDtos.Freshness.STALE,
@@ -89,6 +108,12 @@ class DeviceHealthServiceTest {
         assertThat(stale.healthStatus()).isEqualTo(DeviceHealthDtos.HealthStatus.UNKNOWN);
         assertThat(stale.availability()).isEqualTo(DeviceHealthDtos.Availability.PARTIAL);
         assertThat(stale.reasons()).contains("设备遥测已过期，未用于阈值判断");
+
+        var incomplete = service(facts(device("ONLINE", "HVAC"), List.of()),
+                telemetry(DeviceTelemetryDtos.Status.PARTIAL, DeviceTelemetryDtos.Freshness.FRESH,
+                        List.of(point(9, "24")))).assess("AC-B1-07");
+        assertThat(incomplete.healthStatus()).isEqualTo(DeviceHealthDtos.HealthStatus.UNKNOWN);
+        assertThat(incomplete.reasons()).contains("设备遥测窗口不完整，不能据此确认健康");
 
         var missing = service(facts(device("ONLINE", "HVAC"), List.of()), unavailableTelemetry())
                 .assess("AC-B1-07");
@@ -103,6 +128,18 @@ class DeviceHealthServiceTest {
                 telemetryWithoutThreshold(List.of(point(9, "24")))).assess("AC-B1-07");
         assertThat(missingThreshold.healthStatus()).isEqualTo(DeviceHealthDtos.HealthStatus.UNKNOWN);
         assertThat(missingThreshold.reasons()).contains("遥测可用但没有已登记阈值，未自动推导异常");
+    }
+
+    @Test
+    void doesNotTreatThresholdBreachesAcrossAMissingHourAsSustained() {
+        var response = service(facts(device("ONLINE", "HVAC"), List.of()),
+                telemetry(DeviceTelemetryDtos.Status.PARTIAL, DeviceTelemetryDtos.Freshness.FRESH,
+                        List.of(point(6, "29"), point(8, "30"), point(9, "31"))))
+                .assess("AC-B1-07");
+
+        assertThat(response.healthStatus()).isEqualTo(DeviceHealthDtos.HealthStatus.ATTENTION);
+        assertThat(response.evidence()).filteredOn(item -> item.type().equals("TELEMETRY_THRESHOLD"))
+                .singleElement().satisfies(item -> assertThat(item.summary()).contains("ATTENTION"));
     }
 
     @Test

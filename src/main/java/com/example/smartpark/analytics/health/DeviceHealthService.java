@@ -95,6 +95,9 @@ public final class DeviceHealthService {
             };
             sources.add(new DeviceHealthDtos.Source(telemetryResponse.source().system(), telemetryAvailability));
             partial |= telemetryResponse.status() != DeviceTelemetryDtos.Status.AVAILABLE;
+            if (telemetryResponse.status() == DeviceTelemetryDtos.Status.PARTIAL) {
+                reasons.add("设备遥测窗口不完整，不能据此确认健康");
+            }
             DeviceTelemetryDtos.Series series = telemetryResponse.series().stream().findFirst().orElse(null);
             if (series == null || series.points().isEmpty()) {
                 reasons.add("没有可用于当前健康判断的设备遥测");
@@ -117,7 +120,7 @@ public final class DeviceHealthService {
         else if (severity == 3) status = DeviceHealthDtos.HealthStatus.DEGRADED;
         else if (severity > 0) status = DeviceHealthDtos.HealthStatus.ATTENTION;
         else if (snapshotFresh && telemetryResponse != null
-                && telemetryResponse.status() != DeviceTelemetryDtos.Status.UNAVAILABLE
+                && telemetryResponse.status() == DeviceTelemetryDtos.Status.AVAILABLE
                 && telemetryResponse.threshold() != null
                 && telemetryResponse.series().stream().anyMatch(series ->
                     series.freshness() == DeviceTelemetryDtos.Freshness.FRESH && !series.points().isEmpty())) {
@@ -162,7 +165,10 @@ public final class DeviceHealthService {
             return 4;
         }
         List<DeviceTelemetryDtos.Point> tail = ordered.subList(Math.max(0, ordered.size() - 3), ordered.size());
-        if (tail.size() == 3 && tail.stream().allMatch(point -> point.value().compareTo(attention) > 0)) {
+        boolean consecutiveHours = tail.size() == 3
+                && Duration.between(tail.get(0).timestamp(), tail.get(1).timestamp()).equals(Duration.ofHours(1))
+                && Duration.between(tail.get(1).timestamp(), tail.get(2).timestamp()).equals(Duration.ofHours(1));
+        if (consecutiveHours && tail.stream().allMatch(point -> point.value().compareTo(attention) > 0)) {
             reasons.add("最近 3 个温度点持续超过已登记的 demo attention 阈值");
             tail.forEach(point -> evidence.add(thresholdEvidence(response, point, "SUSTAINED")));
             return Math.max(severity, 3);
