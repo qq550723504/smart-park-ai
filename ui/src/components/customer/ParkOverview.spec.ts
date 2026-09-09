@@ -136,13 +136,48 @@ describe('ParkOverview', () => {
     expect(wrapper.get('[data-kpi="service-requests"] strong').text()).toContain('3')
     expect(wrapper.text()).toContain('运营规则聚合 · 未调用模型')
     expect(wrapper.text()).not.toContain('设备运行率')
+    expect(getAnomalyOverview).toHaveBeenCalledWith('VIEWER', { status: 'OPEN' })
     expect(getEnergyTimeSeries).toHaveBeenCalledWith('VIEWER', {
-      buildingIds: ['B1', 'B2'],
+      buildingIds: ['B1', 'B2', 'B3'],
       from: '2026-09-08T00:00:00.000Z',
       to: '2026-09-09T00:00:00.000Z',
       granularity: 'HOUR',
     })
     expect(listCollaborationWorkItems).toHaveBeenCalledWith('CUSTOMER_AGENT', { limit: 50, sort: 'sla' })
+  })
+
+  it('queries the complete current park catalog even when no building is affected', async () => {
+    vi.mocked(getAnomalyOverview).mockResolvedValue({
+      ...overview,
+      summary: { alertCount: 0, highRiskAlertCount: 0, offlineDeviceCount: 0, affectedBuildingCount: 0 },
+      buildings: [],
+    })
+
+    const wrapper = await mountLoaded()
+
+    expect(getEnergyTimeSeries).toHaveBeenCalledWith('VIEWER', expect.objectContaining({
+      buildingIds: ['B1', 'B2', 'B3'],
+    }))
+    expect(wrapper.get('[data-kpi="energy"] strong').text()).toContain('100')
+    expect(wrapper.text()).toContain('尚无可选楼宇')
+  })
+
+  it('clears old energy while a refreshed energy request is pending', async () => {
+    const wrapper = await mountLoaded()
+    expect(wrapper.get('[data-kpi="energy"] strong').text()).toContain('100')
+
+    const pendingEnergy = deferred<EnergyTimeSeriesResponse>()
+    vi.mocked(getEnergyTimeSeries).mockReturnValueOnce(pendingEnergy.promise)
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+    await vi.waitFor(() => expect(getEnergyTimeSeries).toHaveBeenCalledTimes(2))
+
+    expect(wrapper.get('[data-kpi="energy"] strong').text()).toContain('—')
+    expect(wrapper.get('[data-kpi="energy"]').text()).toContain('正在读取能耗观测…')
+
+    pendingEnergy.resolve(energy)
+    await flushPromises()
+    expect(wrapper.get('[data-kpi="energy"] strong').text()).toContain('100')
   })
 
   it('renders overview and energy while an independent work-item request is still pending', async () => {

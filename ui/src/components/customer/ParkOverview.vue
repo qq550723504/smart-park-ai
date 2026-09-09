@@ -21,6 +21,7 @@ const workItems = ref<CollaborationWorkItem[]>([])
 const evidence = ref<AnomalyEvidence | null>(null)
 const selectedBuildingId = ref<string | null>(null)
 const loading = ref(false)
+const energyLoading = ref(false)
 const metricsLoading = ref(false)
 const workItemsLoading = ref(false)
 const detailLoading = ref(false)
@@ -136,9 +137,11 @@ async function refresh(): Promise<void> {
   const generation = ++requestGeneration
   evidenceGeneration++
   loading.value = true
+  energyLoading.value = false
   metricsLoading.value = true
   workItemsLoading.value = true
   detailLoading.value = false
+  energy.value = null
   metrics.value = null
   workItems.value = []
   evidence.value = null
@@ -147,16 +150,18 @@ async function refresh(): Promise<void> {
   void loadWorkItems(generation)
 
   try {
-    const nextOverview = await getAnomalyOverview('VIEWER')
+    const nextOverview = await getAnomalyOverview('VIEWER', { status: 'OPEN' })
     if (generation !== requestGeneration) return
     overview.value = nextOverview
-    const ids = overview.value.buildings.map((building) => building.buildingId)
-    selectedBuildingId.value = selectedBuildingId.value && ids.includes(selectedBuildingId.value)
+    const ids = Object.keys(buildingCatalog)
+    const affectedIds = overview.value.buildings.map((building) => building.buildingId)
+    selectedBuildingId.value = selectedBuildingId.value && affectedIds.includes(selectedBuildingId.value)
       ? selectedBuildingId.value
-      : ids[0] ?? null
+      : affectedIds[0] ?? null
     if (ids.length > 0) {
       const window = last24Hours(overview.value.window)
       if (window) {
+        energyLoading.value = true
         try {
           const nextEnergy = await getEnergyTimeSeries('VIEWER', {
             buildingIds: ids,
@@ -170,6 +175,8 @@ async function refresh(): Promise<void> {
             energy.value = null
             errors.value.energy = '最近 24 小时能耗趋势暂不可用。'
           }
+        } finally {
+          if (generation === requestGeneration) energyLoading.value = false
         }
       } else {
         energy.value = null
@@ -316,6 +323,7 @@ watch(() => props.active, (active) => {
     requestGeneration++
     evidenceGeneration++
     loading.value = false
+    energyLoading.value = false
     metricsLoading.value = false
     workItemsLoading.value = false
     detailLoading.value = false
@@ -328,7 +336,7 @@ watch(() => props.active, (active) => {
     <section class="park-overview__kpis" aria-label="园区关键指标">
       <article class="customer-card customer-kpi" data-kpi="energy">
         <span class="customer-kpi__icon is-green"><TrendCharts aria-hidden="true" /></span>
-        <div><p>最近 24 小时园区能耗</p><strong>{{ formatNumber(energyTotal) }} <small>{{ energy?.unit ?? 'kWh' }}</small></strong><span>{{ energy?.status === 'PARTIAL' ? '部分观测，缺口未补零' : errors.energy || '各楼宇小时观测汇总' }}</span></div>
+        <div><p>最近 24 小时园区能耗</p><strong>{{ formatNumber(energyTotal) }} <small>{{ energy?.unit ?? 'kWh' }}</small></strong><span>{{ energyLoading ? '正在读取能耗观测…' : energy?.status === 'PARTIAL' ? '部分观测，缺口未补零' : errors.energy || '各楼宇小时观测汇总' }}</span></div>
       </article>
       <article class="customer-card customer-kpi" data-kpi="buildings">
         <span class="customer-kpi__icon is-blue"><OfficeBuilding aria-hidden="true" /></span>
@@ -420,12 +428,12 @@ watch(() => props.active, (active) => {
       <article class="customer-card customer-chart-card is-wide">
         <header><div><h2>园区能耗趋势</h2><small>最近 24 小时 · 实际观测</small></div><span>{{ energy?.status ?? 'UNAVAILABLE' }}</span></header>
         <CustomerOverviewChart v-if="energyTrend.length" kind="line" :data="energyTrend" :unit="energy?.unit" label="园区最近二十四小时实际能耗趋势，缺失时段保留断点" />
-        <p v-else class="customer-state">{{ errors.energy || '当前窗口暂无可绘制的能耗观测' }}</p>
+        <p v-else class="customer-state">{{ energyLoading ? '正在读取能耗观测…' : errors.energy || '当前窗口暂无可绘制的能耗观测' }}</p>
       </article>
       <article class="customer-card customer-chart-card">
         <header><div><h2>能耗分布</h2><small>按楼宇已观测值</small></div></header>
         <CustomerOverviewChart v-if="energyDistribution.some((item) => item.value)" kind="donut" :data="energyDistribution" :unit="energy?.unit" label="各楼宇已观测能耗分布" />
-        <p v-else class="customer-state">{{ errors.energy || '暂无能耗分布数据' }}</p>
+        <p v-else class="customer-state">{{ energyLoading ? '正在读取能耗观测…' : errors.energy || '暂无能耗分布数据' }}</p>
       </article>
       <article class="customer-card customer-chart-card">
         <header><div><h2>事件分布</h2><small>当前查询窗口</small></div></header>

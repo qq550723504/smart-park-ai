@@ -4,11 +4,11 @@
 
 | 展示字段或动作 | 当前来源 | 展示约束 |
 | --- | --- | --- |
-| 最近 24 小时园区能耗、趋势、楼宇分布 | `GET /api/operations/energy-time-series` | 汇总接口返回的实际观测；`PARTIAL` 明示部分观测；缺失时段保留断点，不补零。 |
+| 最近 24 小时园区能耗、趋势、楼宇分布 | `GET /api/operations/energy-time-series` | 按现有 B1/B2/B3 园区目录查询完整园区，而不是使用异常接口的受影响楼宇清单；`PARTIAL` 明示部分观测；缺失时段保留断点，不补零。 |
 | 受影响楼宇 | `GET /api/operations/anomaly-overview` 的 `affectedBuildingCount` | 任一数据域为 `PARTIAL` / `UNAVAILABLE` 时明示“部分数据域可用”。 |
 | 待处理事件 | `anomaly-overview.breakdowns.statuses[OPEN]` | 不使用总告警数冒充待处理数。 |
 | 人工服务请求 | `GET /api/operations/metrics` 的 `humanTicketCount` | 表示当前运行实例累计，不外推为生产规模；该数据域独立加载，不阻塞园区总览。 |
-| AI 今日关注 | `anomaly-overview.buildings` 的高风险告警、离线设备、能耗偏差 | 仅做确定性运营规则排序，并标注“未调用模型”；不生成原因结论。 |
+| AI 今日关注 | `anomaly-overview?status=OPEN` 的高风险告警、离线设备、能耗偏差 | 仅将 OPEN 告警计入可操作关注，同时保留设备和能耗事实；做确定性运营规则排序并标注“未调用模型”，不生成原因结论。 |
 | 园区楼宇名称和坐标 | 现有演示迁移 `V3__add_operations_visualization_demo_data.sql` 的 B1/B2/B3 | 只用于统一演示空间语义；未知 ID 原样显示，空间画面标注为非实时示意。 |
 | 我的待办 | `GET /api/collaboration/work-items`，只读 `CUSTOMER_AGENT` 演示视角 | 最多读取 50 条 SLA 排序结果，过滤完成、关闭、取消、拒绝和失败等终态后展示前 4 条；本项不审批、不更新工单；该数据域独立加载，失败和空态分别展示。 |
 | 最新事件 | `GET /api/operations/anomaly-evidence/{buildingId}` | 合并后端返回的告警、设备和能耗安全摘要，按各自事实时间排序后展示前 5 条；与当前所选楼宇及同一查询窗口绑定。 |
