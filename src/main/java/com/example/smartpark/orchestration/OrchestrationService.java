@@ -404,6 +404,7 @@ public final class OrchestrationService {
         List<String> refs = new ArrayList<>();
         List<String> sources = new ArrayList<>();
         String summary = "已登记问题、场景标记与资源引用";
+        String partialReason = null;
         if (input.alertId() != null) refs.add("alert:" + input.alertId());
         input.buildingIds().forEach(id -> refs.add("building:" + id));
         if (input.alertId() != null && capabilities.current().analytics() && deviceHealth != null) {
@@ -413,13 +414,16 @@ public final class OrchestrationService {
                     refs.addAll(outcome.evidenceReferences());
                     sources.addAll(outcome.sourceReferences());
                     summary = "已登记上下文并读取匹配设备的健康证据";
+                    if ("PARTIAL".equals(outcome.status())) {
+                        partialReason = "设备健康证据不完整";
+                    }
                 }
             } catch (RuntimeException failure) {
                 LOGGER.debug("Optional device health evidence unavailable: exceptionType={}",
                         failure.getClass().getName());
             }
         }
-        completeStep(runId, step.id(), summary, null, refs, sources, List.of(), null);
+        completeStep(runId, step.id(), summary, null, refs, sources, List.of(), partialReason);
         return true;
     }
 

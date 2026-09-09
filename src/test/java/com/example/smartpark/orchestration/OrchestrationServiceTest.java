@@ -177,6 +177,32 @@ class OrchestrationServiceTest {
     }
 
     @Test
+    void partialDeviceHealthContextMarksTheRunPartial() {
+        OrchestrationPorts.OperationsRunner operations = question -> {
+            UUID id = UUID.randomUUID();
+            return new StartedChild(id, CompletableFuture.completedFuture(completedChild(id)));
+        };
+        OrchestrationPorts.DeviceHealthReader deviceHealth = alertId -> new EvidenceOutcome("PARTIAL",
+                "设备健康证据不完整", List.of("device-health:AC-B1-07:CRITICAL"),
+                List.of("OPERATIONS_ANALYTICS_DEMO"), List.of(), null);
+        OrchestrationService service = new OrchestrationService(new InMemoryOrchestrationRunStore(),
+                () -> new Capabilities(true, false, false, false, false), operations, null, deviceHealth,
+                null, null, alertId -> "B1", null, new InMemoryExecutionEventPublisher(), Runnable::run,
+                CLOCK, Duration.ofHours(1));
+        OrchestrationInput input = new OrchestrationInput("检查设备异常", "ALT-1", List.of("B1"),
+                false, false, false, false);
+
+        OrchestrationRun run = service.start(OrchestrationDefinition.JOINT_ANOMALY_ASSESSMENT,
+                input, "partial-device-health", null, "OPERATOR").run();
+
+        assertThat(run.status()).isEqualTo(OrchestrationStatus.PARTIAL);
+        assertThat(step(run, "collect-context").status()).isEqualTo(OrchestrationStepStatus.COMPLETED);
+        assertThat(step(run, "collect-context").failureReason()).isEqualTo("设备健康证据不完整");
+        assertThat(run.result().partialReasons()).containsExactly("设备健康证据不完整");
+        assertThat(run.result().evidenceReferences()).contains("device-health:AC-B1-07:CRITICAL");
+    }
+
+    @Test
     void partialOperationsOutcomeKeepsTheRequiredStepAndMarksTheRunPartial() {
         UUID childId = UUID.randomUUID();
         OrchestrationPorts.OperationsRunner operations = question -> new StartedChild(childId,
