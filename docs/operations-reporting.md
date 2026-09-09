@@ -63,7 +63,8 @@ The report stores both the requested report window and each section's actual res
 `Generated At` is the report completion time. `Source As Of` is the latest source-snapshot reference captured
 by the completed sections. Because the aggregate views do not expose a newest-fact timestamp, this is the
 source-read capture time, not a claim that every underlying fact was observed at the window's upper bound.
-These concepts are intentionally shown separately.
+If no section completes a source read, `Source As Of` remains `null` (shown as `—`) rather than falling back
+to the report completion time. These concepts are intentionally shown separately.
 
 ## Evidence
 

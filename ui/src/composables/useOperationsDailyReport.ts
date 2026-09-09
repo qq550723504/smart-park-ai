@@ -11,6 +11,9 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
   const runId = ref<string | null>(null)
   const busy = ref(false)
   const historyLoading = ref(false)
+  const historyPage = ref(-1)
+  const historyHasNext = ref(false)
+  const historyTotal = ref(0)
   const error = ref('')
   const pollIntervalMs = options.pollIntervalMs ?? 500
   const maxPolls = options.maxPolls ?? 180
@@ -18,12 +21,21 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
   let pendingCreation: { role: DemoRole; key: string; request: OperationsReportCreateRequest } | null = null
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-  async function loadHistory(role: DemoRole): Promise<void> {
+  async function loadHistory(role: DemoRole, append = false): Promise<void> {
+    if (append && (historyLoading.value || !historyHasNext.value)) return
     const current = generation
+    const targetPage = append ? historyPage.value + 1 : 0
     historyLoading.value = true
     try {
-      const page = await listOperationsDailyReports(role)
-      if (current === generation) reports.value = page.content
+      const page = await listOperationsDailyReports(role, { page: targetPage, size: 20 })
+      if (current === generation) {
+        reports.value = append
+          ? [...new Map([...reports.value, ...page.content].map((item) => [item.reportId, item])).values()]
+          : page.content
+        historyPage.value = page.page
+        historyHasNext.value = page.hasNext
+        historyTotal.value = page.totalElements
+      }
     } catch (cause) {
       if (current === generation) error.value = cause instanceof Error ? cause.message : String(cause)
     } finally {
@@ -33,6 +45,8 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
 
   async function open(reportId: string, role: DemoRole): Promise<void> {
     const current = ++generation
+    pendingCreation = null
+    historyLoading.value = false
     error.value = ''
     try {
       const detail = await getOperationsDailyReport(reportId, role)
@@ -103,9 +117,13 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
     runId.value = null
     busy.value = false
     historyLoading.value = false
+    historyPage.value = -1
+    historyHasNext.value = false
+    historyTotal.value = 0
     error.value = ''
   }
 
   onScopeDispose(reset)
-  return { report, reports, runId, busy, historyLoading, error, start, open, loadHistory, download, reset }
+  return { report, reports, runId, busy, historyLoading, historyHasNext, historyTotal, error,
+    start, open, loadHistory, download, reset }
 }

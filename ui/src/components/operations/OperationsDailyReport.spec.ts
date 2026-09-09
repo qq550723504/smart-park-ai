@@ -136,6 +136,61 @@ describe('OperationsDailyReport', () => {
     }
   })
 
+  it('retires an accepted creation key when a historical report is opened', async () => {
+    let postCount = 0
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      if (url.includes('?')) return Promise.resolve(new Response(JSON.stringify({ content: [summary], page: 0, size: 20, totalElements: 1, hasNext: false }), { status: 200 }))
+      if (init?.method === 'POST') {
+        postCount += 1
+        const id = postCount === 1 ? 'report-generating' : 'report-2'
+        return Promise.resolve(new Response(JSON.stringify({ reportId: id, runId: `run-${id}`, statusUrl: `/api/operations-reports/${id}` }), { status: 202 }))
+      }
+      if (url.endsWith('/report-generating')) {
+        return Promise.resolve(new Response(JSON.stringify({ ...detail, reportId: 'report-generating', status: 'GENERATING', completedAt: null, downloadAvailable: false }), { status: 200 }))
+      }
+      if (url.endsWith('/report-2')) {
+        return Promise.resolve(new Response(JSON.stringify({ ...detail, reportId: 'report-2', runId: 'run-report-2', traceId: 'run-report-2' }), { status: 200 }))
+      }
+      return Promise.resolve(new Response(JSON.stringify(detail), { status: 200 }))
+    }))
+    const wrapper = mount(OperationsDailyReport, { props: { role: 'OPERATOR', pollIntervalMs: 10 } })
+    await flushPromises()
+
+    await wrapper.get('[data-generate-report]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="report-history"] button').trigger('click')
+    await new Promise((resolve) => setTimeout(resolve, 15))
+    await flushPromises()
+    await wrapper.get('[data-generate-report]').trigger('click')
+    await flushPromises()
+
+    const posts = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')
+    expect(posts).toHaveLength(2)
+    expect((posts[0][1]?.headers as Record<string, string>)['Idempotency-Key'])
+      .not.toBe((posts[1][1]?.headers as Record<string, string>)['Idempotency-Key'])
+  })
+
+  it('loads every history page instead of hiding reports beyond the first page', async () => {
+    const second = { ...summary, reportId: 'report-2', runId: 'run-2', traceId: 'run-2' }
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      const page = new URL(url, 'http://localhost').searchParams.get('page')
+      const body = page === '1'
+        ? { content: [second], page: 1, size: 20, totalElements: 2, hasNext: false }
+        : { content: [summary], page: 0, size: 20, totalElements: 2, hasNext: true }
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }))
+    }))
+    const wrapper = mount(OperationsDailyReport, { props: { role: 'OPERATOR' } })
+    await flushPromises()
+
+    expect(wrapper.get('[data-load-more-reports]').text()).toContain('1 / 2')
+    await wrapper.get('[data-load-more-reports]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="report-history"]').text()).toContain('2 份')
+    expect(wrapper.find('[data-load-more-reports]').exists()).toBe(false)
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('page=1'))).toBe(true)
+  })
+
   it('renders partial reasons and does not enable unavailable downloads', async () => {
     const partial = { ...summary, status: 'PARTIAL', downloadAvailable: false }
     const partialDetail = { ...detail, ...partial, sections: [{ ...detail.sections[0], status: 'UNAVAILABLE', summary: '', rowCount: 0, rows: [], partialReason: 'REPORT_SECTION_UNAVAILABLE' }] }

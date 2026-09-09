@@ -258,7 +258,7 @@ public final class OperationsDailyReportService {
                     status == OperationsReportStatus.FAILED ? ExecutionStage.FAILURE : ExecutionStage.COMPLETION,
                     type, traceStatus, summary);
             OperationsDailyReport provisional = report.copy(status, report.startedAt(), now,
-                    report.asOf() == null ? now : report.asOf(), summary, report.sections(), report.evidence(),
+                    report.asOf(), summary, report.sections(), report.evidence(),
                     report.sourceReferences(), null, trace);
             OperationsDailyReport.Artifact artifact = status == OperationsReportStatus.FAILED
                     ? null : renderer.render(provisional, now);
@@ -318,7 +318,7 @@ public final class OperationsDailyReportService {
                             : "报告生成被中断，已保留完成章节；下载文件超出容量限制"
                     : "报告生成被中断";
             OperationsDailyReport provisional = report.copy(status, report.startedAt(), now,
-                    report.asOf() == null ? now : report.asOf(), summary, sections,
+                    report.asOf(), summary, sections,
                     report.evidence(), report.sourceReferences(), null, trace);
             OperationsDailyReport.Artifact artifact = status == OperationsReportStatus.PARTIAL && includeArtifact
                     ? renderer.render(provisional, now) : null;

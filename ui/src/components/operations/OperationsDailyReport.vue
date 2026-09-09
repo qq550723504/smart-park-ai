@@ -14,6 +14,7 @@ const sectionLabels = { PENDING: '等待中', RUNNING: '查询中', COMPLETED: '
 function start(): void { void state.start(props.role) }
 function open(reportId: string): void { void state.open(reportId, props.role) }
 function download(reportId: string): void { void state.download(reportId, props.role) }
+function loadMore(): void { void state.loadHistory(props.role, true) }
 function format(value: string | null | undefined): string {
   if (!value) return '—'
   return new Date(value).toLocaleString('zh-CN', { hour12: false })
@@ -59,6 +60,9 @@ watch(() => props.active, (active) => {
         <button type="button" @click="open(item.reportId)">查看</button>
         <button type="button" :disabled="!item.downloadAvailable" @click="download(item.reportId)">下载</button>
       </article>
+      <button v-if="state.historyHasNext.value" type="button" data-load-more-reports :disabled="state.historyLoading.value" @click="loadMore">
+        加载更多（已显示 {{ state.reports.value.length }} / {{ state.historyTotal.value }}）
+      </button>
     </div>
 
     <div v-if="state.report.value" class="operations-report__body" data-testid="report-body">

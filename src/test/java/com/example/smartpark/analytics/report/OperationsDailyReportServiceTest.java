@@ -163,6 +163,7 @@ class OperationsDailyReportServiceTest {
                 "demo-role:OPERATOR", "OPERATOR").report().reportId(), "OPERATOR");
 
         assertThat(report.status()).isEqualTo(OperationsReportStatus.FAILED);
+        assertThat(report.asOf()).isNull();
         assertThat(report.artifact()).isNull();
         assertThat(report.sections()).allMatch(section ->
                 section.status() == OperationsReportSectionStatus.UNAVAILABLE
@@ -187,6 +188,7 @@ class OperationsDailyReportServiceTest {
         OperationsDailyReport recovered = restarted.get(reportId, "OPERATOR");
 
         assertThat(recovered.status()).isEqualTo(OperationsReportStatus.FAILED);
+        assertThat(recovered.asOf()).isNull();
         assertThat(recovered.sections().get(0).partialReason()).isEqualTo("GENERATION_INTERRUPTED");
         assertThat(recovered.traceEvents()).last().extracting(event -> event.eventType())
                 .isEqualTo(ExecutionEventType.RUN_FAILED);
