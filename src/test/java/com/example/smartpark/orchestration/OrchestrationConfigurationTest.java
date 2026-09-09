@@ -1,6 +1,8 @@
 package com.example.smartpark.orchestration;
 
 import com.example.smartpark.analytics.AnalysisRunStore;
+import com.example.smartpark.analytics.health.DeviceHealthDtos;
+import com.example.smartpark.analytics.health.DeviceHealthService;
 import com.example.smartpark.collaboration.model.CollaborationRun;
 import com.example.smartpark.collaboration.model.FindingStatus;
 import com.example.smartpark.collaboration.model.Synthesis;
@@ -10,9 +12,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class OrchestrationConfigurationTest {
     private static final Instant NOW = Instant.parse("2026-09-08T08:00:00Z");
@@ -43,6 +48,39 @@ class OrchestrationConfigurationTest {
         assertThat(outcome.status()).isEqualTo("PARTIAL");
         assertThat(outcome.partialReason()).contains("设备时间窗缺失", "需要人工复核");
         assertThat(outcome.evidenceReferences()).containsExactly("energy:1");
+    }
+
+    @Test
+    void onlyExposesDeviceHealthToOrchestrationWhenTelemetryIsUsable() {
+        DeviceHealthService health = mock(DeviceHealthService.class);
+        when(health.assessByAlertId("ALT-1")).thenReturn(Optional.of(healthResponse(
+                new DeviceHealthDtos.Source("OPERATIONS_ANALYTICS_DEMO",
+                        DeviceHealthDtos.Availability.UNAVAILABLE))));
+
+        OrchestrationPorts.EvidenceOutcome unavailable =
+                OrchestrationConfiguration.deviceHealthOutcome(health, "ALT-1");
+
+        assertThat(unavailable.status()).isEqualTo("UNAVAILABLE");
+
+        when(health.assessByAlertId("ALT-1")).thenReturn(Optional.of(healthResponse(
+                new DeviceHealthDtos.Source("OPERATIONS_ANALYTICS_DEMO",
+                        DeviceHealthDtos.Availability.PARTIAL))));
+
+        OrchestrationPorts.EvidenceOutcome usable =
+                OrchestrationConfiguration.deviceHealthOutcome(health, "ALT-1");
+
+        assertThat(usable.status()).isEqualTo("PARTIAL");
+        assertThat(usable.evidenceReferences()).contains("device-health:AC-B1-07:DEGRADED");
+    }
+
+    private static DeviceHealthDtos.Response healthResponse(DeviceHealthDtos.Source telemetrySource) {
+        return new DeviceHealthDtos.Response("AC-B1-07", "B1", "HVAC",
+                DeviceHealthDtos.HealthStatus.DEGRADED, DeviceHealthDtos.Availability.PARTIAL,
+                List.of("温度持续超过阈值"),
+                List.of(new DeviceHealthDtos.Evidence("TELEMETRY_THRESHOLD", "telemetry:TEMPERATURE:point",
+                        NOW, "demo threshold")),
+                List.of(new DeviceHealthDtos.Source("DEVICE_SNAPSHOT", DeviceHealthDtos.Availability.AVAILABLE),
+                        telemetrySource), NOW);
     }
 
     @Test
