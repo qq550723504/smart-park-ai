@@ -41,7 +41,7 @@ public final class OperationsReportTraceArchive implements ExecutionEventArchive
             }
         });
         if (persisted.isEmpty() && publisher != null && publisher.history(runId).stream()
-                .anyMatch(event -> "operations-report".equals(event.actor()))) {
+                .anyMatch(event -> OperationsReportTraceRecord.REPORT_ACTOR.equals(event.actor()))) {
             throw new NoSuchElementException("Unknown operations report trace");
         }
     }

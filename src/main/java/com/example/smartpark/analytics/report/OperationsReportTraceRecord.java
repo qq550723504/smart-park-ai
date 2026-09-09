@@ -12,6 +12,7 @@ import java.util.UUID;
 public record OperationsReportTraceRecord(UUID eventId, long sequence, Instant timestamp,
         String actor, ExecutionStage stage, ExecutionEventType eventType,
         ExecutionStatus status, String safeSummary) {
+    public static final String REPORT_ACTOR = "report";
 
     public ExecutionEvent toExecutionEvent(UUID traceId) {
         return new ExecutionEvent(eventId, traceId, sequence, timestamp,

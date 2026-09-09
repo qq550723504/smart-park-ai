@@ -356,6 +356,7 @@ class OperationsDailyReportServiceTest {
                 section.status() == OperationsReportSectionStatus.PENDING);
         assertThat(recovered.traceEvents()).singleElement().satisfies(trace -> {
             assertThat(trace.sequence()).isEqualTo(1);
+            assertThat(trace.actor()).isEqualTo(OperationsReportTraceRecord.REPORT_ACTOR);
             assertThat(trace.eventType()).isEqualTo(ExecutionEventType.RUN_FAILED);
             assertThat(trace.status()).isEqualTo(ExecutionStatus.FAILED);
         });
@@ -482,7 +483,7 @@ class OperationsDailyReportServiceTest {
         InMemoryExecutionEventPublisher publisher = new InMemoryExecutionEventPublisher();
         publisher.publish(new ExecutionEvent(
                 UUID.randomUUID(), traceId, 0, NOW, ExecutionScenario.OPERATIONS_ANALYSIS,
-                "operations-report", ExecutionStage.COMPLETION,
+                OperationsReportTraceRecord.REPORT_ACTOR, ExecutionStage.COMPLETION,
                 ExecutionEventType.RUN_COMPLETED, ExecutionStatus.SUCCEEDED,
                 "done", null));
         OperationsReportTraceArchive archive = new OperationsReportTraceArchive(

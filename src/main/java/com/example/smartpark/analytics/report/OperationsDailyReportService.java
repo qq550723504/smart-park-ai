@@ -91,7 +91,8 @@ public final class OperationsDailyReportService {
             generating = store.update(admitted.report().reportId(), report ->
                     report.copy(OperationsReportStatus.GENERATING, now, null, null, "报告生成中",
                             report.sections(), report.evidence(), report.sourceReferences(), null,
-                            append(report.traceEvents(), "operations-report", ExecutionStage.INITIALIZATION,
+                            append(report.traceEvents(), OperationsReportTraceRecord.REPORT_ACTOR,
+                                    ExecutionStage.INITIALIZATION,
                                     ExecutionEventType.RUN_STARTED, ExecutionStatus.RUNNING, "运营日报开始生成")));
             publishNew(generating, 0);
             runSection(generating.reportId(), 0);
@@ -269,7 +270,8 @@ public final class OperationsDailyReportService {
                     ? ExecutionEventType.RUN_FAILED : ExecutionEventType.RUN_COMPLETED;
             ExecutionStatus traceStatus = status == OperationsReportStatus.FAILED
                     ? ExecutionStatus.FAILED : ExecutionStatus.SUCCEEDED;
-            List<OperationsReportTraceRecord> trace = append(report.traceEvents(), "operations-report",
+            List<OperationsReportTraceRecord> trace = append(report.traceEvents(),
+                    OperationsReportTraceRecord.REPORT_ACTOR,
                     status == OperationsReportStatus.FAILED ? ExecutionStage.FAILURE : ExecutionStage.COMPLETION,
                     type, traceStatus, summary);
             OperationsDailyReport provisional = report.copy(status, report.startedAt(), now,
@@ -290,7 +292,8 @@ public final class OperationsDailyReportService {
             OperationsDailyReport failed = store.update(reportId, report -> report.copy(
                     OperationsReportStatus.FAILED, report.startedAt(), clock.instant(), report.asOf(),
                     "运营日报生成失败", report.sections(), report.evidence(), report.sourceReferences(), null,
-                    append(report.traceEvents(), "operations-report", ExecutionStage.FAILURE,
+                    append(report.traceEvents(), OperationsReportTraceRecord.REPORT_ACTOR,
+                            ExecutionStage.FAILURE,
                             ExecutionEventType.RUN_FAILED, ExecutionStatus.FAILED, reason)));
             publishNew(failed, firstTrace);
         } catch (OperationsReportCapacityException capacity) {
@@ -343,7 +346,7 @@ public final class OperationsDailyReportService {
                     section.status() == OperationsReportSectionStatus.COMPLETED ? section
                             : section.unavailable("GENERATION_INTERRUPTED")).toList();
             List<OperationsReportTraceRecord> trace = append(compactTrace ? List.of() : report.traceEvents(),
-                    "operations-report",
+                    OperationsReportTraceRecord.REPORT_ACTOR,
                     ExecutionStage.FAILURE, status == OperationsReportStatus.FAILED
                             ? ExecutionEventType.RUN_FAILED : ExecutionEventType.RUN_COMPLETED,
                     status == OperationsReportStatus.FAILED ? ExecutionStatus.FAILED : ExecutionStatus.SUCCEEDED,
@@ -384,7 +387,7 @@ public final class OperationsDailyReportService {
             OperationsReportTraceRecord terminalTrace = new OperationsReportTraceRecord(
                     UUID.randomUUID(), 1,
                     seed == null ? clock.instant() : seed.timestamp(),
-                    "report",
+                    OperationsReportTraceRecord.REPORT_ACTOR,
                     failed ? ExecutionStage.FAILURE : ExecutionStage.COMPLETION,
                     failed ? ExecutionEventType.RUN_FAILED : ExecutionEventType.RUN_COMPLETED,
                     failed ? ExecutionStatus.FAILED : ExecutionStatus.SUCCEEDED, "");
