@@ -21,6 +21,7 @@ import java.util.Optional;
 /** Deterministic, explainable health state. No numeric score or prediction is produced. */
 public final class DeviceHealthService {
     private static final Duration SNAPSHOT_FRESHNESS = Duration.ofHours(6);
+    private static final Duration TELEMETRY_FRESHNESS = Duration.ofHours(2);
 
     private final DeviceHealthFactsReader factsReader;
     private final DeviceTelemetryService telemetry;
@@ -96,6 +97,7 @@ public final class DeviceHealthService {
         }
 
         DeviceTelemetryDtos.Response telemetryResponse = null;
+        boolean trustedTelemetryFresh = false;
         var definition = catalog.availableForDeviceType(device.deviceType());
         if (definition.isPresent()) {
             telemetryResponse = telemetry.query(new DeviceTelemetryQuery(definition.get().telemetryType(),
@@ -113,7 +115,8 @@ public final class DeviceHealthService {
             DeviceTelemetryDtos.Series series = telemetryResponse.series().stream().findFirst().orElse(null);
             List<DeviceTelemetryDtos.Point> trustedPoints = series == null ? List.of()
                     : series.points().stream()
-                            .filter(point -> "GOOD".equalsIgnoreCase(point.quality()))
+                            .filter(point -> point != null && point.timestamp() != null && point.value() != null
+                                    && "GOOD".equalsIgnoreCase(point.quality()))
                             .toList();
             if (series != null && trustedPoints.size() != series.points().size()) {
                 partial = true;
@@ -121,13 +124,19 @@ public final class DeviceHealthService {
             }
             if (trustedPoints.isEmpty()) {
                 reasons.add("没有可用于当前健康判断的设备遥测");
-            } else if (series.freshness() != DeviceTelemetryDtos.Freshness.FRESH) {
+            } else {
+                Instant latestTrustedTimestamp = trustedPoints.stream()
+                        .map(DeviceTelemetryDtos.Point::timestamp).max(Comparator.naturalOrder()).orElseThrow();
+                trustedTelemetryFresh = !latestTrustedTimestamp.isAfter(now)
+                        && Duration.between(latestTrustedTimestamp, now).compareTo(TELEMETRY_FRESHNESS) <= 0;
+            }
+            if (!trustedPoints.isEmpty() && !trustedTelemetryFresh) {
                 partial = true;
                 reasons.add("设备遥测已过期，未用于阈值判断");
-            } else if (telemetryResponse.threshold() == null) {
+            } else if (!trustedPoints.isEmpty() && telemetryResponse.threshold() == null) {
                 partial = true;
                 reasons.add("遥测可用但没有已登记阈值，未自动推导异常");
-            } else {
+            } else if (!trustedPoints.isEmpty()) {
                 severity = applyThresholdEvidence(telemetryResponse, trustedPoints, severity, reasons, evidence);
             }
         } else {
@@ -142,8 +151,7 @@ public final class DeviceHealthService {
         else if (!partial && snapshotFresh && "ONLINE".equalsIgnoreCase(device.status()) && telemetryResponse != null
                 && telemetryResponse.status() == DeviceTelemetryDtos.Status.AVAILABLE
                 && telemetryResponse.threshold() != null
-                && telemetryResponse.series().stream().anyMatch(series ->
-                    series.freshness() == DeviceTelemetryDtos.Freshness.FRESH && !series.points().isEmpty())) {
+                && trustedTelemetryFresh) {
             status = DeviceHealthDtos.HealthStatus.HEALTHY;
             reasons.add("设备在线，且已登记遥测信号未触发阈值证据");
         } else {

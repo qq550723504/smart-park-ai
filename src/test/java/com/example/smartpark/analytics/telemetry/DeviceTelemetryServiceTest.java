@@ -77,6 +77,17 @@ class DeviceTelemetryServiceTest {
     }
 
     @Test
+    void failsClosedWhenTheReaderTruncatesBeforeDuplicateDetection() {
+        FakeReader reader = new FakeReader(DeviceTelemetryReader.Snapshot.available(
+                List.of(device("AC-B1-07", "B1")), List.of(row("AC-B1-07", "B1", 6, "24.0")), true));
+
+        var response = service(reader).query(query("TEMPERATURE", List.of("AC-B1-07"), FROM, TO));
+
+        assertThat(response.status()).isEqualTo(DeviceTelemetryDtos.Status.UNAVAILABLE);
+        assertThat(response.series()).isEmpty();
+    }
+
+    @Test
     void distinguishesUnknownDeviceFromAValidDeviceWithNoData() {
         FakeReader reader = new FakeReader(DeviceTelemetryReader.Snapshot.available(List.of(), List.of(), false));
         assertThatThrownBy(() -> service(reader).query(query("TEMPERATURE", List.of("MISSING"), FROM, TO)))

@@ -53,7 +53,7 @@ public final class DeviceTelemetryService {
 
         DeviceTelemetryReader.Snapshot snapshot = reader.read(
                 new DeviceTelemetryReader.Request(deviceIds, window.from(), window.to(), granularity), definition);
-        if (!snapshot.available()) return unavailable(definition, window);
+        if (!snapshot.available() || snapshot.truncated()) return unavailable(definition, window);
 
         Map<String, DeviceTelemetryReader.DeviceDescriptor> descriptors = new LinkedHashMap<>();
         snapshot.devices().forEach(device -> descriptors.put(device.deviceId(), device));
@@ -84,7 +84,7 @@ public final class DeviceTelemetryService {
                     }
                 });
 
-        boolean partial = snapshot.truncated();
+        boolean partial = false;
         int total = 0;
         Instant asOf = null;
         List<DeviceTelemetryDtos.Series> series = new ArrayList<>();

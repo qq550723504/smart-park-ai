@@ -185,6 +185,24 @@ class DeviceHealthServiceTest {
     }
 
     @Test
+    void freshUntrustedPointCannotMakeAnExpiredTrustedPointCurrent() {
+        DeviceTelemetryDtos.Point expiredGood = new DeviceTelemetryDtos.Point(
+                NOW.minusSeconds(3 * 3600), new BigDecimal("40"), "GOOD");
+        DeviceTelemetryDtos.Point freshSuspect = new DeviceTelemetryDtos.Point(
+                NOW.minusSeconds(3600), new BigDecimal("24"), "SUSPECT");
+
+        var response = service(facts(device("ONLINE", "HVAC"), List.of()),
+                telemetry(DeviceTelemetryDtos.Status.AVAILABLE, DeviceTelemetryDtos.Freshness.FRESH,
+                        List.of(expiredGood, freshSuspect))).assess("AC-B1-07");
+
+        assertThat(response.healthStatus()).isEqualTo(DeviceHealthDtos.HealthStatus.UNKNOWN);
+        assertThat(response.availability()).isEqualTo(DeviceHealthDtos.Availability.PARTIAL);
+        assertThat(response.reasons()).contains("存在非 GOOD 质量的遥测点，未用于健康判断",
+                "设备遥测已过期，未用于阈值判断");
+        assertThat(response.evidence()).noneMatch(item -> item.type().equals("TELEMETRY_THRESHOLD"));
+    }
+
+    @Test
     void failsClosedWhenFactsAreUnavailableAndDoesNotLeakReaderDetails() {
         var response = service(DeviceHealthFactsReader.Facts.unavailable("jdbc://secret/password"),
                 unavailableTelemetry()).assess("AC-B1-07");
