@@ -20,7 +20,7 @@ const metrics = ref<OperationsMetrics | null>(null)
 const workItems = ref<CollaborationWorkItem[]>([])
 const evidence = ref<AnomalyEvidence | null>(null)
 const selectedBuildingId = ref<string | null>(null)
-const selectionWasExplicit = ref(false)
+const preferredBuildingId = ref<string | null>(null)
 const loading = ref(false)
 const energyLoading = ref(false)
 const metricsLoading = ref(false)
@@ -101,7 +101,7 @@ async function loadEvidence(buildingId: string, currentGeneration = requestGener
 async function selectBuilding(buildingId: string): Promise<void> {
   if (loading.value) return
   selectedBuildingId.value = buildingId
-  selectionWasExplicit.value = true
+  preferredBuildingId.value = buildingId
   await loadEvidence(buildingId)
 }
 
@@ -138,8 +138,7 @@ async function loadWorkItems(generation: number): Promise<void> {
 async function refresh(): Promise<void> {
   if (!props.active) return
   const generation = ++requestGeneration
-  const preferredBuildingId = selectedBuildingId.value
-  const preserveSelection = selectionWasExplicit.value
+  const savedPreferredBuildingId = preferredBuildingId.value
   evidenceGeneration++
   loading.value = true
   energyLoading.value = false
@@ -162,10 +161,9 @@ async function refresh(): Promise<void> {
     overview.value = nextOverview
     const ids = Object.keys(buildingCatalog)
     const affectedIds = overview.value.buildings.map((building) => building.buildingId)
-    selectedBuildingId.value = preserveSelection && preferredBuildingId && ids.includes(preferredBuildingId)
-      ? preferredBuildingId
+    selectedBuildingId.value = savedPreferredBuildingId && ids.includes(savedPreferredBuildingId)
+      ? savedPreferredBuildingId
       : affectedIds[0] ?? null
-    selectionWasExplicit.value = Boolean(preserveSelection && preferredBuildingId && ids.includes(preferredBuildingId))
     loading.value = false
     if (selectedBuildingId.value) void loadEvidence(selectedBuildingId.value, generation)
     if (ids.length > 0) {

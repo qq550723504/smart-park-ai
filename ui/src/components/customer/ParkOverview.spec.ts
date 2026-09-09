@@ -397,6 +397,30 @@ describe('ParkOverview', () => {
     expect(getAnomalyEvidence).toHaveBeenLastCalledWith('VIEWER', 'B3', { from: windowRange.from, to: windowRange.to })
   })
 
+  it('preserves an explicit selection when a reactivation refresh is interrupted', async () => {
+    const wrapper = await mountLoaded()
+    vi.mocked(getAnomalyEvidence).mockResolvedValue({ ...evidence, buildingId: 'B3', alerts: [] })
+    await wrapper.get('[data-building-marker="B3"]').trigger('click')
+    await flushPromises()
+
+    const interruptedOverview = deferred<AnomalyOverview>()
+    vi.mocked(getAnomalyOverview)
+      .mockReturnValueOnce(interruptedOverview.promise)
+      .mockResolvedValueOnce(overview)
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+    await vi.waitFor(() => expect(getAnomalyOverview).toHaveBeenCalledTimes(2))
+
+    await wrapper.setProps({ active: false })
+    interruptedOverview.resolve(overview)
+    await flushPromises()
+    await wrapper.setProps({ active: true })
+    await flushPromises()
+
+    expect(wrapper.get('[data-building-marker="B3"]').attributes('aria-pressed')).toBe('true')
+    expect(getAnomalyEvidence).toHaveBeenLastCalledWith('VIEWER', 'B3', { from: windowRange.from, to: windowRange.to })
+  })
+
   it('derives attention badges and map state from each building signal', async () => {
     vi.mocked(getAnomalyOverview).mockResolvedValue({
       ...overview,
