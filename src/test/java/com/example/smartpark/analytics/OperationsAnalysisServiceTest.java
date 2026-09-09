@@ -3,6 +3,7 @@ package com.example.smartpark.analytics;
 import com.example.smartpark.analytics.agent.AnalyticsModelClient;
 import com.example.smartpark.analytics.catalog.MetricCatalog;
 import com.example.smartpark.analytics.agent.OperationsAnalysisGraph;
+import com.example.smartpark.execution.ExecutionEventCapacityException;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -158,6 +159,56 @@ class OperationsAnalysisServiceTest {
         assertThatThrownBy(() -> serializingService.start("并发问题"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("已有正在进行的分析");
+    }
+
+    @Test
+    void orchestrationAdmissionWaitsForTheSingletonRunnerInsteadOfFailingOnContention() throws Exception {
+        ExecutorService analyticsExecutor = Executors.newFixedThreadPool(2);
+        ExecutorService callerExecutor = Executors.newSingleThreadExecutor();
+        CountDownLatch firstStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
+        try {
+            OperationsAnalysisService service = service((runId, question, pinned) -> {
+                if (calls.incrementAndGet() == 1) {
+                    firstStarted.countDown();
+                    try {
+                        releaseFirst.await();
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new AssertionError(interrupted);
+                    }
+                }
+                return completed(runId);
+            }, analyticsExecutor);
+            var first = service.start("直接分析");
+            assertThat(firstStarted.await(1, TimeUnit.SECONDS)).isTrue();
+
+            var queued = callerExecutor.submit(() -> service.startWhenAvailable("编排分析", () -> false));
+            Thread.sleep(50);
+            assertThat(queued.isDone()).isFalse();
+            releaseFirst.countDown();
+
+            AnalysisRunStore.RunRecord accepted = queued.get(2, TimeUnit.SECONDS);
+            assertThat(service.await(accepted.runId()).get(2, TimeUnit.SECONDS).status()).isEqualTo("COMPLETED");
+            assertThat(calls).hasValue(2);
+        } finally {
+            releaseFirst.countDown();
+            callerExecutor.shutdownNow();
+            analyticsExecutor.shutdownNow();
+            callerExecutor.awaitTermination(2, TimeUnit.SECONDS);
+            analyticsExecutor.awaitTermination(2, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void orchestrationAdmissionCanBeCancelledWhileWaitingForTheSingletonRunner() {
+        OperationsAnalysisService service = service(
+                (runId, question, pinned) -> clarifying(runId), directExecutor());
+        service.start("占用中的分析");
+
+        assertThatThrownBy(() -> service.startWhenAvailable("已取消的编排分析", () -> true))
+                .isInstanceOf(java.util.concurrent.CancellationException.class);
     }
 
     @Test
@@ -405,6 +456,41 @@ class OperationsAnalysisServiceTest {
 
         reject.set(false);
         assertThat(service.start("恢复后问题").status()).isEqualTo("COMPLETED");
+    }
+
+    @Test
+    void propagatesTraceCapacityFailureBeforePersistingOrLaunchingAnalysis() {
+        AtomicBoolean exhausted = new AtomicBoolean(true);
+        AtomicReference<UUID> rejectedRunId = new AtomicReference<>();
+        var publisher = new com.example.smartpark.execution.InMemoryExecutionEventPublisher() {
+            @Override
+            public com.example.smartpark.execution.model.ExecutionEvent publish(
+                    com.example.smartpark.execution.model.ExecutionEvent event) {
+                rejectedRunId.compareAndSet(null, event.runId());
+                if (exhausted.get()) {
+                    throw new ExecutionEventCapacityException("replay capacity exhausted");
+                }
+                return super.publish(event);
+            }
+        };
+        AtomicInteger graphCalls = new AtomicInteger();
+        OperationsAnalysisService service = new OperationsAnalysisService(new MetricCatalog(),
+                (id, question, pinned) -> {
+                    graphCalls.incrementAndGet();
+                    return completed(id);
+                }, directExecutor(), DEFAULT_TIMEOUT, Clock.fixed(NOW, ZoneOffset.UTC), publisher);
+
+        assertThatThrownBy(() -> service.start("容量耗尽问题"))
+                .isInstanceOf(ExecutionEventCapacityException.class);
+        assertThat(graphCalls).hasValue(0);
+        assertThat(rejectedRunId.get()).isNotNull();
+        assertThat(publisher.history(rejectedRunId.get())).isEmpty();
+        assertThatThrownBy(() -> service.get(rejectedRunId.get()))
+                .isInstanceOf(java.util.NoSuchElementException.class);
+
+        exhausted.set(false);
+        assertThat(service.start("容量恢复后问题").status()).isEqualTo("COMPLETED");
+        assertThat(graphCalls).hasValue(1);
     }
 
     @Test

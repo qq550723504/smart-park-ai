@@ -1,5 +1,7 @@
 package com.example.smartpark.web;
 
+import com.example.smartpark.execution.ExecutionEventCapacityException;
+import com.example.smartpark.orchestration.OrchestrationCapacityException;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -23,11 +25,49 @@ class ApiExceptionHandlerTest {
                 .andExpect(jsonPath("$.message").value("Too many collaboration runs; retry later"));
     }
 
+    @Test
+    void mapsOrchestrationAdmissionRejectionToExplicitOverloadBackpressure() throws Exception {
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new OrchestrationOverloadedController())
+                .setControllerAdvice(new ApiExceptionHandler())
+                .build();
+
+        mockMvc.perform(post("/test-orchestration-overloaded"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Too many orchestration runs; retry later"));
+    }
+
+    @Test
+    void mapsExecutionReplayAdmissionRejectionToExplicitOverloadBackpressure() throws Exception {
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new ExecutionReplayOverloadedController())
+                .setControllerAdvice(new ApiExceptionHandler())
+                .build();
+
+        mockMvc.perform(post("/test-execution-replay-overloaded"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Too many active execution traces; retry later"));
+    }
+
     @RestController
     static class OverloadedController {
         @PostMapping("/test-overloaded")
         void start() {
             throw new java.util.concurrent.RejectedExecutionException("queue is full");
+        }
+    }
+
+    @RestController
+    static class OrchestrationOverloadedController {
+        @PostMapping("/test-orchestration-overloaded")
+        void start() {
+            throw new OrchestrationCapacityException("active capacity exhausted");
+        }
+    }
+
+    @RestController
+    static class ExecutionReplayOverloadedController {
+        @PostMapping("/test-execution-replay-overloaded")
+        void start() {
+            throw new ExecutionEventCapacityException("execution event replay capacity is exhausted");
         }
     }
 }

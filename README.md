@@ -444,13 +444,14 @@ $env:AI_DASHSCOPE_API_KEY = [System.Net.NetworkCredential]::new('', $secureDashS
 ```
 
 - [详细架构说明](docs/architecture.md)
+- [跨场景 Agent Orchestration](docs/agent-orchestration.md)
 - [客户版能力展示](docs/customer-capabilities.md)
 - [前端开发说明](ui/README.md)
 - [设计与实施记录](docs/superpowers/)
 
 ## 当前边界与生产化方向
 
-- **持久化：** Graph 状态、事件、审批、幂等记录、会话和工单当前都在进程内；生产环境需要持久化 checkpoint 和多实例一致性方案。
+- **持久化：** Orchestration run、幂等索引及其安全 trace 投影已使用原子文件并由 Compose volume 持久化；现有 Graph checkpoint、领域事件、审批、会话和工单仍在进程内，生产环境仍需补充持久化 checkpoint 和多实例一致性方案。
 - **认证授权：** `X-Demo-Role` 仅用于本地演示；真实系统必须补充身份认证、细粒度授权和租户隔离。
 - **知识检索：** `SimpleVectorStore` 是进程内实现；生产环境需要持久化向量库、文档切片、批量导入和索引版本管理。
 - **真实系统接入：** 当前 `AlertPort`、`DevicePort`、`EnergyPort`、`SecurityPort`、`KnowledgePort` 和 `WorkOrderPort` 都只连接 Mock 或演示适配器。

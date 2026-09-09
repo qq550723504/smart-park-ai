@@ -24,6 +24,8 @@ public interface WorkflowEventPublisher {
     default void complete(String workflowId) {
     }
 
+    void remove(String workflowId);
+
     static WorkflowEventPublisher inMemory() {
         return new InMemoryWorkflowEventPublisher();
     }
@@ -50,12 +52,21 @@ final class InMemoryWorkflowEventPublisher implements WorkflowEventPublisher {
 
     @Override
     public List<WorkflowEvent> history(String workflowId) {
-        return stream(workflowId).history();
+        EventStream stream = streams.get(workflowId);
+        return stream == null ? List.of() : stream.history();
     }
 
     @Override
     public void complete(String workflowId) {
-        stream(workflowId).complete();
+        EventStream stream = streams.get(workflowId);
+        if (stream != null) {
+            stream.complete();
+        }
+    }
+
+    @Override
+    public void remove(String workflowId) {
+        streams.remove(workflowId);
     }
 
     private EventStream stream(String workflowId) {

@@ -16,35 +16,46 @@ import java.util.function.Consumer;
  * Thread-safe in-memory publisher. A per-run lock makes sequence assignment,
  * history append and sink emission one atomic commit so concurrent publishers
  * can never duplicate or skip a sequence. Terminal run histories are retained
- * only for a bounded retention window; an opportunistic sweep triggered by
- * publishing evicts them once they have stayed replayable long enough.
+ * only for a bounded retention window and the registry has a hard run-count
+ * ceiling. New histories evict the oldest terminal history first; if every
+ * retained run is active, admission fails instead of growing heap without bound.
  */
 @Component
 public class InMemoryExecutionEventPublisher implements ExecutionEventPublisher {
 
     /** Default replayable window after a run reaches a terminal state. */
     private static final java.time.Duration DEFAULT_RETENTION = java.time.Duration.ofMinutes(30);
+    private static final int DEFAULT_MAX_RETAINED_RUNS = 512;
 
     private final Map<UUID, RunState> runs = new ConcurrentHashMap<>();
     private final java.time.Clock clock;
     private final java.time.Duration retention;
+    private final int maxRetainedRuns;
 
     public InMemoryExecutionEventPublisher() {
-        this(DEFAULT_RETENTION, java.time.Clock.systemUTC());
+        this(DEFAULT_RETENTION, java.time.Clock.systemUTC(), DEFAULT_MAX_RETAINED_RUNS);
     }
 
     public InMemoryExecutionEventPublisher(java.time.Duration retention, java.time.Clock clock) {
+        this(retention, clock, DEFAULT_MAX_RETAINED_RUNS);
+    }
+
+    InMemoryExecutionEventPublisher(java.time.Duration retention, java.time.Clock clock,
+                                    int maxRetainedRuns) {
         if (retention == null || retention.isZero() || retention.isNegative()) {
             throw new IllegalArgumentException("retention must be positive");
         }
+        if (maxRetainedRuns <= 0) {
+            throw new IllegalArgumentException("maxRetainedRuns must be positive");
+        }
         this.retention = retention;
         this.clock = java.util.Objects.requireNonNull(clock, "clock");
+        this.maxRetainedRuns = maxRetainedRuns;
     }
 
     @Override
     public ExecutionEvent publish(ExecutionEvent event) {
-        evictExpiredRuns(clock.instant());
-        RunState state = runs.computeIfAbsent(event.runId(), id -> new RunState());
+        RunState state = stateFor(event.runId());
         state.lock.lock();
         try {
             if (state.closed) {
@@ -59,16 +70,43 @@ public class InMemoryExecutionEventPublisher implements ExecutionEventPublisher 
             ExecutionEvent stored = new ExecutionEvent(event.eventId(), event.runId(), sequence,
                     event.timestamp(), event.scenario(), event.actor(), event.stage(),
                     event.eventType(), event.status(), event.safeSummary(), event.displayPayload());
-            state.addInternal(stored);
-            for (Consumer<ExecutionEvent> consumer : state.consumers) {
-                consumer.accept(stored);
-            }
-            if (stored.isTerminal()) {
-                state.closed = true;
-                state.consumers.clear();
-                state.terminalAt = clock.instant();
-            }
+            append(state, stored);
             return stored;
+        } finally {
+            state.lock.unlock();
+        }
+    }
+
+    @Override
+    public void hydrate(UUID runId, List<ExecutionEvent> durableHistory) {
+        if (durableHistory == null || durableHistory.isEmpty()) return;
+        RunState state = stateFor(runId);
+        state.lock.lock();
+        try {
+            for (ExecutionEvent event : durableHistory) {
+                if (!runId.equals(event.runId())) {
+                    throw new IllegalArgumentException("durable event belongs to another run");
+                }
+                if (event.sequence() <= 0) {
+                    throw new IllegalArgumentException("durable event sequence must be positive");
+                }
+                if (event.sequence() <= state.count) {
+                    ExecutionEvent existing = state.historyBacking.get(Math.toIntExact(event.sequence() - 1));
+                    if (!existing.eventId().equals(event.eventId())) {
+                        throw new IllegalStateException("durable history conflicts at sequence " + event.sequence());
+                    }
+                    continue;
+                }
+                if (state.closed) {
+                    throw new IllegalStateException("run " + runId + " is already terminal");
+                }
+                long expectedNext = state.count + 1;
+                if (event.sequence() != expectedNext) {
+                    throw new IllegalArgumentException("out-of-order durable sequence " + event.sequence()
+                            + " for run " + runId + "; expected " + expectedNext);
+                }
+                append(state, event);
+            }
         } finally {
             state.lock.unlock();
         }
@@ -131,20 +169,54 @@ public class InMemoryExecutionEventPublisher implements ExecutionEventPublisher 
         runs.remove(runId);
     }
 
+    private void append(RunState state, ExecutionEvent event) {
+        state.addInternal(event);
+        for (Consumer<ExecutionEvent> consumer : state.consumers) {
+            consumer.accept(event);
+        }
+        if (event.isTerminal()) {
+            state.terminalAt = clock.instant();
+            state.consumers.clear();
+            // Publish the timestamp before the volatile closed flag so capacity
+            // scans that observe closed also observe an eviction candidate.
+            state.closed = true;
+        }
+    }
+
+    private synchronized RunState stateFor(UUID runId) {
+        RunState existing = runs.get(runId);
+        if (existing != null) return existing;
+        evictExpiredRuns(clock.instant());
+        while (runs.size() >= maxRetainedRuns && evictOldestTerminalRun()) {
+            // Make bounded room without ever discarding a live stream.
+        }
+        if (runs.size() >= maxRetainedRuns) {
+            throw new ExecutionEventCapacityException("execution event replay capacity is exhausted");
+        }
+        RunState created = new RunState();
+        runs.put(runId, created);
+        return created;
+    }
+
     /** Removes terminal runs whose replayable window has elapsed; running runs are never touched. */
     private void evictExpiredRuns(java.time.Instant now) {
         for (var entry : runs.entrySet()) {
             RunState state = entry.getValue();
-            state.lock.lock();
-            try {
-                if (state.closed && state.terminalAt != null
-                        && state.terminalAt.plus(retention).compareTo(now) <= 0) {
-                    runs.remove(entry.getKey(), state);
-                }
-            } finally {
-                state.lock.unlock();
+            if (state.closed && state.terminalAt != null
+                    && state.terminalAt.plus(retention).compareTo(now) <= 0) {
+                runs.remove(entry.getKey(), state);
             }
         }
+    }
+
+    private boolean evictOldestTerminalRun() {
+        Map.Entry<UUID, RunState> oldest = runs.entrySet().stream()
+                .filter(entry -> entry.getValue().closed && entry.getValue().terminalAt != null)
+                .min(java.util.Comparator
+                        .comparing((Map.Entry<UUID, RunState> entry) -> entry.getValue().terminalAt)
+                        .thenComparing(entry -> entry.getKey().toString()))
+                .orElse(null);
+        return oldest != null && runs.remove(oldest.getKey(), oldest.getValue());
     }
 
     private static final class RunState {

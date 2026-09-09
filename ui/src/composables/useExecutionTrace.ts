@@ -13,7 +13,7 @@ export interface ExecutionTrace {
   error: Ref<string>
   lastSequence: Ref<number>
   isTerminal: Ref<boolean>
-  subscribe(runId: string): void
+  subscribe(runId: string, role?: string): void
   reset(): void
 }
 
@@ -51,7 +51,9 @@ export function useExecutionTrace(): ExecutionTrace {
     for (const event of ordered) {
       if (isTerminalEvent(event)) {
         status.value =
-          event.eventType === 'COMPLETED' ? 'completed' : event.eventType === 'FAILED' ? 'failed' : 'interrupted'
+          event.eventType === 'COMPLETED' || event.eventType === 'RUN_COMPLETED'
+            ? 'completed'
+            : event.eventType === 'FAILED' || event.eventType === 'RUN_FAILED' ? 'failed' : 'interrupted'
       }
     }
   }
@@ -75,7 +77,7 @@ export function useExecutionTrace(): ExecutionTrace {
     }
   }
 
-  function subscribe(runId: string): void {
+  function subscribe(runId: string, role?: string): void {
     reset()
     status.value = 'streaming'
     stream = subscribeToExecutionEvents(runId, {
@@ -87,7 +89,7 @@ export function useExecutionTrace(): ExecutionTrace {
         // trace.
         error.value = message
       },
-    })
+    }, role)
   }
 
   function reset(): void {

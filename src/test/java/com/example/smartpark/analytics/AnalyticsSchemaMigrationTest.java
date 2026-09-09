@@ -85,6 +85,19 @@ class AnalyticsSchemaMigrationTest {
                 rs.next();
                 assertThat(rs.getInt(1)).isGreaterThan(0);
             }
+
+            try (var statement = ro.createStatement();
+                 ResultSet rs = statement.executeQuery(
+                         "SELECT building_id, device_id, category, risk_level, status "
+                                 + "FROM analytics.v_alert_fact "
+                                 + "WHERE alert_id = 'ALT-ORCH-ENERGY-B1-001'")) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getString("building_id")).isEqualTo("B1");
+                assertThat(rs.getString("device_id")).isEqualTo("DEV-ENERGY-B1-001");
+                assertThat(rs.getString("category")).isEqualTo("ENERGY");
+                assertThat(rs.getString("risk_level")).isEqualTo("LOW");
+                assertThat(rs.getString("status")).isEqualTo("OPEN");
+            }
         }
     }
 

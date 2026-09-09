@@ -90,6 +90,11 @@ public final class VoiceTestSupport {
         }
 
         @Override
+        public void hydrate(UUID runId, List<ExecutionEvent> durableHistory) {
+            durableHistory.stream().filter(event -> event.sequence() > published.size()).forEach(this::publish);
+        }
+
+        @Override
         public Subscription subscribe(UUID runId, java.util.function.Consumer<ExecutionEvent> consumer) {
             throw new UnsupportedOperationException();
         }

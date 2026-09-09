@@ -11,6 +11,9 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Comparator;
 import java.util.concurrent.ConcurrentHashMap;
+import java.time.Instant;
+import java.util.UUID;
+import java.util.function.Consumer;
 
 public interface WorkflowExecutionStore {
 
@@ -29,10 +32,36 @@ public interface WorkflowExecutionStore {
             CompiledGraph compiledGraph,
             AlertWorkflowState initialState);
 
+    Execution registerExclusive(
+            String workflowId,
+            String alertId,
+            String graphThreadId,
+            CompiledGraph compiledGraph,
+            AlertWorkflowState initialState);
+
     Optional<Execution> execution(String workflowId);
 
+    /** Removes an execution that never crossed its start-event admission boundary. */
+    void discardUnstarted(Execution execution, Consumer<Execution> cleanup);
+
+    /**
+     * Marks an execution terminal and evicts the oldest terminal exclusive executions above the
+     * configured retention bound. Cleanup runs before removal so a failed cleanup remains retryable.
+     */
+    void markTerminalAndCompact(Execution execution, Consumer<Execution> cleanup);
+
+    /**
+     * Releases the parent-owned retention lease of an exclusive execution after its outcome has
+     * been persisted by the parent, then retries bounded terminal compaction.
+     */
+    void releaseExclusiveRetention(String workflowId, Consumer<Execution> cleanup);
+
     static WorkflowExecutionStore inMemory() {
-        return new InMemoryWorkflowExecutionStore();
+        return inMemory(200);
+    }
+
+    static WorkflowExecutionStore inMemory(int maxRetainedExclusiveExecutions) {
+        return new InMemoryWorkflowExecutionStore(maxRetainedExclusiveExecutions);
     }
 
     final class Execution {
@@ -41,20 +70,27 @@ public interface WorkflowExecutionStore {
         private final String graphThreadId;
         private final CompiledGraph compiledGraph;
         private final AlertWorkflowState initialState;
+        private final boolean reusableByAlert;
         private volatile InterruptionMetadata interruption;
         private volatile Throwable failureCause;
+        private volatile long terminalSequence;
+        private boolean exclusiveRetentionHeld;
+        private final Map<UUID, Instant> pendingApprovalAttempts = new ConcurrentHashMap<>();
 
         Execution(
                 String workflowId,
                 String alertId,
                 String graphThreadId,
                 CompiledGraph compiledGraph,
-                AlertWorkflowState initialState) {
+                AlertWorkflowState initialState,
+                boolean reusableByAlert) {
             this.workflowId = Objects.requireNonNull(workflowId, "workflowId");
             this.alertId = Objects.requireNonNull(alertId, "alertId");
             this.graphThreadId = Objects.requireNonNull(graphThreadId, "graphThreadId");
             this.compiledGraph = Objects.requireNonNull(compiledGraph, "compiledGraph");
             this.initialState = Objects.requireNonNull(initialState, "initialState");
+            this.reusableByAlert = reusableByAlert;
+            this.exclusiveRetentionHeld = !reusableByAlert;
         }
 
         public String workflowId() {
@@ -73,6 +109,32 @@ public interface WorkflowExecutionStore {
             return compiledGraph;
         }
 
+        boolean reusableByAlert() {
+            return reusableByAlert;
+        }
+
+        boolean terminal() {
+            return terminalSequence > 0;
+        }
+
+        long terminalSequence() {
+            return terminalSequence;
+        }
+
+        void markTerminal(long terminalSequence) {
+            if (this.terminalSequence == 0) {
+                this.terminalSequence = terminalSequence;
+            }
+        }
+
+        boolean exclusiveRetentionHeld() {
+            return exclusiveRetentionHeld;
+        }
+
+        void releaseExclusiveRetention() {
+            exclusiveRetentionHeld = false;
+        }
+
         public Optional<InterruptionMetadata> interruption() {
             return Optional.ofNullable(interruption);
         }
@@ -87,6 +149,18 @@ public interface WorkflowExecutionStore {
 
         public void failureCause(Throwable failureCause) {
             this.failureCause = Objects.requireNonNull(failureCause, "failureCause");
+        }
+
+        void beginApprovalAttempt(UUID attemptId, Instant receivedAt) {
+            pendingApprovalAttempts.put(attemptId, receivedAt);
+        }
+
+        void endApprovalAttempt(UUID attemptId) {
+            pendingApprovalAttempts.remove(attemptId);
+        }
+
+        boolean hasApprovalAttemptBefore(Instant deadline) {
+            return pendingApprovalAttempts.values().stream().anyMatch(receivedAt -> receivedAt.isBefore(deadline));
         }
 
         AlertWorkflowState currentState() {
@@ -105,6 +179,15 @@ public interface WorkflowExecutionStore {
 final class InMemoryWorkflowExecutionStore implements WorkflowExecutionStore {
 
     private final Map<String, Execution> executions = new ConcurrentHashMap<>();
+    private final int maxRetainedExclusiveExecutions;
+    private long terminalSequence;
+
+    InMemoryWorkflowExecutionStore(int maxRetainedExclusiveExecutions) {
+        if (maxRetainedExclusiveExecutions < 1) {
+            throw new IllegalArgumentException("maxRetainedExclusiveExecutions must be positive");
+        }
+        this.maxRetainedExclusiveExecutions = maxRetainedExclusiveExecutions;
+    }
 
     @Override
     public Optional<WorkflowSnapshot> get(String workflowId) {
@@ -120,7 +203,7 @@ final class InMemoryWorkflowExecutionStore implements WorkflowExecutionStore {
     @Override
     public Optional<WorkflowSnapshot> findByAlertId(String alertId) {
         return executions.values().stream()
-                .filter(execution -> execution.alertId().equals(alertId))
+                .filter(execution -> execution.reusableByAlert() && execution.alertId().equals(alertId))
                 // Prefer a reusable execution over an old failed attempt. This keeps
                 // retries idempotent once a new attempt is running or completed.
                 .sorted(Comparator.comparing(execution -> isRetryable(execution.snapshot().status())))
@@ -152,7 +235,24 @@ final class InMemoryWorkflowExecutionStore implements WorkflowExecutionStore {
         if (executions.containsKey(workflowId)) {
             throw new IllegalStateException("Workflow already exists: " + workflowId);
         }
-        Execution execution = new Execution(workflowId, alertId, graphThreadId, compiledGraph, initialState);
+        Execution execution = new Execution(
+                workflowId, alertId, graphThreadId, compiledGraph, initialState, true);
+        executions.put(workflowId, execution);
+        return execution;
+    }
+
+    @Override
+    public synchronized Execution registerExclusive(
+            String workflowId,
+            String alertId,
+            String graphThreadId,
+            CompiledGraph compiledGraph,
+            AlertWorkflowState initialState) {
+        if (executions.containsKey(workflowId)) {
+            throw new IllegalStateException("Workflow already exists: " + workflowId);
+        }
+        Execution execution = new Execution(
+                workflowId, alertId, graphThreadId, compiledGraph, initialState, false);
         executions.put(workflowId, execution);
         return execution;
     }
@@ -160,6 +260,65 @@ final class InMemoryWorkflowExecutionStore implements WorkflowExecutionStore {
     @Override
     public Optional<Execution> execution(String workflowId) {
         return Optional.ofNullable(executions.get(workflowId));
+    }
+
+    @Override
+    public synchronized void discardUnstarted(
+            Execution execution,
+            Consumer<Execution> cleanup) {
+        Objects.requireNonNull(execution, "execution");
+        Objects.requireNonNull(cleanup, "cleanup");
+        if (executions.get(execution.workflowId()) != execution) {
+            return;
+        }
+        try {
+            cleanup.accept(execution);
+        }
+        finally {
+            // Admission failed before graph execution, so keeping an unusable registry entry is
+            // always worse than surfacing a best-effort resource-cleanup failure to the caller.
+            executions.remove(execution.workflowId(), execution);
+        }
+    }
+
+    @Override
+    public synchronized void markTerminalAndCompact(
+            Execution execution,
+            Consumer<Execution> cleanup) {
+        Objects.requireNonNull(execution, "execution");
+        Objects.requireNonNull(cleanup, "cleanup");
+        if (executions.get(execution.workflowId()) != execution) {
+            throw new IllegalStateException("Workflow execution is not registered: " + execution.workflowId());
+        }
+        execution.markTerminal(++terminalSequence);
+        compactTerminalExclusive(cleanup);
+    }
+
+    @Override
+    public synchronized void releaseExclusiveRetention(
+            String workflowId,
+            Consumer<Execution> cleanup) {
+        Objects.requireNonNull(workflowId, "workflowId");
+        Objects.requireNonNull(cleanup, "cleanup");
+        Execution execution = executions.get(workflowId);
+        if (execution == null || execution.reusableByAlert()) return;
+        execution.releaseExclusiveRetention();
+        compactTerminalExclusive(cleanup);
+    }
+
+    private void compactTerminalExclusive(Consumer<Execution> cleanup) {
+        List<Execution> terminalExclusive = executions.values().stream()
+                .filter(candidate -> !candidate.reusableByAlert()
+                        && candidate.terminal()
+                        && !candidate.exclusiveRetentionHeld())
+                .sorted(Comparator.comparingLong(Execution::terminalSequence))
+                .toList();
+        int excess = terminalExclusive.size() - maxRetainedExclusiveExecutions;
+        for (int index = 0; index < excess; index++) {
+            Execution evicted = terminalExclusive.get(index);
+            cleanup.accept(evicted);
+            executions.remove(evicted.workflowId(), evicted);
+        }
     }
 
     private static boolean isRunning(WorkflowStatus status) {

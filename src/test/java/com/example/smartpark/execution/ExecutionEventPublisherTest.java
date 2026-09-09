@@ -97,6 +97,23 @@ class ExecutionEventPublisherTest {
     }
 
     @Test
+    void hydrationAppendsTheMissingDurableSuffixToAnExistingProjection() {
+        UUID runId = UUID.randomUUID();
+        ExecutionEvent first = sequencedEvent(runId, 1, "first", false);
+        ExecutionEvent second = sequencedEvent(runId, 2, "second", false);
+        ExecutionEvent terminal = sequencedEvent(runId, 3, "done", true);
+        publisher.publish(first);
+
+        publisher.hydrate(runId, List.of(first, second, terminal));
+
+        assertThat(publisher.history(runId)).extracting(ExecutionEvent::eventId)
+                .containsExactly(first.eventId(), second.eventId(), terminal.eventId());
+        assertThat(publisher.status(runId)).isEqualTo("COMPLETED");
+        assertThatThrownBy(() -> publisher.publish(event(runId, "too late", false)))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void terminalEventCompletesTheStreamAndRejectsFurtherPublishing() {
         UUID runId = UUID.randomUUID();
         publisher.publish(event(runId, "working", false));
@@ -176,6 +193,32 @@ class ExecutionEventPublisherTest {
         assertThat(publisher.history(running)).isNotEmpty();
     }
 
+    @Test
+    void boundsReplayRunCountAndNeverEvictsAnActiveRun() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-08-24T00:00:00Z"));
+        InMemoryExecutionEventPublisher bounded = new InMemoryExecutionEventPublisher(
+                java.time.Duration.ofMinutes(30), clock, 2);
+        UUID oldestFinished = UUID.randomUUID();
+        UUID active = UUID.randomUUID();
+        UUID newest = UUID.randomUUID();
+        bounded.publish(event(oldestFinished, "old done", true));
+        clock.advance(java.time.Duration.ofSeconds(1));
+        bounded.publish(event(active, "active", false));
+
+        bounded.publish(event(newest, "new", false));
+
+        assertThat(bounded.history(oldestFinished)).isEmpty();
+        assertThat(bounded.history(active)).hasSize(1);
+        assertThat(bounded.history(newest)).hasSize(1);
+
+        InMemoryExecutionEventPublisher allActive = new InMemoryExecutionEventPublisher(
+                java.time.Duration.ofMinutes(30), clock, 1);
+        allActive.publish(event(active, "active", false));
+        assertThatThrownBy(() -> allActive.publish(event(newest, "rejected", false)))
+                .isInstanceOf(ExecutionEventCapacityException.class)
+                .hasMessageContaining("capacity");
+    }
+
     private void await(CountDownLatch latch) {
         try {
             latch.await(5, TimeUnit.SECONDS);
@@ -202,5 +245,11 @@ class ExecutionEventPublisherTest {
                 terminal ? ExecutionEventType.COMPLETED : ExecutionEventType.RUN_STARTED,
                 terminal ? ExecutionStatus.SUCCEEDED : ExecutionStatus.RUNNING,
                 summary, null);
+    }
+
+    private static ExecutionEvent sequencedEvent(UUID runId, long sequence, String summary, boolean terminal) {
+        ExecutionEvent event = event(runId, summary, terminal);
+        return new ExecutionEvent(event.eventId(), runId, sequence, event.timestamp(), event.scenario(),
+                event.actor(), event.stage(), event.eventType(), event.status(), summary, null);
     }
 }

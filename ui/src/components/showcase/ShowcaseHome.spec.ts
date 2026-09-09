@@ -122,8 +122,8 @@ describe('ShowcaseHome truthful catalog selection', () => {
     expect(predictiveMaintenance.attributes('data-capability-state')).toBe('NOT_READY')
     expect(predictiveMaintenance.attributes('disabled')).toBeDefined()
     expect(predictiveMaintenance.attributes('title')).toContain('预测模型')
-    expect(allAgents.attributes('data-mapping')).toBe('NOT_READY')
-    expect(allAgents.attributes('title')).toContain('多场景编排 API')
+    expect(allAgents.attributes('data-mapping')).toBe('ADAPTED')
+    expect(allAgents.attributes('data-capability-state')).toBe('AVAILABLE')
   })
 
   it('counts the unavailable cockpit capabilities represented by the risk metric', async () => {
@@ -135,7 +135,7 @@ describe('ShowcaseHome truthful catalog selection', () => {
 
     const wrapper = await mountLoaded()
 
-    expect(wrapper.get('[data-showcase-metric="risk"] dd').text()).toBe('7')
+    expect(wrapper.get('[data-showcase-metric="risk"] dd').text()).toBe('6')
     expect(wrapper.get('[data-showcase-metric="risk"] small').text()).toContain('UNAVAILABLE')
   })
 

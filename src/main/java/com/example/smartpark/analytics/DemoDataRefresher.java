@@ -27,11 +27,13 @@ public class DemoDataRefresher {
     private static final Logger log = LoggerFactory.getLogger(DemoDataRefresher.class);
 
     private static final String DEVICE_IDS =
-            "('AC-B1-07', 'PWR-B1-02', 'LFT-B1-01', 'HUM-B2-11', 'DR-B2-01', 'AC-B3-03', 'CAM-B3-05')";
+            "('AC-B1-07', 'PWR-B1-02', 'LFT-B1-01', 'HUM-B2-11', 'DR-B2-01', 'AC-B3-03', "
+                    + "'CAM-B3-05', 'DEV-ENERGY-B1-001')";
     private static final String ENERGY_METER_IDS =
             "('MTR-1-1', 'MTR-1-2', 'MTR-2-1', 'MTR-2-2', 'MTR-3-1', 'MTR-3-2')";
     private static final String ALERT_IDS =
-            "('ALT-TEMP-001', 'ALT-PWR-002', 'ALT-HUM-003', 'ALT-DOOR-004', 'ALT-TEMP-005')";
+            "('ALT-TEMP-001', 'ALT-PWR-002', 'ALT-HUM-003', 'ALT-DOOR-004', 'ALT-TEMP-005', "
+                    + "'ALT-ORCH-ENERGY-B1-001')";
     private static final String PARKING_ZONES = "parking_zone IN ('ZONE-A', 'ZONE-B')";
 
     @FunctionalInterface
@@ -134,7 +136,8 @@ public class DemoDataRefresher {
             + "('ALT-PWR-002',  'B1', 'PWR-B1-02', 'POWER',      'LOW',    (((CURRENT_DATE - 3)::timestamp + TIME '14:40') AT TIME ZONE 'Asia/Shanghai'), 'RESOLVED'), "
             + "('ALT-HUM-003',  'B2', 'HUM-B2-11', 'HUMIDITY',   'MEDIUM', (((CURRENT_DATE - 2)::timestamp + TIME '03:05') AT TIME ZONE 'Asia/Shanghai'), 'OPEN'), "
             + "('ALT-DOOR-004', 'B2', 'DR-B2-01',  'ACCESS',     'HIGH',   (((CURRENT_DATE - 2)::timestamp + TIME '22:30') AT TIME ZONE 'Asia/Shanghai'), 'OPEN'), "
-            + "('ALT-TEMP-005', 'B3', 'AC-B3-03',  'TEMPERATURE', 'LOW',   (((CURRENT_DATE - 1)::timestamp + TIME '11:20') AT TIME ZONE 'Asia/Shanghai'), 'RESOLVED') "
+            + "('ALT-TEMP-005', 'B3', 'AC-B3-03',  'TEMPERATURE', 'LOW',   (((CURRENT_DATE - 1)::timestamp + TIME '11:20') AT TIME ZONE 'Asia/Shanghai'), 'RESOLVED'), "
+            + "('ALT-ORCH-ENERGY-B1-001', 'B1', 'DEV-ENERGY-B1-001', 'ENERGY', 'LOW', (((CURRENT_DATE - 1)::timestamp + TIME '10:12') AT TIME ZONE 'Asia/Shanghai'), 'OPEN') "
             + "ON CONFLICT DO NOTHING";
 
     private static final String OCCUPANCY_SEED =

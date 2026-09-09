@@ -21,4 +21,9 @@ public final class MockWorkOrderAdapter implements WorkOrderPort {
     public WorkOrder create(String workflowId, String alertId, String summary) {
         return dataStore.buildWorkOrder(workflowId, alertId, summary);
     }
+
+    @Override
+    public WorkOrder createOrGetByAlertId(String workflowId, String alertId, String summary) {
+        return dataStore.buildWorkOrderOnceForAlert(workflowId, alertId, summary);
+    }
 }

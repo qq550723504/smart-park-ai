@@ -32,6 +32,7 @@ public record WorkflowEvent(
             "AlertPort.findHistory",
             "WorkOrderPort.findByWorkflowId",
             "WorkOrderPort.create",
+            "WorkOrderPort.createOrGetByAlertId",
             "KnowledgePort.search",
             "EnergyPort.getLatestEnergyReading",
             "SecurityPort.getEvent",

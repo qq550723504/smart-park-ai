@@ -28,6 +28,7 @@ public final class ExpertCollaborationService {
     private final Duration runTimeout;
     private final Clock clock;
     private final ConcurrentMap<UUID, FutureTask<Void>> activeTasks = new ConcurrentHashMap<>();
+    private final ConcurrentMap<UUID, CompletableFuture<CollaborationRun>> completionWaiters = new ConcurrentHashMap<>();
 
     public ExpertCollaborationService(Planner planner, ExpertCollaborationGraph graph, Synthesizer synthesizer,
             CollaborationRunStore store, ExecutionEventPublisher events, ExecutorService runExecutor,
@@ -64,15 +65,27 @@ public final class ExpertCollaborationService {
             throw rejected;
         }
         CollaborationRun run;
+        boolean runStored = false;
         try {
             run = store.save(new CollaborationRun(id, question.trim(), CollaborationRun.RunStatus.RUNNING,
                     null, List.of(), null, null, Instant.now(clock)));
+            runStored = true;
             publish(id, "Supervisor", ExecutionStage.INITIALIZATION, ExecutionEventType.RUN_STARTED,
                     ExecutionStatus.RUNNING, "Expert collaboration started");
         } catch (RuntimeException registrationFailure) {
             activeTasks.remove(id, task);
             task.cancel(true);
             admitted.countDown();
+            if (runStored) {
+                try {
+                    // Trace admission is part of accepting a collaboration run.
+                    // Keep the persisted record truthful and terminal when the
+                    // replay registry cannot admit its first event.
+                    failIfRunning(id, "collaboration trace admission failed");
+                } catch (RuntimeException rollbackFailure) {
+                    registrationFailure.addSuppressed(rollbackFailure);
+                }
+            }
             throw registrationFailure;
         }
         admitted.countDown();
@@ -82,6 +95,30 @@ public final class ExpertCollaborationService {
     }
 
     public CollaborationRun get(UUID id) { return store.get(id); }
+
+    /** Awaitable lifecycle seam for bounded orchestrators; execution still uses the existing graph. */
+    public CompletableFuture<CollaborationRun> startAndAwait(String question) {
+        CollaborationRun accepted;
+        try {
+            accepted = start(question);
+        } catch (RuntimeException failure) {
+            CompletableFuture<CollaborationRun> waiter = new CompletableFuture<>();
+            waiter.completeExceptionally(failure);
+            return waiter;
+        }
+        return await(accepted.runId());
+    }
+
+    /** Attaches an awaiter to an already accepted run without starting a duplicate child run. */
+    public CompletableFuture<CollaborationRun> await(UUID runId) {
+        CompletableFuture<CollaborationRun> waiter = new CompletableFuture<>();
+        synchronized (this) {
+            CollaborationRun current = store.get(runId);
+            if (current.status() != CollaborationRun.RunStatus.RUNNING) waiter.complete(current);
+            else completionWaiters.put(runId, waiter);
+        }
+        return waiter;
+    }
 
     /** Cancels a run owned by a caller such as showcase preflight. */
     public synchronized CollaborationRun abort(UUID id) {
@@ -148,6 +185,7 @@ public final class ExpertCollaborationService {
         }
         store.save(new CollaborationRun(id, question, CollaborationRun.RunStatus.COMPLETED, plan, findings, synthesis, null, Instant.now(clock)));
         publish(id, "Supervisor", ExecutionStage.COMPLETION, ExecutionEventType.COMPLETED, ExecutionStatus.SUCCEEDED, "Expert collaboration completed");
+        completeWaiter(id);
     }
 
     private synchronized void failIfRunningWithSynthesis(UUID id, SupervisorPlan plan,
@@ -158,6 +196,7 @@ public final class ExpertCollaborationService {
                 plan, findings, synthesis, synthesis.conclusion(), Instant.now(clock)));
         publish(id, "Supervisor", ExecutionStage.FAILURE, ExecutionEventType.FAILED,
                 ExecutionStatus.FAILED, "Expert collaboration failed: " + synthesis.conclusion());
+        completeWaiter(id);
     }
 
     private synchronized boolean failIfRunning(UUID id, String message) {
@@ -166,6 +205,7 @@ public final class ExpertCollaborationService {
         store.save(new CollaborationRun(id, current.question(), CollaborationRun.RunStatus.FAILED, current.plan(), current.findings(), null, message, Instant.now(clock)));
         try { publish(id, "Supervisor", ExecutionStage.FAILURE, ExecutionEventType.FAILED, ExecutionStatus.FAILED, message); }
         catch (IllegalStateException ignored) { }
+        completeWaiter(id);
         return true;
     }
 
@@ -181,6 +221,11 @@ public final class ExpertCollaborationService {
     private void publish(UUID id, String actor, ExecutionStage stage, ExecutionEventType type, ExecutionStatus status, String summary) {
         events.publish(new ExecutionEvent(UUID.randomUUID(), id, 0, Instant.now(clock), ExecutionScenario.EXPERT_COLLABORATION,
                 actor, stage, type, status, summary, null));
+    }
+
+    private void completeWaiter(UUID id) {
+        CompletableFuture<CollaborationRun> waiter = completionWaiters.remove(id);
+        if (waiter != null) waiter.complete(store.get(id));
     }
 
     @FunctionalInterface public interface Planner { SupervisorPlan plan(String question); }

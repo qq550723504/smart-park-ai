@@ -164,6 +164,9 @@ function retryGuidedLaunch(): void {
 
 // 统一执行轨迹：告警工作流通过确定性 runId 同时出现在右侧轨迹栏。
 const trace = useExecutionTrace()
+watch(role, (nextRole, previousRole) => {
+  if (nextRole !== previousRole) trace.reset()
+})
 watch(activeView, (view, previousView) => {
   if (view === 'governance' && previousView !== 'governance') trace.reset()
 })
@@ -224,7 +227,7 @@ function openViewFromBoard(view: WorkbenchView): void {
 function openTraceFromBoard(runId: string): void {
   const normalized = runId.trim()
   if (!normalized) return
-  trace.subscribe(normalized)
+  trace.subscribe(normalized, role.value)
 }
 
 async function openCollaborationView(view: 'workflow' | 'customer' | 'security-incident', workflowId?: string, _ticketId?: string): Promise<void> {
@@ -455,6 +458,7 @@ function confidence(value?: number) {
       :role="role"
       :trace="trace"
       :active="props.active && activeView === 'operations'"
+      :analytics-available="capabilities?.analyticsEnabled === true"
       :collaboration-available="capabilities?.collaborationEnabled === true"
       :security-incident-available="capabilities?.securityIncidentEnabled === true && ['ADMIN', 'APPROVER'].includes(role)"
       @open-analysis="openAnalysisFromBoard"

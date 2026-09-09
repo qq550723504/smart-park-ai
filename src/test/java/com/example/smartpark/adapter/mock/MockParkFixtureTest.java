@@ -66,6 +66,18 @@ class MockParkFixtureTest {
     }
 
     @Test
+    void orchestrationAlertAndDeviceShareTheB1Identity() {
+        Alert alert = fixture.alerts().getAlert("ALT-ORCH-ENERGY-B1-001");
+
+        assertThat(alert.buildingId()).isEqualTo("B1");
+        assertThat(alert.deviceId()).isEqualTo("DEV-ENERGY-B1-001");
+        assertThat(alert.classification())
+                .isEqualTo(com.example.smartpark.model.alert.AlertClassification.ENERGY);
+        assertThat(alert.riskHint()).isEqualTo(RiskLevel.LOW);
+        assertThat(fixture.devices().getDevice(alert.deviceId()).buildingId()).isEqualTo("B1");
+    }
+
+    @Test
     void highRiskPowerAlertRequiresTheHighRiskFixture() {
         Alert alert = fixture.alerts().getAlert("ALT-POWER-001");
 
@@ -142,6 +154,45 @@ class MockParkFixtureTest {
             assertThat(fixture.workOrders().findByWorkflowId("wf-concurrent")).hasSize(1);
             assertThat(fixture.workOrders().findByWorkflowId("wf-concurrent").get(0).approvalDecision()).isEqualTo(Optional.empty());
         } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void concurrentOwnedWorkflowsCreateOneAlertAction() throws Exception {
+        int callers = 4;
+        ExecutorService executor = Executors.newFixedThreadPool(callers);
+        CountDownLatch ready = new CountDownLatch(callers);
+        CountDownLatch start = new CountDownLatch(1);
+
+        try {
+            List<Callable<WorkOrder>> tasks = new ArrayList<>();
+            for (int i = 0; i < callers; i++) {
+                String workflowId = "wf-owned-" + i;
+                tasks.add(() -> {
+                    ready.countDown();
+                    start.await();
+                    return fixture.workOrders().createOrGetByAlertId(
+                            workflowId, "ALT-TEMP-001", "temperature anomaly");
+                });
+            }
+
+            List<Future<WorkOrder>> futures = new ArrayList<>();
+            for (Callable<WorkOrder> task : tasks) {
+                futures.add(executor.submit(task));
+            }
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            List<WorkOrder> results = new ArrayList<>();
+            for (Future<WorkOrder> future : futures) {
+                results.add(future.get(5, TimeUnit.SECONDS));
+            }
+
+            assertThat(results).extracting(WorkOrder::id).containsOnly(results.get(0).id());
+            assertThat(results).extracting(WorkOrder::alertId).containsOnly("ALT-TEMP-001");
+        }
+        finally {
             executor.shutdownNow();
         }
     }

@@ -1,6 +1,7 @@
 package com.example.smartpark.web;
 
 import com.example.smartpark.execution.ExecutionEventPublisher;
+import com.example.smartpark.execution.ExecutionEventArchive;
 import com.example.smartpark.execution.model.DisplayPayload;
 import com.example.smartpark.execution.model.ExecutionEvent;
 import com.example.smartpark.execution.model.ExecutionEventType;
@@ -8,6 +9,7 @@ import com.example.smartpark.execution.model.ExecutionScenario;
 import com.example.smartpark.execution.model.ExecutionStage;
 import com.example.smartpark.execution.model.ExecutionStatus;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -29,6 +31,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
@@ -49,6 +52,14 @@ class ExecutionEventControllerTest {
 
     @MockitoBean
     private ExecutionEventPublisher publisher;
+
+    @MockitoBean
+    private ExecutionEventArchive archive;
+
+    @BeforeEach
+    void emptyArchiveByDefault() {
+        when(archive.history(any())).thenReturn(List.of());
+    }
 
     @Test
     void sseUsesNamedEventsIdSequenceAndPolymorphicPayloadType() throws Exception {
@@ -115,6 +126,30 @@ class ExecutionEventControllerTest {
     }
 
     @Test
+    void orchestrationArchiveCanRejectAnUnauthorizedTraceBeforeSubscription() throws Exception {
+        doThrow(new SecurityException("role is not allowed"))
+                .when(archive).authorize(RUN_ID, "VIEWER");
+
+        mockMvc.perform(get("/api/executions/{runId}/events", RUN_ID).param("role", "VIEWER"))
+                .andExpect(status().isForbidden());
+
+        verify(publisher, never()).subscribe(eq(RUN_ID), any());
+    }
+
+    @Test
+    void eventSourceRoleQueryIsPassedToTheArchiveAuthorizationBoundary() throws Exception {
+        scriptSubscription(List.of(event(1, ExecutionEventType.COMPLETED, null)));
+
+        MvcResult async = mockMvc.perform(get("/api/executions/{runId}/events", RUN_ID)
+                        .param("role", "OPERATOR"))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        mockMvc.perform(asyncDispatch(async)).andExpect(status().isOk());
+
+        verify(archive).authorize(RUN_ID, "OPERATOR");
+    }
+
+    @Test
     void runSummaryExposesStatusAndCountOnly() throws Exception {
         when(publisher.history(RUN_ID)).thenReturn(List.of(
                 event(1, ExecutionEventType.RUN_STARTED, null),
@@ -125,6 +160,21 @@ class ExecutionEventControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("COMPLETED"))
                 .andExpect(jsonPath("$.totalEvents").value(2));
+    }
+
+    @Test
+    void summaryReconcilesADurableSuffixEvenWhenTheProjectionAlreadyHasAPrefix() throws Exception {
+        ExecutionEvent first = event(1, ExecutionEventType.RUN_STARTED, null);
+        ExecutionEvent second = event(2, ExecutionEventType.COMPLETED, null);
+        when(publisher.history(RUN_ID)).thenReturn(List.of(first), List.of(first, second));
+        when(publisher.status(RUN_ID)).thenReturn("COMPLETED");
+        when(archive.history(RUN_ID)).thenReturn(List.of(first, second));
+
+        mockMvc.perform(get("/api/executions/{runId}", RUN_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalEvents").value(2));
+
+        verify(publisher).hydrate(RUN_ID, List.of(first, second));
     }
 
     private void scriptSubscription(List<ExecutionEvent> scripted) {

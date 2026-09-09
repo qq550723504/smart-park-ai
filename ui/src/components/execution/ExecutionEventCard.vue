@@ -56,7 +56,7 @@ function timeLabel(timestamp: string) {
 <template>
   <article
     class="execution-event-card"
-    :class="{ 'is-error': props.event.eventType === 'FAILED' || props.event.displayPayload?.payloadType === 'ERROR' }"
+    :class="{ 'is-error': props.event.status === 'FAILED' || props.event.displayPayload?.payloadType === 'ERROR' }"
     role="listitem"
     :aria-label="`${props.event.actor} · ${props.event.eventType}`"
   >

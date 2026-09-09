@@ -55,6 +55,22 @@ spring:
         streamable-http:
           mcp-endpoint: /mcp
 smartpark:
+  workflow:
+    # Orchestration-owned child executions are isolated for cancellation, but
+    # their terminal graph checkpoints and event traces are retained only within
+    # this bound. Reusable direct alert workflows are unaffected.
+    max-retained-exclusive-executions: ${SMARTPARK_WORKFLOW_MAX_RETAINED_EXCLUSIVE_EXECUTIONS:200}
+  orchestration:
+    # Safe run metadata and trace references only. Docker mounts this path on a
+    # named volume so refresh, reconnect and backend restart do not erase runs.
+    state-file: ${SMARTPARK_ORCHESTRATION_STATE_FILE:./data/orchestration/runs.json}
+    # Bound disk, heap and serialized rewrite work. Oldest terminal runs are
+    # compacted first; active runs are never evicted.
+    max-retained-runs: ${SMARTPARK_ORCHESTRATION_MAX_RETAINED_RUNS:200}
+    max-active-runs: ${SMARTPARK_ORCHESTRATION_MAX_ACTIVE_RUNS:8}
+    max-run-bytes: ${SMARTPARK_ORCHESTRATION_MAX_RUN_BYTES:131072}
+    approval-timeout-seconds: ${SMARTPARK_ORCHESTRATION_APPROVAL_TIMEOUT_SECONDS:900}
+    maintenance-interval-seconds: ${SMARTPARK_ORCHESTRATION_MAINTENANCE_INTERVAL_SECONDS:30}
   local-demo:
     enabled: ${SMARTPARK_LOCAL_DEMO_ENABLED:false}
   analytics:

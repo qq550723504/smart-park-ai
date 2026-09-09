@@ -35,6 +35,7 @@ public final class AlertWorkflowState {
     public static final String DIAGNOSIS = "diagnosis";
     public static final String RISK_LEVEL = "riskLevel";
     public static final String APPROVAL = "approval";
+    public static final String APPROVAL_EXPIRES_AT = "approvalExpiresAt";
     public static final String WORK_ORDER = "workOrder";
     public static final String STATUS = "status";
     public static final String ERRORS = "errors";
@@ -71,6 +72,11 @@ public final class AlertWorkflowState {
     }
 
     public static AlertWorkflowState initial(String workflowId, String alertId, Instant createdAt) {
+        return initial(workflowId, alertId, createdAt, null);
+    }
+
+    public static AlertWorkflowState initial(String workflowId, String alertId, Instant createdAt,
+                                             Instant approvalExpiresAt) {
         Objects.requireNonNull(createdAt, "createdAt");
         Map<String, Object> data = new LinkedHashMap<>();
         data.put(WORKFLOW_ID, workflowId);
@@ -81,6 +87,7 @@ public final class AlertWorkflowState {
         data.put(EVENT_SEQUENCE, 0L);
         data.put(CREATED_AT, createdAt.toString());
         data.put(UPDATED_AT, createdAt.toString());
+        if (approvalExpiresAt != null) data.put(APPROVAL_EXPIRES_AT, approvalExpiresAt.toString());
         return new AlertWorkflowState(data);
     }
 
@@ -91,6 +98,7 @@ public final class AlertWorkflowState {
     public static Map<String, KeyStrategy> keyStrategies() {
         Map<String, KeyStrategy> strategies = new LinkedHashMap<>();
         REQUIRED_KEYS.forEach(key -> strategies.put(key, new ReplaceStrategy()));
+        strategies.put(APPROVAL_EXPIRES_AT, new ReplaceStrategy());
         strategies.put(ROUTE, new ReplaceStrategy());
         strategies.put(RESULT_SUMMARY, new ReplaceStrategy());
         strategies.put(SCENARIO_ANALYSIS, new ReplaceStrategy());
@@ -143,6 +151,9 @@ public final class AlertWorkflowState {
         if (data.containsKey(RISK_REASONS)) {
             payload.put(RISK_REASONS, data.get(RISK_REASONS));
         }
+        if (data.containsKey(APPROVAL_EXPIRES_AT)) {
+            payload.put(APPROVAL_EXPIRES_AT, data.get(APPROVAL_EXPIRES_AT));
+        }
         return payload;
     }
 
@@ -184,6 +195,10 @@ public final class AlertWorkflowState {
 
     public Optional<ApprovalDecision> approval() {
         return optional(APPROVAL, ApprovalDecision.class);
+    }
+
+    public Optional<Instant> approvalExpiresAt() {
+        return optional(APPROVAL_EXPIRES_AT, Instant.class);
     }
 
     public Optional<WorkOrder> workOrder() {

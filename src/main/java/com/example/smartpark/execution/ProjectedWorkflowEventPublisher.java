@@ -43,4 +43,10 @@ public final class ProjectedWorkflowEventPublisher implements WorkflowEventPubli
     public void complete(String workflowId) {
         delegate.complete(workflowId);
     }
+
+    @Override
+    public void remove(String workflowId) {
+        delegate.remove(workflowId);
+        adapter.remove(workflowId);
+    }
 }

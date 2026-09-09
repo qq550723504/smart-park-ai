@@ -2,6 +2,8 @@ package com.example.smartpark.web;
 
 import com.example.smartpark.analytics.anomaly.OperationsAnomalyService;
 import com.example.smartpark.analytics.energy.EnergyTimeSeriesService;
+import com.example.smartpark.execution.ExecutionEventCapacityException;
+import com.example.smartpark.orchestration.OrchestrationCapacityException;
 import com.example.smartpark.workflow.CustomerServiceValidationException;
 
 import org.springframework.http.HttpStatus;
@@ -22,6 +24,11 @@ public class ApiExceptionHandler {
         return error(HttpStatus.FORBIDDEN, "Operation is not allowed for the current demo role");
     }
 
+    @ExceptionHandler(SecurityException.class)
+    ResponseEntity<WebDtos.ApiError> securityForbidden(SecurityException exception) {
+        return error(HttpStatus.FORBIDDEN, "Operation is not allowed for the current demo role");
+    }
+
     @ExceptionHandler(NoSuchElementException.class)
     ResponseEntity<WebDtos.ApiError> notFound(NoSuchElementException exception) {
         return error(HttpStatus.NOT_FOUND, "Requested resource was not found");
@@ -34,7 +41,9 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(IllegalStateException.class)
     ResponseEntity<WebDtos.ApiError> conflict(RuntimeException exception) {
-        String message = "Idempotency key was already used for another question".equals(exception.getMessage())
+        String message = exception.getMessage() != null && exception.getMessage().startsWith("Idempotency-Key was already used")
+                ? "Idempotency-Key 已用于其他编排请求，请生成新的请求键"
+                : "Idempotency key was already used for another question".equals(exception.getMessage())
                 ? "Idempotency-Key 已用于其他问题，请生成新的请求键"
                 : "Request conflicts with current resource state";
         return error(HttpStatus.CONFLICT, message);
@@ -64,6 +73,16 @@ public class ApiExceptionHandler {
     @ExceptionHandler(java.util.concurrent.RejectedExecutionException.class)
     ResponseEntity<WebDtos.ApiError> overloaded(java.util.concurrent.RejectedExecutionException exception) {
         return error(HttpStatus.TOO_MANY_REQUESTS, "Too many collaboration runs; retry later");
+    }
+
+    @ExceptionHandler(OrchestrationCapacityException.class)
+    ResponseEntity<WebDtos.ApiError> orchestrationOverloaded(OrchestrationCapacityException exception) {
+        return error(HttpStatus.TOO_MANY_REQUESTS, "Too many orchestration runs; retry later");
+    }
+
+    @ExceptionHandler(ExecutionEventCapacityException.class)
+    ResponseEntity<WebDtos.ApiError> executionReplayOverloaded(ExecutionEventCapacityException exception) {
+        return error(HttpStatus.TOO_MANY_REQUESTS, "Too many active execution traces; retry later");
     }
 
     @ExceptionHandler({MethodArgumentNotValidException.class, HttpMessageNotReadableException.class})

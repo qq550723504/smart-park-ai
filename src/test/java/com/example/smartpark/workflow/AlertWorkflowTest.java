@@ -19,12 +19,18 @@ import com.example.smartpark.tool.device.DeviceQueryTool;
 import com.example.smartpark.tool.knowledge.ParkKnowledgeTool;
 import com.example.smartpark.tool.workorder.WorkOrderTool;
 import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Flux;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -69,6 +75,84 @@ class AlertWorkflowTest {
     }
 
     @Test
+    void independentlyOwnedExecutionsReuseTheSameAlertAction() {
+        Fixture fixture = fixture("ALT-TEMP-001", 0.92, "LOW", null, sequentialIds());
+
+        WorkflowSnapshot first = fixture.workflow.startExclusive("ALT-TEMP-001", null);
+        WorkflowSnapshot second = fixture.workflow.startExclusive("ALT-TEMP-001", null);
+
+        assertThat(first.workflowId()).isNotEqualTo(second.workflowId());
+        assertThat(first.workOrder().id()).isEqualTo(second.workOrder().id());
+        assertThat(second.workOrder().workflowId()).isEqualTo(first.workflowId());
+        assertThat(fixture.parkSystem.workOrders().findByWorkflowId(second.workflowId())).isEmpty();
+    }
+
+    @Test
+    void terminalExclusiveRetentionReleasesExecutionCheckpointAndEventHistory() {
+        MockParkFixture parkSystem = new MockParkFixture();
+        WorkflowExecutionStore store = WorkflowExecutionStore.inMemory(1);
+        WorkflowEventPublisher publisher = WorkflowEventPublisher.inMemory();
+        Fixture fixture = fixture(
+                parkSystem,
+                parkSystem.workOrders(),
+                "ALT-TEMP-001",
+                0.92,
+                0.92,
+                "LOW",
+                parkSystem.knowledge(),
+                sequentialIds(),
+                CLOCK,
+                store,
+                publisher);
+
+        WorkflowSnapshot first = fixture.workflow.startExclusive("ALT-TEMP-001", null);
+        WorkflowExecutionStore.Execution firstExecution = store.execution(first.workflowId()).orElseThrow();
+        WorkflowSnapshot second = fixture.workflow.startExclusive("ALT-TEMP-001", null);
+
+        // Both terminal children stay pinned while their owning parents have
+        // not durably reconciled the outcome, even though the unpinned bound is one.
+        assertThat(store.execution(first.workflowId())).isPresent();
+        assertThat(store.execution(second.workflowId())).isPresent();
+
+        fixture.workflow.releaseExclusiveRetention(first.workflowId());
+        fixture.workflow.releaseExclusiveRetention(second.workflowId());
+
+        assertThat(store.execution(first.workflowId())).isEmpty();
+        assertThat(store.execution(second.workflowId())).isPresent();
+        assertThat(publisher.history(first.workflowId())).isEmpty();
+        assertThat(firstExecution.compiledGraph().stateOf(RunnableConfig.builder()
+                .threadId(firstExecution.graphThreadId())
+                .build())).isEmpty();
+    }
+
+    @Test
+    void startEventAdmissionFailureRollsBackTheUnstartedExecutionAndPartialEvents() {
+        MockParkFixture parkSystem = new MockParkFixture();
+        WorkflowExecutionStore store = WorkflowExecutionStore.inMemory(1);
+        FailingAdmissionPublisher publisher = new FailingAdmissionPublisher();
+        Fixture fixture = fixture(
+                parkSystem,
+                parkSystem.workOrders(),
+                "ALT-TEMP-001",
+                0.92,
+                0.92,
+                "LOW",
+                parkSystem.knowledge(),
+                () -> "wf-admission-failure",
+                CLOCK,
+                store,
+                publisher);
+
+        assertThatThrownBy(() -> fixture.workflow.startExclusive("ALT-TEMP-001", null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("execution event replay capacity is exhausted");
+
+        assertThat(store.execution("wf-admission-failure")).isEmpty();
+        assertThat(publisher.history("wf-admission-failure")).isEmpty();
+        assertThat(publisher.removed).isTrue();
+    }
+
+    @Test
     void highRiskAlertPausesAndApprovalResumesTheSameThread() {
         Fixture fixture = fixture("ALT-POWER-001", 0.96, "HIGH", null, sequentialIds());
 
@@ -97,6 +181,141 @@ class AlertWorkflowTest {
                 .collectList()
                 .block(Duration.ofSeconds(2));
         assertThat(eventTypes).contains(WorkflowEvent.EventType.PAUSED, WorkflowEvent.EventType.RESUMED);
+    }
+
+    @Test
+    void approvalCompletedBeforeItsDeadlineRemainsAuthoritativeWhenObservedLater() {
+        MutableClock clock = new MutableClock(NOW);
+        Fixture fixture = fixture("ALT-POWER-001", 0.96, 0.96, "HIGH", null,
+                sequentialIds(), clock);
+        Instant deadline = NOW.plus(Duration.ofMinutes(5));
+        WorkflowSnapshot waiting = fixture.workflow.start("ALT-POWER-001", deadline);
+        clock.advance(Duration.ofMinutes(4));
+
+        WorkflowSnapshot completed = fixture.workflow.approve(waiting.workflowId(),
+                approvedAt("approval-before-deadline", clock.instant().toString()));
+        clock.advance(Duration.ofMinutes(2));
+        WorkflowSnapshot observedAfterDeadline = fixture.workflow.expireApproval(waiting.workflowId(), deadline);
+
+        assertThat(completed.status()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThat(observedAfterDeadline.status()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThat(observedAfterDeadline.approval()).contains(completed.approval().orElseThrow());
+        assertThat(fixture.parkSystem.workOrders().findByWorkflowId(waiting.workflowId())).hasSize(1);
+    }
+
+    @Test
+    void expiredChildApprovalIsTerminalAndRejectsLateWorkOrderCreation() {
+        MutableClock clock = new MutableClock(NOW);
+        Fixture fixture = fixture("ALT-POWER-001", 0.96, 0.96, "HIGH", null,
+                sequentialIds(), clock);
+        Instant deadline = NOW.plus(Duration.ofMinutes(5));
+        WorkflowSnapshot waiting = fixture.workflow.start("ALT-POWER-001", deadline);
+        clock.advance(Duration.ofMinutes(6));
+
+        WorkflowSnapshot expired = fixture.workflow.expireApproval(waiting.workflowId(), deadline);
+
+        assertThat(expired.status()).isEqualTo(WorkflowStatus.FAILED);
+        assertThat(expired.errors()).contains("Approval deadline expired");
+        assertThatThrownBy(() -> fixture.workflow.approve(waiting.workflowId(),
+                approvedAt("late-approval", clock.instant().toString())))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("deadline expired");
+        assertThat(fixture.parkSystem.workOrders().findByWorkflowId(waiting.workflowId())).isEmpty();
+    }
+
+    @Test
+    void reusingAWaitingWorkflowCannotExtendItsApprovalDeadline() {
+        MutableClock clock = new MutableClock(NOW);
+        Fixture fixture = fixture("ALT-POWER-001", 0.96, 0.96, "HIGH", null,
+                sequentialIds(), clock);
+        Instant originalDeadline = NOW.plus(Duration.ofMinutes(5));
+        WorkflowSnapshot waiting = fixture.workflow.start("ALT-POWER-001", originalDeadline);
+
+        WorkflowSnapshot reused = fixture.workflow.start(
+                "ALT-POWER-001", originalDeadline.plus(Duration.ofMinutes(5)));
+        clock.advance(Duration.ofMinutes(6));
+        WorkflowSnapshot expired = fixture.workflow.expireApproval(
+                waiting.workflowId(), originalDeadline.plus(Duration.ofMinutes(5)));
+
+        assertThat(reused.workflowId()).isEqualTo(waiting.workflowId());
+        assertThat(reused.approvalExpiresAt()).contains(originalDeadline);
+        assertThat(expired.status()).isEqualTo(WorkflowStatus.FAILED);
+        assertThat(fixture.parkSystem.workOrders().findByWorkflowId(waiting.workflowId())).isEmpty();
+    }
+
+    @Test
+    void cancellingAWaitingWorkflowRejectsLaterApprovalAndCreatesNoWorkOrder() {
+        Fixture fixture = fixture("ALT-POWER-001", 0.96, "HIGH", null, sequentialIds());
+        WorkflowSnapshot waiting = fixture.workflow.start("ALT-POWER-001");
+
+        WorkflowSnapshot cancelled = fixture.workflow.cancel(waiting.workflowId());
+
+        assertThat(cancelled.status()).isEqualTo(WorkflowStatus.FAILED);
+        assertThat(cancelled.errors()).contains("Workflow cancelled by orchestration");
+        assertThatThrownBy(() -> fixture.workflow.approve(waiting.workflowId(),
+                approvedAt("approval-after-cancel", NOW.toString())))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("must be WAITING_APPROVAL");
+        assertThat(fixture.parkSystem.workOrders().findByWorkflowId(waiting.workflowId())).isEmpty();
+    }
+
+    @Test
+    void exclusiveStartsForTheSameAlertHaveIndependentApprovalOwnership() {
+        Fixture fixture = fixture("ALT-POWER-001", 0.96, "HIGH", null, sequentialIds());
+        Instant deadline = NOW.plus(Duration.ofMinutes(5));
+        WorkflowSnapshot first = fixture.workflow.startExclusive("ALT-POWER-001", deadline);
+        WorkflowSnapshot second = fixture.workflow.startExclusive("ALT-POWER-001", deadline);
+
+        WorkflowSnapshot cancelled = fixture.workflow.cancel(first.workflowId());
+        WorkflowSnapshot approved = fixture.workflow.approve(second.workflowId(),
+                approvedAt("exclusive-second", NOW.toString()));
+
+        assertThat(first.workflowId()).isNotEqualTo(second.workflowId());
+        assertThat(cancelled.status()).isEqualTo(WorkflowStatus.FAILED);
+        assertThat(approved.status()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThat(fixture.parkSystem.workOrders().findByWorkflowId(first.workflowId())).isEmpty();
+        assertThat(fixture.parkSystem.workOrders().findByWorkflowId(second.workflowId())).hasSize(1);
+    }
+
+    @Test
+    void ordinaryAlertIdempotencyDoesNotAttachToAnOwnedExecution() {
+        Fixture fixture = fixture("ALT-POWER-001", 0.96, "HIGH", null, sequentialIds());
+        WorkflowSnapshot owned = fixture.workflow.startExclusive(
+                "ALT-POWER-001", NOW.plus(Duration.ofMinutes(5)));
+
+        WorkflowSnapshot ordinary = fixture.workflow.start("ALT-POWER-001");
+        WorkflowSnapshot replay = fixture.workflow.start("ALT-POWER-001");
+
+        assertThat(ordinary.workflowId()).isNotEqualTo(owned.workflowId());
+        assertThat(replay.workflowId()).isEqualTo(ordinary.workflowId());
+    }
+
+    @Test
+    void approvalArrivalIsRegisteredBeforeExpirationCanAcquireTheExecutionMonitor() throws Exception {
+        BlockingClock clock = new BlockingClock(NOW);
+        Fixture fixture = fixture("ALT-POWER-001", 0.96, 0.96, "HIGH", null,
+                sequentialIds(), clock);
+        Instant deadline = NOW.plus(Duration.ofMinutes(5));
+        WorkflowSnapshot waiting = fixture.workflow.start("ALT-POWER-001", deadline);
+        ApprovalDecision decision = approvedAt("arrival-registration-race", NOW.toString());
+        clock.blockNextInstant();
+
+        CompletableFuture<WorkflowSnapshot> approval = CompletableFuture.supplyAsync(
+                () -> fixture.workflow.approve(waiting.workflowId(), decision));
+        assertThat(clock.awaitBlocked(2, TimeUnit.SECONDS)).isTrue();
+        clock.advance(Duration.ofMinutes(6));
+        CompletableFuture<WorkflowSnapshot> expiration = CompletableFuture.supplyAsync(
+                () -> fixture.workflow.expireApproval(waiting.workflowId(), deadline));
+        Thread.sleep(50);
+
+        assertThat(expiration).isNotDone();
+        clock.release();
+        WorkflowSnapshot completed = approval.get(2, TimeUnit.SECONDS);
+        WorkflowSnapshot observed = expiration.get(2, TimeUnit.SECONDS);
+
+        assertThat(completed.status()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThat(observed.status()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThat(fixture.parkSystem.workOrders().findByWorkflowId(waiting.workflowId())).hasSize(1);
     }
 
     @Test
@@ -305,7 +524,7 @@ class AlertWorkflowTest {
         WorkflowSnapshot result = fixture.workflow.start("ALT-TEMP-001");
 
         assertThat(result.workOrder().id()).isEqualTo(existing.id());
-        assertThat(workOrderPort.createCalls()).isZero();
+        assertThat(workOrderPort.createCalls()).isEqualTo(1);
         assertThat(parkSystem.workOrders().findByWorkflowId("wf-fixed")).containsExactly(existing);
     }
 
@@ -344,6 +563,18 @@ class AlertWorkflowTest {
             String riskLevel,
             KnowledgePort knowledgePort,
             Supplier<String> workflowIds) {
+        return fixture(alertId, classificationConfidence, diagnosisConfidence, riskLevel,
+                knowledgePort, workflowIds, CLOCK);
+    }
+
+    private static Fixture fixture(
+            String alertId,
+            double classificationConfidence,
+            double diagnosisConfidence,
+            String riskLevel,
+            KnowledgePort knowledgePort,
+            Supplier<String> workflowIds,
+            Clock clock) {
         MockParkFixture parkSystem = new MockParkFixture();
         return fixture(
                 parkSystem,
@@ -353,7 +584,8 @@ class AlertWorkflowTest {
                 diagnosisConfidence,
                 riskLevel,
                 knowledgePort == null ? parkSystem.knowledge() : knowledgePort,
-                workflowIds);
+                workflowIds,
+                clock);
     }
 
     private static Fixture fixture(
@@ -365,14 +597,57 @@ class AlertWorkflowTest {
             String riskLevel,
             KnowledgePort knowledgePort,
             Supplier<String> workflowIds) {
-        TestChatModel triageModel = new TestChatModel(triageJson(alertId, classificationConfidence, riskLevel));
+        return fixture(parkSystem, workOrderPort, alertId, classificationConfidence,
+                diagnosisConfidence, riskLevel, knowledgePort, workflowIds, CLOCK);
+    }
+
+    private static Fixture fixture(
+            MockParkFixture parkSystem,
+            WorkOrderPort workOrderPort,
+            String alertId,
+            double classificationConfidence,
+            double diagnosisConfidence,
+            String riskLevel,
+            KnowledgePort knowledgePort,
+            Supplier<String> workflowIds,
+            Clock clock) {
+        return fixture(
+                parkSystem,
+                workOrderPort,
+                alertId,
+                classificationConfidence,
+                diagnosisConfidence,
+                riskLevel,
+                knowledgePort,
+                workflowIds,
+                clock,
+                WorkflowExecutionStore.inMemory(),
+                WorkflowEventPublisher.inMemory());
+    }
+
+    private static Fixture fixture(
+            MockParkFixture parkSystem,
+            WorkOrderPort workOrderPort,
+            String alertId,
+            double classificationConfidence,
+            double diagnosisConfidence,
+            String riskLevel,
+            KnowledgePort knowledgePort,
+            Supplier<String> workflowIds,
+            Clock clock,
+            WorkflowExecutionStore store,
+            WorkflowEventPublisher publisher) {
+        String triageResponse = triageJson(alertId, classificationConfidence, riskLevel);
+        TestChatModel triageModel = new TestChatModel(
+                triageResponse, triageResponse, triageResponse, triageResponse);
         String knowledgeQuery = alertId.contains("POWER") ? "power" : "temperature";
+        String diagnosisResponse = diagnosisJson(
+                alertId,
+                riskLevel,
+                diagnosisConfidence,
+                knowledgePort.search(KnowledgeDomain.ALERT_OPERATIONS, knowledgeQuery).isEmpty());
         TestChatModel diagnosisModel = new TestChatModel(
-                diagnosisJson(
-                        alertId,
-                        riskLevel,
-                        diagnosisConfidence,
-                        knowledgePort.search(KnowledgeDomain.ALERT_OPERATIONS, knowledgeQuery).isEmpty()));
+                diagnosisResponse, diagnosisResponse, diagnosisResponse, diagnosisResponse);
         AlertTriageAgent triageAgent = new AlertTriageAgent(triageModel);
         AlertDiagnosisAgent diagnosisAgent = new AlertDiagnosisAgent(
                 diagnosisModel,
@@ -380,8 +655,6 @@ class AlertWorkflowTest {
                 new AlertQueryTool(parkSystem.alerts()),
                 new WorkOrderTool(workOrderPort),
                 new ParkKnowledgeTool(knowledgePort));
-        WorkflowExecutionStore store = WorkflowExecutionStore.inMemory();
-        WorkflowEventPublisher publisher = WorkflowEventPublisher.inMemory();
         AlertWorkflow workflow = new AlertWorkflow(
                 triageAgent,
                 diagnosisAgent,
@@ -391,7 +664,7 @@ class AlertWorkflowTest {
                 knowledgePort,
                 store,
                 publisher,
-                CLOCK,
+                clock,
                 workflowIds);
         return new Fixture(workflow, parkSystem, store, publisher);
     }
@@ -422,6 +695,67 @@ class AlertWorkflowTest {
     private static Supplier<String> sequentialIds() {
         AtomicInteger sequence = new AtomicInteger();
         return () -> "wf-" + sequence.incrementAndGet();
+    }
+
+    private static final class MutableClock extends Clock {
+        private Instant current;
+
+        private MutableClock(Instant current) {
+            this.current = current;
+        }
+
+        void advance(Duration duration) {
+            current = current.plus(duration);
+        }
+
+        @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+        @Override public Clock withZone(ZoneId zone) { return this; }
+        @Override public Instant instant() { return current; }
+    }
+
+    private static final class BlockingClock extends Clock {
+        private volatile Instant current;
+        private final AtomicBoolean blockNext = new AtomicBoolean();
+        private final CountDownLatch blocked = new CountDownLatch(1);
+        private final CountDownLatch release = new CountDownLatch(1);
+
+        private BlockingClock(Instant current) {
+            this.current = current;
+        }
+
+        void blockNextInstant() {
+            blockNext.set(true);
+        }
+
+        boolean awaitBlocked(long timeout, TimeUnit unit) throws InterruptedException {
+            return blocked.await(timeout, unit);
+        }
+
+        void release() {
+            release.countDown();
+        }
+
+        void advance(Duration duration) {
+            current = current.plus(duration);
+        }
+
+        @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+        @Override public Clock withZone(ZoneId zone) { return this; }
+
+        @Override
+        public Instant instant() {
+            Instant observed = current;
+            if (blockNext.compareAndSet(true, false)) {
+                blocked.countDown();
+                try {
+                    release.await();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("clock wait interrupted", interrupted);
+                }
+            }
+            return observed;
+        }
     }
 
     private static String triageJson(String alertId, double confidence, String riskLevel) {
@@ -500,8 +834,47 @@ class AlertWorkflowTest {
             return delegate.create(workflowId, alertId, summary);
         }
 
+        @Override
+        public WorkOrder createOrGetByAlertId(String workflowId, String alertId, String summary) {
+            createCalls.incrementAndGet();
+            return delegate.createOrGetByAlertId(workflowId, alertId, summary);
+        }
+
         private int createCalls() {
             return createCalls.get();
+        }
+    }
+
+    private static final class FailingAdmissionPublisher implements WorkflowEventPublisher {
+        private final WorkflowEventPublisher delegate = WorkflowEventPublisher.inMemory();
+        private boolean removed;
+
+        @Override
+        public WorkflowEvent publish(String workflowId, WorkflowEvent.EventType eventType,
+                                     String node, Instant timestamp, String summary) {
+            delegate.publish(workflowId, eventType, node, timestamp, summary);
+            throw new IllegalStateException("execution event replay capacity is exhausted");
+        }
+
+        @Override
+        public Flux<WorkflowEvent> events(String workflowId) {
+            return delegate.events(workflowId);
+        }
+
+        @Override
+        public List<WorkflowEvent> history(String workflowId) {
+            return delegate.history(workflowId);
+        }
+
+        @Override
+        public void complete(String workflowId) {
+            delegate.complete(workflowId);
+        }
+
+        @Override
+        public void remove(String workflowId) {
+            removed = true;
+            delegate.remove(workflowId);
         }
     }
 }

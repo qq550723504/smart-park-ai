@@ -51,6 +51,16 @@ public final class SecurityIncidentService {
         return new SecurityIncidentPage(filtered.stream().skip(query.offset()).limit(query.limit()).toList(), filtered.size());
     }
 
+    /** Returns matching incidents from one correlated snapshot without page truncation. */
+    public synchronized List<SecurityIncident> findMatching(List<String> buildingIds, String alertId) {
+        List<String> safeBuildingIds = List.copyOf(buildingIds == null ? List.of() : buildingIds);
+        String safeAlertId = alertId == null || alertId.isBlank() ? null : alertId.trim();
+        return currentIncidents(null).stream()
+                .filter(incident -> safeBuildingIds.contains(incident.buildingId())
+                        || (safeAlertId != null && incident.alertIds().contains(safeAlertId)))
+                .toList();
+    }
+
     public synchronized SecurityIncident get(String incidentId) {
         return currentIncidents(null).stream()
                 .filter(incident -> incident.incidentId().equals(incidentId))

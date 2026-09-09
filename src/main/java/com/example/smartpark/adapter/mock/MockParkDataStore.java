@@ -41,6 +41,7 @@ public class MockParkDataStore {
     private final Map<String, KnowledgeDocument> knowledgeDocuments = new ConcurrentHashMap<>();
     private final Map<String, Boolean> knowledgeActive = new ConcurrentHashMap<>();
     private final Map<String, WorkOrder> workOrdersByWorkflowId = new ConcurrentHashMap<>();
+    private final Map<String, WorkOrder> workOrdersByAlertId = new ConcurrentHashMap<>();
     private final AtomicInteger workOrderSequence = new AtomicInteger();
 
     MockParkDataStore() { reset(); }
@@ -48,7 +49,8 @@ public class MockParkDataStore {
     final void reset() {
         // 重置动态数据后重新装载基础设备、告警、历史记录和知识库。
         devices.clear(); energyReadings.clear(); securityEvents.clear(); alerts.clear(); historyByDevice.clear();
-        knowledgeDocuments.clear(); knowledgeActive.clear(); workOrdersByWorkflowId.clear(); workOrderSequence.set(0);
+        knowledgeDocuments.clear(); knowledgeActive.clear(); workOrdersByWorkflowId.clear();
+        workOrdersByAlertId.clear(); workOrderSequence.set(0);
         seedDevices(); seedSecurityEvents(); seedAlerts(); seedHistory(); seedKnowledge();
     }
 
@@ -73,11 +75,25 @@ public class MockParkDataStore {
         return workOrder == null ? List.of() : List.of(workOrder);
     }
 
-    WorkOrder buildWorkOrder(String workflowId, String alertId, String summary) {
+    synchronized WorkOrder buildWorkOrder(String workflowId, String alertId, String summary) {
         Objects.requireNonNull(workflowId, "workflowId");
         Objects.requireNonNull(alertId, "alertId");
         Objects.requireNonNull(summary, "summary");
-        return workOrdersByWorkflowId.computeIfAbsent(workflowId, key -> createWorkOrder(key, alertId, summary));
+        WorkOrder workOrder = workOrdersByWorkflowId.computeIfAbsent(
+                workflowId, key -> createWorkOrder(key, alertId, summary));
+        workOrdersByAlertId.putIfAbsent(alertId, workOrder);
+        return workOrder;
+    }
+
+    synchronized WorkOrder buildWorkOrderOnceForAlert(String workflowId, String alertId, String summary) {
+        Objects.requireNonNull(workflowId, "workflowId");
+        Objects.requireNonNull(alertId, "alertId");
+        Objects.requireNonNull(summary, "summary");
+        WorkOrder existing = workOrdersByAlertId.get(alertId);
+        if (existing != null) {
+            return existing;
+        }
+        return buildWorkOrder(workflowId, alertId, summary);
     }
 
     List<KnowledgeDocument> search(KnowledgeDomain domain, String query) {
@@ -116,7 +132,9 @@ public class MockParkDataStore {
         putDevice(device("DEV-ENERGY-001", "A2", "Building A2 Energy Meter", "ENERGY_METER", "ACTIVE", 2));
         putDevice(device("DEV-ACCESS-001", "A1", "North Access Controller", "ACCESS", "ACTIVE", 3));
         putDevice(device("DEV-PUMP-001", "A2", "Basement Pump", "PUMP", "ACTIVE", 4));
+        putDevice(device("DEV-ENERGY-B1-001", "B1", "B1 Orchestration Energy Meter", "ENERGY_METER", "ACTIVE", 5));
         putEnergyReading(new EnergyReading("DEV-ENERGY-001", PARK_ID, "A2", ALERT_BASE_TIME.plus(Duration.ofMinutes(6)), 138.0, 100.0, 42.5));
+        putEnergyReading(new EnergyReading("DEV-ENERGY-B1-001", PARK_ID, "B1", ALERT_BASE_TIME.plus(Duration.ofMinutes(12)), 112.0, 100.0, 36.0));
     }
 
     private void seedSecurityEvents() {
@@ -138,6 +156,8 @@ public class MockParkDataStore {
                 "Unexpected energy consumption in building A2", "Current interval consumption is 38 percent above the learned baseline.", ALERT_BASE_TIME.plus(Duration.ofMinutes(6)), List.of("meter:current-kwh=138", "baseline:kwh=100", "trend:after-hours")));
         putAlert(alert("ALT-ACCESS-001", "DEV-ACCESS-001", "A1", AlertClassification.ACCESS, RiskLevel.HIGH,
                 "Repeated access denial at the north entrance", "A redacted security event was correlated with repeated denied access attempts outside opening hours.", ALERT_BASE_TIME.plus(Duration.ofMinutes(9)), List.of("security-event:SEC-ACCESS-001", "evidence:redacted-only")));
+        putAlert(alert("ALT-ORCH-ENERGY-B1-001", "DEV-ENERGY-B1-001", "B1", AlertClassification.ENERGY, RiskLevel.LOW,
+                "B1 orchestration energy anomaly", "B1 consumption exceeded the demo baseline for joint assessment.", ALERT_BASE_TIME.plus(Duration.ofMinutes(12)), List.of("meter:current-kwh=112", "baseline:kwh=100")));
     }
 
     private void seedHistory() {
@@ -151,6 +171,8 @@ public class MockParkDataStore {
                 alert("ALT-HIST-ENERGY-001", "DEV-ENERGY-001", "A2", AlertClassification.ENERGY, RiskLevel.HIGH, "Previous after-hours energy spike", "The meter previously reported elevated consumption after normal operating hours.", HISTORY_BASE_TIME.plus(Duration.ofHours(2)), List.of("log:after-hours-spike"))));
         historyByDevice.put("DEV-ACCESS-001", List.of(
                 alert("ALT-HIST-ACCESS-001", "DEV-ACCESS-001", "A1", AlertClassification.ACCESS, RiskLevel.LOW, "Previous isolated access denial", "A single denied attempt was recorded without retained identity or media data.", HISTORY_BASE_TIME.plus(Duration.ofHours(3)), List.of("security-summary:redacted"))));
+        historyByDevice.put("DEV-ENERGY-B1-001", List.of(
+                alert("ALT-HIST-ORCH-ENERGY-B1-001", "DEV-ENERGY-B1-001", "B1", AlertClassification.ENERGY, RiskLevel.LOW, "Previous B1 energy deviation", "A prior bounded deviation was recorded for the orchestration demo meter.", HISTORY_BASE_TIME.plus(Duration.ofHours(6)), List.of("log:b1-energy-deviation"))));
     }
 
     private void seedKnowledge() {
@@ -176,7 +198,8 @@ public class MockParkDataStore {
     }
 
     private WorkOrder createWorkOrder(String workflowId, String alertId, String summary) {
-        // workflowId 作为幂等键，同一工作流重复创建时返回原工单。
+        // workflowId protects retries of one execution; the alert index protects
+        // the same business action across independently owned executions.
         Alert alert = getAlert(alertId);
         int sequence = workOrderSequence.incrementAndGet();
         Instant createdAt = WORK_ORDER_BASE_TIME.plusSeconds(sequence);

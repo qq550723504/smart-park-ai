@@ -97,6 +97,40 @@ class OperationsDailyReportServiceTest {
                 assertThat(event.safeSummary()).doesNotContain("secret prompt", "SQL"));
     }
 
+    @Test
+    void terminalizesTheReportAndReleasesAdmissionWhenInitialTraceAdmissionFails() {
+        AtomicReference<UUID> rejectedRunId = new AtomicReference<>();
+        java.util.concurrent.atomic.AtomicBoolean sectionCalled = new java.util.concurrent.atomic.AtomicBoolean();
+        com.example.smartpark.execution.ExecutionEventPublisher rejectingPublisher =
+                new com.example.smartpark.execution.ExecutionEventPublisher() {
+                    @Override public ExecutionEvent publish(ExecutionEvent event) {
+                        rejectedRunId.compareAndSet(null, event.runId());
+                        throw new com.example.smartpark.execution.ExecutionEventCapacityException(
+                                "execution event replay capacity is exhausted");
+                    }
+                    @Override public List<ExecutionEvent> history(UUID runId) { return List.of(); }
+                    @Override public void hydrate(UUID runId, List<ExecutionEvent> durableHistory) { }
+                    @Override public Subscription subscribe(UUID runId,
+                            java.util.function.Consumer<ExecutionEvent> consumer) { return () -> { }; }
+                    @Override public String status(UUID runId) { return "UNKNOWN"; }
+                    @Override public void remove(UUID runId) { }
+                };
+        OperationsDailyReportStore store = new OperationsDailyReportStore(Duration.ofMinutes(30), CLOCK);
+        OperationsDailyReportService service = new OperationsDailyReportService(section -> {
+            sectionCalled.set(true);
+            return CompletableFuture.completedFuture(completed(UUID.randomUUID(), section.question()));
+        }, store, rejectingPublisher, CLOCK);
+
+        assertThatThrownBy(service::start)
+                .isInstanceOf(com.example.smartpark.execution.ExecutionEventCapacityException.class);
+
+        assertThat(rejectedRunId).doesNotHaveValue(null);
+        assertThat(store.get(rejectedRunId.get())).get().extracting(OperationsDailyReport::status)
+                .isEqualTo("FAILED");
+        assertThat(store.activeRun()).isFalse();
+        assertThat(sectionCalled).isFalse();
+    }
+
     private OperationsDailyReportService service(OperationsReportSectionRunner runner,
                                                  InMemoryExecutionEventPublisher publisher) {
         return new OperationsDailyReportService(runner,

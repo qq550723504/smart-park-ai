@@ -20,7 +20,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system app \
-    && useradd --system --gid app --home-dir /app --no-create-home app
+    && useradd --system --gid app --home-dir /app --no-create-home app \
+    && install -d -o app -g app /var/lib/smartpark/orchestration
 
 COPY --from=build --chown=app:app /app/app.jar /app/app.jar
 

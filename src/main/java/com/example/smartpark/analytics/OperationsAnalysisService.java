@@ -12,21 +12,23 @@ import com.example.smartpark.execution.model.ExecutionStage;
 import com.example.smartpark.execution.model.ExecutionStatus;
 
 import java.time.Clock;
-import java.time.Instant;
 import java.time.Duration;
-import java.util.List;
+import java.time.Instant;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.Executor;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 
 /**
  * Run lifecycle for natural-language operations analysis: start, ambiguity
@@ -154,25 +156,79 @@ public class OperationsAnalysisService {
     }
 
     /**
+     * Waits for the service's singleton execution slot and claims it atomically.
+     * Direct API callers keep the existing fail-fast {@link #start(String)}
+     * contract; bounded orchestrators use this seam so transient contention is
+     * queued instead of being persisted as an analysis failure.
+     */
+    public AnalysisRunStore.RunRecord startWhenAvailable(String question, BooleanSupplier cancelled) {
+        requireValidQuestion(question);
+        java.util.Objects.requireNonNull(cancelled, "cancelled");
+        UUID runId = UUID.randomUUID();
+        AnalysisRunStore.RunRecord expired = null;
+        synchronized (lifecycleLock) {
+            while (activeRunId != null) {
+                expired = expireAbandonedClarificationLocked(Instant.now(clock));
+                if (activeRunId == null) break;
+                if (cancelled.getAsBoolean()) {
+                    throw new CancellationException("orchestration cancelled while awaiting analysis admission");
+                }
+                try {
+                    lifecycleLock.wait(100L);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new CancellationException("interrupted while awaiting analysis admission");
+                }
+            }
+            if (cancelled.getAsBoolean()) {
+                throw new CancellationException("orchestration cancelled while awaiting analysis admission");
+            }
+            activeRunId = runId;
+        }
+        publishExpiredClarification(expired);
+        try {
+            launch(runId, question, null, false,
+                    () -> store.put(new RecordBuilder(runId, question, clock).running()),
+                    () -> { }, true);
+        } catch (RuntimeException rejected) {
+            synchronized (lifecycleLock) {
+                releaseActiveLocked(runId);
+            }
+            throw rejected;
+        }
+        return store.get(runId);
+    }
+
+    /**
      * Starts one normal analysis run and completes when it reaches a terminal
      * state or a clarification pause. This is an application-layer seam for
      * bounded orchestrators; it does not add a second execution path.
      */
     public CompletableFuture<AnalysisRunStore.RunRecord> startAndAwait(String question) {
-        CompletableFuture<AnalysisRunStore.RunRecord> future = new CompletableFuture<>();
         AnalysisRunStore.RunRecord accepted;
         try {
             accepted = start(question);
         } catch (RuntimeException failure) {
+            CompletableFuture<AnalysisRunStore.RunRecord> future = new CompletableFuture<>();
             future.completeExceptionally(failure);
             return future;
         }
+        return await(accepted.runId());
+    }
+
+    /** Attaches an awaiter to an already accepted run without starting a second analysis. */
+    public CompletableFuture<AnalysisRunStore.RunRecord> await(UUID runId) {
+        CompletableFuture<AnalysisRunStore.RunRecord> future = new CompletableFuture<>();
         synchronized (lifecycleLock) {
-            AnalysisRunStore.RunRecord current = store.get(accepted.runId());
+            AnalysisRunStore.RunRecord current = store.get(runId);
+            if (current == null) {
+                future.completeExceptionally(new java.util.NoSuchElementException("Unknown analysis run: " + runId));
+                return future;
+            }
             if (current != null && isAwaitableState(current.status())) {
                 future.complete(current);
             } else {
-                completionWaiters.put(accepted.runId(), future);
+                completionWaiters.put(runId, future);
             }
         }
         return future;
@@ -657,14 +713,18 @@ public class OperationsAnalysisService {
                     resumed ? ExecutionEventType.RESUMED : ExecutionEventType.RUN_STARTED,
                     ExecutionStatus.RUNNING,
                     resumed ? "澄清已提交，继续运营分析" : "运营分析已启动", null));
-        } catch (IllegalStateException alreadyRegistered) {
-            // Trace already open for this run; nothing more to do.
+        } catch (IllegalStateException publishFailure) {
+            // A closed trace can legitimately win a raced lifecycle retry. An
+            // empty history proves this was not an existing trace (for example
+            // replay-capacity exhaustion), so admission must fail visibly.
+            if (events.history(runId).isEmpty()) throw publishFailure;
         }
     }
 
     private void releaseActiveLocked(UUID runId) {
         if (runId.equals(activeRunId)) {
             activeRunId = null;
+            lifecycleLock.notifyAll();
         }
     }
 
@@ -680,6 +740,7 @@ public class OperationsAnalysisService {
         store.put(expired);
         pendingClarifications.remove(activeRunId);
         activeRunId = null;
+        lifecycleLock.notifyAll();
         return expired;
     }
 
