@@ -341,11 +341,8 @@ public class AnalyticsConfiguration {
     }
 
     static String operationsReportQuestion(OperationsReportSection section, OperationsReportRequest request) {
-        String metricQuestion = section.question().replaceFirst("^过去5天", "");
-        // The governed parser accepts an explicit atomic UTC range. Instant#toString
-        // emits that exact ISO-8601 form and avoids a second, ambiguous local-time interpretation.
-        return request.timeWindow().fromInclusive() + " 到 "
-                + request.timeWindow().toExclusive() + " " + metricQuestion;
+        // The same resolved question is executed and persisted in the immutable snapshot.
+        return section.questionFor(request);
     }
 
 }

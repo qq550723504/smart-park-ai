@@ -68,6 +68,32 @@ class OperationsDailyReportServiceTest {
     }
 
     @Test
+    void preservesNullSqlCellsAndTheExactRequestedWindowInEverySection() {
+        OperationsDailyReportService service = service(temp.resolve("null-cells.json"),
+                (section, request) -> CompletableFuture.completedFuture(
+                        completedValue(section.question(), null)),
+                new InMemoryExecutionEventPublisher());
+        OperationsReportRequest request = new OperationsReportRequest(OperationsReportRequest.DAILY,
+                new OperationsReportRequest.TimeWindow(
+                        Instant.parse("2026-09-01T00:00:00Z"),
+                        Instant.parse("2026-09-03T12:00:00Z")),
+                "Asia/Shanghai");
+
+        UUID reportId = service.start(request, "null-window-key",
+                "demo-role:OPERATOR", "OPERATOR").report().reportId();
+        OperationsDailyReport report = service.get(reportId, "OPERATOR");
+
+        assertThat(report.status()).isEqualTo(OperationsReportStatus.COMPLETED);
+        assertThat(report.sections()).allSatisfy(section -> {
+            assertThat(section.question())
+                    .startsWith("2026-09-01T00:00:00Z 到 2026-09-03T12:00:00Z ")
+                    .doesNotContain("过去5天");
+            assertThat(section.rows()).containsExactly(
+                    java.util.Collections.singletonList(null));
+        });
+    }
+
+    @Test
     void completedReportPreservesStructuredSnapshotWhenArtifactExceedsLimit() {
         Path state = temp.resolve("artifact-limit.json");
         OperationsDailyReportService service = new OperationsDailyReportService(
@@ -366,6 +392,46 @@ class OperationsDailyReportServiceTest {
     }
 
     @Test
+    void restartTerminalizesActiveSnapshotAdmittedBeforeReportLimitWasLowered() throws Exception {
+        Path state = temp.resolve("lowered-active-limit.json");
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        OperationsDailyReportStore firstStore = new OperationsDailyReportStore(
+                state, mapper, 20, 1, 16 * 1024, 1024);
+        UUID reportId = UUID.randomUUID();
+        UUID runId = UUID.randomUUID();
+        OperationsDailyReport interrupted = new OperationsDailyReport(
+                reportId, OperationsReportRequest.DAILY, "智慧园区运营日报",
+                OperationsReportStatus.GENERATING, "x".repeat(5000), "OPERATOR",
+                NOW, NOW, null, new OperationsReportRequest.TimeWindow(NOW.minusSeconds(3600), NOW),
+                OperationsReportRequest.DEFAULT_TIMEZONE, null, "",
+                OperationsDailyReportDefinition.sections().stream()
+                        .map(OperationsDailyReport.SectionResult::pending).toList(),
+                List.of(), List.of(), runId, runId,
+                OperationsDailyReport.CURRENT_SCHEMA_VERSION,
+                OperationsDailyReport.CURRENT_GENERATION_VERSION, null,
+                "lowered-active-key", "lowered-active-fingerprint", 0,
+                List.of(new OperationsReportTraceRecord(UUID.randomUUID(), 1, NOW,
+                        OperationsReportTraceRecord.REPORT_ACTOR, ExecutionStage.INITIALIZATION,
+                        ExecutionEventType.RUN_STARTED, ExecutionStatus.RUNNING, "started")));
+        firstStore.createOrGet("lowered-active-key", "lowered-active-fingerprint", () -> interrupted);
+        assertThat(mapper.writeValueAsBytes(interrupted).length).isGreaterThan(4096);
+
+        OperationsDailyReportService restarted = new OperationsDailyReportService(
+                (section, request) -> CompletableFuture.completedFuture(completed(section.question(), 1)),
+                new OperationsDailyReportStore(state, mapper, 20, 1, 4096, 1024),
+                new InMemoryExecutionEventPublisher(), new OperationsReportRenderer(), CLOCK);
+        OperationsDailyReport recovered = restarted.get(reportId, "OPERATOR");
+
+        assertThat(recovered.status()).isEqualTo(OperationsReportStatus.FAILED);
+        assertThat(recovered.artifact()).isNull();
+        assertThat(recovered.traceEvents()).singleElement()
+                .extracting(OperationsReportTraceRecord::eventType)
+                .isEqualTo(ExecutionEventType.RUN_FAILED);
+        assertThat(new OperationsDailyReportStore(state, mapper, 20, 1, 4096, 1024)
+                .find(reportId)).contains(recovered);
+    }
+
+    @Test
     void liveSectionCapacityFailureStillReleasesTheActiveReportSlot() throws Exception {
         Path state = temp.resolve("live-capacity.json");
         ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
@@ -511,7 +577,7 @@ class OperationsDailyReportServiceTest {
         UUID runId = UUID.randomUUID();
         return new AnalysisRunStore.RunRecord(runId, question, "COMPLETED", List.of(), List.of(),
                 "安全摘要", 1, false, 3, null, NOW.minusSeconds(1), NOW,
-                List.of("metric"), List.of(List.of((Object) value)),
+                List.of("metric"), List.of(java.util.Collections.singletonList(value)),
                 TimeResolutionMetadata.defaultLookback(NOW.minusSeconds(3600), NOW));
     }
 }

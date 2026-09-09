@@ -202,6 +202,37 @@ public final class OperationsDailyReportStore {
         return updated;
     }
 
+    /**
+     * Terminalizes a snapshot admitted under an older, larger byte limit. Only an oversized
+     * active record may use this path, and its artifact-free terminal snapshot may not grow.
+     */
+    synchronized OperationsDailyReport terminalizeGrandfathered(
+            UUID reportId, UnaryOperator<OperationsDailyReport> transition) {
+        OperationsDailyReport current = Optional.ofNullable(reports.get(reportId))
+                .orElseThrow(() -> new NoSuchElementException("Unknown operations report"));
+        int currentBytes = serializedSize(current);
+        if (current.status().isTerminal() || currentBytes <= maxReportBytes) {
+            throw new IllegalStateException("report is not an oversized active snapshot");
+        }
+        OperationsDailyReport updated = transition.apply(current);
+        if (!reportId.equals(updated.reportId()) || updated.revision() <= current.revision()) {
+            throw new IllegalArgumentException("invalid grandfathered terminal transition");
+        }
+        if (!updated.status().isTerminal() || updated.artifact() != null) {
+            throw new IllegalArgumentException(
+                    "grandfathered transition must produce a terminal report without artifact");
+        }
+        validateReportIntegrity(updated);
+        if (serializedSize(updated) > currentBytes) {
+            throw new OperationsReportCapacityException("grandfathered terminal report must not grow");
+        }
+        LinkedHashMap<UUID, OperationsDailyReport> next = new LinkedHashMap<>(reports);
+        next.put(reportId, updated);
+        persist(next.values());
+        replaceState(next);
+        return updated;
+    }
+
     private void load() {
         if (!Files.exists(stateFile)) return;
         try {
@@ -337,10 +368,14 @@ public final class OperationsDailyReportStore {
             }
         }
         validateReportIntegrity(report);
+        if (serializedSize(report) > maxReportBytes) {
+            throw new OperationsReportCapacityException("operations report exceeds configured byte limit");
+        }
+    }
+
+    private int serializedSize(OperationsDailyReport report) {
         try {
-            if (mapper.writeValueAsBytes(report).length > maxReportBytes) {
-                throw new OperationsReportCapacityException("operations report exceeds configured byte limit");
-            }
+            return mapper.writeValueAsBytes(report).length;
         } catch (com.fasterxml.jackson.core.JsonProcessingException failure) {
             throw new IllegalStateException("unable to size operations report", failure);
         }

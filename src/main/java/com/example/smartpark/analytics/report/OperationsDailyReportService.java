@@ -77,7 +77,8 @@ public final class OperationsDailyReportService {
                     OperationsReportStatus.REQUESTED, actor, normalizedRole, now, null, null,
                     request.timeWindow(), request.timezone(), null, "报告请求已接收",
                     OperationsDailyReportDefinition.sections().stream()
-                            .map(OperationsDailyReport.SectionResult::pending).toList(),
+                            .map(section -> OperationsDailyReport.SectionResult.pending(
+                                    section, section.questionFor(request))).toList(),
                     List.of(), List.of(), runId, runId,
                     OperationsDailyReport.CURRENT_SCHEMA_VERSION,
                     OperationsDailyReport.CURRENT_GENERATION_VERSION, null, key, fingerprint, 0, List.of());
@@ -182,10 +183,11 @@ public final class OperationsDailyReportService {
     private void completeSection(UUID reportId, int index, OperationsReportSection definition,
                                  AnalysisRunStore.RunRecord record, Throwable failure) {
         try {
-            OperationsDailyReport.SectionResult result = sectionResult(definition, record, failure);
             OperationsDailyReport current = store.find(reportId)
                     .orElseThrow(() -> new NoSuchElementException("Unknown operations report"));
             if (current.status().isTerminal()) return;
+            OperationsDailyReport.SectionResult result = sectionResult(
+                    definition, current.sections().get(index).question(), record, failure);
             int firstTrace = current.traceEvents().size();
             OperationsDailyReport updated = store.update(reportId, report -> {
                 List<OperationsDailyReport.SectionResult> sections = new ArrayList<>(report.sections());
@@ -213,13 +215,16 @@ public final class OperationsDailyReportService {
     }
 
     private OperationsDailyReport.SectionResult sectionResult(OperationsReportSection definition,
+                                                               String resolvedQuestion,
                                                                AnalysisRunStore.RunRecord record,
                                                                Throwable failure) {
         if (failure != null || record == null) {
-            return OperationsDailyReport.SectionResult.pending(definition).unavailable(SAFE_SECTION_FAILURE);
+            return OperationsDailyReport.SectionResult.pending(definition, resolvedQuestion)
+                    .unavailable(SAFE_SECTION_FAILURE);
         }
         if (!"COMPLETED".equals(record.status())) {
-            return OperationsDailyReport.SectionResult.pending(definition).unavailable(SAFE_SECTION_FAILURE);
+            return OperationsDailyReport.SectionResult.pending(definition, resolvedQuestion)
+                    .unavailable(SAFE_SECTION_FAILURE);
         }
         Map<String, Object> resolution = timeResolution(record);
         Instant asOf = observationTime(record);
@@ -229,7 +234,7 @@ public final class OperationsDailyReportService {
         OperationsDailyReport.EvidenceReference evidence = new OperationsDailyReport.EvidenceReference(
                 definition.sourceSystem(), definition.metric(), "REPORT_SECTION:" + definition.id(), asOf,
                 record.runId().toString(), "已保存 " + record.rowCount() + " 行生成时结果");
-        return new OperationsDailyReport.SectionResult(definition.id(), definition.title(), definition.question(),
+        return new OperationsDailyReport.SectionResult(definition.id(), definition.title(), resolvedQuestion,
                 OperationsReportSectionStatus.COMPLETED, record.summary(), record.rowCount(), record.truncated(),
                 record.columns(), record.rows(), resolution, List.of(evidence), List.of(source),
                 record.truncated() ? "RESULT_TRUNCATED" : null, null, record.runId());
@@ -330,7 +335,7 @@ public final class OperationsDailyReportService {
                     } catch (OperationsReportCapacityException stillTooLarge) {
                         // Last-resort terminalization changes only shrinking fields, so any valid
                         // persisted non-terminal record can never trap the application in a restart loop.
-                        recovered = terminalizeAtCapacity(interrupted.reportId(), status);
+                        recovered = terminalizeInterruptedAtCapacity(interrupted.reportId(), status);
                     }
                 }
             }
@@ -377,24 +382,38 @@ public final class OperationsDailyReportService {
         }
     }
 
+    private OperationsDailyReport terminalizeInterruptedAtCapacity(
+            UUID reportId, OperationsReportStatus status) {
+        try {
+            return terminalizeAtCapacity(reportId, status);
+        } catch (OperationsReportCapacityException loweredLimit) {
+            return store.terminalizeGrandfathered(reportId,
+                    report -> compactTerminal(report, status, null));
+        }
+    }
+
     private OperationsDailyReport terminalizeAtCapacity(UUID reportId,
                                                         OperationsReportStatus status,
                                                         Instant completedAt) {
-        return store.update(reportId, report -> {
-            boolean failed = status == OperationsReportStatus.FAILED;
-            OperationsReportTraceRecord seed = report.traceEvents().isEmpty()
-                    ? null : report.traceEvents().get(0);
-            OperationsReportTraceRecord terminalTrace = new OperationsReportTraceRecord(
-                    UUID.randomUUID(), 1,
-                    seed == null ? clock.instant() : seed.timestamp(),
-                    OperationsReportTraceRecord.REPORT_ACTOR,
-                    failed ? ExecutionStage.FAILURE : ExecutionStage.COMPLETION,
-                    failed ? ExecutionEventType.RUN_FAILED : ExecutionEventType.RUN_COMPLETED,
-                    failed ? ExecutionStatus.FAILED : ExecutionStatus.SUCCEEDED, "");
-            return report.copy(status, report.startedAt(), completedAt,
-                    report.asOf(), "", report.sections(), report.evidence(), report.sourceReferences(), null,
-                    List.of(terminalTrace));
-        });
+        return store.update(reportId, report -> compactTerminal(report, status, completedAt));
+    }
+
+    private OperationsDailyReport compactTerminal(OperationsDailyReport report,
+                                                   OperationsReportStatus status,
+                                                   Instant completedAt) {
+        boolean failed = status == OperationsReportStatus.FAILED;
+        OperationsReportTraceRecord seed = report.traceEvents().isEmpty()
+                ? null : report.traceEvents().get(0);
+        OperationsReportTraceRecord terminalTrace = new OperationsReportTraceRecord(
+                UUID.randomUUID(), 1,
+                seed == null ? clock.instant() : seed.timestamp(),
+                OperationsReportTraceRecord.REPORT_ACTOR,
+                failed ? ExecutionStage.FAILURE : ExecutionStage.COMPLETION,
+                failed ? ExecutionEventType.RUN_FAILED : ExecutionEventType.RUN_COMPLETED,
+                failed ? ExecutionStatus.FAILED : ExecutionStatus.SUCCEEDED, "");
+        return report.copy(status, report.startedAt(), completedAt,
+                report.asOf(), "", report.sections(), report.evidence(), report.sourceReferences(), null,
+                List.of(terminalTrace));
     }
 
     private void authorize(OperationsDailyReport report, String role) {

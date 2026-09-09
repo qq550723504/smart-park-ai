@@ -55,7 +55,7 @@ public class InMemoryExecutionEventPublisher implements ExecutionEventPublisher 
 
     @Override
     public ExecutionEvent publish(ExecutionEvent event) {
-        RunState state = stateFor(event.runId());
+        RunState state = stateForPublishedSequence(event.runId(), event.sequence());
         state.lock.lock();
         try {
             if (state.closed) {
@@ -245,6 +245,16 @@ public class InMemoryExecutionEventPublisher implements ExecutionEventPublisher 
         RunState created = new RunState();
         runs.put(runId, created);
         return created;
+    }
+
+    private synchronized RunState stateForPublishedSequence(UUID runId, long sequence) {
+        RunState existing = runs.get(runId);
+        if (existing != null) return existing;
+        if (sequence > 1) {
+            throw new IllegalArgumentException("out-of-order sequence " + sequence
+                    + " for run " + runId + "; expected 1");
+        }
+        return stateFor(runId);
     }
 
     /** Removes terminal runs whose replayable window has elapsed; running runs are never touched. */

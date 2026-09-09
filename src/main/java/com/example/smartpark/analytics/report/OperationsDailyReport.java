@@ -1,6 +1,8 @@
 package com.example.smartpark.analytics.report;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -70,14 +72,21 @@ public record OperationsDailyReport(
             summary = summary == null ? "" : summary;
             if (rowCount < 0) throw new IllegalArgumentException("rowCount must not be negative");
             columns = List.copyOf(columns == null ? List.of() : columns);
-            rows = rows == null ? List.of() : rows.stream().map(List::copyOf).toList();
+            rows = rows == null ? List.of() : rows.stream()
+                    .map(row -> Collections.unmodifiableList(new ArrayList<>(
+                            Objects.requireNonNull(row, "row"))))
+                    .toList();
             timeResolution = Map.copyOf(timeResolution == null ? Map.of() : timeResolution);
             evidenceReferences = List.copyOf(evidenceReferences == null ? List.of() : evidenceReferences);
             sourceReferences = List.copyOf(sourceReferences == null ? List.of() : sourceReferences);
         }
 
         public static SectionResult pending(OperationsReportSection section) {
-            return new SectionResult(section.id(), section.title(), section.question(),
+            return pending(section, section.question());
+        }
+
+        public static SectionResult pending(OperationsReportSection section, String resolvedQuestion) {
+            return new SectionResult(section.id(), section.title(), resolvedQuestion,
                     OperationsReportSectionStatus.PENDING, "", 0, false, List.of(), List.of(), Map.of(),
                     List.of(), List.of(), null, null, null);
         }

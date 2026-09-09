@@ -19,6 +19,14 @@ public record OperationsReportSection(String id, String title, String question,
         unit = requireText(unit, "unit");
     }
 
+    /** Resolves the persisted and executed question against the exact requested window. */
+    public String questionFor(OperationsReportRequest request) {
+        Objects.requireNonNull(request, "request");
+        String metricQuestion = question.replaceFirst("^过去5天", "");
+        return request.timeWindow().fromInclusive() + " 到 "
+                + request.timeWindow().toExclusive() + " " + metricQuestion;
+    }
+
     private static String requireText(String value, String field) {
         Objects.requireNonNull(value, field);
         if (value.isBlank()) throw new IllegalArgumentException(field + " must not be blank");

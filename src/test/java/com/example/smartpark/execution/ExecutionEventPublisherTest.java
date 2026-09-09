@@ -219,6 +219,25 @@ class ExecutionEventPublisherTest {
                 .hasMessageContaining("capacity");
     }
 
+    @Test
+    void rejectedLateSequencedPublishDoesNotRecreateAnEvictedRun() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-08-24T00:00:00Z"));
+        InMemoryExecutionEventPublisher bounded = new InMemoryExecutionEventPublisher(
+                java.time.Duration.ofMinutes(30), clock, 1);
+        UUID evicted = UUID.randomUUID();
+        bounded.publish(sequencedEvent(evicted, 1, "done", true));
+        bounded.remove(evicted);
+
+        assertThatThrownBy(() -> bounded.publish(sequencedEvent(evicted, 2, "late", true)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("expected 1");
+        assertThat(bounded.history(evicted)).isEmpty();
+
+        UUID admitted = UUID.randomUUID();
+        bounded.publish(event(admitted, "active", false));
+        assertThat(bounded.history(admitted)).hasSize(1);
+    }
+
     private void await(CountDownLatch latch) {
         try {
             latch.await(5, TimeUnit.SECONDS);
