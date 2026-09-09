@@ -120,3 +120,4 @@ Intentional differences are capability-driven rather than visual drift. Search, 
 2. Root cause: the overview window carries minute/second precision while the governed hourly time-series API requires exact hour boundaries.
 3. The customer adapter now clamps the requested last-24-hour range to valid hour boundaries; a focused unit test covers the unaligned source window.
 4. The rebuilt live page returned 3,348 kWh from the current demo facts and rendered the trend/distribution charts. Final 1440 × 900 and 1920 × 1080 captures were then taken.
+5. PR review found a stale-refresh race and two derived-state inconsistencies. The final pass now invalidates old evidence at refresh start, stops obsolete continuations after the energy await, derives attention badges and map warnings from each building's actual signals, and regenerates both browser captures.

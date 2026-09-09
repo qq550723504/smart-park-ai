@@ -93,6 +93,7 @@
 .customer-attention__item > span:last-child { padding: 5px 7px; color: #3578e8; border: 1px solid #b8d4fa; border-radius: 5px; font-size: 9px; white-space: nowrap; }
 .customer-attention__level { display: grid; place-items: center; width: 22px; height: 22px; color: #b4671f; background: #fff0db; border-radius: 6px; font-size: 9px; }
 .customer-attention__level.is-high { color: #c94e49; background: #ffebe9; }
+.customer-attention__level.is-low { color: #53708e; background: #eaf1f8; }
 .customer-campus { position: relative; min-height: 380px; overflow: hidden; background-position: center; background-size: cover; border: 1px solid #cfe2ee; border-radius: 11px; box-shadow: 0 8px 24px rgba(39, 82, 126, .08); }
 .customer-campus::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(7, 42, 63, .38), transparent 28%, transparent 68%, rgba(6, 36, 52, .7)); }
 .customer-campus > header { position: absolute; top: 14px; left: 16px; z-index: 2; display: grid; gap: 2px; color: #fff; text-shadow: 0 1px 3px rgba(0, 42, 68, .65); }

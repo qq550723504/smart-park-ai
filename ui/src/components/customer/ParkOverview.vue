@@ -94,6 +94,8 @@ async function refresh(): Promise<void> {
   const generation = ++requestGeneration
   evidenceGeneration++
   loading.value = true
+  detailLoading.value = false
+  evidence.value = null
   errors.value = { overview: '', energy: '', metrics: '', workItems: '', evidence: '' }
   const [overviewResult, metricsResult, workItemsResult] = await Promise.allSettled([
     getAnomalyOverview('VIEWER'),
@@ -129,9 +131,11 @@ async function refresh(): Promise<void> {
         energy.value = null
         errors.value.energy = '总览窗口不足以形成小时级能耗趋势。'
       }
+      if (generation !== requestGeneration) return
       if (selectedBuildingId.value) void loadEvidence(selectedBuildingId.value, generation)
     } else {
       energy.value = null
+      evidence.value = null
     }
   } else {
     overview.value = null
@@ -220,7 +224,22 @@ function attentionDescription(building: AnomalyBuildingSummary): string {
 
 function markerState(summary: AnomalyBuildingSummary | null): 'unknown' | 'warning' | 'normal' {
   if (!summary) return 'unknown'
-  return summary.highRiskAlertCount > 0 || summary.offlineDeviceCount > 0 ? 'warning' : 'normal'
+  const hasAlert = domainUsable('alerts') && summary.alertCount > 0
+  const hasOfflineDevice = domainUsable('devices') && summary.offlineDeviceCount > 0
+  const hasEnergyDeviation = domainUsable('energy')
+    && summary.energyDeviationPct != null
+    && Math.abs(summary.energyDeviationPct) > 0
+  return hasAlert || hasOfflineDevice || hasEnergyDeviation ? 'warning' : 'normal'
+}
+
+function attentionSignal(building: AnomalyBuildingSummary): { label: string; className: string } {
+  if (domainUsable('alerts') && building.highRiskAlertCount > 0) return { label: '高', className: 'is-high' }
+  if (domainUsable('devices') && building.offlineDeviceCount > 0) return { label: '离线', className: 'is-medium' }
+  if (domainUsable('energy') && building.energyDeviationPct != null && Math.abs(building.energyDeviationPct) > 0) {
+    return { label: '偏差', className: 'is-medium' }
+  }
+  if (domainUsable('alerts') && building.alertCount > 0) return { label: '告警', className: 'is-medium' }
+  return { label: '关注', className: 'is-low' }
 }
 
 function recordText(record: Record<string, unknown>): string {
@@ -282,7 +301,7 @@ watch(() => props.active, (active) => {
         <div v-if="loading && !overview" class="customer-state">正在读取园区运营数据…</div>
         <div v-else-if="attentionItems.length === 0" class="customer-state">{{ errors.overview || '当前窗口暂无需要关注的楼宇' }}</div>
         <button
-          v-for="(building, index) in attentionItems"
+          v-for="building in attentionItems"
           :key="building.buildingId"
           type="button"
           class="customer-attention__item"
@@ -290,7 +309,7 @@ watch(() => props.active, (active) => {
           :data-building-id="building.buildingId"
           @click="selectBuilding(building.buildingId)"
         >
-          <span class="customer-attention__level" :class="index === 0 ? 'is-high' : 'is-medium'">{{ index === 0 ? '高' : '中' }}</span>
+          <span class="customer-attention__level" :class="attentionSignal(building).className">{{ attentionSignal(building).label }}</span>
           <span><strong>{{ attentionTitle(building) }}</strong><small>{{ attentionDescription(building) }}</small></span>
           <span>定位楼宇</span>
         </button>

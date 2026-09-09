@@ -62,6 +62,12 @@ const evidence: AnomalyEvidence = {
   domainStatus: { alerts: 'OK', devices: 'OK', energy: 'OK' },
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((next) => { resolve = next })
+  return { promise, resolve }
+}
+
 const chartStub = defineComponent({
   name: 'CustomerOverviewChart',
   props: {
@@ -147,6 +153,93 @@ describe('ParkOverview', () => {
     expect(wrapper.get('[data-building-marker="B2"]').attributes('aria-pressed')).toBe('true')
     expect(wrapper.text()).toContain('B2 · 研发大厦')
     expect(getAnomalyEvidence).toHaveBeenLastCalledWith('VIEWER', 'B2', { from: windowRange.from, to: windowRange.to })
+  })
+
+  it('derives attention badges and map state from each building signal', async () => {
+    vi.mocked(getAnomalyOverview).mockResolvedValue({
+      ...overview,
+      summary: { alertCount: 1, highRiskAlertCount: 1, offlineDeviceCount: 0, affectedBuildingCount: 2 },
+      buildings: [
+        { buildingId: 'B1', alertCount: 0, highRiskAlertCount: 0, offlineDeviceCount: 0, energyDeviationPct: 12 },
+        { buildingId: 'B2', alertCount: 1, highRiskAlertCount: 1, offlineDeviceCount: 0, energyDeviationPct: 0 },
+      ],
+    })
+
+    const wrapper = await mountLoaded()
+
+    expect(wrapper.get('[data-building-id="B1"] .customer-attention__level').text()).toBe('偏差')
+    expect(wrapper.get('[data-building-id="B2"] .customer-attention__level').text()).toBe('高')
+    expect(wrapper.get('[data-building-marker="B1"]').classes()).toContain('is-warning')
+  })
+
+  it('clears old evidence when a refreshed overview contains no buildings', async () => {
+    const wrapper = await mountLoaded()
+    expect(wrapper.text()).toContain('REDACTED: 能耗告警 · OPEN')
+
+    vi.mocked(getAnomalyOverview).mockResolvedValue({
+      ...overview,
+      summary: { alertCount: 0, highRiskAlertCount: 0, offlineDeviceCount: 0, affectedBuildingCount: 0 },
+      buildings: [],
+    })
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('REDACTED: 能耗告警 · OPEN')
+    expect(wrapper.text()).toContain('选择楼宇后查看')
+    expect(wrapper.text()).toContain('当前楼宇暂无事件记录')
+  })
+
+  it('ignores a stale refresh after a newer activation has completed', async () => {
+    const firstEnergy = deferred<EnergyTimeSeriesResponse>()
+    vi.mocked(getEnergyTimeSeries)
+      .mockReturnValueOnce(firstEnergy.promise)
+      .mockResolvedValueOnce(energy)
+    vi.mocked(getOperationsMetrics)
+      .mockResolvedValueOnce({
+        workflowCount: 1,
+        completedWorkflowCount: 0,
+        customerSessionCount: 0,
+        humanTicketCount: 1,
+        auditEntryCount: 0,
+        feedbackCount: 0,
+        positiveFeedbackCount: 0,
+        knowledgeDocumentCount: 0,
+        activeKnowledgeDocumentCount: 0,
+      })
+      .mockResolvedValueOnce({
+        workflowCount: 9,
+        completedWorkflowCount: 9,
+        customerSessionCount: 9,
+        humanTicketCount: 9,
+        auditEntryCount: 9,
+        feedbackCount: 0,
+        positiveFeedbackCount: 0,
+        knowledgeDocumentCount: 9,
+        activeKnowledgeDocumentCount: 9,
+      })
+    vi.mocked(getAnomalyEvidence).mockResolvedValue({
+      ...evidence,
+      alerts: [{ ...evidence.alerts[0]!, redactedSummary: 'LATEST SAFE EVENT' }],
+    })
+
+    const wrapper = mount(ParkOverview, { global: { stubs: { CustomerOverviewChart: chartStub } } })
+    await vi.waitFor(() => expect(getEnergyTimeSeries).toHaveBeenCalledTimes(1))
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+    await vi.waitFor(() => expect(getEnergyTimeSeries).toHaveBeenCalledTimes(2))
+    await flushPromises()
+
+    expect(wrapper.get('[data-kpi="service-requests"] strong').text()).toContain('9')
+    expect(wrapper.text()).toContain('LATEST SAFE EVENT')
+    expect(getAnomalyEvidence).toHaveBeenCalledTimes(1)
+
+    firstEnergy.resolve(energy)
+    await flushPromises()
+
+    expect(wrapper.get('[data-kpi="service-requests"] strong').text()).toContain('9')
+    expect(wrapper.text()).toContain('LATEST SAFE EVENT')
+    expect(getAnomalyEvidence).toHaveBeenCalledTimes(1)
   })
 
   it('preserves a missing timestamp as a null trend point', async () => {
