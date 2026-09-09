@@ -1,7 +1,7 @@
 import { onScopeDispose, ref } from 'vue'
 import type { DemoRole } from '../types/workflow'
 import type { OperationsDailyReport, OperationsReportCreateRequest, OperationsReportSummary } from '../types/operationsReport'
-import { downloadOperationsDailyReport, getOperationsDailyReport, listOperationsDailyReports, startOperationsDailyReport } from '../services/operationsReportApi'
+import { downloadOperationsDailyReport, getOperationsDailyReport, listOperationsDailyReports, OperationsReportHttpError, startOperationsDailyReport } from '../services/operationsReportApi'
 import { createRequestId } from '../utils/requestId'
 import type { ExecutionTraceLike } from './useOperationsAnalysis'
 
@@ -50,6 +50,7 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
     const current = ++generation
     busy.value = true
     error.value = ''
+    let createAccepted = false
     try {
       if (!pendingCreation || pendingCreation.role !== role) {
         const to = new Date()
@@ -64,6 +65,7 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
         }
       }
       const accepted = await startOperationsDailyReport(role, pendingCreation.request, pendingCreation.key)
+      createAccepted = true
       if (current !== generation) return
       runId.value = accepted.runId
       options.trace?.subscribe(accepted.runId, role)
@@ -80,6 +82,7 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
       }
       throw new Error('运营日报超时，可稍后从报告历史查看最终状态')
     } catch (cause) {
+      if (!createAccepted && cause instanceof OperationsReportHttpError) pendingCreation = null
       if (current === generation) error.value = cause instanceof Error ? cause.message : String(cause)
     } finally {
       busy.value = false

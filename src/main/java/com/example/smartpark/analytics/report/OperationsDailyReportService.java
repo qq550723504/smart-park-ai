@@ -290,27 +290,41 @@ public final class OperationsDailyReportService {
                     .filter(section -> section.status() == OperationsReportSectionStatus.COMPLETED).count();
             OperationsReportStatus status = completed > 0 ? OperationsReportStatus.PARTIAL : OperationsReportStatus.FAILED;
             Instant now = clock.instant();
-            OperationsDailyReport recovered = store.update(interrupted.reportId(), report -> {
-                List<OperationsDailyReport.SectionResult> sections = report.sections().stream().map(section ->
-                        section.status() == OperationsReportSectionStatus.COMPLETED ? section
-                                : section.unavailable("GENERATION_INTERRUPTED")).toList();
-                List<OperationsReportTraceRecord> trace = append(report.traceEvents(), "operations-report",
-                        ExecutionStage.FAILURE, status == OperationsReportStatus.FAILED
-                                ? ExecutionEventType.RUN_FAILED : ExecutionEventType.RUN_COMPLETED,
-                        status == OperationsReportStatus.FAILED ? ExecutionStatus.FAILED : ExecutionStatus.SUCCEEDED,
-                        "运营日报生成被服务重启中断");
-                String summary = status == OperationsReportStatus.PARTIAL
-                        ? "报告生成被中断，已保留完成章节" : "报告生成被中断";
-                OperationsDailyReport provisional = report.copy(status, report.startedAt(), now,
-                        report.asOf() == null ? now : report.asOf(), summary, sections,
-                        report.evidence(), report.sourceReferences(), null, trace);
-                OperationsDailyReport.Artifact artifact = status == OperationsReportStatus.PARTIAL
-                        ? renderer.render(provisional, now) : null;
-                return report.copy(status, report.startedAt(), now, provisional.asOf(), summary,
-                        sections, report.evidence(), report.sourceReferences(), artifact, trace);
-            });
+            OperationsDailyReport recovered;
+            try {
+                recovered = recoverInterrupted(interrupted.reportId(), status, now, true);
+            } catch (OperationsReportCapacityException artifactTooLarge) {
+                // A valid structured snapshot must never make startup dependent on whether
+                // its optional Markdown projection fits the smaller artifact byte limit.
+                recovered = recoverInterrupted(interrupted.reportId(), status, now, false);
+            }
             hydrate(recovered);
         }
+    }
+
+    private OperationsDailyReport recoverInterrupted(UUID reportId, OperationsReportStatus status,
+                                                      Instant now, boolean includeArtifact) {
+        return store.update(reportId, report -> {
+            List<OperationsDailyReport.SectionResult> sections = report.sections().stream().map(section ->
+                    section.status() == OperationsReportSectionStatus.COMPLETED ? section
+                            : section.unavailable("GENERATION_INTERRUPTED")).toList();
+            List<OperationsReportTraceRecord> trace = append(report.traceEvents(), "operations-report",
+                    ExecutionStage.FAILURE, status == OperationsReportStatus.FAILED
+                            ? ExecutionEventType.RUN_FAILED : ExecutionEventType.RUN_COMPLETED,
+                    status == OperationsReportStatus.FAILED ? ExecutionStatus.FAILED : ExecutionStatus.SUCCEEDED,
+                    "运营日报生成被服务重启中断");
+            String summary = status == OperationsReportStatus.PARTIAL
+                    ? includeArtifact ? "报告生成被中断，已保留完成章节"
+                            : "报告生成被中断，已保留完成章节；下载文件超出容量限制"
+                    : "报告生成被中断";
+            OperationsDailyReport provisional = report.copy(status, report.startedAt(), now,
+                    report.asOf() == null ? now : report.asOf(), summary, sections,
+                    report.evidence(), report.sourceReferences(), null, trace);
+            OperationsDailyReport.Artifact artifact = status == OperationsReportStatus.PARTIAL && includeArtifact
+                    ? renderer.render(provisional, now) : null;
+            return report.copy(status, report.startedAt(), now, provisional.asOf(), summary,
+                    sections, report.evidence(), report.sourceReferences(), artifact, trace);
+        });
     }
 
     private void authorize(OperationsDailyReport report, String role) {

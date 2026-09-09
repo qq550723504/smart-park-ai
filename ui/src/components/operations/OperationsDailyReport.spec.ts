@@ -100,6 +100,42 @@ describe('OperationsDailyReport', () => {
     expect(posts[0][1]?.body).toBe(posts[1][1]?.body)
   })
 
+  it('uses a fresh key and window after a definitive create rejection', async () => {
+    vi.useFakeTimers()
+    let wrapper: ReturnType<typeof mount> | undefined
+    try {
+      let postCount = 0
+      vi.setSystemTime(new Date('2026-09-09T01:00:00Z'))
+      vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+        if (url.includes('?')) return Promise.resolve(new Response(JSON.stringify({ content: [], page: 0, size: 20, totalElements: 0, hasNext: false }), { status: 200 }))
+        if (init?.method === 'POST') {
+          postCount += 1
+          if (postCount === 1) return Promise.resolve(new Response(JSON.stringify({ message: 'capacity exhausted' }), { status: 429 }))
+          return Promise.resolve(new Response(JSON.stringify({ reportId: 'report-1', runId: 'run-1', statusUrl: '/api/operations-reports/report-1' }), { status: 202 }))
+        }
+        return Promise.resolve(new Response(JSON.stringify(detail), { status: 200 }))
+      }))
+      wrapper = mount(OperationsDailyReport, { props: { role: 'OPERATOR', pollIntervalMs: 1 } })
+      await flushPromises()
+
+      await wrapper.get('[data-generate-report]').trigger('click')
+      await flushPromises()
+      vi.setSystemTime(new Date('2026-09-09T02:00:00Z'))
+      await wrapper.get('[data-generate-report]').trigger('click')
+      await flushPromises()
+
+      const posts = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')
+      expect(posts).toHaveLength(2)
+      expect((posts[0][1]?.headers as Record<string, string>)['Idempotency-Key'])
+        .not.toBe((posts[1][1]?.headers as Record<string, string>)['Idempotency-Key'])
+      expect(JSON.parse(String(posts[0][1]?.body)).timeWindow.toExclusive).toBe('2026-09-09T01:00:00.000Z')
+      expect(JSON.parse(String(posts[1][1]?.body)).timeWindow.toExclusive).toBe('2026-09-09T02:00:00.000Z')
+    } finally {
+      wrapper?.unmount()
+      vi.useRealTimers()
+    }
+  })
+
   it('renders partial reasons and does not enable unavailable downloads', async () => {
     const partial = { ...summary, status: 'PARTIAL', downloadAvailable: false }
     const partialDetail = { ...detail, ...partial, sections: [{ ...detail.sections[0], status: 'UNAVAILABLE', summary: '', rowCount: 0, rows: [], partialReason: 'REPORT_SECTION_UNAVAILABLE' }] }

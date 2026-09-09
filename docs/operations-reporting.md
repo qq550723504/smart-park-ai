@@ -118,8 +118,9 @@ tabs, slow responses, and retry storms; the UI also prevents concurrent clicks a
 Section execution is not resumable because the underlying natural-language analysis run is not durable.
 At startup, every persisted `REQUESTED` or `GENERATING` report is atomically recovered:
 
-- if at least one section is complete, it becomes `PARTIAL`, preserving those sections and producing a
-  download artifact;
+- if at least one section is complete, it becomes `PARTIAL` and preserves those sections; it produces a
+  download artifact when the artifact fits the configured limit, otherwise the terminal snapshot explicitly
+  reports that download is unavailable instead of blocking application startup;
 - otherwise it becomes `FAILED`;
 - every unfinished section records `GENERATION_INTERRUPTED`;
 - a matching durable terminal trace event is committed with the report state.

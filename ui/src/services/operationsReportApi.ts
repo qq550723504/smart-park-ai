@@ -1,9 +1,16 @@
 import type { DemoRole } from '../types/workflow'
 import type { OperationsDailyReport, OperationsReportCreateRequest, OperationsReportPage, OperationsReportStatus } from '../types/operationsReport'
 
-async function readError(response: Response): Promise<Error> {
+export class OperationsReportHttpError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message)
+    this.name = 'OperationsReportHttpError'
+  }
+}
+
+async function readError(response: Response): Promise<OperationsReportHttpError> {
   const detail = await response.json().catch(() => null) as { message?: string } | null
-  return new Error(detail?.message ?? `请求失败（${response.status}）`)
+  return new OperationsReportHttpError(detail?.message ?? `请求失败（${response.status}）`, response.status)
 }
 
 export async function startOperationsDailyReport(role: DemoRole, request: OperationsReportCreateRequest, idempotencyKey: string): Promise<{ reportId: string; runId: string; statusUrl: string }> {

@@ -224,6 +224,37 @@ class OperationsDailyReportServiceTest {
     }
 
     @Test
+    void restartRecoversOversizedPartialArtifactWithoutBlockingStartup() {
+        Path state = temp.resolve("oversized-partial.json");
+        AtomicInteger calls = new AtomicInteger();
+        CompletableFuture<AnalysisRunStore.RunRecord> pending = new CompletableFuture<>();
+        OperationsDailyReportStore firstStore = new OperationsDailyReportStore(state,
+                new ObjectMapper().findAndRegisterModules(), 20, 1, 64 * 1024, 1024);
+        OperationsDailyReportService first = new OperationsDailyReportService(
+                (section, request) -> calls.getAndIncrement() == 0
+                        ? CompletableFuture.completedFuture(completedValue(section.question(), "x".repeat(4096)))
+                        : pending,
+                firstStore, new InMemoryExecutionEventPublisher(), new OperationsReportRenderer(), CLOCK);
+        UUID reportId = first.start(first.defaultRequest(), "oversized-restart-key",
+                "demo-role:OPERATOR", "OPERATOR").report().reportId();
+
+        InMemoryExecutionEventPublisher restartedPublisher = new InMemoryExecutionEventPublisher();
+        OperationsDailyReportService restarted = new OperationsDailyReportService(
+                (section, request) -> CompletableFuture.completedFuture(completed(section.question(), 200)),
+                new OperationsDailyReportStore(state, new ObjectMapper().findAndRegisterModules(),
+                        20, 1, 64 * 1024, 1024),
+                restartedPublisher, new OperationsReportRenderer(), CLOCK);
+        OperationsDailyReport recovered = restarted.get(reportId, "OPERATOR");
+
+        assertThat(recovered.status()).isEqualTo(OperationsReportStatus.PARTIAL);
+        assertThat(recovered.artifact()).isNull();
+        assertThat(recovered.summary()).contains("下载文件超出容量限制");
+        assertThat(recovered.sections().get(0).rows().get(0)).containsExactly("x".repeat(4096));
+        assertThat(restartedPublisher.history(recovered.traceId())).last()
+                .extracting(ExecutionEvent::eventType).isEqualTo(ExecutionEventType.RUN_COMPLETED);
+    }
+
+    @Test
     void historyIsPagedFilteredAndRoleScoped() {
         OperationsDailyReportService service = service(temp.resolve("reports.json"), (section, request) ->
                 CompletableFuture.completedFuture(completed(section.question(), 1)),
@@ -306,6 +337,10 @@ class OperationsDailyReportServiceTest {
     }
 
     private static AnalysisRunStore.RunRecord completed(String question, int value) {
+        return completedValue(question, value);
+    }
+
+    private static AnalysisRunStore.RunRecord completedValue(String question, Object value) {
         UUID runId = UUID.randomUUID();
         return new AnalysisRunStore.RunRecord(runId, question, "COMPLETED", List.of(), List.of(),
                 "安全摘要", 1, false, 3, null, NOW.minusSeconds(1), NOW,
