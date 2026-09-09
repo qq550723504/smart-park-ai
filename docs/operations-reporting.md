@@ -93,7 +93,9 @@ history, detail, download, and trace replay remain available; only creation is r
 
 ## API and download format
 
-- `POST /api/operations-reports` creates or replays one report; `Idempotency-Key` is required.
+- `POST /api/operations-reports` creates or replays one report; `reportType`, the exact half-open
+  `timeWindow`, and `Idempotency-Key` are required. The UI retains the same window and key across an
+  ambiguous network retry.
 - `GET /api/operations-reports` returns a descending, paged history and supports report type, status, and
   half-open created-time filters.
 - `GET /api/operations-reports/{reportId}` returns the persisted detail snapshot.

@@ -1,7 +1,8 @@
 import { onScopeDispose, ref } from 'vue'
 import type { DemoRole } from '../types/workflow'
-import type { OperationsDailyReport, OperationsReportSummary } from '../types/operationsReport'
+import type { OperationsDailyReport, OperationsReportCreateRequest, OperationsReportSummary } from '../types/operationsReport'
 import { downloadOperationsDailyReport, getOperationsDailyReport, listOperationsDailyReports, startOperationsDailyReport } from '../services/operationsReportApi'
+import { createRequestId } from '../utils/requestId'
 import type { ExecutionTraceLike } from './useOperationsAnalysis'
 
 export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; pollIntervalMs?: number; maxPolls?: number } = {}) {
@@ -14,6 +15,7 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
   const pollIntervalMs = options.pollIntervalMs ?? 500
   const maxPolls = options.maxPolls ?? 180
   let generation = 0
+  let pendingCreation: { role: DemoRole; key: string; request: OperationsReportCreateRequest } | null = null
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
   async function loadHistory(role: DemoRole): Promise<void> {
@@ -49,7 +51,19 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
     busy.value = true
     error.value = ''
     try {
-      const accepted = await startOperationsDailyReport(role)
+      if (!pendingCreation || pendingCreation.role !== role) {
+        const to = new Date()
+        pendingCreation = {
+          role,
+          key: createRequestId(),
+          request: {
+            reportType: 'OPERATIONS_DAILY',
+            timeWindow: { fromInclusive: new Date(to.getTime() - 5 * 24 * 60 * 60 * 1000).toISOString(), toExclusive: to.toISOString() },
+            timezone: 'Asia/Shanghai',
+          },
+        }
+      }
+      const accepted = await startOperationsDailyReport(role, pendingCreation.request, pendingCreation.key)
       if (current !== generation) return
       runId.value = accepted.runId
       options.trace?.subscribe(accepted.runId)
@@ -58,6 +72,7 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
         if (current !== generation) return
         report.value = detail
         if (detail.status !== 'REQUESTED' && detail.status !== 'GENERATING') {
+          pendingCreation = null
           await loadHistory(role)
           return
         }
@@ -67,7 +82,7 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
     } catch (cause) {
       if (current === generation) error.value = cause instanceof Error ? cause.message : String(cause)
     } finally {
-      if (current === generation) busy.value = false
+      busy.value = false
     }
   }
 

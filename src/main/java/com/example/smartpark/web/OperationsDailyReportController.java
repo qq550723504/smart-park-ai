@@ -105,24 +105,23 @@ public class OperationsDailyReportController {
     }
 
     private OperationsReportRequest request(Map<String, Object> body) {
-        if (body == null || body.isEmpty()) return service.defaultRequest();
+        if (body == null || body.isEmpty()) throw new IllegalArgumentException("report request is required");
         if (!REQUEST_FIELDS.containsAll(body.keySet())) throw new IllegalArgumentException("unsupported report field");
-        OperationsReportRequest defaults = service.defaultRequest();
-        String reportType = text(body.getOrDefault("reportType", defaults.reportType()), "reportType");
-        String timezone = text(body.getOrDefault("timezone", defaults.timezone()), "timezone");
-        OperationsReportRequest.TimeWindow window = defaults.timeWindow();
-        if (body.containsKey("timeWindow")) {
-            if (!(body.get("timeWindow") instanceof Map<?, ?> raw)) throw new IllegalArgumentException("invalid timeWindow");
-            if (!WINDOW_FIELDS.containsAll(raw.keySet().stream().map(String::valueOf).toList())) {
-                throw new IllegalArgumentException("unsupported timeWindow field");
-            }
-            if (!raw.containsKey("fromInclusive") || !raw.containsKey("toExclusive")) {
-                throw new IllegalArgumentException("incomplete timeWindow");
-            }
-            window = new OperationsReportRequest.TimeWindow(
-                    Instant.parse(text(raw.get("fromInclusive"), "fromInclusive")),
-                    Instant.parse(text(raw.get("toExclusive"), "toExclusive")));
+        if (!body.containsKey("reportType") || !body.containsKey("timeWindow")) {
+            throw new IllegalArgumentException("reportType and timeWindow are required");
         }
+        String reportType = text(body.get("reportType"), "reportType");
+        String timezone = text(body.getOrDefault("timezone", OperationsReportRequest.DEFAULT_TIMEZONE), "timezone");
+        if (!(body.get("timeWindow") instanceof Map<?, ?> raw)) throw new IllegalArgumentException("invalid timeWindow");
+        if (!WINDOW_FIELDS.containsAll(raw.keySet().stream().map(String::valueOf).toList())) {
+            throw new IllegalArgumentException("unsupported timeWindow field");
+        }
+        if (!raw.containsKey("fromInclusive") || !raw.containsKey("toExclusive")) {
+            throw new IllegalArgumentException("incomplete timeWindow");
+        }
+        OperationsReportRequest.TimeWindow window = new OperationsReportRequest.TimeWindow(
+                Instant.parse(text(raw.get("fromInclusive"), "fromInclusive")),
+                Instant.parse(text(raw.get("toExclusive"), "toExclusive")));
         return new OperationsReportRequest(reportType, window, timezone);
     }
 

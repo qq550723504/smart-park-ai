@@ -1,17 +1,16 @@
 import type { DemoRole } from '../types/workflow'
-import type { OperationsDailyReport, OperationsReportPage, OperationsReportStatus } from '../types/operationsReport'
-import { createRequestId } from '../utils/requestId'
+import type { OperationsDailyReport, OperationsReportCreateRequest, OperationsReportPage, OperationsReportStatus } from '../types/operationsReport'
 
 async function readError(response: Response): Promise<Error> {
   const detail = await response.json().catch(() => null) as { message?: string } | null
   return new Error(detail?.message ?? `请求失败（${response.status}）`)
 }
 
-export async function startOperationsDailyReport(role: DemoRole, idempotencyKey = createRequestId()): Promise<{ reportId: string; runId: string; statusUrl: string }> {
+export async function startOperationsDailyReport(role: DemoRole, request: OperationsReportCreateRequest, idempotencyKey: string): Promise<{ reportId: string; runId: string; statusUrl: string }> {
   const response = await fetch('/api/operations-reports', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Demo-Role': role, 'Idempotency-Key': idempotencyKey },
-    body: JSON.stringify({ reportType: 'OPERATIONS_DAILY' }),
+    body: JSON.stringify(request),
   })
   if (!response.ok) throw await readError(response)
   const result = await response.json() as { reportId?: string; runId?: string; statusUrl?: string }

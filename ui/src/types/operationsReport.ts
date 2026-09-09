@@ -2,6 +2,11 @@ export type OperationsReportStatus = 'REQUESTED' | 'GENERATING' | 'COMPLETED' | 
 export type OperationsReportSectionStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'UNAVAILABLE' | 'FAILED'
 
 export interface OperationsReportTimeWindow { fromInclusive: string; toExclusive: string }
+export interface OperationsReportCreateRequest {
+  reportType: 'OPERATIONS_DAILY'
+  timeWindow: OperationsReportTimeWindow
+  timezone: 'Asia/Shanghai'
+}
 export interface OperationsReportTimeResolution {
   status: 'NONE' | 'PARSED' | 'EMPTY'
   fromInclusive: string | null

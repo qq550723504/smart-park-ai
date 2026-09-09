@@ -44,7 +44,6 @@ class OperationsDailyReportControllerTest {
     void createsListsReadsAndDownloadsSnapshots() throws Exception {
         OperationsReportRequest request = request();
         OperationsDailyReport report = report();
-        when(service.defaultRequest()).thenReturn(request);
         when(service.start(eq(request), eq("key-1"), eq("demo-role:OPERATOR"), eq("OPERATOR")))
                 .thenReturn(new OperationsDailyReportStore.StartResult(report, true));
         when(service.list(eq("OPERATOR"), any(), any(), any(), any(), eq(0), eq(20)))
@@ -54,7 +53,7 @@ class OperationsDailyReportControllerTest {
 
         mockMvc.perform(post("/api/operations-reports")
                         .header("X-Demo-Role", "OPERATOR").header("Idempotency-Key", "key-1")
-                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                        .contentType(MediaType.APPLICATION_JSON).content(requestJson()))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.reportId").value(report.reportId().toString()))
                 .andExpect(jsonPath("$.runId").value(report.runId().toString()));
@@ -77,9 +76,11 @@ class OperationsDailyReportControllerTest {
 
     @Test
     void rejectsMissingKeyUnsupportedFieldsRolesAndUnsafePath() throws Exception {
-        when(service.defaultRequest()).thenReturn(request());
         mockMvc.perform(post("/api/operations-reports").header("X-Demo-Role", "OPERATOR")
                         .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/api/operations-reports").header("X-Demo-Role", "OPERATOR")
+                        .header("Idempotency-Key", "key").contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isBadRequest());
         mockMvc.perform(post("/api/operations-reports").header("X-Demo-Role", "OPERATOR")
                         .header("Idempotency-Key", "key").contentType(MediaType.APPLICATION_JSON)
@@ -128,7 +129,6 @@ class OperationsDailyReportControllerTest {
     @Test
     void reportsGenerationUnavailableWithoutHidingReadApi() throws Exception {
         OperationsReportRequest request = request();
-        when(service.defaultRequest()).thenReturn(request);
         when(service.start(eq(request), eq("disabled-key"), eq("demo-role:OPERATOR"), eq("OPERATOR")))
                 .thenThrow(new OperationsReportUnavailableException("analytics credentials absent"));
         when(service.list(eq("OPERATOR"), any(), any(), any(), any(), eq(0), eq(20)))
@@ -136,7 +136,7 @@ class OperationsDailyReportControllerTest {
 
         mockMvc.perform(post("/api/operations-reports")
                         .header("X-Demo-Role", "OPERATOR").header("Idempotency-Key", "disabled-key")
-                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                        .contentType(MediaType.APPLICATION_JSON).content(requestJson()))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.message").value("Operations report generation is unavailable"));
         mockMvc.perform(get("/api/operations-reports").header("X-Demo-Role", "OPERATOR"))
@@ -146,6 +146,14 @@ class OperationsDailyReportControllerTest {
     private static OperationsReportRequest request() {
         return new OperationsReportRequest(OperationsReportRequest.DAILY,
                 new OperationsReportRequest.TimeWindow(NOW.minusSeconds(3600), NOW), "Asia/Shanghai");
+    }
+
+    private static String requestJson() {
+        return """
+                {"reportType":"OPERATIONS_DAILY","timeWindow":{
+                  "fromInclusive":"2026-09-09T01:00:00Z","toExclusive":"2026-09-09T02:00:00Z"},
+                  "timezone":"Asia/Shanghai"}
+                """;
     }
 
     private static OperationsDailyReport report() {

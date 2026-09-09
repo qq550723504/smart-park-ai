@@ -68,6 +68,36 @@ describe('OperationsDailyReport', () => {
     expect(wrapper.get('[data-testid="report-history"]').text()).toContain('1 份')
     const post = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'POST')
     expect((post?.[1]?.headers as Record<string, string>)['Idempotency-Key']).toBeTruthy()
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
+      reportType: 'OPERATIONS_DAILY', timezone: 'Asia/Shanghai',
+      timeWindow: { fromInclusive: expect.any(String), toExclusive: expect.any(String) },
+    })
+  })
+
+  it('reuses the exact key and time window after an ambiguous network failure', async () => {
+    let postCount = 0
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      if (url.includes('?')) return Promise.resolve(new Response(JSON.stringify({ content: [], page: 0, size: 20, totalElements: 0, hasNext: false }), { status: 200 }))
+      if (init?.method === 'POST') {
+        postCount += 1
+        if (postCount === 1) return Promise.reject(new Error('network response lost'))
+        return Promise.resolve(new Response(JSON.stringify({ reportId: 'report-1', runId: 'run-1', statusUrl: '/api/operations-reports/report-1' }), { status: 202 }))
+      }
+      return Promise.resolve(new Response(JSON.stringify(detail), { status: 200 }))
+    }))
+    const wrapper = mount(OperationsDailyReport, { props: { role: 'OPERATOR', pollIntervalMs: 1 } })
+    await flushPromises()
+
+    await wrapper.get('[data-generate-report]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-generate-report]').trigger('click')
+    await flushPromises()
+
+    const posts = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')
+    expect(posts).toHaveLength(2)
+    expect((posts[0][1]?.headers as Record<string, string>)['Idempotency-Key'])
+      .toBe((posts[1][1]?.headers as Record<string, string>)['Idempotency-Key'])
+    expect(posts[0][1]?.body).toBe(posts[1][1]?.body)
   })
 
   it('renders partial reasons and does not enable unavailable downloads', async () => {
