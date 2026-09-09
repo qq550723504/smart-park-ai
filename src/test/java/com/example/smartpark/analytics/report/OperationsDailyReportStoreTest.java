@@ -291,6 +291,37 @@ class OperationsDailyReportStoreTest {
         assertThat(mapper.readTree(state.toFile())).hasSize(2);
     }
 
+    @Test
+    void loweringOperationalByteLimitsPreservesPreviouslyValidTerminalSnapshots() throws Exception {
+        Path state = temp.resolve("lowered-byte-limits.json");
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        OperationsDailyReportStore first = store(state, 2, 1, 16 * 1024, 4 * 1024);
+        first.createOrGet("key-1", "fingerprint-1",
+                () -> report("key-1", "fingerprint-1", OperationsReportStatus.COMPLETED));
+        String content = "a".repeat(1500);
+        String checksum = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                .digest(content.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        OperationsDailyReport newest = first.createOrGet("key-2", "fingerprint-2", () -> {
+            OperationsDailyReport base = report("key-2", "fingerprint-2", OperationsReportStatus.COMPLETED);
+            return base.copy(base.status(), base.startedAt(), base.completedAt(), base.asOf(), "x".repeat(5000),
+                    base.sections(), base.evidence(), base.sourceReferences(),
+                    new OperationsDailyReport.Artifact(UUID.randomUUID(), "MARKDOWN", "historic.md",
+                            "text/markdown", content.length(), NOW, checksum, "v1", content),
+                    base.traceEvents());
+        }).report();
+
+        OperationsDailyReportStore reduced = store(state, 1, 1, 4096, 1024);
+
+        assertThat(reduced.all()).containsExactly(newest);
+        assertThat(mapper.readTree(state.toFile())).hasSize(1);
+        assertThatThrownBy(() -> reduced.createOrGet("key-3", "fingerprint-3", () -> {
+            OperationsDailyReport base = report("key-3", "fingerprint-3", OperationsReportStatus.COMPLETED);
+            return base.copy(base.status(), base.startedAt(), base.completedAt(), base.asOf(), "y".repeat(5000),
+                    base.sections(), base.evidence(), base.sourceReferences(), null, base.traceEvents());
+        })).isInstanceOf(OperationsReportCapacityException.class);
+        assertThat(reduced.all()).containsExactly(newest);
+    }
+
     private OperationsDailyReportStore store(Path state, int retained, int active, int reportBytes, int artifactBytes) {
         return new OperationsDailyReportStore(state, new ObjectMapper().findAndRegisterModules(),
                 retained, active, reportBytes, artifactBytes);

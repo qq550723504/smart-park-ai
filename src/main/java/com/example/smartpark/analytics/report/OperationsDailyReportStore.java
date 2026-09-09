@@ -147,6 +147,7 @@ public final class OperationsDailyReportStore {
         if (!key.equals(created.idempotencyKey()) || !fingerprint.equals(created.requestFingerprint())) {
             throw new IllegalArgumentException("created report does not match idempotency request");
         }
+        validateReportSize(created);
         next.put(created.reportId(), created);
         persist(next.values());
         replaceState(next);
@@ -227,7 +228,7 @@ public final class OperationsDailyReportStore {
                         unsupported.add(node.deepCopy());
                     } else {
                         OperationsDailyReport report = mapper.treeToValue(node, OperationsDailyReport.class);
-                        validateReportSize(report);
+                        validateReportIntegrity(report);
                         if (!loadedKeys.add(report.idempotencyKey())) {
                             throw new IllegalStateException("duplicate operations report idempotency key");
                         }
@@ -291,7 +292,6 @@ public final class OperationsDailyReportStore {
 
     private void persist(java.util.Collection<OperationsDailyReport> snapshot) {
         try {
-            snapshot.forEach(this::validateReportSize);
             Path parent = stateFile.getParent();
             if (parent != null) Files.createDirectories(parent);
             Path temporary = Files.createTempFile(parent, stateFile.getFileName().toString(), ".tmp");
@@ -320,7 +320,7 @@ public final class OperationsDailyReportStore {
         for (OperationsDailyReport report : snapshot) {
             if (report.status().isTerminal()) continue;
             long currentBytes = mapper.writeValueAsBytes(report).length;
-            long reservedGrowth = maxReportBytes - currentBytes;
+            long reservedGrowth = Math.max(0L, maxReportBytes - currentBytes);
             if (reservedGrowth > maxStateFileBytes - projectedBytes) {
                 throw new OperationsReportCapacityException(
                         "operations report state lacks durable terminalization capacity");
@@ -335,16 +335,23 @@ public final class OperationsDailyReportStore {
             if (content.length > maxArtifactBytes) {
                 throw new OperationsReportCapacityException("operations report artifact exceeds configured byte limit");
             }
-            if (report.artifact().size() != content.length || !report.artifact().checksum().equals(sha256(content))) {
-                throw new IllegalStateException("operations report artifact metadata is inconsistent");
-            }
         }
+        validateReportIntegrity(report);
         try {
             if (mapper.writeValueAsBytes(report).length > maxReportBytes) {
                 throw new OperationsReportCapacityException("operations report exceeds configured byte limit");
             }
         } catch (com.fasterxml.jackson.core.JsonProcessingException failure) {
             throw new IllegalStateException("unable to size operations report", failure);
+        }
+    }
+
+    private static void validateReportIntegrity(OperationsDailyReport report) {
+        if (report.artifact() != null) {
+            byte[] content = report.artifact().content().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            if (report.artifact().size() != content.length || !report.artifact().checksum().equals(sha256(content))) {
+                throw new IllegalStateException("operations report artifact metadata is inconsistent");
+            }
         }
     }
 
