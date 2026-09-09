@@ -1,5 +1,11 @@
 package com.example.smartpark.analytics.report;
 
+import com.example.smartpark.execution.InMemoryExecutionEventPublisher;
+import com.example.smartpark.execution.model.ExecutionEvent;
+import com.example.smartpark.execution.model.ExecutionEventType;
+import com.example.smartpark.execution.model.ExecutionScenario;
+import com.example.smartpark.execution.model.ExecutionStage;
+import com.example.smartpark.execution.model.ExecutionStatus;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -64,9 +70,15 @@ class OperationsDailyReportStoreTest {
 
     @Test
     void evictsOldestTerminalReportWithinRetainedBound() {
-        OperationsDailyReportStore store = store(temp.resolve("reports.json"), 2, 1, 64 * 1024, 16 * 1024);
+        InMemoryExecutionEventPublisher publisher = new InMemoryExecutionEventPublisher();
+        OperationsDailyReportStore store = new OperationsDailyReportStore(temp.resolve("reports.json"),
+                new ObjectMapper().findAndRegisterModules(), 2, 1, 64 * 1024, 16 * 1024,
+                traceId -> publisher.remove(traceId));
         OperationsDailyReport oldest = store.createOrGet("key-1", "fingerprint-1",
                 () -> report("key-1", "fingerprint-1", OperationsReportStatus.COMPLETED)).report();
+        publisher.publish(new ExecutionEvent(UUID.randomUUID(), oldest.traceId(), 0, NOW,
+                ExecutionScenario.OPERATIONS_ANALYSIS, "operations-report", ExecutionStage.COMPLETION,
+                ExecutionEventType.RUN_COMPLETED, ExecutionStatus.SUCCEEDED, "done", null));
         OperationsDailyReport second = store.createOrGet("key-2", "fingerprint-2",
                 () -> report("key-2", "fingerprint-2", OperationsReportStatus.COMPLETED)).report();
         OperationsDailyReport newest = store.createOrGet("key-3", "fingerprint-3",
@@ -75,6 +87,7 @@ class OperationsDailyReportStoreTest {
         assertThat(store.find(oldest.reportId())).isEmpty();
         assertThat(store.all()).extracting(OperationsDailyReport::reportId)
                 .containsExactly(second.reportId(), newest.reportId());
+        assertThat(publisher.history(oldest.traceId())).isEmpty();
     }
 
     @Test

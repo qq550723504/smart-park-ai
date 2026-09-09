@@ -41,6 +41,8 @@ import com.example.smartpark.workflow.WorkflowExecutionStore;
 import com.example.smartpark.analytics.catalog.MetricCatalog;
 import com.example.smartpark.analytics.sql.QueryCostGuard;
 import com.example.smartpark.analytics.sql.ReadOnlyQueryExecutor;
+import com.example.smartpark.analytics.report.OperationsReportRequest;
+import com.example.smartpark.analytics.report.OperationsReportSection;
 import com.example.smartpark.analytics.report.OperationsReportSectionRunner;
 
 import javax.sql.DataSource;
@@ -305,11 +307,7 @@ public class AnalyticsConfiguration {
     @Bean
     OperationsReportSectionRunner operationsReportSectionRunner(OperationsAnalysisService analysisService) {
         return (section, request) -> {
-            java.time.format.DateTimeFormatter formatter = java.time.format.DateTimeFormatter
-                    .ofPattern("yyyy-MM-dd HH:mm:ssXXX").withZone(java.time.ZoneId.of(request.timezone()));
-            String metricQuestion = section.question().replaceFirst("^过去5天", "");
-            String question = formatter.format(request.timeWindow().fromInclusive()) + " 到 "
-                    + formatter.format(request.timeWindow().toExclusive()) + " " + metricQuestion;
+            String question = operationsReportQuestion(section, request);
             return analysisService.startAndAwait(question)
                 .thenApply(record -> {
                     // A clarification is terminal for the report section, but
@@ -321,6 +319,14 @@ public class AnalyticsConfiguration {
                     return record;
                 });
         };
+    }
+
+    static String operationsReportQuestion(OperationsReportSection section, OperationsReportRequest request) {
+        String metricQuestion = section.question().replaceFirst("^过去5天", "");
+        // The governed parser accepts an explicit atomic UTC range. Instant#toString
+        // emits that exact ISO-8601 form and avoids a second, ambiguous local-time interpretation.
+        return request.timeWindow().fromInclusive() + " 到 "
+                + request.timeWindow().toExclusive() + " " + metricQuestion;
     }
 
 }

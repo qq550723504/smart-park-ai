@@ -3,7 +3,11 @@ package com.example.smartpark.analytics.report;
 import com.example.smartpark.analytics.AnalysisRunStore;
 import com.example.smartpark.analytics.agent.TimeResolutionMetadata;
 import com.example.smartpark.execution.InMemoryExecutionEventPublisher;
+import com.example.smartpark.execution.model.ExecutionEvent;
 import com.example.smartpark.execution.model.ExecutionEventType;
+import com.example.smartpark.execution.model.ExecutionScenario;
+import com.example.smartpark.execution.model.ExecutionStage;
+import com.example.smartpark.execution.model.ExecutionStatus;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -273,6 +277,25 @@ class OperationsDailyReportServiceTest {
         assertThatThrownBy(() -> archive.authorize(report.traceId(), "APPROVER"))
                 .isInstanceOf(SecurityException.class);
         archive.authorize(report.traceId(), "ADMIN");
+    }
+
+    @Test
+    void traceArchiveRejectsAnOrphanedLiveReportProjection() {
+        UUID traceId = UUID.randomUUID();
+        InMemoryExecutionEventPublisher publisher = new InMemoryExecutionEventPublisher();
+        publisher.publish(new ExecutionEvent(
+                UUID.randomUUID(), traceId, 0, NOW, ExecutionScenario.OPERATIONS_ANALYSIS,
+                "operations-report", ExecutionStage.COMPLETION,
+                ExecutionEventType.RUN_COMPLETED, ExecutionStatus.SUCCEEDED,
+                "done", null));
+        OperationsReportTraceArchive archive = new OperationsReportTraceArchive(
+                new OperationsDailyReportStore(temp.resolve("empty-reports.json"),
+                        new ObjectMapper().findAndRegisterModules(), 20, 1, 512 * 1024, 256 * 1024),
+                publisher);
+
+        assertThatThrownBy(() -> archive.authorize(traceId, "VIEWER"))
+                .isInstanceOf(java.util.NoSuchElementException.class)
+                .hasMessageContaining("Unknown operations report trace");
     }
 
     private OperationsDailyReportService service(Path state, OperationsReportSectionRunner runner,

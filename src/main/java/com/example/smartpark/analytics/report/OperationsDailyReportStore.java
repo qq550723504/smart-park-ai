@@ -18,6 +18,7 @@ import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.HexFormat;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 
@@ -35,6 +36,7 @@ public final class OperationsDailyReportStore {
     private final int maxReportBytes;
     private final int maxArtifactBytes;
     private final AtomicReplacer atomicReplacer;
+    private final Consumer<UUID> terminalTraceEvictor;
     private final Map<UUID, OperationsDailyReport> reports = new LinkedHashMap<>();
     private final Map<String, UUID> idempotencyIndex = new LinkedHashMap<>();
     /** Future/older schema records are retained verbatim but deliberately not exposed. */
@@ -42,20 +44,38 @@ public final class OperationsDailyReportStore {
 
     public OperationsDailyReportStore(Path stateFile, ObjectMapper mapper) {
         this(stateFile, mapper, DEFAULT_MAX_RETAINED_REPORTS, DEFAULT_MAX_ACTIVE_REPORTS,
-                DEFAULT_MAX_REPORT_BYTES, DEFAULT_MAX_ARTIFACT_BYTES, OperationsDailyReportStore::atomicReplace);
+                DEFAULT_MAX_REPORT_BYTES, DEFAULT_MAX_ARTIFACT_BYTES,
+                OperationsDailyReportStore::atomicReplace, ignored -> { });
     }
 
     public OperationsDailyReportStore(Path stateFile, ObjectMapper mapper,
                                       int maxRetainedReports, int maxActiveReports,
                                       int maxReportBytes, int maxArtifactBytes) {
         this(stateFile, mapper, maxRetainedReports, maxActiveReports, maxReportBytes,
-                maxArtifactBytes, OperationsDailyReportStore::atomicReplace);
+                maxArtifactBytes, OperationsDailyReportStore::atomicReplace, ignored -> { });
     }
 
     OperationsDailyReportStore(Path stateFile, ObjectMapper mapper,
                                int maxRetainedReports, int maxActiveReports,
                                int maxReportBytes, int maxArtifactBytes,
                                AtomicReplacer atomicReplacer) {
+        this(stateFile, mapper, maxRetainedReports, maxActiveReports, maxReportBytes,
+                maxArtifactBytes, atomicReplacer, ignored -> { });
+    }
+
+    OperationsDailyReportStore(Path stateFile, ObjectMapper mapper,
+                               int maxRetainedReports, int maxActiveReports,
+                               int maxReportBytes, int maxArtifactBytes,
+                               Consumer<UUID> terminalTraceEvictor) {
+        this(stateFile, mapper, maxRetainedReports, maxActiveReports, maxReportBytes,
+                maxArtifactBytes, OperationsDailyReportStore::atomicReplace, terminalTraceEvictor);
+    }
+
+    OperationsDailyReportStore(Path stateFile, ObjectMapper mapper,
+                               int maxRetainedReports, int maxActiveReports,
+                               int maxReportBytes, int maxArtifactBytes,
+                               AtomicReplacer atomicReplacer,
+                               Consumer<UUID> terminalTraceEvictor) {
         this.stateFile = stateFile.toAbsolutePath().normalize();
         this.mapper = mapper.copy().findAndRegisterModules();
         if (maxRetainedReports < 1) throw new IllegalArgumentException("maxRetainedReports must be positive");
@@ -70,6 +90,8 @@ public final class OperationsDailyReportStore {
         this.maxReportBytes = maxReportBytes;
         this.maxArtifactBytes = maxArtifactBytes;
         this.atomicReplacer = java.util.Objects.requireNonNull(atomicReplacer, "atomicReplacer");
+        this.terminalTraceEvictor = java.util.Objects.requireNonNull(terminalTraceEvictor,
+                "terminalTraceEvictor");
         load();
     }
 
@@ -96,6 +118,10 @@ public final class OperationsDailyReportStore {
             throw new OperationsReportCapacityException("operations report retained capacity is exhausted");
         }
         LinkedHashMap<UUID, OperationsDailyReport> next = compact(supportedTarget);
+        List<UUID> evictedTraceIds = reports.values().stream()
+                .filter(report -> !next.containsKey(report.reportId()))
+                .map(OperationsDailyReport::traceId)
+                .toList();
         if (next.size() + unsupportedRecords.size() >= maxRetainedReports) {
             throw new OperationsReportCapacityException("operations report retained capacity is exhausted");
         }
@@ -106,6 +132,9 @@ public final class OperationsDailyReportStore {
         next.put(created.reportId(), created);
         persist(next.values());
         replaceState(next);
+        // Keep the live execution projection aligned with the durable authorization
+        // source before another request can observe the evicted report.
+        evictedTraceIds.forEach(terminalTraceEvictor);
         return new StartResult(created, true);
     }
 

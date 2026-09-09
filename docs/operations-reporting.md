@@ -131,7 +131,9 @@ No report remains permanently `GENERATING` after restart.
 Every report includes `schemaVersion` and `generationVersion`; every artifact includes `rendererVersion`.
 The current reader exposes schema version 1. Records with another version are preserved verbatim, excluded from
 current APIs, and count toward retention rather than being silently misread or preventing startup. Retention is
-count-based. A user-facing delete API is intentionally out of scope.
+count-based. When a terminal report is evicted, its terminal in-memory trace projection is removed in the same
+store admission boundary; an orphaned report projection is also rejected by the trace archive. A user-facing
+delete API is intentionally out of scope.
 
 ## Known limitations
 

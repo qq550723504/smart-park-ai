@@ -21,9 +21,11 @@ public class OperationsReportConfiguration {
             @Value("${smartpark.reporting.max-retained-reports:200}") int maxRetainedReports,
             @Value("${smartpark.reporting.max-active-reports:1}") int maxActiveReports,
             @Value("${smartpark.reporting.max-report-bytes:524288}") int maxReportBytes,
-            @Value("${smartpark.reporting.max-artifact-bytes:262144}") int maxArtifactBytes) {
+            @Value("${smartpark.reporting.max-artifact-bytes:262144}") int maxArtifactBytes,
+            ExecutionEventPublisher publisher) {
         return new OperationsDailyReportStore(Path.of(stateFile), new ObjectMapper().findAndRegisterModules(),
-                maxRetainedReports, maxActiveReports, maxReportBytes, maxArtifactBytes);
+                maxRetainedReports, maxActiveReports, maxReportBytes, maxArtifactBytes,
+                publisher::remove);
     }
 
     @Bean
@@ -32,8 +34,9 @@ public class OperationsReportConfiguration {
     }
 
     @Bean
-    ExecutionEventArchive operationsReportTraceArchive(OperationsDailyReportStore reportStore) {
-        return new OperationsReportTraceArchive(reportStore);
+    ExecutionEventArchive operationsReportTraceArchive(OperationsDailyReportStore reportStore,
+                                                        ExecutionEventPublisher publisher) {
+        return new OperationsReportTraceArchive(reportStore, publisher);
     }
 
     @Bean
