@@ -57,6 +57,11 @@ class DemoDataRefresherTest {
                 "DELETE FROM analytics.building_occupancy_demo_hourly_raw"));
         assertThat(sql).anyMatch(statement -> statement.contains(
                 "INSERT INTO analytics.building_occupancy_demo_hourly_raw"));
+        assertThat(sql).anyMatch(statement -> statement.contains(
+                "DELETE FROM analytics.device_telemetry_demo_hourly_raw"));
+        assertThat(sql).anyMatch(statement -> statement.contains(
+                "INSERT INTO analytics.device_telemetry_demo_hourly_raw"));
+        assertThat(sql).anyMatch(statement -> statement.contains("'TEMPERATURE'"));
         assertThat(sql).anyMatch(statement -> statement.contains("CURRENT_DATE - 6 + d"));
         assertThat(sql).noneMatch(statement -> statement.contains("meter_id ~"));
     }

@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Establishes the real analytics data boundary: four whitelisted views must
+ * Establishes the analytics data boundary: whitelisted views must
  * exist, the application's read-only role must be able to SELECT them and must
  * be unable to write anything — enforced by database privileges themselves.
  */
@@ -49,7 +49,8 @@ class AnalyticsSchemaMigrationTest {
 
         try (Connection ro = DriverManager.getConnection(POSTGRES.getJdbcUrl(), RO_USER, RO_PASSWORD)) {
             for (String view : new String[] {
-                    "v_energy_hourly", "v_alert_fact", "v_device_snapshot", "v_parking_daily" }) {
+                    "v_energy_hourly", "v_alert_fact", "v_device_snapshot", "v_parking_daily",
+                    "v_device_telemetry_hourly" }) {
                 try (var statement = ro.createStatement();
                      ResultSet rs = statement.executeQuery("SELECT COUNT(*) FROM analytics." + view)) {
                     assertThat(rs.next()).isTrue();
@@ -68,6 +69,9 @@ class AnalyticsSchemaMigrationTest {
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("permission denied");
             assertThatThrownBy(() -> exec(ro, "CREATE TABLE analytics.evil(id int)"))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("permission denied");
+            assertThatThrownBy(() -> exec(ro, "SELECT * FROM analytics.device_telemetry_demo_hourly_raw"))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("permission denied");
 
@@ -98,6 +102,33 @@ class AnalyticsSchemaMigrationTest {
                 assertThat(rs.getString("risk_level")).isEqualTo("LOW");
                 assertThat(rs.getString("status")).isEqualTo("OPEN");
             }
+        }
+    }
+
+    @Test
+    void exposesDeterministicDemoTemperatureWithExplicitGapsAndNoVibrationRows() throws Exception {
+        migrate();
+        try (Connection ro = DriverManager.getConnection(POSTGRES.getJdbcUrl(), RO_USER, RO_PASSWORD);
+             var statement = ro.createStatement();
+             ResultSet rs = statement.executeQuery(
+                     "SELECT telemetry_type, unit, COUNT(*) AS points, COUNT(DISTINCT device_id) AS devices, "
+                             + "MIN(quality) AS quality FROM analytics.v_device_telemetry_hourly "
+                             + "GROUP BY telemetry_type, unit")) {
+            assertThat(rs.next()).isTrue();
+            assertThat(rs.getString("telemetry_type")).isEqualTo("TEMPERATURE");
+            assertThat(rs.getString("unit")).isEqualTo("°C");
+            assertThat(rs.getInt("points")).isEqualTo(3 * 48 - 3);
+            assertThat(rs.getInt("devices")).isEqualTo(3);
+            assertThat(rs.getString("quality")).isEqualTo("GOOD");
+            assertThat(rs.next()).isFalse();
+        }
+        try (Connection ro = DriverManager.getConnection(POSTGRES.getJdbcUrl(), RO_USER, RO_PASSWORD);
+             var statement = ro.createStatement();
+             ResultSet rs = statement.executeQuery(
+                     "SELECT COUNT(*) FROM analytics.v_device_telemetry_hourly "
+                             + "WHERE telemetry_type = 'VIBRATION'")) {
+            assertThat(rs.next()).isTrue();
+            assertThat(rs.getInt(1)).isZero();
         }
     }
 
@@ -203,6 +234,8 @@ class AnalyticsSchemaMigrationTest {
                     + "SET occurred_at = occurred_at - INTERVAL '30 days' WHERE alert_id LIKE 'ALT-%'");
             statement.execute("UPDATE analytics.parking_daily_raw "
                     + "SET stat_date = stat_date - INTERVAL '30 days' WHERE parking_zone IN ('ZONE-A', 'ZONE-B')");
+            statement.execute("UPDATE analytics.device_telemetry_demo_hourly_raw "
+                    + "SET observed_at = observed_at - INTERVAL '30 days'");
         }
 
         var properties = new com.example.smartpark.analytics.AnalyticsProperties();
@@ -269,6 +302,13 @@ class AnalyticsSchemaMigrationTest {
                 var newestParking = rs.getObject(1, java.time.LocalDate.class);
                 var today = rs.getObject(2, java.time.LocalDate.class);
                 assertThat(newestParking).isEqualTo(today.minusDays(1));
+            }
+            try (ResultSet rs = statement.executeQuery(
+                    "SELECT MAX(observed_at), now() FROM analytics.device_telemetry_demo_hourly_raw")) {
+                assertThat(rs.next()).isTrue();
+                var newestTelemetry = rs.getObject(1, java.time.OffsetDateTime.class);
+                var reference = rs.getObject(2, java.time.OffsetDateTime.class);
+                assertThat(newestTelemetry).isAfter(reference.minus(java.time.Duration.ofHours(2)));
             }
         }
     }

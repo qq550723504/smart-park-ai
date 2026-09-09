@@ -46,6 +46,7 @@ public final class SqlAstGuard {
             SqlRelationName.parseCatalogName("analytics.v_energy_hourly"),
             SqlRelationName.parseCatalogName("analytics.v_alert_fact"),
             SqlRelationName.parseCatalogName("analytics.v_device_snapshot"),
+            SqlRelationName.parseCatalogName("analytics.v_device_telemetry_hourly"),
             SqlRelationName.parseCatalogName("analytics.v_parking_daily"));
 
     private static final Set<String> ALLOWED_FUNCTIONS = Set.of(

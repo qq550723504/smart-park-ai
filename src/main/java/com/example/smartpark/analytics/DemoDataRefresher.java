@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * V1 seeds time-sensitive demo fixtures (energy, alerts, device snapshots,
  * parking) once, but every catalog metric reads a runtime-relative lookback
- (seven days by default, one day for device snapshots): on a persistent
+ * (seven days by default, one day for device snapshots): on a persistent
  * database the seeded rows leave those windows and the documented demo
  * analyses start returning empty results. This refresher periodically
  * re-anchors ALL V1 demo facts to the current instant so the shipped demos
@@ -103,6 +103,9 @@ public class DemoDataRefresher {
                 statement.executeUpdate(
                         "DELETE FROM analytics.energy_hourly_raw WHERE meter_id IN " + ENERGY_METER_IDS);
                 statement.executeUpdate(ENERGY_SEED);
+                statement.executeUpdate("DELETE FROM analytics.device_telemetry_demo_hourly_raw "
+                        + "WHERE device_id IN ('AC-B1-07', 'HUM-B2-11', 'AC-B3-03')");
+                statement.executeUpdate(TELEMETRY_SEED);
                 statement.executeUpdate(
                         "DELETE FROM analytics.building_occupancy_demo_hourly_raw");
                 statement.executeUpdate(OCCUPANCY_SEED);
@@ -129,6 +132,19 @@ public class DemoDataRefresher {
             + "CASE WHEN h BETWEEN 9 AND 19 THEN 42.0 + b * 3 ELSE 12.0 + b END "
             + "FROM generate_series(1, 3) AS b, generate_series(1, 2) AS m, "
             + "generate_series(0, 4) AS d, generate_series(0, 23) AS h ON CONFLICT DO NOTHING";
+
+    private static final String TELEMETRY_SEED =
+            "INSERT INTO analytics.device_telemetry_demo_hourly_raw "
+            + "(device_id, building_id, device_type, telemetry_type, unit, observed_at, value, quality) "
+            + "SELECT fixture.device_id, fixture.building_id, 'HVAC', 'TEMPERATURE', '°C', "
+            + "date_trunc('hour', now()) - INTERVAL '47 hours' + make_interval(hours => h), "
+            + "CASE WHEN fixture.device_id = 'AC-B1-07' AND h >= 44 THEN 30.0 + (h - 44) * 0.5 "
+            + "WHEN fixture.device_id = 'HUM-B2-11' THEN 23.0 + (h % 4) * 0.2 "
+            + "ELSE 24.0 + (h % 5) * 0.1 END, 'GOOD' "
+            + "FROM (VALUES ('AC-B1-07', 'B1'), ('HUM-B2-11', 'B2'), ('AC-B3-03', 'B3')) "
+            + "AS fixture(device_id, building_id) CROSS JOIN generate_series(0, 47) AS h "
+            + "WHERE NOT (fixture.device_id = 'AC-B1-07' AND h IN (12, 31)) "
+            + "AND NOT (fixture.device_id = 'HUM-B2-11' AND h = 28) ON CONFLICT DO NOTHING";
 
     private static final String ALERT_SEED =
             "INSERT INTO analytics.alert_fact_raw (alert_id, building_id, device_id, category, risk_level, occurred_at, status) VALUES "
