@@ -263,6 +263,15 @@ describe('ParkOverview', () => {
     expect(wrapper.text()).toContain('REDACTED: 能耗告警 · OPEN')
     expect(wrapper.get('[data-kpi="energy"]').text()).toContain('正在读取能耗观测…')
 
+    const nextBuilding = wrapper.get('[data-building-marker="B2"]')
+    expect(nextBuilding.attributes('disabled')).toBeUndefined()
+    await nextBuilding.trigger('click')
+    await vi.waitFor(() => expect(getAnomalyEvidence).toHaveBeenCalledWith(
+      'VIEWER',
+      'B2',
+      { from: windowRange.from, to: windowRange.to },
+    ))
+
     pendingEnergy.resolve(energy)
     await flushPromises()
   })

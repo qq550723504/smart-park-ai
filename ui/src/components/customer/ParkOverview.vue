@@ -166,6 +166,7 @@ async function refresh(): Promise<void> {
       ? preferredBuildingId
       : affectedIds[0] ?? null
     selectionWasExplicit.value = Boolean(preserveSelection && preferredBuildingId && ids.includes(preferredBuildingId))
+    loading.value = false
     if (selectedBuildingId.value) void loadEvidence(selectedBuildingId.value, generation)
     if (ids.length > 0) {
       const window = last24Hours(overview.value.window)
