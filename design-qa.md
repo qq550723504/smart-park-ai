@@ -89,7 +89,7 @@ Result: **PASSED**
 ## Evidence
 
 - Approved reference: `smart-park-ai-approved-designs.zip / 01-park-overview.png` (1672 × 941).
-- Actual browser captures: `docs/evidence/issue-69/overview-1440x900.png` and `docs/evidence/issue-69/overview-1920x1080.png`.
+- Actual browser captures: `docs/evidence/issue-69/overview-1440x900.png` and `docs/evidence/issue-69/overview-1920x1080.png`, both generated from UI commit `8b361b645f9b5cfd32dc94237f0c881cbc352daa`.
 - Runtime: repository Compose analytics profile with its deterministic PostgreSQL demo facts; the page was opened through the in-app browser at `http://127.0.0.1:15173/`.
 - Responsive check: 1366 × 768 reported `scrollWidth=1351`, `innerWidth=1366`, so no horizontal overflow. The workbench entry, first KPI and building markers were visible.
 
@@ -111,8 +111,20 @@ Intentional differences are capability-driven rather than visual drift. Search, 
 - Selecting B2 changed the map selection and latest-event context to `研发大厦 · 同一业务窗口`.
 - Entering the internal workbench hid the customer surface; returning restored the customer surface and retained B2 selection.
 - The four later navigation items are non-link elements with `aria-disabled=true`.
+- Customer-visible statuses are mapped to Chinese. Unknown values render `状态未知`; partial and unavailable states remain explicit. No raw Issue number, `OPEN`, or `REDACTED:` metadata is visible in the normal browser state.
+- “今日重点关注” keeps its deterministic-rule and no-model disclosure in a collapsed `数据依据` detail, which was expanded and visually checked in the browser.
 - The customer surface had no unnamed buttons, duplicate IDs, or browser console warnings/errors.
 - API failures remain explicit and do not fall back to a successful fixture; missing energy buckets stay null and ECharts keeps line breaks.
+
+## Acceptance closeout regression
+
+- Focused customer suite: `2` files / `26` tests passed, including status localization, unknown fallback, unavailable navigation, no-data, partial data, independent failure/retry, and internal-workbench handoff.
+- Full unit suite: `44` files / `422` tests passed.
+- `npm.cmd run typecheck`: passed.
+- `npm.cmd run build`: passed; only the existing Vite chunk-size advisory remains.
+- Normal browser state: passed against the running Compose analytics stack and deterministic PostgreSQL demo facts (`3,384 kWh`, `3` buildings, `4` unhandled alerts at capture time). Demo/simulated-data markers remained visible.
+- Internal workbench: entering from the customer header and returning to the customer surface both passed in the browser.
+- Approved-reference comparison at 1440 × 900 and 1920 × 1080: passed without page redesign; the 1366 × 768 viewport remained free of horizontal document overflow.
 
 ## Iteration history
 
@@ -127,3 +139,4 @@ Intentional differences are capability-driven rather than visual drift. Search, 
 9. Final refresh QA invalidates the prior overview while revalidation is pending, keeps partial-evidence notices visible alongside any available rows, and removes the inherited mobile navigation minimum width so narrow screens scroll inside the navigation instead of widening the document.
 10. The final data-state pass exposes HTTP-200 energy responses with `UNAVAILABLE` status instead of treating them as empty observations, and preserves an explicitly selected catalog building across workbench reactivation even when it has no anomaly row.
 11. The next review pass disables map selection while the overview is revalidating so a pending response cannot overwrite a newer user choice, and treats absent catalog rows as normal only when every anomaly domain completed with `OK`.
+12. The customer-demo closeout localizes raw status and redaction metadata, removes delivery Issue numbers from customer copy, turns future navigation into explicit non-interactive “未开放” entries, moves the rule/no-model statement into expandable data-basis disclosure, and regenerates both approved browser capture sizes from commit `8b361b645f9b5cfd32dc94237f0c881cbc352daa`.
