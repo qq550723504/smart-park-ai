@@ -27,6 +27,15 @@ public interface ExecutionEventPublisher {
     void hydrate(UUID runId, List<ExecutionEvent> durableHistory);
 
     /**
+     * Replaces an active projection with a compact durable terminal history.
+     * Existing subscribers must receive one terminal notification before the
+     * stream closes, while future reads must expose the replacement history.
+     */
+    default void reconcileTerminalHistory(UUID runId, List<ExecutionEvent> durableHistory) {
+        throw new UnsupportedOperationException("terminal history reconciliation is unavailable");
+    }
+
+    /**
      * Subscribes to an existing run: the consumer first receives the full history,
      * then every subsequent live event until a terminal event completes the stream.
      */

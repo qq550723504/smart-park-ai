@@ -55,7 +55,7 @@ public class InMemoryExecutionEventPublisher implements ExecutionEventPublisher 
 
     @Override
     public ExecutionEvent publish(ExecutionEvent event) {
-        RunState state = stateFor(event.runId());
+        RunState state = stateForPublishedSequence(event.runId(), event.sequence());
         state.lock.lock();
         try {
             if (state.closed) {
@@ -107,6 +107,37 @@ public class InMemoryExecutionEventPublisher implements ExecutionEventPublisher 
                 }
                 append(state, event);
             }
+        } finally {
+            state.lock.unlock();
+        }
+    }
+
+    @Override
+    public void reconcileTerminalHistory(UUID runId, List<ExecutionEvent> durableHistory) {
+        validateTerminalHistory(runId, durableHistory);
+        RunState state = stateFor(runId);
+        state.lock.lock();
+        try {
+            if (state.closed) {
+                if (!state.snapshot().equals(durableHistory)) {
+                    throw new IllegalStateException("terminal history conflicts for run " + runId);
+                }
+                return;
+            }
+            ExecutionEvent durableTerminal = durableHistory.get(durableHistory.size() - 1);
+            ExecutionEvent liveTerminal = new ExecutionEvent(durableTerminal.eventId(), runId,
+                    state.count + 1, durableTerminal.timestamp(), durableTerminal.scenario(),
+                    durableTerminal.actor(), durableTerminal.stage(), durableTerminal.eventType(),
+                    durableTerminal.status(), durableTerminal.safeSummary(), durableTerminal.displayPayload());
+            for (Consumer<ExecutionEvent> consumer : state.consumers) {
+                consumer.accept(liveTerminal);
+            }
+            state.historyBacking.clear();
+            state.historyBacking.addAll(durableHistory);
+            state.count = durableHistory.size();
+            state.terminalAt = clock.instant();
+            state.consumers.clear();
+            state.closed = true;
         } finally {
             state.lock.unlock();
         }
@@ -183,6 +214,24 @@ public class InMemoryExecutionEventPublisher implements ExecutionEventPublisher 
         }
     }
 
+    private static void validateTerminalHistory(UUID runId, List<ExecutionEvent> durableHistory) {
+        if (durableHistory == null || durableHistory.isEmpty()) {
+            throw new IllegalArgumentException("terminal durable history must not be empty");
+        }
+        for (int index = 0; index < durableHistory.size(); index++) {
+            ExecutionEvent event = durableHistory.get(index);
+            if (!runId.equals(event.runId()) || event.sequence() != index + 1L) {
+                throw new IllegalArgumentException("terminal durable history must be contiguous for run " + runId);
+            }
+            if (index + 1 < durableHistory.size() && event.isTerminal()) {
+                throw new IllegalArgumentException("terminal durable history closes before its final event");
+            }
+        }
+        if (!durableHistory.get(durableHistory.size() - 1).isTerminal()) {
+            throw new IllegalArgumentException("terminal durable history must end with a terminal event");
+        }
+    }
+
     private synchronized RunState stateFor(UUID runId) {
         RunState existing = runs.get(runId);
         if (existing != null) return existing;
@@ -196,6 +245,16 @@ public class InMemoryExecutionEventPublisher implements ExecutionEventPublisher 
         RunState created = new RunState();
         runs.put(runId, created);
         return created;
+    }
+
+    private synchronized RunState stateForPublishedSequence(UUID runId, long sequence) {
+        RunState existing = runs.get(runId);
+        if (existing != null) return existing;
+        if (sequence > 1) {
+            throw new IllegalArgumentException("out-of-order sequence " + sequence
+                    + " for run " + runId + "; expected 1");
+        }
+        return stateFor(runId);
     }
 
     /** Removes terminal runs whose replayable window has elapsed; running runs are never touched. */

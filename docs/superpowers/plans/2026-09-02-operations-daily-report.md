@@ -1,5 +1,7 @@
 # 运营日报会话快照 Implementation Plan
 
+> 历史实施计划：其中“有界进程内存储”的方案已由 Issue #61 的 `docs/operations-reporting.md` 取代；本文件仅保留为最初切片的实施证据。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task with review checkpoints.
 
 **Goal:** 在运营看板中增加一个由真实只读分析结果驱动的、可手动触发的会话级运营日报。

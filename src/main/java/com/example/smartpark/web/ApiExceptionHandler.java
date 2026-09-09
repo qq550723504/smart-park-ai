@@ -6,6 +6,9 @@ import com.example.smartpark.analytics.health.DeviceHealthService;
 import com.example.smartpark.analytics.telemetry.DeviceTelemetryService;
 import com.example.smartpark.execution.ExecutionEventCapacityException;
 import com.example.smartpark.orchestration.OrchestrationCapacityException;
+import com.example.smartpark.analytics.report.OperationsReportCapacityException;
+import com.example.smartpark.analytics.report.OperationsReportUnavailableException;
+import com.example.smartpark.analytics.report.UnsupportedOperationsReportSchemaException;
 import com.example.smartpark.workflow.CustomerServiceValidationException;
 
 import org.springframework.http.HttpStatus;
@@ -44,7 +47,7 @@ public class ApiExceptionHandler {
     @ExceptionHandler(IllegalStateException.class)
     ResponseEntity<WebDtos.ApiError> conflict(RuntimeException exception) {
         String message = exception.getMessage() != null && exception.getMessage().startsWith("Idempotency-Key was already used")
-                ? "Idempotency-Key 已用于其他编排请求，请生成新的请求键"
+                ? "Idempotency-Key 已用于其他请求，请生成新的请求键"
                 : "Idempotency key was already used for another question".equals(exception.getMessage())
                 ? "Idempotency-Key 已用于其他问题，请生成新的请求键"
                 : "Request conflicts with current resource state";
@@ -92,6 +95,21 @@ public class ApiExceptionHandler {
     @ExceptionHandler(OrchestrationCapacityException.class)
     ResponseEntity<WebDtos.ApiError> orchestrationOverloaded(OrchestrationCapacityException exception) {
         return error(HttpStatus.TOO_MANY_REQUESTS, "Too many orchestration runs; retry later");
+    }
+
+    @ExceptionHandler(OperationsReportCapacityException.class)
+    ResponseEntity<WebDtos.ApiError> reportOverloaded(OperationsReportCapacityException exception) {
+        return error(HttpStatus.TOO_MANY_REQUESTS, "Operations report capacity is exhausted; retry later");
+    }
+
+    @ExceptionHandler(OperationsReportUnavailableException.class)
+    ResponseEntity<WebDtos.ApiError> reportUnavailable(OperationsReportUnavailableException exception) {
+        return error(HttpStatus.SERVICE_UNAVAILABLE, "Operations report generation is unavailable");
+    }
+
+    @ExceptionHandler(UnsupportedOperationsReportSchemaException.class)
+    ResponseEntity<WebDtos.ApiError> unsupportedReportSchema(UnsupportedOperationsReportSchemaException exception) {
+        return error(HttpStatus.CONFLICT, "Operations report schema is unsupported by this runtime");
     }
 
     @ExceptionHandler(ExecutionEventCapacityException.class)

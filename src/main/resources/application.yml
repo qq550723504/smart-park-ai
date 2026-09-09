@@ -55,6 +55,14 @@ spring:
         streamable-http:
           mcp-endpoint: /mcp
 smartpark:
+  reporting:
+    # Structured snapshots and embedded Markdown artifacts. The whole bounded
+    # state is atomically replaced; historical reads never query analytics.
+    state-file: ${SMARTPARK_REPORT_STATE_FILE:./data/reports/reports.json}
+    max-retained-reports: ${SMARTPARK_REPORT_MAX_RETAINED_REPORTS:200}
+    max-active-reports: ${SMARTPARK_REPORT_MAX_ACTIVE_REPORTS:1}
+    max-report-bytes: ${SMARTPARK_REPORT_MAX_REPORT_BYTES:524288}
+    max-artifact-bytes: ${SMARTPARK_REPORT_MAX_ARTIFACT_BYTES:262144}
   workflow:
     # Orchestration-owned child executions are isolated for cancellation, but
     # their terminal graph checkpoints and event traces are retained only within

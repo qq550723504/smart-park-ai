@@ -4,176 +4,523 @@ import com.example.smartpark.analytics.AnalysisRunStore;
 import com.example.smartpark.execution.ExecutionEventPublisher;
 import com.example.smartpark.execution.model.ExecutionEvent;
 import com.example.smartpark.execution.model.ExecutionEventType;
-import com.example.smartpark.execution.model.ExecutionScenario;
 import com.example.smartpark.execution.model.ExecutionStage;
 import com.example.smartpark.execution.model.ExecutionStatus;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
-/** Orchestrates the fixed, read-only operations report sections. */
-public class OperationsDailyReportService {
+/** Orchestrates existing read-only analysis sections and persists immutable report snapshots. */
+public final class OperationsDailyReportService {
+    public static final int MAX_PAGE_SIZE = 50;
+    private static final String SAFE_SECTION_FAILURE = "REPORT_SECTION_UNAVAILABLE";
 
     private final OperationsReportSectionRunner sectionRunner;
     private final OperationsDailyReportStore store;
     private final ExecutionEventPublisher events;
+    private final OperationsReportRenderer renderer;
     private final Clock clock;
+    private final boolean generationAvailable;
 
     public OperationsDailyReportService(OperationsReportSectionRunner sectionRunner,
                                         OperationsDailyReportStore store,
                                         ExecutionEventPublisher events,
+                                        OperationsReportRenderer renderer,
                                         Clock clock) {
-        this.sectionRunner = sectionRunner;
-        this.store = store;
-        this.events = events;
-        this.clock = clock == null ? Clock.systemUTC() : clock;
+        this(sectionRunner, store, events, renderer, clock, true);
     }
 
-    public OperationsDailyReport start() {
-        if (!store.tryAcquireRun()) {
-            throw new IllegalStateException("已有正在生成的运营日报，请等待完成后再启动");
-        }
-        UUID runId = UUID.randomUUID();
-        OperationsDailyReport report = null;
-        try {
-            report = store.create(runId, clock.instant());
-            publish(runId, ExecutionStage.INITIALIZATION, ExecutionEventType.RUN_STARTED,
-                    ExecutionStatus.RUNNING, "运营日报开始");
-            runSection(runId, 0);
-            return report;
-        } catch (RuntimeException failure) {
-            if (report != null) {
-                try {
-                    // A report is accepted only when its replayable trace is
-                    // admitted. Terminalize the snapshot if the first event
-                    // fails so it cannot survive forever as a RUNNING ghost.
-                    OperationsDailyReport current = store.get(report.runId()).orElse(report);
-                    store.update(current.withStatus("FAILED", clock.instant()));
-                } catch (RuntimeException rollbackFailure) {
-                    failure.addSuppressed(rollbackFailure);
-                }
+    OperationsDailyReportService(OperationsReportSectionRunner sectionRunner,
+                                 OperationsDailyReportStore store,
+                                 ExecutionEventPublisher events,
+                                 OperationsReportRenderer renderer,
+                                 Clock clock,
+                                 boolean generationAvailable) {
+        this.sectionRunner = java.util.Objects.requireNonNull(sectionRunner, "sectionRunner");
+        this.store = java.util.Objects.requireNonNull(store, "store");
+        this.events = java.util.Objects.requireNonNull(events, "events");
+        this.renderer = java.util.Objects.requireNonNull(renderer, "renderer");
+        this.clock = clock == null ? Clock.systemUTC() : clock;
+        this.generationAvailable = generationAvailable;
+        recoverInterrupted();
+    }
+
+    public OperationsDailyReportStore.StartResult start(OperationsReportRequest request,
+                                                        String idempotencyKey,
+                                                        String requestedBy,
+                                                        String role) {
+        String key = requireText(idempotencyKey, "Idempotency-Key", 128);
+        String normalizedRole = requireText(role, "role", 30).toUpperCase(Locale.ROOT);
+        String actor = requireText(requestedBy, "requestedBy", 100);
+        String fingerprint = fingerprint(request, normalizedRole);
+        Instant now = clock.instant();
+        OperationsDailyReportStore.StartResult admitted = store.createOrGet(key, fingerprint, () -> {
+            if (!generationAvailable) {
+                throw new OperationsReportUnavailableException("operations report generation is unavailable");
             }
-            store.releaseRun();
+            UUID reportId = UUID.randomUUID();
+            UUID runId = UUID.randomUUID();
+            return new OperationsDailyReport(reportId, request.reportType(), "智慧园区运营日报",
+                    OperationsReportStatus.REQUESTED, actor, normalizedRole, now, null, null,
+                    request.timeWindow(), request.timezone(), null, "报告请求已接收",
+                    OperationsDailyReportDefinition.sections().stream()
+                            .map(section -> OperationsDailyReport.SectionResult.pending(
+                                    section, section.questionFor(request))).toList(),
+                    List.of(), List.of(), runId, runId,
+                    OperationsDailyReport.CURRENT_SCHEMA_VERSION,
+                    OperationsDailyReport.CURRENT_GENERATION_VERSION, null, key, fingerprint, 0, List.of());
+        });
+        if (!admitted.created()) {
+            hydrate(admitted.report());
+            return admitted;
+        }
+        OperationsDailyReport generating;
+        try {
+            generating = store.update(admitted.report().reportId(), report ->
+                    report.copy(OperationsReportStatus.GENERATING, now, null, null, "报告生成中",
+                            report.sections(), report.evidence(), report.sourceReferences(), null,
+                            append(report.traceEvents(), OperationsReportTraceRecord.REPORT_ACTOR,
+                                    ExecutionStage.INITIALIZATION,
+                                    ExecutionEventType.RUN_STARTED, ExecutionStatus.RUNNING, "运营日报开始生成")));
+            publishNew(generating, 0);
+            runSection(generating.reportId(), 0);
+        } catch (RuntimeException failure) {
+            failReport(admitted.report().reportId(), "REPORT_START_FAILED");
             throw failure;
         }
+        return new OperationsDailyReportStore.StartResult(generating, true);
     }
 
-    public OperationsDailyReport get(UUID runId) {
-        return store.get(runId).orElseThrow(() -> new NoSuchElementException("Unknown report: " + runId));
+    public OperationsReportRequest defaultRequest() {
+        Instant to = clock.instant();
+        return new OperationsReportRequest(OperationsReportRequest.DAILY,
+                new OperationsReportRequest.TimeWindow(to.minus(java.time.Duration.ofDays(5)), to),
+                OperationsReportRequest.DEFAULT_TIMEZONE);
     }
 
-    private void runSection(UUID runId, int index) {
-        OperationsDailyReport current;
-        try {
-            current = get(runId);
-        } catch (RuntimeException failure) {
-            finishFailure(runId, "REPORT_STATE");
-            return;
+    public OperationsDailyReport get(UUID reportId, String role) {
+        OperationsDailyReport report = store.find(reportId).orElseThrow(() -> {
+            if (store.isUnsupported(reportId)) return new UnsupportedOperationsReportSchemaException();
+            return new NoSuchElementException("Unknown operations report");
+        });
+        authorize(report, role);
+        return report;
+    }
+
+    public Page list(String role, String reportType, OperationsReportStatus status,
+                     Instant createdFrom, Instant createdTo, int page, int size) {
+        String normalizedRole = requireText(role, "role", 30).toUpperCase(Locale.ROOT);
+        if (page < 0) throw new IllegalArgumentException("page must not be negative");
+        if (size < 1 || size > MAX_PAGE_SIZE) throw new IllegalArgumentException("page size is invalid");
+        if (createdFrom != null && createdTo != null && !createdFrom.isBefore(createdTo)) {
+            throw new IllegalArgumentException("created range must be ordered");
         }
+        List<OperationsDailyReport> visible = store.all().stream()
+                .filter(report -> "ADMIN".equals(normalizedRole) || report.role().equals(normalizedRole))
+                .filter(report -> reportType == null || report.reportType().equals(reportType))
+                .filter(report -> status == null || report.status() == status)
+                .filter(report -> createdFrom == null || !report.createdAt().isBefore(createdFrom))
+                .filter(report -> createdTo == null || report.createdAt().isBefore(createdTo))
+                .sorted(Comparator.comparing(OperationsDailyReport::createdAt).reversed()
+                        .thenComparing(OperationsDailyReport::reportId))
+                .toList();
+        long offset = (long) page * size;
+        List<OperationsDailyReport> content = offset >= visible.size() ? List.of()
+                : visible.subList((int) offset, Math.min(visible.size(), (int) offset + size));
+        return new Page(content, page, size, visible.size(), offset + content.size() < visible.size());
+    }
+
+    public OperationsDailyReport.Artifact download(UUID reportId, String role) {
+        OperationsDailyReport report = get(reportId, role);
+        if (report.artifact() == null) throw new IllegalStateException("Report artifact is not available");
+        return report.artifact();
+    }
+
+    private void runSection(UUID reportId, int index) {
+        OperationsDailyReport current = store.find(reportId).orElse(null);
+        if (current == null || current.status().isTerminal()) return;
         List<OperationsReportSection> definitions = OperationsDailyReportDefinition.sections();
         if (index >= definitions.size()) {
-            finishReport(runId, current);
+            finishReport(reportId);
             return;
         }
-
-        OperationsReportSection section = definitions.get(index);
-        List<OperationsDailyReport.SectionResult> runningSections = new ArrayList<>(current.sections());
-        runningSections.set(index, runningSections.get(index).running());
-        store.update(current.withSections("RUNNING", clock.instant(), runningSections));
-        publish(runId, ExecutionStage.ANALYSIS, ExecutionEventType.NODE_STARTED,
-                ExecutionStatus.RUNNING, section.title());
-
+        OperationsReportSection definition = definitions.get(index);
+        int firstTrace = current.traceEvents().size();
+        OperationsDailyReport running = store.update(reportId, report -> {
+            List<OperationsDailyReport.SectionResult> sections = new ArrayList<>(report.sections());
+            sections.set(index, sections.get(index).running());
+            return report.copy(OperationsReportStatus.GENERATING, report.startedAt(), null,
+                    report.asOf(), report.summary(), sections, report.evidence(), report.sourceReferences(), null,
+                    append(report.traceEvents(), definition.id(), ExecutionStage.ANALYSIS,
+                            ExecutionEventType.STEP_STARTED, ExecutionStatus.RUNNING, definition.title()));
+        });
+        publishNew(running, firstTrace);
         CompletableFuture<AnalysisRunStore.RunRecord> execution;
         try {
-            execution = sectionRunner.run(section);
+            execution = sectionRunner.run(definition, new OperationsReportRequest(current.reportType(),
+                    current.timeWindow(), current.timezone()));
             if (execution == null) throw new IllegalStateException("section runner returned null");
         } catch (RuntimeException failure) {
-            completeSection(runId, index, section, null, failure);
+            completeSection(reportId, index, definition, null, failure);
             return;
         }
-        execution.whenComplete((record, failure) -> completeSection(runId, index, section, record, failure));
+        execution.whenComplete((record, failure) -> completeSection(reportId, index, definition, record, failure));
     }
 
-    private void completeSection(UUID runId, int index, OperationsReportSection section,
+    private void completeSection(UUID reportId, int index, OperationsReportSection definition,
                                  AnalysisRunStore.RunRecord record, Throwable failure) {
-        OperationsDailyReport current = get(runId);
-        OperationsDailyReport.SectionResult result;
-        if (failure != null) {
-            result = OperationsDailyReport.SectionResult.pending(section)
-                    .failed("REPORT_SECTION_EXECUTION");
-        } else if (record == null) {
-            result = OperationsDailyReport.SectionResult.pending(section)
-                    .failed("REPORT_SECTION_EMPTY_RESULT");
-        } else if ("COMPLETED".equals(record.status())) {
-            result = completedSection(section, record);
-        } else if ("NEEDS_CLARIFICATION".equals(record.status())) {
-            result = OperationsDailyReport.SectionResult.pending(section)
-                    .failed("REPORT_CLARIFICATION_REQUIRED");
-        } else {
-            result = OperationsDailyReport.SectionResult.pending(section)
-                    .failed("REPORT_SECTION_FAILED");
+        try {
+            OperationsDailyReport current = store.find(reportId)
+                    .orElseThrow(() -> new NoSuchElementException("Unknown operations report"));
+            if (current.status().isTerminal()) return;
+            OperationsDailyReport.SectionResult result = sectionResult(
+                    definition, current.sections().get(index).question(), record, failure);
+            int firstTrace = current.traceEvents().size();
+            OperationsDailyReport updated = store.update(reportId, report -> {
+                List<OperationsDailyReport.SectionResult> sections = new ArrayList<>(report.sections());
+                sections.set(index, result);
+                List<OperationsDailyReport.EvidenceReference> evidence = sections.stream()
+                        .flatMap(section -> section.evidenceReferences().stream()).toList();
+                List<OperationsDailyReport.SourceReference> sources = sections.stream()
+                        .flatMap(section -> section.sourceReferences().stream()).toList();
+                ExecutionEventType type = result.status() == OperationsReportSectionStatus.COMPLETED
+                        ? ExecutionEventType.STEP_COMPLETED : ExecutionEventType.STEP_FAILED;
+                ExecutionStatus eventStatus = result.status() == OperationsReportSectionStatus.COMPLETED
+                        ? ExecutionStatus.SUCCEEDED : ExecutionStatus.FAILED;
+                String summary = result.status() == OperationsReportSectionStatus.COMPLETED
+                        ? definition.title() + "已完成" : definition.title() + "不可用";
+                return report.copy(OperationsReportStatus.GENERATING, report.startedAt(), null,
+                        latestAsOf(sources), report.summary(), sections, evidence, sources, null,
+                        append(report.traceEvents(), definition.id(), ExecutionStage.ANALYSIS,
+                                type, eventStatus, summary));
+            });
+            publishNew(updated, firstTrace);
+            runSection(reportId, index + 1);
+        } catch (RuntimeException storeFailure) {
+            failReport(reportId, "REPORT_PERSISTENCE_FAILED");
         }
-        List<OperationsDailyReport.SectionResult> sections = new ArrayList<>(current.sections());
-        sections.set(index, result);
-        store.update(current.withSections("RUNNING", clock.instant(), sections));
-        publish(runId, ExecutionStage.ANALYSIS, ExecutionEventType.NODE_COMPLETED,
-                result.status() == OperationsReportSectionStatus.COMPLETED
-                        ? ExecutionStatus.SUCCEEDED : ExecutionStatus.FAILED,
-                section.title());
-        runSection(runId, index + 1);
     }
 
-    private void finishReport(UUID runId, OperationsDailyReport current) {
+    private OperationsDailyReport.SectionResult sectionResult(OperationsReportSection definition,
+                                                               String resolvedQuestion,
+                                                               AnalysisRunStore.RunRecord record,
+                                                               Throwable failure) {
+        if (failure != null || record == null) {
+            return OperationsDailyReport.SectionResult.pending(definition, resolvedQuestion)
+                    .unavailable(SAFE_SECTION_FAILURE);
+        }
+        if (!"COMPLETED".equals(record.status())) {
+            return OperationsDailyReport.SectionResult.pending(definition, resolvedQuestion)
+                    .unavailable(SAFE_SECTION_FAILURE);
+        }
+        Map<String, Object> resolution = timeResolution(record);
+        Instant asOf = observationTime(record);
+        OperationsDailyReport.SourceReference source = new OperationsDailyReport.SourceReference(
+                definition.sourceSystem(), definition.metric(), definition.unit(),
+                record.truncated() ? "PARTIAL" : "AVAILABLE", asOf);
+        OperationsDailyReport.EvidenceReference evidence = new OperationsDailyReport.EvidenceReference(
+                definition.sourceSystem(), definition.metric(), "REPORT_SECTION:" + definition.id(), asOf,
+                record.runId().toString(), "已保存 " + record.rowCount() + " 行生成时结果");
+        return new OperationsDailyReport.SectionResult(definition.id(), definition.title(), resolvedQuestion,
+                OperationsReportSectionStatus.COMPLETED, record.summary(), record.rowCount(), record.truncated(),
+                record.columns(), record.rows(), resolution, List.of(evidence), List.of(source),
+                record.truncated() ? "RESULT_TRUNCATED" : null, null, record.runId());
+    }
+
+    private void finishReport(UUID reportId) {
+        OperationsDailyReport current = store.find(reportId)
+                .orElseThrow(() -> new NoSuchElementException("Unknown operations report"));
         long completed = current.sections().stream()
                 .filter(section -> section.status() == OperationsReportSectionStatus.COMPLETED).count();
-        long failed = current.sections().stream()
-                .filter(section -> section.status() == OperationsReportSectionStatus.FAILED).count();
-        String status = completed == current.sections().size() ? "COMPLETED"
-                : failed == current.sections().size() ? "FAILED" : "PARTIAL";
-        OperationsDailyReport finalReport = store.update(current.withStatus(status, clock.instant()));
-        store.releaseRun();
-        ExecutionStatus eventStatus = "FAILED".equals(status) ? ExecutionStatus.FAILED : ExecutionStatus.SUCCEEDED;
-        ExecutionEventType eventType = "FAILED".equals(status) ? ExecutionEventType.FAILED : ExecutionEventType.COMPLETED;
-        publish(runId, "FAILED".equals(status) ? ExecutionStage.FAILURE : ExecutionStage.COMPLETION,
-                eventType, eventStatus,
-                "PARTIAL".equals(finalReport.status()) ? "运营日报完成，部分章节失败" : "运营日报完成");
+        boolean degraded = current.sections().stream().anyMatch(section -> section.partialReason() != null);
+        OperationsReportStatus status = completed == current.sections().size() && !degraded
+                ? OperationsReportStatus.COMPLETED
+                : completed == 0 ? OperationsReportStatus.FAILED : OperationsReportStatus.PARTIAL;
+        Instant now = clock.instant();
+        String summary = status == OperationsReportStatus.COMPLETED ? "运营日报已基于生成时证据完成"
+                : status == OperationsReportStatus.PARTIAL ? "运营日报部分完成，未完成章节已明确标记"
+                : "运营日报生成失败，没有可用章节";
+        int firstTrace = current.traceEvents().size();
+        OperationsDailyReport terminal;
+        try {
+            terminal = finishReport(reportId, status, now, summary, true);
+        } catch (OperationsReportCapacityException artifactOrReportTooLarge) {
+            try {
+                terminal = finishReport(reportId, status, now,
+                        summary + "；下载文件超出容量限制", false);
+            } catch (OperationsReportCapacityException terminalMetadataTooLarge) {
+                terminal = terminalizeAtCapacity(reportId, status);
+            }
+        }
+        publishNew(terminal, firstTrace);
     }
 
-    private void finishFailure(UUID runId, String stage) {
+    private OperationsDailyReport finishReport(UUID reportId, OperationsReportStatus status,
+                                                Instant now, String summary, boolean includeArtifact) {
+        return store.update(reportId, report -> {
+            ExecutionEventType type = status == OperationsReportStatus.FAILED
+                    ? ExecutionEventType.RUN_FAILED : ExecutionEventType.RUN_COMPLETED;
+            ExecutionStatus traceStatus = status == OperationsReportStatus.FAILED
+                    ? ExecutionStatus.FAILED : ExecutionStatus.SUCCEEDED;
+            List<OperationsReportTraceRecord> trace = append(report.traceEvents(),
+                    OperationsReportTraceRecord.REPORT_ACTOR,
+                    status == OperationsReportStatus.FAILED ? ExecutionStage.FAILURE : ExecutionStage.COMPLETION,
+                    type, traceStatus, summary);
+            OperationsDailyReport provisional = report.copy(status, report.startedAt(), now,
+                    report.asOf(), summary, report.sections(), report.evidence(),
+                    report.sourceReferences(), null, trace);
+            OperationsDailyReport.Artifact artifact = status == OperationsReportStatus.FAILED || !includeArtifact
+                    ? null : renderer.render(provisional, now);
+            return report.copy(status, report.startedAt(), now, provisional.asOf(), summary,
+                    report.sections(), report.evidence(), report.sourceReferences(), artifact, trace);
+        });
+    }
+
+    private void failReport(UUID reportId, String reason) {
+        OperationsDailyReport current = store.find(reportId).orElse(null);
+        if (current == null || current.status().isTerminal()) return;
+        int firstTrace = current.traceEvents().size();
         try {
-            OperationsDailyReport current = get(runId);
-            store.update(current.withStatus("FAILED", clock.instant()));
-        } finally {
-            store.releaseRun();
-            publish(runId, ExecutionStage.FAILURE, ExecutionEventType.FAILED,
-                    ExecutionStatus.FAILED, "运营日报执行失败：" + stage);
+            OperationsDailyReport failed = store.update(reportId, report -> report.copy(
+                    OperationsReportStatus.FAILED, report.startedAt(), clock.instant(), report.asOf(),
+                    "运营日报生成失败", report.sections(), report.evidence(), report.sourceReferences(), null,
+                    append(report.traceEvents(), OperationsReportTraceRecord.REPORT_ACTOR,
+                            ExecutionStage.FAILURE,
+                            ExecutionEventType.RUN_FAILED, ExecutionStatus.FAILED, reason)));
+            publishNew(failed, firstTrace);
+        } catch (OperationsReportCapacityException capacity) {
+            try {
+                OperationsDailyReport failed = terminalizeAtCapacity(reportId, OperationsReportStatus.FAILED);
+                publishNew(failed, firstTrace);
+            } catch (RuntimeException ignored) {
+                // The durable state remains non-terminal only when persistence itself is unavailable.
+            }
+        } catch (RuntimeException ignored) {
+            // The durable state remains non-terminal only when persistence itself is unavailable.
         }
     }
 
-    private static OperationsDailyReport.SectionResult completedSection(
-            OperationsReportSection section, AnalysisRunStore.RunRecord record) {
-        Map<String, Object> timeResolution = record.timeResolution() == null ? Map.of() : Map.of(
-                "status", record.timeResolution().status(),
-                "fromInclusive", record.timeResolution().fromInclusive() == null ? "" : record.timeResolution().fromInclusive().toString(),
-                "toExclusive", record.timeResolution().toExclusive() == null ? "" : record.timeResolution().toExclusive().toString(),
-                "source", record.timeResolution().source(),
-                "explanation", record.timeResolution().explanation(),
-                "empty", record.timeResolution().empty());
-        return new OperationsDailyReport.SectionResult(section.id(), section.title(), section.question(),
-                OperationsReportSectionStatus.COMPLETED, record.summary(), record.rowCount(), record.truncated(),
-                record.columns(), record.rows(), timeResolution, null);
+    private void recoverInterrupted() {
+        for (OperationsDailyReport interrupted : store.nonTerminalReports()) {
+            long completed = interrupted.sections().stream()
+                    .filter(section -> section.status() == OperationsReportSectionStatus.COMPLETED).count();
+            OperationsReportStatus status = completed > 0 ? OperationsReportStatus.PARTIAL : OperationsReportStatus.FAILED;
+            Instant now = clock.instant();
+            OperationsDailyReport recovered;
+            try {
+                recovered = recoverInterrupted(interrupted.reportId(), status, now, true, false);
+            } catch (OperationsReportCapacityException artifactTooLarge) {
+                // A valid structured snapshot must never make startup dependent on whether
+                // its optional Markdown projection fits the smaller artifact byte limit.
+                try {
+                    recovered = recoverInterrupted(interrupted.reportId(), status, now, false, false);
+                } catch (OperationsReportCapacityException reportTooLarge) {
+                    try {
+                        // Preserve section evidence while replacing the verbose in-flight trace
+                        // with one explicit terminal event.
+                        recovered = recoverInterrupted(interrupted.reportId(), status, now, false, true);
+                    } catch (OperationsReportCapacityException stillTooLarge) {
+                        // Last-resort terminalization changes only shrinking fields, so any valid
+                        // persisted non-terminal record can never trap the application in a restart loop.
+                        recovered = terminalizeInterruptedAtCapacity(interrupted.reportId(), status);
+                    }
+                }
+            }
+            hydrate(recovered);
+        }
     }
 
-    private void publish(UUID runId, ExecutionStage stage, ExecutionEventType type,
-                         ExecutionStatus status, String safeSummary) {
-        if (events == null) return;
-        events.publish(new ExecutionEvent(UUID.randomUUID(), runId, 0, clock.instant(),
-                ExecutionScenario.OPERATIONS_ANALYSIS, "operations-report", stage, type, status, safeSummary, null));
+    private OperationsDailyReport recoverInterrupted(UUID reportId, OperationsReportStatus status,
+                                                      Instant now, boolean includeArtifact,
+                                                      boolean compactTrace) {
+        return store.update(reportId, report -> {
+            List<OperationsDailyReport.SectionResult> sections = report.sections().stream().map(section ->
+                    section.status() == OperationsReportSectionStatus.COMPLETED ? section
+                            : section.unavailable("GENERATION_INTERRUPTED")).toList();
+            List<OperationsReportTraceRecord> trace = append(compactTrace ? List.of() : report.traceEvents(),
+                    OperationsReportTraceRecord.REPORT_ACTOR,
+                    ExecutionStage.FAILURE, status == OperationsReportStatus.FAILED
+                            ? ExecutionEventType.RUN_FAILED : ExecutionEventType.RUN_COMPLETED,
+                    status == OperationsReportStatus.FAILED ? ExecutionStatus.FAILED : ExecutionStatus.SUCCEEDED,
+                    compactTrace ? "运营日报生成被服务重启中断；历史追踪因容量限制已压缩"
+                            : "运营日报生成被服务重启中断");
+            String summary = status == OperationsReportStatus.PARTIAL
+                    ? compactTrace ? "报告生成被中断，已保留完成章节；追踪已压缩且无下载文件"
+                    : includeArtifact ? "报告生成被中断，已保留完成章节"
+                            : "报告生成被中断，已保留完成章节；下载文件超出容量限制"
+                    : "报告生成被中断";
+            OperationsDailyReport provisional = report.copy(status, report.startedAt(), now,
+                    report.asOf(), summary, sections,
+                    report.evidence(), report.sourceReferences(), null, trace);
+            OperationsDailyReport.Artifact artifact = status == OperationsReportStatus.PARTIAL && includeArtifact
+                    ? renderer.render(provisional, now) : null;
+            return report.copy(status, report.startedAt(), now, provisional.asOf(), summary,
+                    sections, report.evidence(), report.sourceReferences(), artifact, trace);
+        });
+    }
+
+    private OperationsDailyReport terminalizeAtCapacity(UUID reportId,
+                                                        OperationsReportStatus status) {
+        Instant completedAt = clock.instant();
+        try {
+            return terminalizeAtCapacity(reportId, status, completedAt);
+        } catch (OperationsReportCapacityException completedTimestampTooLarge) {
+            return terminalizeAtCapacity(reportId, status, null);
+        }
+    }
+
+    private OperationsDailyReport terminalizeInterruptedAtCapacity(
+            UUID reportId, OperationsReportStatus status) {
+        try {
+            return terminalizeAtCapacity(reportId, status);
+        } catch (OperationsReportCapacityException loweredLimit) {
+            return store.terminalizeGrandfathered(reportId,
+                    report -> compactTerminal(report, status, null));
+        }
+    }
+
+    private OperationsDailyReport terminalizeAtCapacity(UUID reportId,
+                                                        OperationsReportStatus status,
+                                                        Instant completedAt) {
+        return store.update(reportId, report -> compactTerminal(report, status, completedAt));
+    }
+
+    private OperationsDailyReport compactTerminal(OperationsDailyReport report,
+                                                   OperationsReportStatus status,
+                                                   Instant completedAt) {
+        boolean failed = status == OperationsReportStatus.FAILED;
+        OperationsReportTraceRecord seed = report.traceEvents().isEmpty()
+                ? null : report.traceEvents().get(0);
+        OperationsReportTraceRecord terminalTrace = new OperationsReportTraceRecord(
+                UUID.randomUUID(), 1,
+                seed == null ? clock.instant() : seed.timestamp(),
+                OperationsReportTraceRecord.REPORT_ACTOR,
+                failed ? ExecutionStage.FAILURE : ExecutionStage.COMPLETION,
+                failed ? ExecutionEventType.RUN_FAILED : ExecutionEventType.RUN_COMPLETED,
+                failed ? ExecutionStatus.FAILED : ExecutionStatus.SUCCEEDED, "");
+        return report.copy(status, report.startedAt(), completedAt,
+                report.asOf(), "", report.sections(), report.evidence(), report.sourceReferences(), null,
+                List.of(terminalTrace));
+    }
+
+    private void authorize(OperationsDailyReport report, String role) {
+        String normalized = requireText(role, "role", 30).toUpperCase(Locale.ROOT);
+        if (!"ADMIN".equals(normalized) && !report.role().equals(normalized)) {
+            throw new SecurityException("role is not allowed to read operations report");
+        }
+    }
+
+    private void publishNew(OperationsDailyReport report, int firstTraceIndex) {
+        for (int index = firstTraceIndex; index < report.traceEvents().size(); index++) {
+            OperationsReportTraceRecord trace = report.traceEvents().get(index);
+            ExecutionEvent projection = projection(report, trace);
+            try {
+                events.publish(projection);
+            } catch (IllegalArgumentException | IllegalStateException duplicateOrClosed) {
+                if (events.history(report.traceId()).stream().noneMatch(projection::equals)) throw duplicateOrClosed;
+            }
+        }
+        List<ExecutionEvent> liveHistory = events.history(report.traceId());
+        if (report.status().isTerminal() && !report.traceEvents().isEmpty()
+                && (liveHistory.isEmpty() || !liveHistory.get(liveHistory.size() - 1).isTerminal())) {
+            List<ExecutionEvent> durableHistory = report.traceEvents().stream()
+                    .map(trace -> projection(report, trace)).toList();
+            if (!durableHistory.get(durableHistory.size() - 1).isTerminal()) {
+                throw new IllegalStateException("terminal report has no durable terminal trace event");
+            }
+            events.reconcileTerminalHistory(report.traceId(), durableHistory);
+        }
+    }
+
+    private void hydrate(OperationsDailyReport report) {
+        events.hydrate(report.traceId(), report.traceEvents().stream()
+                .map(trace -> projection(report, trace)).toList());
+    }
+
+    private static ExecutionEvent projection(OperationsDailyReport report, OperationsReportTraceRecord trace) {
+        return trace.toExecutionEvent(report.traceId());
+    }
+
+    private List<OperationsReportTraceRecord> append(List<OperationsReportTraceRecord> current,
+                                                     String actor, ExecutionStage stage,
+                                                     ExecutionEventType type, ExecutionStatus status,
+                                                     String summary) {
+        List<OperationsReportTraceRecord> next = new ArrayList<>(current);
+        next.add(new OperationsReportTraceRecord(UUID.randomUUID(), current.size() + 1L,
+                clock.instant(), actor, stage, type, status, summary));
+        return next;
+    }
+
+    private static Map<String, Object> timeResolution(AnalysisRunStore.RunRecord record) {
+        if (record.timeResolution() == null) return Map.of();
+        Map<String, Object> values = new java.util.LinkedHashMap<>();
+        values.put("status", record.timeResolution().status());
+        values.put("fromInclusive", record.timeResolution().fromInclusive() == null
+                ? "" : record.timeResolution().fromInclusive().toString());
+        values.put("toExclusive", record.timeResolution().toExclusive() == null
+                ? "" : record.timeResolution().toExclusive().toString());
+        values.put("source", record.timeResolution().source());
+        values.put("explanation", record.timeResolution().explanation());
+        values.put("empty", record.timeResolution().empty());
+        return values;
+    }
+
+    private static Instant observationTime(AnalysisRunStore.RunRecord record) {
+        // Aggregate queries do not expose a newest-fact timestamp. Keep the
+        // source-read capture time instead of overstating the requested upper
+        // window bound as measured data freshness.
+        return record.updatedAt();
+    }
+
+    private static Instant latestAsOf(List<OperationsDailyReport.SourceReference> sources) {
+        return sources.stream().map(OperationsDailyReport.SourceReference::asOf).max(Instant::compareTo).orElse(null);
+    }
+
+    private static String fingerprint(OperationsReportRequest request, String role) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            update(digest, "operations-report-request-v1");
+            update(digest, request.reportType());
+            update(digest, role);
+            update(digest, request.timezone());
+            update(digest, request.timeWindow().fromInclusive().toString());
+            update(digest, request.timeWindow().toExclusive().toString());
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 is unavailable", impossible);
+        }
+    }
+
+    private static void update(MessageDigest digest, String value) {
+        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+        digest.update(ByteBuffer.allocate(Integer.BYTES).putInt(bytes.length).array());
+        digest.update(bytes);
+    }
+
+    private static String requireText(String value, String field, int maxLength) {
+        if (value == null || value.isBlank() || value.trim().length() > maxLength) {
+            throw new IllegalArgumentException(field + " is invalid");
+        }
+        return value.trim();
+    }
+
+    public record Page(List<OperationsDailyReport> content, int page, int size, long totalElements,
+                       boolean hasNext) {
+        public Page {
+            content = List.copyOf(content);
+        }
     }
 }

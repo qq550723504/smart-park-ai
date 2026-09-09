@@ -229,7 +229,7 @@ safeSummary / typed displayPayload
 
 `DisplayPayload` 是受控的类型化展示负载：文本、工具调用、专家交接、SQL、图表、音频状态和错误分别使用不同结构。SQL 只发送经过校验的安全版本；音频负载当前只表示状态元数据。事件模型为语音场景提供 `VOICE` 和音频事件枚举；语音 Session、WebSocket 和前端语音入口只有在对应能力开关与预检通过后才进入可演示目录。
 
- Vue 3 控制台按场景切换页面：告警工作流、园区客服、AI 智能协同中心、专家协作、运营分析、停车与能耗运营看板和治理中心；协同中心读取应用层 `CollaborationWorkItem` 安全投影，聚合告警工作流与客服工单但不合并两个领域模型。协同中心的详情抽屉展示来源、位置、状态、安全摘要、时间和演示 SLA 元数据，并在告警 `WAITING_APPROVAL` 时复用现有审批接口，在客服可推进状态时复用现有工单状态接口；`APPROVER`/`ADMIN` 可审批告警，`CUSTOMER_AGENT`/`ADMIN` 可推进客服工单。演示 SLA 使用固定策略（高优先级告警 30 分钟、普通告警 2 小时、客服工单 4 小时），不代表生产调度承诺。协同中心趋势使用应用层内存会话采样（30 秒间隔、最多 120 点），不代表持久化历史报表。点击条目后仍可回到原场景处理。看板点击问题后切换到运营分析页并复用同一只读查询链路；看板还可手动启动会话级运营日报，固定顺序编排能耗基线偏差、停车利用率和高风险告警三个章节，章节失败后继续后续章节并以 `PARTIAL` 收束。日报存储有界且仅保留进程内会话快照。运营看板另外通过 `OperationsAnomalyService` 调用三个独立的只读分析 reader，从 `analytics.v_alert_fact`、`analytics.v_device_snapshot` 和 `analytics.v_energy_hourly` 分域取数，再在应用层按 `buildingId` 合并成异常雷达；不扩展告警/设备/能耗业务端口，也不执行跨域 SQL Join。点击楼宇后打开安全 DTO 证据链抽屉；告警、设备、能耗无法读取时以 `domainStatus` 局部降级，不将失败伪装为零。右侧统一执行轨迹栏为告警、客服、专家协作、运营分析、运营日报和证据链中已关联的运行通过 `runId` 订阅后端事件；没有服务端运行编号时不生成虚假轨迹。客服 API 先从 `X-Execution-Run-Id` 取得运行编号，再重放完整安全轨迹。治理中心读取安全聚合快照，管理员可额外查看审计明细。`X-Demo-Role` 用于本地演示查看者、操作员、审批人、客服坐席和管理员的 UI/API 操作边界，不是生产身份系统。
+ Vue 3 控制台按场景切换页面：告警工作流、园区客服、AI 智能协同中心、专家协作、运营分析、停车与能耗运营看板和治理中心；协同中心读取应用层 `CollaborationWorkItem` 安全投影，聚合告警工作流与客服工单但不合并两个领域模型。协同中心的详情抽屉展示来源、位置、状态、安全摘要、时间和演示 SLA 元数据，并在告警 `WAITING_APPROVAL` 时复用现有审批接口，在客服可推进状态时复用现有工单状态接口；`APPROVER`/`ADMIN` 可审批告警，`CUSTOMER_AGENT`/`ADMIN` 可推进客服工单。演示 SLA 使用固定策略（高优先级告警 30 分钟、普通告警 2 小时、客服工单 4 小时），不代表生产调度承诺。协同中心趋势使用应用层内存会话采样（30 秒间隔、最多 120 点），不代表持久化历史报表。点击条目后仍可回到原场景处理。看板点击问题后切换到运营分析页并复用同一只读查询链路；看板还可手动启动可恢复运营日报，固定顺序编排能耗基线偏差、停车利用率和高风险告警三个章节，章节失败后继续后续章节并以 `PARTIAL` 收束。日报使用有界原子文件存储保存结构化生成时快照、证据、轨迹和 Markdown artifact，支持刷新及单实例重启后的历史查询与下载。运营看板另外通过 `OperationsAnomalyService` 调用三个独立的只读分析 reader，从 `analytics.v_alert_fact`、`analytics.v_device_snapshot` 和 `analytics.v_energy_hourly` 分域取数，再在应用层按 `buildingId` 合并成异常雷达；不扩展告警/设备/能耗业务端口，也不执行跨域 SQL Join。点击楼宇后打开安全 DTO 证据链抽屉；告警、设备、能耗无法读取时以 `domainStatus` 局部降级，不将失败伪装为零。右侧统一执行轨迹栏为告警、客服、专家协作、运营分析、运营日报和证据链中已关联的运行通过 `runId` 订阅后端事件；没有服务端运行编号时不生成虚假轨迹。客服 API 先从 `X-Execution-Run-Id` 取得运行编号，再重放完整安全轨迹。治理中心读取安全聚合快照，管理员可额外查看审计明细。`X-Demo-Role` 用于本地演示查看者、操作员、审批人、客服坐席和管理员的 UI/API 操作边界，不是生产身份系统。
 
 ## 7. 知识、审计、反馈和 MCP
 
@@ -286,8 +286,10 @@ MCP 不提供知识正文、身份数据、工作流变更、工单写入、设�
 | `POST` | `/api/operations-analysis/runs` | 发起自然语言运营分析 |
 | `POST` | `/api/operations-analysis/runs/{runId}/clarifications` | 提交指标口径澄清 |
 | `GET` | `/api/operations-analysis/runs/{runId}` | 查询运营分析状态和结果 |
-| `POST` | `/api/operations-reports/runs` | 手动启动固定三章节运营日报；需要 `OPERATOR` 或 `ADMIN`，请求体必须为空对象 |
-| `GET` | `/api/operations-reports/runs/{runId}` | 查询会话级运营日报安全快照；需要 `OPERATOR` 或 `ADMIN` |
+| `POST` | `/api/operations-reports` | 幂等启动固定三章节运营日报；需要 `OPERATOR` 或 `ADMIN` 及 `Idempotency-Key` |
+| `GET` | `/api/operations-reports` | 按类型、状态、创建时间分页查询持久化报告历史 |
+| `GET` | `/api/operations-reports/{reportId}` | 读取不可变的生成时结构化快照，不重新查询 Analytics |
+| `GET` | `/api/operations-reports/{reportId}/download` | 下载同一持久化快照对应的 Markdown artifact |
 | `GET` | `/api/executions/{runId}` | 查询统一执行运行摘要 |
 | `GET` | `/api/executions/{runId}/events` | 订阅统一执行 SSE |
 
@@ -309,11 +311,11 @@ MCP 不提供知识正文、身份数据、工作流变更、工单写入、设�
 
 ### 10.1 当前存储
 
-当前实现的工作流快照、Graph checkpoint、统一执行事件、客服会话/工单、专家协作运行、运营日报和反馈审计主要是进程内存储。RAG 使用进程内 `SimpleVectorStore`；运营分析的事实数据可来自独立 PostgreSQL，但分析运行状态和日报快照本身仍由进程内 Store 管理。日报最多保留 10 个终态快照、终态保留 30 分钟，并限制同一进程同时只有一个日报编排运行；服务重启后清空。
+当前实现的工作流快照、Graph checkpoint、统一执行事件、客服会话/工单、专家协作运行和反馈审计主要是进程内存储。RAG 使用进程内 `SimpleVectorStore`；运营分析的事实数据来自独立只读 PostgreSQL。运营日报是例外：它使用有界原子 JSON file store 保存结构化生成时快照、证据元数据、durable trace 和 Markdown artifact，Compose 通过独立 named volume 保持重启恢复；默认最多保留 200 份、同时生成 1 份，并分别限制报告与 artifact 大小。报告读取与分析开关解耦：分析关闭时仍可查阅和下载历史，只拒绝新生成。详见 `docs/operations-reporting.md`。
 
-运营日报当前明确是手动、只读、会话级展示能力。生产化的定时生成、历史报表持久化、邮件/消息通知、跨实例一致性或面向设备与工单的联动，都需要单独的数据模型、权限和可靠性设计，不能由当前内存快照直接推导。
+运营日报当前明确是手动、只读、单实例展示能力；历史查询与下载来自生成时不可变快照。生产化的定时生成、邮件/消息通知、跨实例一致性或面向设备与工单的联动，仍需要单独的数据模型、权限和可靠性设计，不能由当前文件存储直接推导。
 
-因此当前版本适合单进程演示和测试，不保证重启恢复、跨实例幂等或多实例事件一致性。
+因此当前版本适合单进程演示和测试。运营日报保证单实例正常重启后的恢复与幂等；整个系统仍不保证跨实例幂等或多实例事件一致性。
 
 ### 10.2 主要配置
 
