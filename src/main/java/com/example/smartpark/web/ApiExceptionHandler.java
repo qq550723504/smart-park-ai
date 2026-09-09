@@ -2,6 +2,8 @@ package com.example.smartpark.web;
 
 import com.example.smartpark.analytics.anomaly.OperationsAnomalyService;
 import com.example.smartpark.analytics.energy.EnergyTimeSeriesService;
+import com.example.smartpark.analytics.health.DeviceHealthService;
+import com.example.smartpark.analytics.telemetry.DeviceTelemetryService;
 import com.example.smartpark.execution.ExecutionEventCapacityException;
 import com.example.smartpark.orchestration.OrchestrationCapacityException;
 import com.example.smartpark.workflow.CustomerServiceValidationException;
@@ -68,6 +70,18 @@ public class ApiExceptionHandler {
     ResponseEntity<WebDtos.ApiError> energyTimeSeriesUnavailable(
             EnergyTimeSeriesService.EnergyTimeSeriesUnavailableException exception) {
         return error(HttpStatus.SERVICE_UNAVAILABLE, "能耗时序暂不可用");
+    }
+
+    @ExceptionHandler(DeviceTelemetryService.TelemetryUnavailableException.class)
+    ResponseEntity<WebDtos.ApiError> telemetryUnavailable(
+            DeviceTelemetryService.TelemetryUnavailableException exception) {
+        return error(HttpStatus.SERVICE_UNAVAILABLE, "设备遥测暂不可用");
+    }
+
+    @ExceptionHandler(DeviceHealthService.DeviceHealthUnavailableException.class)
+    ResponseEntity<WebDtos.ApiError> deviceHealthUnavailable(
+            DeviceHealthService.DeviceHealthUnavailableException exception) {
+        return error(HttpStatus.SERVICE_UNAVAILABLE, "设备健康暂不可用");
     }
 
     @ExceptionHandler(java.util.concurrent.RejectedExecutionException.class)

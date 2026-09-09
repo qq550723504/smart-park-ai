@@ -7,6 +7,11 @@ import com.example.smartpark.analytics.anomaly.OperationsAnomalyService;
 import com.example.smartpark.analytics.energy.EnergyTimeSeriesDtos;
 import com.example.smartpark.analytics.energy.EnergyTimeSeriesQuery;
 import com.example.smartpark.analytics.energy.EnergyTimeSeriesService;
+import com.example.smartpark.analytics.health.DeviceHealthDtos;
+import com.example.smartpark.analytics.health.DeviceHealthService;
+import com.example.smartpark.analytics.telemetry.DeviceTelemetryDtos;
+import com.example.smartpark.analytics.telemetry.DeviceTelemetryQuery;
+import com.example.smartpark.analytics.telemetry.DeviceTelemetryService;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -27,17 +32,23 @@ public class OperationsController {
     private final OperationsMetrics metrics;
     private final OperationsAnomalyService anomalyService;
     private final EnergyTimeSeriesService energyTimeSeriesService;
+    private final DeviceTelemetryService deviceTelemetryService;
+    private final DeviceHealthService deviceHealthService;
 
     public OperationsController(OperationsMetrics metrics) {
         this.metrics = Objects.requireNonNull(metrics, "metrics");
         this.anomalyService = null;
         this.energyTimeSeriesService = null;
+        this.deviceTelemetryService = null;
+        this.deviceHealthService = null;
     }
 
     OperationsController(OperationsMetrics metrics, OperationsAnomalyService anomalyService) {
         this.metrics = Objects.requireNonNull(metrics, "metrics");
         this.anomalyService = Objects.requireNonNull(anomalyService, "anomalyService");
         this.energyTimeSeriesService = null;
+        this.deviceTelemetryService = null;
+        this.deviceHealthService = null;
     }
 
     OperationsController(OperationsMetrics metrics, OperationsAnomalyService anomalyService,
@@ -45,15 +56,21 @@ public class OperationsController {
         this.metrics = Objects.requireNonNull(metrics, "metrics");
         this.anomalyService = Objects.requireNonNull(anomalyService, "anomalyService");
         this.energyTimeSeriesService = Objects.requireNonNull(energyTimeSeriesService, "energyTimeSeriesService");
+        this.deviceTelemetryService = null;
+        this.deviceHealthService = null;
     }
 
     @Autowired
     public OperationsController(OperationsMetrics metrics,
                                 ObjectProvider<OperationsAnomalyService> anomalyService,
-                                ObjectProvider<EnergyTimeSeriesService> energyTimeSeriesService) {
+                                ObjectProvider<EnergyTimeSeriesService> energyTimeSeriesService,
+                                ObjectProvider<DeviceTelemetryService> deviceTelemetryService,
+                                ObjectProvider<DeviceHealthService> deviceHealthService) {
         this.metrics = Objects.requireNonNull(metrics, "metrics");
         this.anomalyService = anomalyService.getIfAvailable();
         this.energyTimeSeriesService = energyTimeSeriesService.getIfAvailable();
+        this.deviceTelemetryService = deviceTelemetryService.getIfAvailable();
+        this.deviceHealthService = deviceHealthService.getIfAvailable();
     }
 
     @GetMapping("/metrics")
@@ -104,6 +121,27 @@ public class OperationsController {
                 parseInstant(from), parseInstant(to), parseGranularity(granularity)));
     }
 
+    @GetMapping("/device-telemetry")
+    public DeviceTelemetryDtos.Response deviceTelemetry(
+            @RequestHeader(value = "X-Demo-Role", required = false) String role,
+            @RequestParam String telemetryType,
+            @RequestParam List<String> deviceIds,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to,
+            @RequestParam(defaultValue = "HOUR") String granularity) {
+        DemoRole.require(role, DemoRole.VIEWER, DemoRole.OPERATOR, DemoRole.APPROVER, DemoRole.ADMIN);
+        return requireDeviceTelemetryService().query(new DeviceTelemetryQuery(telemetryType, deviceIds,
+                parseInstant(from), parseInstant(to), parseTelemetryGranularity(granularity)));
+    }
+
+    @GetMapping("/device-health/{deviceId}")
+    public DeviceHealthDtos.Response deviceHealth(
+            @RequestHeader(value = "X-Demo-Role", required = false) String role,
+            @PathVariable String deviceId) {
+        DemoRole.require(role, DemoRole.VIEWER, DemoRole.OPERATOR, DemoRole.APPROVER, DemoRole.ADMIN);
+        return requireDeviceHealthService().assess(deviceId);
+    }
+
     private OperationsAnomalyService requireAnomalyService() {
         if (anomalyService == null) throw new OperationsAnomalyService.AnomalyOverviewUnavailableException("运营异常分析未启用");
         return anomalyService;
@@ -116,9 +154,31 @@ public class OperationsController {
         return energyTimeSeriesService;
     }
 
+    private DeviceTelemetryService requireDeviceTelemetryService() {
+        if (deviceTelemetryService == null) {
+            throw new DeviceTelemetryService.TelemetryUnavailableException("设备遥测未启用");
+        }
+        return deviceTelemetryService;
+    }
+
+    private DeviceHealthService requireDeviceHealthService() {
+        if (deviceHealthService == null) {
+            throw new DeviceHealthService.DeviceHealthUnavailableException("设备健康未启用");
+        }
+        return deviceHealthService;
+    }
+
     private static EnergyTimeSeriesQuery.Granularity parseGranularity(String raw) {
         try {
             return EnergyTimeSeriesQuery.Granularity.valueOf(raw.trim().toUpperCase(Locale.ROOT));
+        } catch (RuntimeException exception) {
+            throw new IllegalArgumentException("粒度参数无效");
+        }
+    }
+
+    private static DeviceTelemetryQuery.Granularity parseTelemetryGranularity(String raw) {
+        try {
+            return DeviceTelemetryQuery.Granularity.valueOf(raw.trim().toUpperCase(Locale.ROOT));
         } catch (RuntimeException exception) {
             throw new IllegalArgumentException("粒度参数无效");
         }
