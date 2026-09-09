@@ -135,16 +135,19 @@ async function loadWorkItems(generation: number): Promise<void> {
 async function refresh(): Promise<void> {
   if (!props.active) return
   const generation = ++requestGeneration
+  const preferredBuildingId = selectedBuildingId.value
   evidenceGeneration++
   loading.value = true
   energyLoading.value = false
   metricsLoading.value = true
   workItemsLoading.value = true
   detailLoading.value = false
+  overview.value = null
   energy.value = null
   metrics.value = null
   workItems.value = []
   evidence.value = null
+  selectedBuildingId.value = null
   errors.value = { overview: '', energy: '', metrics: '', workItems: '', evidence: '' }
   void loadMetrics(generation)
   void loadWorkItems(generation)
@@ -155,8 +158,8 @@ async function refresh(): Promise<void> {
     overview.value = nextOverview
     const ids = Object.keys(buildingCatalog)
     const affectedIds = overview.value.buildings.map((building) => building.buildingId)
-    selectedBuildingId.value = selectedBuildingId.value && affectedIds.includes(selectedBuildingId.value)
-      ? selectedBuildingId.value
+    selectedBuildingId.value = preferredBuildingId && affectedIds.includes(preferredBuildingId)
+      ? preferredBuildingId
       : affectedIds[0] ?? null
     if (selectedBuildingId.value) void loadEvidence(selectedBuildingId.value, generation)
     if (ids.length > 0) {
@@ -254,11 +257,11 @@ const latestEvents = computed(() => [
 ]
   .sort((left, right) => recordTimestamp(right) - recordTimestamp(left))
   .slice(0, 5))
-const emptyEvidenceMessage = computed(() => {
-  if (!evidence.value || latestEvents.value.length > 0) return ''
+const evidenceAvailabilityMessage = computed(() => {
+  if (!evidence.value) return ''
   const statuses = Object.values(evidence.value.domainStatus)
-  if (statuses.some((status) => status === 'UNAVAILABLE')) return '部分事件数据暂不可用，无法确认当前楼宇暂无记录'
-  if (statuses.some((status) => status === 'PARTIAL')) return '事件数据仅部分可用，当前未取得事件记录'
+  if (statuses.some((status) => status === 'UNAVAILABLE')) return '部分事件数据暂不可用，当前列表可能不完整'
+  if (statuses.some((status) => status === 'PARTIAL')) return '事件数据仅部分可用，当前列表可能不完整'
   return ''
 })
 
@@ -457,7 +460,7 @@ watch(() => props.active, (active) => {
         <header><div><h2>最新事件</h2><small>{{ selectedBuildingId ? `${buildingName(selectedBuildingId)} · 同一业务窗口` : '选择楼宇后查看' }}</small></div></header>
         <p v-if="detailLoading" class="customer-state is-compact">正在读取楼宇事件…</p>
         <p v-else-if="errors.evidence" class="customer-state is-compact">{{ errors.evidence }}</p>
-        <p v-else-if="emptyEvidenceMessage" class="customer-state is-compact">{{ emptyEvidenceMessage }}</p>
+        <p v-else-if="evidenceAvailabilityMessage" class="customer-state is-compact">{{ evidenceAvailabilityMessage }}</p>
         <p v-else-if="latestEvents.length === 0" class="customer-state is-compact">当前楼宇暂无事件记录</p>
         <div v-for="(event, index) in latestEvents" :key="recordKey(event, index)" :data-event-key="recordKey(event, index)" class="customer-latest__row">
           <span><WarningFilled v-if="event.riskLevel === 'HIGH'" aria-hidden="true" /><DataLine v-else aria-hidden="true" /></span>

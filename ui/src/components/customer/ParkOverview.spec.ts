@@ -180,6 +180,24 @@ describe('ParkOverview', () => {
     expect(wrapper.get('[data-kpi="energy"] strong').text()).toContain('100')
   })
 
+  it('hides the previous overview while a refreshed overview request is pending', async () => {
+    const wrapper = await mountLoaded()
+    expect(wrapper.get('[data-kpi="buildings"] strong').text()).toContain('2')
+
+    const pendingOverview = deferred<AnomalyOverview>()
+    vi.mocked(getAnomalyOverview).mockReturnValueOnce(pendingOverview.promise)
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+    await vi.waitFor(() => expect(getAnomalyOverview).toHaveBeenCalledTimes(2))
+
+    expect(wrapper.get('[data-kpi="buildings"] strong').text()).toContain('—')
+    expect(wrapper.text()).toContain('正在读取园区运营数据…')
+    expect(wrapper.find('[data-building-id="B1"]').exists()).toBe(false)
+
+    pendingOverview.resolve(overview)
+    await flushPromises()
+  })
+
   it('renders overview and energy while an independent work-item request is still pending', async () => {
     const pendingWorkItems = deferred<CollaborationWorkItem[]>()
     vi.mocked(listCollaborationWorkItems).mockReturnValue(pendingWorkItems.promise)
@@ -255,8 +273,22 @@ describe('ParkOverview', () => {
 
     const wrapper = await mountLoaded()
 
-    expect(wrapper.text()).toContain('部分事件数据暂不可用，无法确认当前楼宇暂无记录')
+    expect(wrapper.text()).toContain('部分事件数据暂不可用，当前列表可能不完整')
     expect(wrapper.text()).not.toContain('当前楼宇暂无事件记录')
+  })
+
+  it('keeps the partial-evidence notice visible alongside available rows', async () => {
+    vi.mocked(getAnomalyEvidence).mockResolvedValue({
+      ...evidence,
+      domainStatus: { alerts: 'UNAVAILABLE', devices: 'OK', energy: 'OK' },
+      alerts: [],
+      devices: [{ deviceId: 'DEV-2', snapshotAt: '2026-09-08T23:00:00Z', redactedSummary: '可用设备证据' }],
+    })
+
+    const wrapper = await mountLoaded()
+
+    expect(wrapper.text()).toContain('部分事件数据暂不可用，当前列表可能不完整')
+    expect(wrapper.text()).toContain('可用设备证据')
   })
 
   it('uses the observation time to keep repeated meter evidence keys unique', async () => {

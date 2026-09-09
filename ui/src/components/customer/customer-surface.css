@@ -168,7 +168,7 @@
   .customer-shell__topbar { gap: 8px; }
   .customer-shell__divider, .customer-shell__park, .customer-shell__workbench > svg { display: none; }
   .customer-shell__user-zone { margin-left: auto; }
-  .customer-shell__nav { justify-content: flex-start; overflow-x: auto; }
+  .customer-shell__nav { justify-content: flex-start; min-width: 0; max-width: 100%; overflow-x: auto; }
   .customer-shell__nav button, .customer-shell__nav > span { flex: none; min-width: auto; padding: 0 12px; }
   .customer-shell__hero { min-height: 112px; padding: 18px; }
   .customer-shell__hero h1 { font-size: 21px; }
