@@ -1,0 +1,481 @@
+<script setup lang="ts">
+import { computed, ref, watch } from 'vue'
+import { ArrowLeft, Calendar, Checked, DataAnalysis, DocumentChecked, Refresh, WarningFilled } from '@element-plus/icons-vue'
+import campusBanner from '../../assets/customer/campus-banner.png'
+import campusBanner960 from '../../assets/customer/campus-banner-960.webp'
+import campusBanner1440 from '../../assets/customer/campus-banner-1440.webp'
+import campusBanner2172 from '../../assets/customer/campus-banner-2172.webp'
+import { useOperationsAnalysis } from '../../composables/useOperationsAnalysis'
+import { getEnergyTimeSeries } from '../../services/energyTimeSeriesApi'
+import { getAnomalyEvidence } from '../../services/operationsAnomalyApi'
+import type { CustomerAnalysisContext } from '../../types/customer'
+import type { EnergyTimeSeriesFilters, EnergyTimeSeriesResponse } from '../../types/energyTimeSeries'
+import type { AnomalyEvidence } from '../../types/operationsAnomaly'
+import EnergyAnalysisChart, { type EnergyAnalysisPoint } from './EnergyAnalysisChart.vue'
+
+const props = withDefaults(defineProps<{
+  context: CustomerAnalysisContext | null
+  active?: boolean
+  analysisPollIntervalMs?: number
+}>(), { active: true })
+
+const emit = defineEmits<{ back: [] }>()
+const actual = ref<EnergyTimeSeriesResponse | null>(null)
+const baseline = ref<EnergyTimeSeriesResponse | null>(null)
+const evidence = ref<AnomalyEvidence | null>(null)
+const loading = ref(false)
+const errors = ref({ actual: '', baseline: '', evidence: '' })
+const analysis = useOperationsAnalysis({
+  ...(props.analysisPollIntervalMs != null ? { pollIntervalMs: props.analysisPollIntervalMs } : {}),
+})
+const clarificationSelections = ref<string[]>([])
+let requestGeneration = 0
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function textValue(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null
+}
+
+function formatNumber(value: number | null | undefined, digits = 1): string {
+  return value == null || !Number.isFinite(value)
+    ? '—'
+    : value.toLocaleString('zh-CN', { maximumFractionDigits: digits })
+}
+
+function formatTime(value: string | null | undefined, timezone = props.context?.anomalyWindow.timezone ?? 'Asia/Shanghai'): string {
+  if (!value) return '时间未知'
+  const date = new Date(value)
+  if (Number.isNaN(date.valueOf())) return '时间未知'
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: timezone,
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date)
+}
+
+function formatWindow(from: string, to: string, timezone: string): string {
+  return `${formatTime(from, timezone)} 至 ${formatTime(to, timezone)}`
+}
+
+function sameInstant(left: string, right: string): boolean {
+  const leftTime = Date.parse(left)
+  const rightTime = Date.parse(right)
+  return Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime === rightTime
+}
+
+function matchesEnergyContext(
+  response: EnergyTimeSeriesResponse,
+  context: CustomerAnalysisContext,
+  metric: string,
+): boolean {
+  return response.metric === metric
+    && response.source.system === context.source
+    && response.source.metricDefinition === metric
+    && response.source.status === response.status
+    && sameInstant(response.window.from, context.energyWindow.from)
+    && sameInstant(response.window.to, context.energyWindow.to)
+    && response.window.granularity === context.energyWindow.granularity
+    && response.timezone === context.energyWindow.timezone
+    && (response.status === 'UNAVAILABLE'
+      || response.series.every((item) => item.buildingId === context.buildingId))
+}
+
+async function refresh(): Promise<void> {
+  const context = props.context
+  if (!props.active || !context) return
+  const generation = ++requestGeneration
+  loading.value = true
+  actual.value = null
+  baseline.value = null
+  evidence.value = null
+  errors.value = { actual: '', baseline: '', evidence: '' }
+
+  const filters: EnergyTimeSeriesFilters = {
+    buildingIds: [context.buildingId],
+    from: context.energyWindow.from,
+    to: context.energyWindow.to,
+    granularity: context.energyWindow.granularity,
+  }
+  const [actualResult, baselineResult, evidenceResult] = await Promise.allSettled([
+    getEnergyTimeSeries('VIEWER', { ...filters, metric: 'energy_kwh' }),
+    getEnergyTimeSeries('VIEWER', { ...filters, metric: 'energy_baseline_kwh' }),
+    getAnomalyEvidence('VIEWER', context.buildingId, {
+      from: context.anomalyWindow.from,
+      to: context.anomalyWindow.to,
+    }),
+  ])
+  if (generation !== requestGeneration || props.context?.buildingId !== context.buildingId) return
+
+  if (actualResult.status === 'fulfilled') {
+    if (matchesEnergyContext(actualResult.value, context, 'energy_kwh')) {
+      actual.value = actualResult.value
+      if (actualResult.value.status === 'UNAVAILABLE') errors.value.actual = '该楼宇实际用电暂不可用。'
+    } else {
+      errors.value.actual = '实际用电返回范围与当前选择不一致。'
+    }
+  } else {
+    errors.value.actual = '该楼宇实际用电读取失败。'
+  }
+  if (baselineResult.status === 'fulfilled') {
+    if (matchesEnergyContext(baselineResult.value, context, 'energy_baseline_kwh')) {
+      baseline.value = baselineResult.value
+      if (baselineResult.value.status === 'UNAVAILABLE') errors.value.baseline = '该楼宇基线用电暂不可用。'
+    } else {
+      errors.value.baseline = '基线用电返回范围与当前选择不一致。'
+    }
+  } else {
+    errors.value.baseline = '该楼宇基线用电读取失败。'
+  }
+  if (evidenceResult.status === 'fulfilled'
+    && evidenceResult.value.buildingId === context.buildingId
+    && sameInstant(evidenceResult.value.window.from, context.anomalyWindow.from)
+    && sameInstant(evidenceResult.value.window.to, context.anomalyWindow.to)
+    && evidenceResult.value.window.timezone === context.anomalyWindow.timezone) {
+    evidence.value = evidenceResult.value
+  } else if (evidenceResult.status === 'fulfilled') {
+    errors.value.evidence = '告警与设备依据返回范围与当前选择不一致。'
+  } else {
+    errors.value.evidence = '该楼宇的告警与设备依据读取失败。'
+  }
+  loading.value = false
+}
+
+const chartPoints = computed<EnergyAnalysisPoint[]>(() => {
+  const actualSeries = actual.value?.series.find((item) => item.buildingId === props.context?.buildingId)
+  const baselineSeries = baseline.value?.series.find((item) => item.buildingId === props.context?.buildingId)
+  const timestamps = new Set<string>()
+  actualSeries?.points.forEach((point) => timestamps.add(point.timestamp))
+  actualSeries?.missingTimestamps.forEach((timestamp) => timestamps.add(timestamp))
+  baselineSeries?.points.forEach((point) => timestamps.add(point.timestamp))
+  baselineSeries?.missingTimestamps.forEach((timestamp) => timestamps.add(timestamp))
+  const actualByTime = new Map(actualSeries?.points.map((point) => [point.timestamp, point.value]) ?? [])
+  const baselineByTime = new Map(baselineSeries?.points.map((point) => [point.timestamp, point.value]) ?? [])
+  return [...timestamps]
+    .sort((left, right) => Date.parse(left) - Date.parse(right))
+    .map((timestamp) => ({
+      timestamp,
+      actual: actualByTime.get(timestamp) ?? null,
+      baseline: baselineByTime.get(timestamp) ?? null,
+    }))
+})
+
+const actualSeries = computed(() => actual.value?.series.find((item) => item.buildingId === props.context?.buildingId) ?? null)
+const baselineSeries = computed(() => baseline.value?.series.find((item) => item.buildingId === props.context?.buildingId) ?? null)
+const actualTotal = computed(() => actual.value?.status === 'UNAVAILABLE'
+  ? null
+  : actualSeries.value?.points.reduce((sum, point) => sum + point.value, 0) ?? null)
+const baselineTotal = computed(() => baseline.value?.status === 'UNAVAILABLE'
+  ? null
+  : baselineSeries.value?.points.reduce((sum, point) => sum + point.value, 0) ?? null)
+const hasUnmatchedBuckets = computed(() => chartPoints.value.some((point) => point.actual == null || point.baseline == null))
+const energyWindowDeviation = computed(() => {
+  if (actual.value?.status !== 'AVAILABLE' || baseline.value?.status !== 'AVAILABLE'
+    || hasUnmatchedBuckets.value || baselineTotal.value == null || baselineTotal.value === 0 || actualTotal.value == null) return null
+  return (actualTotal.value - baselineTotal.value) * 100 / baselineTotal.value
+})
+const incompleteEnergy = computed(() => actual.value?.status === 'PARTIAL' || baseline.value?.status === 'PARTIAL')
+const chartStatus = computed(() => {
+  if (loading.value) return '正在读取单楼宇小时数据…'
+  if (errors.value.actual && errors.value.baseline) return `${errors.value.actual} ${errors.value.baseline} 未绘制曲线。`
+  if (errors.value.actual) return `${errors.value.actual} 仅展示可用基线，不形成偏差结论。`
+  if (errors.value.baseline) return `${errors.value.baseline} 仅展示实际用电，不绘制正常范围。`
+  if (incompleteEnergy.value || hasUnmatchedBuckets.value) return '部分小时缺失，曲线保留断点，窗口偏差不作完整结论。'
+  return '实际用电与基线来自同一楼宇、同一小时窗口。'
+})
+
+const observation = computed(() => {
+  const context = props.context
+  if (!context) return '请先从园区总览选择一个楼宇。'
+  const facts: string[] = []
+  const deviation = context.summary?.energyDeviationPct
+  if (deviation != null) {
+    facts.push(`${context.buildingName}在异常总览窗口内的能耗较基线${deviation >= 0 ? '高' : '低'} ${formatNumber(Math.abs(deviation))}%`)
+  } else {
+    facts.push(`${context.buildingName}当前缺少可用的总览基线偏差`)
+  }
+  if (context.summary) {
+    facts.push(`同期记录未处理告警 ${context.summary.alertCount} 条、离线设备 ${context.summary.offlineDeviceCount} 台`)
+  }
+  return `${facts.join('；')}。这是基于受治理事实的运营观察，不是模型生成的原因判断。`
+})
+
+const analysisSummary = computed(() => analysis.dto.value?.status === 'COMPLETED'
+  ? analysis.dto.value.summary?.trim() || '本次模型分析已完成，但未返回可展示的结论摘要。'
+  : null)
+const safeAnalysisError = computed(() => analysis.error.value
+  ? '模型或分析接口暂不可用，请稍后重试'
+  : '本次分析未完成')
+
+const causes = computed(() => {
+  const rows: string[] = []
+  const summary = props.context?.summary
+  if (summary?.energyDeviationPct != null && summary.energyDeviationPct > 0) {
+    rows.push('用电高于基线的时段与现场运行计划是否一致，仍需人工核查。')
+  }
+  if ((summary?.offlineDeviceCount ?? 0) > 0) {
+    rows.push('离线设备与能耗变化是否相关尚未确认，应先核对设备状态和采集完整性。')
+  }
+  const categories = [...new Set((evidence.value?.alerts ?? []).map((item) => textValue(item.category)).filter((item): item is string => item != null))]
+  if (categories.length) rows.push(`窗口内存在 ${categories.join('、')} 类告警；它们是关联线索，不等同于已确认故障原因。`)
+  if (!rows.length) rows.push('现有事实不足以确认具体原因，暂不推断设备故障或运行违规。')
+  return rows
+})
+
+const suggestions = computed(() => {
+  const rows = ['按异常窗口核对楼宇运行计划与实际启停记录，保留人工确认。']
+  if ((props.context?.summary?.offlineDeviceCount ?? 0) > 0) rows.push('先恢复或核验离线设备的数据采集，再判断能耗变化。')
+  if ((props.context?.summary?.alertCount ?? 0) > 0) rows.push('逐条核对关联告警及现场情况，不把关联性直接写成故障结论。')
+  rows.push('在后续小时持续观察实际用电与基线；当前页面不会执行能源控制。')
+  return rows
+})
+
+interface RelatedDeviceRow {
+  id: string
+  kind: string
+  status: string
+  observedAt: string | null
+  reading: string
+}
+
+const relatedDevices = computed<RelatedDeviceRow[]>(() => {
+  const rows = new Map<string, RelatedDeviceRow>()
+  for (const item of evidence.value?.devices ?? []) {
+    const id = textValue(item.deviceId)
+    if (!id) continue
+    rows.set(id, {
+      id,
+      kind: textValue(item.deviceType) ?? '设备类型未知',
+      status: textValue(item.status) === 'OFFLINE' ? '离线' : '状态未知',
+      observedAt: textValue(item.snapshotAt),
+      reading: '未提供设备级用电',
+    })
+  }
+  for (const item of evidence.value?.alerts ?? []) {
+    const id = textValue(item.deviceId)
+    if (!id || rows.has(id)) continue
+    rows.set(id, {
+      id,
+      kind: '告警关联设备',
+      status: '设备状态未提供',
+      observedAt: textValue(item.occurredAt),
+      reading: `关联${textValue(item.category) ?? '类别未知'}告警`,
+    })
+  }
+  for (const item of evidence.value?.energy ?? []) {
+    const id = textValue(item.meterId)
+    if (!id) continue
+    const kwh = finiteNumber(item.kwh)
+    rows.set(id, {
+      id,
+      kind: '能耗计量点',
+      status: '已取得观测',
+      observedAt: textValue(item.measuredAt),
+      reading: kwh == null ? '读数缺失' : `${formatNumber(kwh, 2)} kWh`,
+    })
+  }
+  return [...rows.values()].sort((left, right) => left.id.localeCompare(right.id))
+})
+
+const relatedRecords = computed(() => [
+  ...(evidence.value?.alerts ?? []).map((item) => ({
+    id: textValue(item.alertId) ?? '告警标识缺失',
+    label: `${textValue(item.category) ?? '类别未知'}告警 · ${textValue(item.status) === 'OPEN' ? '未处理' : '状态未知'}`,
+    at: textValue(item.occurredAt),
+  })),
+  ...(evidence.value?.energy ?? []).map((item) => ({
+    id: textValue(item.meterId) ?? '计量点标识缺失',
+    label: finiteNumber(item.deviationPct) == null ? '能耗观测' : `能耗观测 · 基线偏差 ${formatNumber(finiteNumber(item.deviationPct))}%`,
+    at: textValue(item.measuredAt),
+  })),
+].sort((left, right) => Date.parse(right.at ?? '') - Date.parse(left.at ?? '')).slice(0, 8))
+
+function scrollToSection(id: string): void {
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function runAiAnalysis(): void {
+  const context = props.context
+  if (!context || analysis.phase.value === 'running') return
+  const question = `${context.buildingId} 从 ${context.energyWindow.from} 到 ${context.energyWindow.to} 的能耗基线偏差率`
+  void analysis.submit(question)
+}
+
+function clarificationOptions(index: number): string[] {
+  return analysis.dto.value?.clarificationOptions?.[index] ?? ['energy_deviation_pct']
+}
+
+function metricLabel(metric: string): string {
+  const labels: Record<string, string> = {
+    energy_kwh: '实际用电量',
+    energy_baseline_kwh: '基线用电量',
+    energy_deviation_pct: '能耗基线偏差率',
+  }
+  return labels[metric] ?? '后端提供的指标口径'
+}
+
+function submitClarification(): void {
+  const questions = analysis.dto.value?.clarificationQuestions ?? []
+  analysis.selections.value = questions.map((question, index) => ({
+    term: question,
+    metric: clarificationSelections.value[index] ?? clarificationOptions(index)[0]!,
+  }))
+  void analysis.clarify()
+}
+
+const analysisContextKey = computed(() => [
+  props.context?.buildingId,
+  props.context?.anomalyWindow.from,
+  props.context?.anomalyWindow.to,
+  props.context?.anomalyWindow.timezone,
+  props.context?.energyWindow.from,
+  props.context?.energyWindow.to,
+  props.context?.energyWindow.timezone,
+  props.context?.energyWindow.granularity,
+].join('|'))
+
+watch(() => analysis.dto.value?.clarificationQuestions, (questions) => {
+  clarificationSelections.value = (questions ?? []).map((_, index) => clarificationOptions(index)[0]!)
+})
+
+watch(
+  [() => props.active, () => analysisContextKey.value],
+  ([active, contextKey], previous) => {
+    const contextChanged = previous != null && previous[1] !== contextKey
+    if (contextChanged) analysis.reset()
+    if (active) void refresh()
+    else {
+      requestGeneration++
+      loading.value = false
+    }
+  },
+  { immediate: true },
+)
+</script>
+
+<template>
+  <main id="customer-analysis-main" class="energy-analysis" data-customer-page="analysis">
+    <section v-if="!context" class="customer-card energy-analysis__empty" role="status">
+      <DataAnalysis aria-hidden="true" />
+      <h1>请先选择需要分析的楼宇</h1>
+      <p>从园区总览的重点关注或楼宇地图进入，页面才会继承对应对象与两类查询周期。</p>
+      <button type="button" @click="$emit('back')"><ArrowLeft aria-hidden="true" /> 返回园区总览</button>
+    </section>
+
+    <template v-else>
+      <section class="energy-analysis__hero" aria-labelledby="analysis-title">
+        <picture class="customer-art" aria-hidden="true">
+          <source type="image/webp" :srcset="`${campusBanner960} 960w, ${campusBanner1440} 1440w, ${campusBanner2172} 2172w`" sizes="98vw" />
+          <img :src="campusBanner" alt="" />
+        </picture>
+        <div class="energy-analysis__heading">
+          <button type="button" class="energy-analysis__back" data-analysis-back @click="$emit('back')"><ArrowLeft aria-hidden="true" /> 返回</button>
+          <div>
+            <span>{{ context.buildingId }} · {{ context.buildingName }}</span>
+            <h1 id="analysis-title">{{ context.title }}</h1>
+            <p>异常依据周期：{{ formatWindow(context.anomalyWindow.from, context.anomalyWindow.to, context.anomalyWindow.timezone) }}（{{ context.anomalyWindow.timezone }}）</p>
+          </div>
+          <strong class="energy-analysis__priority" :class="{ 'is-high': context.priority === '高' }">{{ context.priority }}优先级</strong>
+        </div>
+        <div class="energy-analysis__actions">
+          <button type="button" disabled title="事件与工单将在人工确认页面开放"><DocumentChecked aria-hidden="true" /> 进入人工确认</button>
+          <span>报告暂不支持自选分析内容</span>
+        </div>
+      </section>
+
+      <nav class="energy-analysis__tabs" aria-label="分析页内容导航">
+        <button type="button" class="is-current" @click="scrollToSection('analysis-conclusion')">综合分析</button>
+        <button type="button" @click="scrollToSection('related-devices')">设备详情</button>
+        <button type="button" @click="scrollToSection('analysis-actions')">处理建议</button>
+        <button type="button" @click="scrollToSection('related-records')">相关记录</button>
+      </nav>
+
+      <section id="analysis-conclusion" class="customer-card energy-analysis__conclusion">
+        <header>
+          <div><span class="energy-analysis__ai">AI</span><h2>{{ analysisSummary ? 'AI 分析结论' : '运营观察' }}</h2></div>
+          <button type="button" data-run-ai-analysis :disabled="analysis.phase.value === 'running'" @click="runAiAnalysis">
+            {{ analysis.phase.value === 'running' ? '分析中…' : analysisSummary ? '重新分析' : '运行 AI 分析' }}
+          </button>
+        </header>
+        <p class="energy-analysis__lead">{{ analysisSummary ?? observation }}</p>
+        <p v-if="analysis.phase.value === 'idle'" class="energy-analysis__boundary">当前先展示规则化运营观察；只有点击按钮后才会调用现有受控分析链路。</p>
+        <p v-else-if="analysis.phase.value === 'running'" class="energy-analysis__boundary" role="status">正在执行受控只读分析，页面不会展示技术轨迹。</p>
+        <p v-else-if="analysis.phase.value === 'failed'" class="energy-analysis__error" role="alert">AI 分析未完成：{{ safeAnalysisError }}。已有业务事实仍可继续查看。</p>
+        <section v-if="analysis.phase.value === 'clarification'" class="energy-analysis__clarification">
+          <strong>需要确认指标口径</strong>
+          <label v-for="(question, index) in analysis.dto.value?.clarificationQuestions ?? []" :key="question">
+            <span>{{ question }}</span>
+            <select v-model="clarificationSelections[index]">
+              <option v-for="metric in clarificationOptions(index)" :key="metric" :value="metric">{{ metricLabel(metric) }}</option>
+            </select>
+          </label>
+          <button type="button" @click="submitClarification">按所选口径继续</button>
+        </section>
+        <div class="energy-analysis__summary-grid">
+          <div><WarningFilled aria-hidden="true" /><span><strong>{{ context.summary?.energyDeviationPct == null ? '—' : `${formatNumber(Math.abs(context.summary.energyDeviationPct))}%` }}</strong><small>异常总览窗口基线偏差</small></span></div>
+          <div><Calendar aria-hidden="true" /><span><strong>{{ context.summary?.alertCount ?? '—' }} 条</strong><small>异常总览窗口未处理告警</small></span></div>
+          <div><DataAnalysis aria-hidden="true" /><span><strong>{{ formatNumber(actualTotal) }} {{ actual?.unit ?? 'kWh' }}</strong><small>单楼宇能耗窗口已观测值</small></span></div>
+        </div>
+      </section>
+
+      <section class="customer-card energy-analysis__trend" aria-labelledby="energy-trend-title">
+        <header>
+          <div><h2 id="energy-trend-title">实际用电与基线对比</h2><p>能耗周期：{{ formatWindow(context.energyWindow.from, context.energyWindow.to, context.energyWindow.timezone) }} · 小时粒度</p></div>
+          <span v-if="energyWindowDeviation != null">完整窗口偏差 {{ energyWindowDeviation >= 0 ? '+' : '' }}{{ formatNumber(energyWindowDeviation) }}%</span>
+        </header>
+        <div class="energy-analysis__notice" :class="{ 'is-error': errors.actual || errors.baseline }">
+          <span>{{ chartStatus }}</span>
+          <button v-if="errors.actual || errors.baseline" type="button" data-retry-energy :disabled="loading" @click="refresh"><Refresh aria-hidden="true" /> 重试</button>
+        </div>
+        <EnergyAnalysisChart v-if="chartPoints.length" :points="chartPoints" :timezone="context.energyWindow.timezone" :unit="actual?.unit ?? baseline?.unit ?? 'kWh'" />
+        <p v-else class="customer-state">{{ loading ? '正在读取单楼宇小时数据…' : '当前能耗窗口没有可绘制数据' }}</p>
+        <details class="energy-analysis__basis" data-analysis-basis>
+          <summary>查看数据依据与缺失说明</summary>
+          <dl>
+            <div><dt>异常依据周期</dt><dd>{{ formatWindow(context.anomalyWindow.from, context.anomalyWindow.to, context.anomalyWindow.timezone) }}</dd></div>
+            <div><dt>能耗图周期</dt><dd>{{ formatWindow(context.energyWindow.from, context.energyWindow.to, context.energyWindow.timezone) }}</dd></div>
+            <div><dt>指标与单位</dt><dd>实际用电、基线用电 · {{ actual?.unit ?? baseline?.unit ?? 'kWh' }}</dd></div>
+            <div><dt>来源</dt><dd>{{ actual?.source.system ?? baseline?.source.system ?? context.source }} · 受治理小时事实</dd></div>
+            <div><dt>数据完整性</dt><dd>{{ chartStatus }}</dd></div>
+          </dl>
+        </details>
+      </section>
+
+      <section class="energy-analysis__two-column">
+        <article class="customer-card energy-analysis__list">
+          <header><span class="is-amber">?</span><h2>可能原因</h2><small>线索，不是故障定论</small></header>
+          <ol><li v-for="cause in causes" :key="cause">{{ cause }}</li></ol>
+        </article>
+        <article id="analysis-actions" class="customer-card energy-analysis__list">
+          <header><span class="is-green"><Checked aria-hidden="true" /></span><h2>建议处理措施</h2><small>需人工确认</small></header>
+          <ol><li v-for="suggestion in suggestions" :key="suggestion">{{ suggestion }}</li></ol>
+        </article>
+      </section>
+
+      <section id="related-devices" class="customer-card energy-analysis__table-card">
+        <header><div><h2>相关设备与计量点</h2><p>{{ context.buildingId }} · {{ context.buildingName }} · 合法关联来自告警、设备快照与能耗证据</p></div></header>
+        <div v-if="errors.evidence" class="energy-analysis__inline-error">{{ errors.evidence }} <button type="button" :disabled="loading" @click="refresh"><Refresh aria-hidden="true" /> 重试</button></div>
+        <div class="energy-analysis__table-wrap">
+          <table v-if="relatedDevices.length">
+            <thead><tr><th>设备/计量点</th><th>类型</th><th>位置</th><th>状态</th><th>可用读数/关联</th><th>观测时间</th></tr></thead>
+            <tbody><tr v-for="item in relatedDevices" :key="item.id"><td>{{ item.id }}</td><td>{{ item.kind }}</td><td>{{ context.buildingName }}</td><td>{{ item.status }}</td><td>{{ item.reading }}</td><td>{{ formatTime(item.observedAt) }}</td></tr></tbody>
+          </table>
+          <p v-else class="customer-state">{{ loading ? '正在读取相关设备…' : errors.evidence || '当前未取得合法关联的设备或计量点' }}</p>
+        </div>
+      </section>
+
+      <section id="related-records" class="customer-card energy-analysis__records">
+        <header><div><h2>相关记录</h2><p>仅展示客户可读的业务依据，不展示内部技术执行细节。</p></div></header>
+        <div v-for="record in relatedRecords" :key="`${record.id}:${record.at}`"><strong>{{ record.id }}</strong><span>{{ record.label }}</span><time>{{ formatTime(record.at) }}</time></div>
+        <p v-if="!loading && !relatedRecords.length" class="customer-state is-compact">{{ errors.evidence || '当前窗口暂无相关记录' }}</p>
+      </section>
+    </template>
+  </main>
+</template>
+
+<style scoped src="./energy-analysis.css"></style>

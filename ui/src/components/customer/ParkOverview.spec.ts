@@ -127,6 +127,30 @@ beforeEach(() => {
 afterEach(() => vi.resetAllMocks())
 
 describe('ParkOverview', () => {
+  it('opens the selected issue with distinct inherited anomaly and energy windows', async () => {
+    const wrapper = await mountLoaded()
+
+    await wrapper.get('[data-building-id="B1"]').trigger('click')
+    await flushPromises()
+
+    const emitted = wrapper.emitted('view-analysis')
+    expect(emitted).toHaveLength(1)
+    expect(emitted?.[0]?.[0]).toMatchObject({
+      buildingId: 'B1',
+      buildingName: '创新中心',
+      anomalyId: 'ALT-1',
+      anomalyWindow: windowRange,
+      energyWindow: {
+        from: '2026-09-08T00:00:00.000Z',
+        to: '2026-09-09T00:00:00.000Z',
+        timezone: 'Asia/Shanghai',
+        granularity: 'HOUR',
+      },
+    })
+    const payload = emitted?.at(-1)?.[0] as { anomalyWindow: { to: string }; energyWindow: { to: string } }
+    expect(payload.anomalyWindow.to).not.toBe(payload.energyWindow.to)
+  })
+
   it('derives the overview from existing APIs without inventing device availability', async () => {
     const wrapper = await mountLoaded()
 
