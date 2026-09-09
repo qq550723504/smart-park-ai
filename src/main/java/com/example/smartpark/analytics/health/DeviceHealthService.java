@@ -78,6 +78,11 @@ public final class DeviceHealthService {
 
         List<Instant> usableAlertTimes = new ArrayList<>();
         for (DeviceHealthFactsReader.AlertFact alert : facts.activeAlerts()) {
+            if (!"OPEN".equals(alert.status())) {
+                partial = true;
+                reasons.add("存在状态无效的告警事实，未用于当前健康判断");
+                continue;
+            }
             if (alert.occurredAt() == null || alert.occurredAt().isAfter(now)) {
                 partial = true;
                 reasons.add("存在时间无效的活动告警，未用于当前健康判断");

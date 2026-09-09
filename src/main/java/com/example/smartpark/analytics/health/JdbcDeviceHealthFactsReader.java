@@ -34,7 +34,8 @@ public final class JdbcDeviceHealthFactsReader implements DeviceHealthFactsReade
                         + "FROM analytics.v_device_snapshot WHERE device_id = :deviceId LIMIT 1", parameters);
                 DeviceFact device = devices.rows().isEmpty() ? null : mapDevice(devices, devices.rows().get(0));
                 TabularResult alerts = execute("SELECT alert_id, building_id, device_id, category, risk_level, status, occurred_at "
-                        + "FROM analytics.v_alert_fact WHERE device_id = :deviceId AND status <> 'RESOLVED' "
+                        + "FROM analytics.v_alert_fact WHERE device_id = :deviceId "
+                        + "AND (status <> 'RESOLVED' OR status IS NULL) "
                         + "ORDER BY occurred_at DESC, alert_id ASC LIMIT 20", parameters);
                 List<AlertFact> active = alerts.rows().stream().map(row -> new AlertFact(
                         text(alerts, row, "alert_id"), text(alerts, row, "building_id"),

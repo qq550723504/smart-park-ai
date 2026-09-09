@@ -49,6 +49,7 @@ class JdbcDeviceHealthFactsReaderTest {
         assertThat(sql.getAllValues()).allSatisfy(statement -> {
             assertThat(statement).contains(":deviceId").doesNotContain("AC-B1-07");
         });
+        assertThat(sql.getAllValues().get(1)).contains("status <> 'RESOLVED' OR status IS NULL");
         assertThat(parameters.getAllValues()).allSatisfy(values ->
                 assertThat(values).containsEntry("deviceId", "AC-B1-07"));
         verify(executor, times(2)).execute(any(ValidatedSql.class), any());

@@ -185,6 +185,24 @@ class DeviceHealthServiceTest {
     }
 
     @Test
+    void nonOpenAlertStatusesAreIncompleteAndCannotDeriveSeverity() {
+        var lowercaseResolved = new DeviceHealthFactsReader.AlertFact("ALT-LOWER", "B1", "AC-B1-07",
+                "TEMPERATURE", "HIGH", "resolved", NOW.minusSeconds(900));
+        var invalidStatus = new DeviceHealthFactsReader.AlertFact("ALT-INVALID", "B1", "AC-B1-07",
+                "TEMPERATURE", "HIGH", "RESOVLED", NOW.minusSeconds(600));
+
+        var response = service(facts(device("ONLINE", "HVAC"), List.of(lowercaseResolved, invalidStatus)),
+                telemetry(DeviceTelemetryDtos.Status.AVAILABLE, DeviceTelemetryDtos.Freshness.FRESH,
+                        List.of(point(9, "24")))).assess("AC-B1-07");
+
+        assertThat(response.healthStatus()).isEqualTo(DeviceHealthDtos.HealthStatus.UNKNOWN);
+        assertThat(response.availability()).isEqualTo(DeviceHealthDtos.Availability.PARTIAL);
+        assertThat(response.reasons()).contains("存在状态无效的告警事实，未用于当前健康判断");
+        assertThat(response.evidence()).noneMatch(item -> item.reference().contains("ALT-LOWER")
+                || item.reference().contains("ALT-INVALID"));
+    }
+
+    @Test
     void untrustedTelemetryQualityCannotProduceHealthEvidence() {
         DeviceTelemetryDtos.Point suspect = new DeviceTelemetryDtos.Point(
                 Instant.parse("2026-09-08T09:00:00Z"), new BigDecimal("40"), "SUSPECT");
