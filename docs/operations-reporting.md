@@ -123,8 +123,11 @@ At startup, every persisted `REQUESTED` or `GENERATING` report is atomically rec
   download artifact when the artifact fits the configured limit, otherwise the terminal snapshot explicitly
   reports that download is unavailable instead of blocking application startup;
 - otherwise it becomes `FAILED`;
-- every unfinished section records `GENERATION_INTERRUPTED`;
-- a matching durable terminal trace event is committed with the report state.
+- every unfinished section records `GENERATION_INTERRUPTED`, and a matching durable terminal trace event is
+  committed with the report state;
+- if that terminal metadata would exceed the structured-report limit, recovery preserves section evidence and
+  compacts the trace to one explicit terminal event. A final status-only shrinking transition is reserved for
+  the pathological case where even that compact snapshot cannot fit, so any valid state file can still start.
 
 No report remains permanently `GENERATING` after restart.
 

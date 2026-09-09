@@ -252,4 +252,32 @@ describe('OperationsDailyReport', () => {
     expect(wrapper.find('[data-testid="report-body"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="report-history"]').text()).toContain('0 份')
   })
+
+  it('does not let stale role cleanup unlock a replacement generation', async () => {
+    let resolveAdminCreate!: (response: Response) => void
+    const adminCreate = new Promise<Response>((resolve) => { resolveAdminCreate = resolve })
+    const operatorDetail = new Promise<Response>(() => {})
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      const role = (init?.headers as Record<string, string> | undefined)?.['X-Demo-Role']
+      if (url.includes('?')) return Promise.resolve(new Response(JSON.stringify({ content: [], page: 0, size: 20, totalElements: 0, hasNext: false }), { status: 200 }))
+      if (init?.method === 'POST' && role === 'ADMIN') return adminCreate
+      if (init?.method === 'POST') return Promise.resolve(new Response(JSON.stringify({ reportId: 'operator-report', runId: 'operator-run', statusUrl: '/api/operations-reports/operator-report' }), { status: 202 }))
+      return operatorDetail
+    }))
+    const wrapper = mount(OperationsDailyReport, { props: { role: 'ADMIN', pollIntervalMs: 1 } })
+    await flushPromises()
+
+    await wrapper.get('[data-generate-report]').trigger('click')
+    await wrapper.setProps({ role: 'OPERATOR' })
+    await flushPromises()
+    await wrapper.get('[data-generate-report]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-generate-report]').attributes('disabled')).toBeDefined()
+
+    resolveAdminCreate(new Response(JSON.stringify({ reportId: 'admin-report', runId: 'admin-run', statusUrl: '/api/operations-reports/admin-report' }), { status: 202 }))
+    await flushPromises()
+
+    expect(wrapper.get('[data-generate-report]').attributes('disabled')).toBeDefined()
+    expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(2)
+  })
 })

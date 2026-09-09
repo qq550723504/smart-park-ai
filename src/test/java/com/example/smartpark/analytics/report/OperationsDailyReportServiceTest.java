@@ -257,6 +257,88 @@ class OperationsDailyReportServiceTest {
     }
 
     @Test
+    void restartCompactsTraceWhenTerminalMetadataWouldExceedStructuredLimit() throws Exception {
+        Path state = temp.resolve("near-limit-partial.json");
+        AtomicInteger calls = new AtomicInteger();
+        CompletableFuture<AnalysisRunStore.RunRecord> pending = new CompletableFuture<>();
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        OperationsDailyReportStore firstStore = new OperationsDailyReportStore(
+                state, mapper, 20, 1, 64 * 1024, 1024);
+        OperationsDailyReportService first = new OperationsDailyReportService(
+                (section, request) -> calls.getAndIncrement() == 0
+                        ? CompletableFuture.completedFuture(completedValue(section.question(), "x".repeat(4096)))
+                        : pending,
+                firstStore, new InMemoryExecutionEventPublisher(), new OperationsReportRenderer(), CLOCK);
+        UUID reportId = first.start(first.defaultRequest(), "near-limit-restart-key",
+                "demo-role:OPERATOR", "OPERATOR").report().reportId();
+        OperationsDailyReport interrupted = firstStore.find(reportId).orElseThrow();
+        int exactInterruptedBytes = mapper.writeValueAsBytes(interrupted).length;
+        assertThat(interrupted.traceEvents()).hasSizeGreaterThan(1);
+
+        InMemoryExecutionEventPublisher restartedPublisher = new InMemoryExecutionEventPublisher();
+        OperationsDailyReportService restarted = new OperationsDailyReportService(
+                (section, request) -> CompletableFuture.completedFuture(completed(section.question(), 200)),
+                new OperationsDailyReportStore(state, mapper, 20, 1, exactInterruptedBytes, 1024),
+                restartedPublisher, new OperationsReportRenderer(), CLOCK);
+        OperationsDailyReport recovered = restarted.get(reportId, "OPERATOR");
+
+        assertThat(recovered.status()).isEqualTo(OperationsReportStatus.PARTIAL);
+        assertThat(recovered.sections().get(0).rows().get(0)).containsExactly("x".repeat(4096));
+        assertThat(recovered.sections().subList(1, 3)).allMatch(section ->
+                "GENERATION_INTERRUPTED".equals(section.partialReason()));
+        assertThat(recovered.artifact()).isNull();
+        assertThat(recovered.traceEvents()).singleElement().satisfies(event -> {
+            assertThat(event.eventType()).isEqualTo(ExecutionEventType.RUN_COMPLETED);
+            assertThat(event.safeSummary()).contains("容量限制已压缩");
+        });
+        assertThat(restartedPublisher.history(recovered.traceId())).singleElement()
+                .extracting(ExecutionEvent::eventType).isEqualTo(ExecutionEventType.RUN_COMPLETED);
+    }
+
+    @Test
+    void restartUsesShrinkingTerminalizationWhenEvenCompactedMetadataCannotFit() throws Exception {
+        Path state = temp.resolve("exact-limit-generating.json");
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        OperationsDailyReportStore firstStore = new OperationsDailyReportStore(
+                state, mapper, 20, 1, 64 * 1024, 1024);
+        UUID reportId = UUID.randomUUID();
+        UUID runId = UUID.randomUUID();
+        OperationsDailyReport interrupted = new OperationsDailyReport(
+                reportId, OperationsReportRequest.DAILY, "智慧园区运营日报",
+                OperationsReportStatus.GENERATING, "x".repeat(3000), "OPERATOR",
+                NOW, NOW, null, new OperationsReportRequest.TimeWindow(NOW.minusSeconds(3600), NOW),
+                OperationsReportRequest.DEFAULT_TIMEZONE, null, "",
+                OperationsDailyReportDefinition.sections().stream()
+                        .map(OperationsDailyReport.SectionResult::pending).toList(),
+                List.of(), List.of(), runId, runId,
+                OperationsDailyReport.CURRENT_SCHEMA_VERSION,
+                OperationsDailyReport.CURRENT_GENERATION_VERSION, null,
+                "exact-limit-key", "exact-limit-fingerprint", 0,
+                List.of(new OperationsReportTraceRecord(UUID.randomUUID(), 1, NOW, "x",
+                        ExecutionStage.INITIALIZATION, ExecutionEventType.RUN_STARTED,
+                        ExecutionStatus.RUNNING, "x")));
+        firstStore.createOrGet("exact-limit-key", "exact-limit-fingerprint", () -> interrupted);
+        int exactInterruptedBytes = mapper.writeValueAsBytes(interrupted).length;
+        assertThat(exactInterruptedBytes).isGreaterThan(4096);
+
+        OperationsDailyReportService restarted = new OperationsDailyReportService(
+                (section, request) -> CompletableFuture.completedFuture(completed(section.question(), 200)),
+                new OperationsDailyReportStore(state, mapper, 20, 1, exactInterruptedBytes, 1024),
+                new InMemoryExecutionEventPublisher(), new OperationsReportRenderer(), CLOCK);
+        OperationsDailyReport recovered = restarted.get(reportId, "OPERATOR");
+
+        assertThat(recovered.status()).isEqualTo(OperationsReportStatus.FAILED);
+        assertThat(recovered.summary()).isEmpty();
+        assertThat(recovered.completedAt()).isNull();
+        assertThat(recovered.sections()).allMatch(section ->
+                section.status() == OperationsReportSectionStatus.PENDING);
+        assertThat(recovered.traceEvents()).isEqualTo(interrupted.traceEvents());
+        assertThat(restarted.list("OPERATOR", null, null, null, null, 0, 20).content())
+                .singleElement().extracting(OperationsDailyReport::status)
+                .isEqualTo(OperationsReportStatus.FAILED);
+    }
+
+    @Test
     void historyIsPagedFilteredAndRoleScoped() {
         OperationsDailyReportService service = service(temp.resolve("reports.json"), (section, request) ->
                 CompletableFuture.completedFuture(completed(section.question(), 1)),

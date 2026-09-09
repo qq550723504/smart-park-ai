@@ -46,6 +46,7 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
   async function open(reportId: string, role: DemoRole): Promise<void> {
     const current = ++generation
     pendingCreation = null
+    busy.value = false
     historyLoading.value = false
     error.value = ''
     try {
@@ -96,10 +97,12 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
       }
       throw new Error('运营日报超时，可稍后从报告历史查看最终状态')
     } catch (cause) {
-      if (!createAccepted && cause instanceof OperationsReportHttpError) pendingCreation = null
-      if (current === generation) error.value = cause instanceof Error ? cause.message : String(cause)
+      if (current === generation) {
+        if (!createAccepted && cause instanceof OperationsReportHttpError) pendingCreation = null
+        error.value = cause instanceof Error ? cause.message : String(cause)
+      }
     } finally {
-      busy.value = false
+      if (current === generation) busy.value = false
     }
   }
 

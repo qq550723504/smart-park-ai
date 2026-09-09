@@ -292,29 +292,45 @@ public final class OperationsDailyReportService {
             Instant now = clock.instant();
             OperationsDailyReport recovered;
             try {
-                recovered = recoverInterrupted(interrupted.reportId(), status, now, true);
+                recovered = recoverInterrupted(interrupted.reportId(), status, now, true, false);
             } catch (OperationsReportCapacityException artifactTooLarge) {
                 // A valid structured snapshot must never make startup dependent on whether
                 // its optional Markdown projection fits the smaller artifact byte limit.
-                recovered = recoverInterrupted(interrupted.reportId(), status, now, false);
+                try {
+                    recovered = recoverInterrupted(interrupted.reportId(), status, now, false, false);
+                } catch (OperationsReportCapacityException reportTooLarge) {
+                    try {
+                        // Preserve section evidence while replacing the verbose in-flight trace
+                        // with one explicit terminal event.
+                        recovered = recoverInterrupted(interrupted.reportId(), status, now, false, true);
+                    } catch (OperationsReportCapacityException stillTooLarge) {
+                        // Last-resort terminalization changes only shrinking fields, so any valid
+                        // persisted non-terminal record can never trap the application in a restart loop.
+                        recovered = terminalizeInterruptedAtCapacity(interrupted.reportId(), status);
+                    }
+                }
             }
             hydrate(recovered);
         }
     }
 
     private OperationsDailyReport recoverInterrupted(UUID reportId, OperationsReportStatus status,
-                                                      Instant now, boolean includeArtifact) {
+                                                      Instant now, boolean includeArtifact,
+                                                      boolean compactTrace) {
         return store.update(reportId, report -> {
             List<OperationsDailyReport.SectionResult> sections = report.sections().stream().map(section ->
                     section.status() == OperationsReportSectionStatus.COMPLETED ? section
                             : section.unavailable("GENERATION_INTERRUPTED")).toList();
-            List<OperationsReportTraceRecord> trace = append(report.traceEvents(), "operations-report",
+            List<OperationsReportTraceRecord> trace = append(compactTrace ? List.of() : report.traceEvents(),
+                    "operations-report",
                     ExecutionStage.FAILURE, status == OperationsReportStatus.FAILED
                             ? ExecutionEventType.RUN_FAILED : ExecutionEventType.RUN_COMPLETED,
                     status == OperationsReportStatus.FAILED ? ExecutionStatus.FAILED : ExecutionStatus.SUCCEEDED,
-                    "运营日报生成被服务重启中断");
+                    compactTrace ? "运营日报生成被服务重启中断；历史追踪因容量限制已压缩"
+                            : "运营日报生成被服务重启中断");
             String summary = status == OperationsReportStatus.PARTIAL
-                    ? includeArtifact ? "报告生成被中断，已保留完成章节"
+                    ? compactTrace ? "报告生成被中断，已保留完成章节；追踪已压缩且无下载文件"
+                    : includeArtifact ? "报告生成被中断，已保留完成章节"
                             : "报告生成被中断，已保留完成章节；下载文件超出容量限制"
                     : "报告生成被中断";
             OperationsDailyReport provisional = report.copy(status, report.startedAt(), now,
@@ -325,6 +341,13 @@ public final class OperationsDailyReportService {
             return report.copy(status, report.startedAt(), now, provisional.asOf(), summary,
                     sections, report.evidence(), report.sourceReferences(), artifact, trace);
         });
+    }
+
+    private OperationsDailyReport terminalizeInterruptedAtCapacity(UUID reportId,
+                                                                    OperationsReportStatus status) {
+        return store.update(reportId, report -> report.copy(status, report.startedAt(), report.completedAt(),
+                report.asOf(), "", report.sections(), report.evidence(), report.sourceReferences(), null,
+                report.traceEvents()));
     }
 
     private void authorize(OperationsDailyReport report, String role) {
