@@ -240,6 +240,8 @@ describe('ParkOverview', () => {
 
     expect(wrapper.get('[data-kpi="buildings"] strong').text()).toContain('—')
     expect(wrapper.text()).toContain('正在读取园区运营数据…')
+    expect(wrapper.get('[data-kpi="energy"]').text()).toContain('正在读取能耗观测…')
+    expect(wrapper.get('[data-energy-status]').text()).toBe('读取中')
     expect(wrapper.find('[data-building-id="B1"]').exists()).toBe(false)
 
     pendingOverview.resolve(overview)
@@ -580,8 +582,10 @@ describe('ParkOverview', () => {
     const wrapper = await mountLoaded()
 
     expect(wrapper.text()).toContain('园区运营总览暂不可用')
+    expect(wrapper.text()).toContain('园区总览不可用，无法确定能耗查询窗口')
     expect(wrapper.text()).toContain('页面不会回填预置成功数据')
     expect(wrapper.get('[data-kpi="energy"] strong').text()).toContain('—')
+    expect(wrapper.get('[data-energy-status]').text()).toBe('暂不可用')
     expect(wrapper.text()).not.toContain('database password')
     expect(wrapper.text()).not.toContain('SQL trace')
   })

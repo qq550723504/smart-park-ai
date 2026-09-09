@@ -190,7 +190,7 @@ async function refresh(): Promise<void> {
   const savedPreferredBuildingId = preferredBuildingId.value
   evidenceGeneration++
   loading.value = true
-  energyLoading.value = false
+  energyLoading.value = true
   metricsLoading.value = true
   workItemsLoading.value = true
   detailLoading.value = false
@@ -241,11 +241,14 @@ async function refresh(): Promise<void> {
       } else {
         energy.value = null
         errors.value.energy = '总览窗口不足以形成小时级能耗趋势。'
+        energyLoading.value = false
       }
       if (generation !== requestGeneration) return
     } else {
       energy.value = null
       evidence.value = null
+      errors.value.energy = '园区楼宇目录暂不可用，无法读取能耗趋势。'
+      energyLoading.value = false
     }
   } catch {
     if (generation !== requestGeneration) return
@@ -254,6 +257,8 @@ async function refresh(): Promise<void> {
     selectedBuildingId.value = null
     evidence.value = null
     errors.value.overview = '园区运营总览暂不可用。'
+    errors.value.energy = '园区总览不可用，无法确定能耗查询窗口。'
+    energyLoading.value = false
   } finally {
     if (generation === requestGeneration) loading.value = false
   }
