@@ -231,7 +231,7 @@ public final class DeviceHealthService {
         return new DeviceHealthDtos.Response(deviceId, null, null, DeviceHealthDtos.HealthStatus.UNKNOWN,
                 DeviceHealthDtos.Availability.UNAVAILABLE, List.of(reason), List.of(),
                 List.of(new DeviceHealthDtos.Source("DEVICE_HEALTH", DeviceHealthDtos.Availability.UNAVAILABLE)),
-                clock.instant());
+                null);
     }
 
     private static String normalizeDeviceId(String value) {

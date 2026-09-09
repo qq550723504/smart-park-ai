@@ -241,6 +241,7 @@ class DeviceHealthServiceTest {
                 unavailableTelemetry()).assess("AC-B1-07");
         assertThat(response.healthStatus()).isEqualTo(DeviceHealthDtos.HealthStatus.UNKNOWN);
         assertThat(response.availability()).isEqualTo(DeviceHealthDtos.Availability.UNAVAILABLE);
+        assertThat(response.asOf()).isNull();
         assertThat(response.toString()).doesNotContain("jdbc", "secret", "password");
     }
 
