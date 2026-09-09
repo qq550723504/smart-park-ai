@@ -79,3 +79,67 @@ The collaboration route initially exposed a Vue Flow warning because the workflo
 - P3 engineering: Vite still reports the pre-existing production chunk-size warning above 500kB. It does not block this visual slice, but route-level code splitting should be handled as a separate performance task.
 
 final result: passed
+
+---
+
+# Issue #69 Design QA
+
+Result: **PASSED**
+
+## Evidence
+
+- Approved reference: `smart-park-ai-approved-designs.zip / 01-park-overview.png` (1672 × 941).
+- Actual browser captures: `docs/evidence/issue-69/overview-1440x900.png` and `docs/evidence/issue-69/overview-1920x1080.png`, both regenerated against the runtime built from UI commit `aeb2f43637d5f87809864e0976e8a0e23f5eb5f6`.
+- Runtime: repository Compose analytics profile with its deterministic PostgreSQL demo facts; the page was opened through the in-app browser at `http://127.0.0.1:15173/`.
+- Responsive check: 1366 × 768 reported `scrollWidth=1351`, `innerWidth=1366`, so no horizontal overflow. The workbench entry, first KPI and building markers were visible.
+
+## Comparison
+
+The approved reference and the 1920 × 1080 implementation capture were reviewed together. The implementation preserves the reference hierarchy and spatial rhythm:
+
+- white customer header with active overview navigation;
+- wide daylight campus banner;
+- four KPI cards plus the green-operation promotion;
+- left attention list, central park image with building markers, and right todo/report column;
+- bottom energy trend, two distributions, and latest-event list;
+- pale blue canvas, white cards, compact radii, restrained shadows, blue/green/coral/violet status accents.
+
+Intentional differences are capability-driven rather than visual drift. Search, weather and live date are omitted because no reliable source exists. Device run rate is replaced by affected buildings because the current API has no total-device denominator. The report and later customer pages are visibly unavailable instead of linking to empty pages. The trend has one observed series rather than fabricated comparison data, and empty todo/service counts remain zero when returned by the running backend.
+
+## Interaction and state checks
+
+- Selecting B2 changed the map selection and latest-event context to `研发大厦 · 同一业务窗口`.
+- Entering the internal workbench hid the customer surface; returning restored the customer surface and retained B2 selection.
+- The four later navigation items are non-link elements with `aria-disabled=true`.
+- Customer-visible statuses are mapped to Chinese. Unknown values render `状态未知`; partial and unavailable states remain explicit. No raw Issue number, `OPEN`, or `REDACTED:` metadata is visible in the normal browser state.
+- “今日重点关注” keeps its deterministic-rule and no-model disclosure in a collapsed `数据依据` detail, which was expanded and visually checked in the browser.
+- The customer surface had no unnamed buttons, duplicate IDs, or browser console warnings/errors.
+- API failures remain explicit and do not fall back to a successful fixture; missing energy buckets stay null and ECharts keeps line breaks.
+
+## Acceptance closeout regression
+
+- Focused customer suite: `2` files / `27` tests passed, including status localization, unknown fallback, unavailable navigation, responsive WebP sources with PNG fallback, no-data, partial data, independent failure/retry, and internal-workbench handoff.
+- Full unit suite: `44` files / `423` tests passed.
+- `npm.cmd run typecheck`: passed.
+- `npm.cmd run build`: passed; only the existing Vite chunk-size advisory remains.
+- Normal browser state: passed against the running Compose analytics stack and deterministic PostgreSQL demo facts (`3,384 kWh`, `3` buildings, `4` unhandled alerts at capture time). Demo/simulated-data markers remained visible.
+- Internal workbench: entering from the customer header and returning to the customer surface both passed in the browser.
+- Approved-reference comparison at 1440 × 900 and 1920 × 1080: passed without page redesign; the 1366 × 768 viewport remained free of horizontal document overflow.
+- In the final browser capture environment, both approved viewport sizes selected `campus-banner-2172.webp`, `eco-operations-480.webp`, and `park-aerial-daylight-1200.webp` (about 291 KB total source bytes), instead of transferring the three 5.9 MB source PNGs. The width candidates allow lower-density or narrower clients to select smaller variants; PNG files remain only as browser compatibility fallbacks.
+
+## Iteration history
+
+1. First live run showed the anomaly data but rejected the energy request with HTTP 400.
+2. Root cause: the overview window carries minute/second precision while the governed hourly time-series API requires exact hour boundaries.
+3. The customer adapter now clamps the requested last-24-hour range to valid hour boundaries; a focused unit test covers the unaligned source window.
+4. The rebuilt live page returned 3,348 kWh from the current demo facts and rendered the trend/distribution charts. Final 1440 × 900 and 1920 × 1080 captures were then taken.
+5. PR review found a stale-refresh race and two derived-state inconsistencies. The final pass now invalidates old evidence at refresh start, stops obsolete continuations after the energy await, derives attention badges and map warnings from each building's actual signals, and regenerates both browser captures.
+6. Follow-up review found cross-domain blocking and incomplete filtering/aggregation. Overview/energy, metrics and work items now settle independently; terminal work items are removed before the four-item display limit; latest events combine alert, device and energy evidence by timestamp; and zero energy deviation no longer produces a deviation claim. The focused component suite covers all four cases.
+7. Final-head review found that the anomaly building list is not a park inventory. Energy now queries the complete current B1/B2/B3 park catalog even with no anomalies, old energy is invalidated before a refreshed query, and actionable attention requests only the OPEN alert slice.
+8. A further concurrency and evidence pass starts building evidence independently of energy, distinguishes unavailable/partial evidence from a confirmed empty list, and keys repeated meter observations by meter plus measurement time.
+9. Final refresh QA invalidates the prior overview while revalidation is pending, keeps partial-evidence notices visible alongside any available rows, and removes the inherited mobile navigation minimum width so narrow screens scroll inside the navigation instead of widening the document.
+10. The final data-state pass exposes HTTP-200 energy responses with `UNAVAILABLE` status instead of treating them as empty observations, and preserves an explicitly selected catalog building across workbench reactivation even when it has no anomaly row.
+11. The next review pass disables map selection while the overview is revalidating so a pending response cannot overwrite a newer user choice, and treats absent catalog rows as normal only when every anomaly domain completed with `OK`.
+12. The customer-demo closeout localizes raw status and redaction metadata, removes delivery Issue numbers from customer copy, turns future navigation into explicit non-interactive “未开放” entries, moves the rule/no-model statement into expandable data-basis disclosure, and regenerates both approved browser capture sizes from commit `8b361b645f9b5cfd32dc94237f0c881cbc352daa`.
+13. Final-head review identified 5.9 MB of eager source PNG transfers. The page now uses responsive WebP `srcset` variants with PNG fallbacks; actual browser selection at both capture sizes was verified, and the screenshots were regenerated against `2e8c7227cec35d158606dd38ef6f3a740ce1420d` with no visual drift.
+14. The next final-head review found that energy appeared empty while its required overview window was still pending. Energy now stays in an explicit loading state until the window settles; an unavailable overview supplies an explicit energy-unavailable reason. The slow-overview and failure regressions assert both states, and the final browser captures were regenerated against `aeb2f43637d5f87809864e0976e8a0e23f5eb5f6`.
