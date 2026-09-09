@@ -27,10 +27,16 @@ function timeResolutionLabel(value: OperationsReportTimeResolution): string {
   return '默认回看'
 }
 
-watch([() => props.active, () => props.role, canUse], ([active, , allowed]) => {
-  if (active && allowed) void state.loadHistory(props.role)
-  if (active && state.runId.value) props.trace?.subscribe(state.runId.value)
+watch(() => props.role, (role) => {
+  state.reset()
+  if (props.active && canUse.value) void state.loadHistory(role)
 }, { immediate: true })
+
+watch(() => props.active, (active) => {
+  if (!active) return
+  if (canUse.value) void state.loadHistory(props.role)
+  if (state.runId.value) props.trace?.subscribe(state.runId.value, props.role)
+})
 </script>
 
 <template>
@@ -61,7 +67,7 @@ watch([() => props.active, () => props.role, canUse], ([active, , allowed]) => {
         <div><dt>生成时间</dt><dd>{{ format(state.report.value.completedAt ?? state.report.value.createdAt) }}</dd></div>
         <div><dt>数据窗口</dt><dd>{{ format(state.report.value.timeWindow.fromInclusive) }} — {{ format(state.report.value.timeWindow.toExclusive) }}</dd></div>
         <div><dt>Source As Of</dt><dd>{{ format(state.report.value.asOf) }}</dd></div>
-        <div><dt>Trace</dt><dd><button type="button" @click="props.trace?.subscribe(state.report.value!.traceId)">{{ state.report.value.traceId }}</button></dd></div>
+        <div><dt>Trace</dt><dd><button type="button" @click="props.trace?.subscribe(state.report.value!.traceId, props.role)">{{ state.report.value.traceId }}</button></dd></div>
       </dl>
       <p v-if="state.report.value.summary">{{ state.report.value.summary }}</p>
       <article v-for="section in state.report.value.sections" :key="section.sectionId" class="operations-report__section" :data-status="section.status">

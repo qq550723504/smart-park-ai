@@ -76,7 +76,7 @@ watch(() => props.active, (active) => {
 
 <template>
   <main class="main-content operations-board" data-operations-board>
-    <section class="operations-board__hero">
+    <section v-if="props.analyticsAvailable" class="operations-board__hero">
       <div>
         <span class="eyebrow">OPERATIONS COCKPIT / READ ONLY</span>
         <h2>园区运营态势<br /><em>从真实异常到 Agent 研判</em></h2>
@@ -89,7 +89,7 @@ watch(() => props.active, (active) => {
       </div>
     </section>
 
-    <section class="operations-board__capability-strip" aria-label="驾驶舱数据能力状态">
+    <section v-if="props.analyticsAvailable" class="operations-board__capability-strip" aria-label="驾驶舱数据能力状态">
       <article data-cockpit-feature="energy-overview" data-feature-state="ADAPTED"><span>能耗总览 / 排行</span><strong>ADAPTED</strong><small>使用真实能耗基线偏差；不冒充实时总量</small><button type="button" @click="emit('open-analysis', '过去5天各楼宇能耗基线偏差')">打开只读分析</button></article>
       <article data-cockpit-feature="energy-trend" :data-feature-state="energyTrendStatus"><span>能耗趋势</span><strong>{{ energyTrendStatus }}</strong><small>真实小时序列；缺失点不补零、不插值</small><button type="button" @click="emit('open-analysis', '过去5天各楼宇能耗基线偏差')">分析基线偏差</button></article>
       <article data-cockpit-feature="device-health" :data-feature-state="deviceHealthStatus"><span>设备健康研判</span><strong>{{ deviceHealthStatus }}</strong><small>解释性状态与证据；不生成健康分</small><button type="button" @click="emit('open-analysis', '各设备类型离线设备数')">分析设备状态</button></article>
@@ -98,12 +98,14 @@ watch(() => props.active, (active) => {
     </section>
 
     <EnergyTimeSeriesPanel
+      v-if="props.analyticsAvailable"
       :role="props.role"
       :active="props.active"
       @status="(status) => energyTrendStatus = status"
     />
 
     <DeviceTelemetryHealthPanel
+      v-if="props.analyticsAvailable"
       :role="props.role"
       :active="props.active"
       @telemetry-status="(status) => temperatureStatus = status"
@@ -111,6 +113,7 @@ watch(() => props.active, (active) => {
     />
 
     <AnomalyRadar
+      v-if="props.analyticsAvailable"
       :role="props.role"
       :active="props.active"
       @open-analysis="(question) => emit('open-analysis', question)"
@@ -118,6 +121,7 @@ watch(() => props.active, (active) => {
       @open-trace="(runId) => emit('open-trace', runId)"
     />
     <AnomalyEvidenceDrawer
+      v-if="props.analyticsAvailable"
       :role="props.role"
       :building-id="selectedBuildingId"
       :filters="selectedFilters"
@@ -127,7 +131,7 @@ watch(() => props.active, (active) => {
       @open-trace="(runId) => emit('open-trace', runId)"
     />
 
-    <section class="operations-board__workbench panel" aria-label="Agent 工作台入口">
+    <section v-if="props.analyticsAvailable" class="operations-board__workbench panel" aria-label="Agent 工作台入口">
       <div class="operations-board__workbench-copy">
         <span class="eyebrow">AGENT WORKBENCH</span>
         <h2>不是聊天框，是可追溯的执行入口</h2>
@@ -144,11 +148,11 @@ watch(() => props.active, (active) => {
       </div>
     </section>
 
-    <OrchestrationPanel :role="props.role" :active="props.active" :available="props.analyticsAvailable" @open-trace="(runId) => emit('open-trace', runId)" />
+    <OrchestrationPanel v-if="props.analyticsAvailable" :role="props.role" :active="props.active" :available="props.analyticsAvailable" @open-trace="(runId) => emit('open-trace', runId)" />
 
     <OperationsDailyReport :role="props.role" :trace="props.trace" :active="props.active" :available="props.analyticsAvailable" />
 
-    <section class="operations-board__question-grid" aria-label="受控分析入口">
+    <section v-if="props.analyticsAvailable" class="operations-board__question-grid" aria-label="受控分析入口">
       <section v-for="group in groups" :key="group.title" class="panel operations-board__group" :aria-label="group.title">
         <div class="section-heading compact"><div><span class="eyebrow">CONTROLLED ANALYTICS</span><h2>{{ group.title }}</h2></div><span class="count-badge">{{ group.questions.length }} 个入口</span></div>
         <p>{{ group.description }}</p>

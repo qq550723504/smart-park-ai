@@ -243,12 +243,11 @@ describe('OperationsWorkbench', () => {
   })
 
   it.each([
-    ['operations', 'analyticsEnabled', 'operations'],
     ['security-incidents', 'securityIncidentEnabled', 'security'],
   ] as const)('does not mount %s when %s is disabled', async (requestedView, disabledCapability, mountKey) => {
     globalThis.fetch = (async () => new Response(JSON.stringify({
       knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
-      analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true, securityIncidentEnabled: true,
+      analyticsEnabled: true, collaborationEnabled: true, voiceEnabled: true,
       [disabledCapability]: false,
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as typeof fetch
 
@@ -264,6 +263,23 @@ describe('OperationsWorkbench', () => {
     expect(wrapper.find(`[data-workbench-view="${requestedView}"]`).exists()).toBe(false)
     expect(restrictedMounts[mountKey]).toBe(0)
     expect(restrictedRequests[mountKey]).toBe(0)
+  })
+
+  it('keeps the operations view reachable for durable report history when analytics is disabled', async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none',
+      analyticsEnabled: false, collaborationEnabled: false, voiceEnabled: false, securityIncidentEnabled: false,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as typeof fetch
+
+    const wrapper = mount(OperationsWorkbench, {
+      props: { initialView: 'operations', active: true },
+      global: { stubs: { ...operatorStubs, OperationsBoard: operationsBoardStub } },
+    })
+    await settleCapabilities()
+
+    expect(wrapper.get('[data-workbench-view="operations"]').classes()).toContain('active')
+    expect(wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())).toContain('运营看板')
+    expect(restrictedMounts.operations).toBeGreaterThan(0)
   })
 
   it.each([
@@ -590,7 +606,7 @@ describe('OperationsWorkbench', () => {
     expect(labels).not.toContain('实时语音')
     expect(labels).not.toContain('专家协作')
     expect(labels).not.toContain('运营分析')
-    expect(labels).not.toContain('运营看板')
+    expect(labels).toContain('运营看板')
   })
 
   it('routes an operations board question into the existing analytics input', async () => {
@@ -896,7 +912,7 @@ describe('OperationsWorkbench', () => {
 
     await settleCapabilities()
 
-    expect(wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())).toEqual(['告警工作流', '园区客服', '协同中心', '治理中心'])
+    expect(wrapper.findAll('.immersive-workbench__nav button').map((button) => button.text())).toEqual(['告警工作流', '园区客服', '协同中心', '运营看板', '治理中心'])
     expect(wrapper.get('[data-evidence-item="知识检索"] strong').text()).toBe('能力检查失败')
     expect(wrapper.get('[data-evidence-item="知识检索"]').attributes('data-tone')).toBe('warning')
   })

@@ -44,7 +44,7 @@ describe('OperationsDailyReport', () => {
     expect(wrapper.get('[data-testid="report-body"]').text()).toContain('后端摘要')
     expect(wrapper.text()).toContain('100')
     expect(wrapper.text()).not.toContain('38%')
-    expect(trace.subscribe).toHaveBeenCalledWith('run-1')
+    expect(trace.subscribe).toHaveBeenCalledWith('run-1', 'OPERATOR')
   })
 
   it('shows real generating state then refreshes history after terminal snapshot', async () => {
@@ -63,7 +63,7 @@ describe('OperationsDailyReport', () => {
     await new Promise((resolve) => setTimeout(resolve, 5))
     await flushPromises()
 
-    expect(trace.subscribe).toHaveBeenCalledWith('run-1')
+    expect(trace.subscribe).toHaveBeenCalledWith('run-1', 'ADMIN')
     expect(wrapper.get('[data-testid="report-body"]').text()).toContain('已完成')
     expect(wrapper.get('[data-testid="report-history"]').text()).toContain('1 份')
     const post = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'POST')
@@ -128,6 +128,37 @@ describe('OperationsDailyReport', () => {
     await wrapper.setProps({ active: true })
     await flushPromises()
     expect(trace.subscribe).toHaveBeenCalledTimes(2)
-    expect(trace.subscribe).toHaveBeenLastCalledWith('run-1')
+    expect(trace.subscribe).toHaveBeenLastCalledWith('run-1', 'OPERATOR')
+  })
+
+  it('clears selected data and ignores stale history when the role changes', async () => {
+    let adminHistoryCalls = 0
+    let resolveStaleAdmin!: (response: Response) => void
+    const staleAdmin = new Promise<Response>((resolve) => { resolveStaleAdmin = resolve })
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      const role = (init?.headers as Record<string, string> | undefined)?.['X-Demo-Role']
+      if (url.includes('?') && role === 'ADMIN') {
+        adminHistoryCalls += 1
+        if (adminHistoryCalls > 1) return staleAdmin
+        return Promise.resolve(new Response(JSON.stringify({ content: [summary], page: 0, size: 20, totalElements: 1, hasNext: false }), { status: 200 }))
+      }
+      if (url.includes('?')) return Promise.resolve(new Response(JSON.stringify({ content: [], page: 0, size: 20, totalElements: 0, hasNext: false }), { status: 200 }))
+      return Promise.resolve(new Response(JSON.stringify({ ...detail, requestedBy: 'demo-role:ADMIN', role: 'ADMIN' }), { status: 200 }))
+    }))
+    const wrapper = mount(OperationsDailyReport, { props: { role: 'ADMIN', active: true } })
+    await flushPromises()
+    await wrapper.get('[data-testid="report-history"] button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="report-body"]').exists()).toBe(true)
+
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+    await wrapper.setProps({ role: 'OPERATOR' })
+    await flushPromises()
+    resolveStaleAdmin(new Response(JSON.stringify({ content: [summary], page: 0, size: 20, totalElements: 1, hasNext: false }), { status: 200 }))
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="report-body"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="report-history"]').text()).toContain('0 份')
   })
 })

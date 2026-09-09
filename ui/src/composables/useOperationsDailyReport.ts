@@ -39,7 +39,7 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
       if (current !== generation) return
       report.value = detail
       runId.value = detail.runId
-      options.trace?.subscribe(detail.traceId)
+      options.trace?.subscribe(detail.traceId, role)
     } catch (cause) {
       if (current === generation) error.value = cause instanceof Error ? cause.message : String(cause)
     }
@@ -66,7 +66,7 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
       const accepted = await startOperationsDailyReport(role, pendingCreation.request, pendingCreation.key)
       if (current !== generation) return
       runId.value = accepted.runId
-      options.trace?.subscribe(accepted.runId)
+      options.trace?.subscribe(accepted.runId, role)
       for (let attempt = 0; attempt < maxPolls; attempt += 1) {
         const detail = await getOperationsDailyReport(accepted.reportId, role)
         if (current !== generation) return
@@ -92,6 +92,17 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
     catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) }
   }
 
-  onScopeDispose(() => { generation += 1 })
-  return { report, reports, runId, busy, historyLoading, error, start, open, loadHistory, download }
+  function reset(): void {
+    generation += 1
+    pendingCreation = null
+    report.value = null
+    reports.value = []
+    runId.value = null
+    busy.value = false
+    historyLoading.value = false
+    error.value = ''
+  }
+
+  onScopeDispose(reset)
+  return { report, reports, runId, busy, historyLoading, error, start, open, loadHistory, download, reset }
 }

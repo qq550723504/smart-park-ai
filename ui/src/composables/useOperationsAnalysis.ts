@@ -4,11 +4,12 @@ import type { AnalysisStatusDto } from '../types/analytics'
 import { isTerminalAnalysisStatus } from '../types/analytics'
 import type { DisplayPayload, ExecutionEvent } from '../types/execution'
 import { isTerminalEvent } from '../types/execution'
+import type { DemoRole } from '../types/workflow'
 import { getAnalysisStatus, startAnalysis, submitClarification } from '../services/analyticsApi'
 
 export interface ExecutionTraceLike {
   events: Ref<ExecutionEvent[]>
-  subscribe(runId: string): void
+  subscribe(runId: string, role?: DemoRole): void
 }
 
 export type AnalysisPhase = 'idle' | 'running' | 'completed' | 'clarification' | 'failed'
