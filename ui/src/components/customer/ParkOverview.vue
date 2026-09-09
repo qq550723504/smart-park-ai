@@ -158,6 +158,7 @@ async function refresh(): Promise<void> {
     selectedBuildingId.value = selectedBuildingId.value && affectedIds.includes(selectedBuildingId.value)
       ? selectedBuildingId.value
       : affectedIds[0] ?? null
+    if (selectedBuildingId.value) void loadEvidence(selectedBuildingId.value, generation)
     if (ids.length > 0) {
       const window = last24Hours(overview.value.window)
       if (window) {
@@ -183,7 +184,6 @@ async function refresh(): Promise<void> {
         errors.value.energy = '总览窗口不足以形成小时级能耗趋势。'
       }
       if (generation !== requestGeneration) return
-      if (selectedBuildingId.value) void loadEvidence(selectedBuildingId.value, generation)
     } else {
       energy.value = null
       evidence.value = null
@@ -254,6 +254,13 @@ const latestEvents = computed(() => [
 ]
   .sort((left, right) => recordTimestamp(right) - recordTimestamp(left))
   .slice(0, 5))
+const emptyEvidenceMessage = computed(() => {
+  if (!evidence.value || latestEvents.value.length > 0) return ''
+  const statuses = Object.values(evidence.value.domainStatus)
+  if (statuses.some((status) => status === 'UNAVAILABLE')) return '部分事件数据暂不可用，无法确认当前楼宇暂无记录'
+  if (statuses.some((status) => status === 'PARTIAL')) return '事件数据仅部分可用，当前未取得事件记录'
+  return ''
+})
 
 function attentionTitle(building: AnomalyBuildingSummary): string {
   if (domainUsable('alerts') && building.highRiskAlertCount > 0) return `${buildingName(building.buildingId)}存在高风险告警`
@@ -308,6 +315,12 @@ function recordTimestamp(record: Record<string, unknown>): number {
   if (typeof value !== 'string') return 0
   const timestamp = Date.parse(value)
   return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function recordKey(record: Record<string, unknown>, index: number): string {
+  const identifier = record.alertId ?? record.deviceId ?? record.meterId ?? 'event'
+  const observedAt = record.occurredAt ?? record.snapshotAt ?? record.measuredAt ?? index
+  return `${String(identifier)}:${String(observedAt)}`
 }
 
 function recordTime(record: Record<string, unknown>): string {
@@ -444,8 +457,9 @@ watch(() => props.active, (active) => {
         <header><div><h2>最新事件</h2><small>{{ selectedBuildingId ? `${buildingName(selectedBuildingId)} · 同一业务窗口` : '选择楼宇后查看' }}</small></div></header>
         <p v-if="detailLoading" class="customer-state is-compact">正在读取楼宇事件…</p>
         <p v-else-if="errors.evidence" class="customer-state is-compact">{{ errors.evidence }}</p>
+        <p v-else-if="emptyEvidenceMessage" class="customer-state is-compact">{{ emptyEvidenceMessage }}</p>
         <p v-else-if="latestEvents.length === 0" class="customer-state is-compact">当前楼宇暂无事件记录</p>
-        <div v-for="(event, index) in latestEvents" :key="String(event.alertId ?? event.deviceId ?? event.meterId ?? index)" class="customer-latest__row">
+        <div v-for="(event, index) in latestEvents" :key="recordKey(event, index)" :data-event-key="recordKey(event, index)" class="customer-latest__row">
           <span><WarningFilled v-if="event.riskLevel === 'HIGH'" aria-hidden="true" /><DataLine v-else aria-hidden="true" /></span>
           <strong>{{ recordText(event) }}</strong>
           <time>{{ recordTime(event) }}</time>

@@ -195,6 +195,25 @@ describe('ParkOverview', () => {
     expect(wrapper.text()).toContain(activeWorkItem.title)
   })
 
+  it('loads building evidence while the independent energy request is still pending', async () => {
+    const pendingEnergy = deferred<EnergyTimeSeriesResponse>()
+    vi.mocked(getEnergyTimeSeries).mockReturnValue(pendingEnergy.promise)
+
+    const wrapper = mount(ParkOverview, { global: { stubs: { CustomerOverviewChart: chartStub } } })
+    await vi.waitFor(() => expect(getAnomalyEvidence).toHaveBeenCalledWith(
+      'VIEWER',
+      'B1',
+      { from: windowRange.from, to: windowRange.to },
+    ))
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('REDACTED: 能耗告警 · OPEN')
+    expect(wrapper.get('[data-kpi="energy"]').text()).toContain('正在读取能耗观测…')
+
+    pendingEnergy.resolve(energy)
+    await flushPromises()
+  })
+
   it('filters terminal work items before selecting the first four actionable todos', async () => {
     vi.mocked(listCollaborationWorkItems).mockResolvedValue([
       { ...activeWorkItem, id: 'done', status: 'COMPLETED', title: '已完成事项' },
@@ -223,6 +242,41 @@ describe('ParkOverview', () => {
     const rows = wrapper.findAll('.customer-latest__row strong').map((row) => row.text())
 
     expect(rows).toEqual(['设备证据', '能耗证据', '告警证据'])
+  })
+
+  it('does not describe unavailable evidence domains as an empty event list', async () => {
+    vi.mocked(getAnomalyEvidence).mockResolvedValue({
+      ...evidence,
+      alerts: [],
+      devices: [],
+      energy: [],
+      domainStatus: { alerts: 'UNAVAILABLE', devices: 'OK', energy: 'OK' },
+    })
+
+    const wrapper = await mountLoaded()
+
+    expect(wrapper.text()).toContain('部分事件数据暂不可用，无法确认当前楼宇暂无记录')
+    expect(wrapper.text()).not.toContain('当前楼宇暂无事件记录')
+  })
+
+  it('uses the observation time to keep repeated meter evidence keys unique', async () => {
+    vi.mocked(getAnomalyEvidence).mockResolvedValue({
+      ...evidence,
+      alerts: [],
+      energy: [
+        { meterId: 'METER-1', measuredAt: '2026-09-08T22:00:00Z', redactedSummary: '能耗证据 22 点' },
+        { meterId: 'METER-1', measuredAt: '2026-09-08T23:00:00Z', redactedSummary: '能耗证据 23 点' },
+      ],
+    })
+
+    const wrapper = await mountLoaded()
+    const keys = wrapper.findAll('.customer-latest__row').map((row) => row.attributes('data-event-key'))
+
+    expect(keys).toEqual([
+      'METER-1:2026-09-08T23:00:00Z',
+      'METER-1:2026-09-08T22:00:00Z',
+    ])
+    expect(new Set(keys).size).toBe(keys.length)
   })
 
   it('does not describe a zero energy deviation as a deviation', async () => {
@@ -329,14 +383,14 @@ describe('ParkOverview', () => {
 
     expect(wrapper.get('[data-kpi="service-requests"] strong').text()).toContain('9')
     expect(wrapper.text()).toContain('LATEST SAFE EVENT')
-    expect(getAnomalyEvidence).toHaveBeenCalledTimes(1)
+    expect(getAnomalyEvidence).toHaveBeenCalledTimes(2)
 
     firstEnergy.resolve(energy)
     await flushPromises()
 
     expect(wrapper.get('[data-kpi="service-requests"] strong').text()).toContain('9')
     expect(wrapper.text()).toContain('LATEST SAFE EVENT')
-    expect(getAnomalyEvidence).toHaveBeenCalledTimes(1)
+    expect(getAnomalyEvidence).toHaveBeenCalledTimes(2)
   })
 
   it('preserves a missing timestamp as a null trend point', async () => {
