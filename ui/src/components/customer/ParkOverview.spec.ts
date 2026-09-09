@@ -213,6 +213,26 @@ describe('ParkOverview', () => {
     await flushPromises()
   })
 
+  it('does not accept a map selection while the overview is revalidating', async () => {
+    const wrapper = await mountLoaded()
+    const evidenceCalls = vi.mocked(getAnomalyEvidence).mock.calls.length
+    const pendingOverview = deferred<AnomalyOverview>()
+    vi.mocked(getAnomalyOverview).mockReturnValueOnce(pendingOverview.promise)
+
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+    await vi.waitFor(() => expect(getAnomalyOverview).toHaveBeenCalledTimes(2))
+
+    const marker = wrapper.get('[data-building-marker="B3"]')
+    expect(marker.attributes('disabled')).toBeDefined()
+    await marker.trigger('click')
+    expect(getAnomalyEvidence).toHaveBeenCalledTimes(evidenceCalls)
+
+    pendingOverview.resolve(overview)
+    await flushPromises()
+    expect(wrapper.get('[data-building-marker="B1"]').attributes('aria-pressed')).toBe('true')
+  })
+
   it('renders overview and energy while an independent work-item request is still pending', async () => {
     const pendingWorkItems = deferred<CollaborationWorkItem[]>()
     vi.mocked(listCollaborationWorkItems).mockReturnValue(pendingWorkItems.promise)
@@ -383,6 +403,19 @@ describe('ParkOverview', () => {
     expect(wrapper.get('[data-building-id="B1"] .customer-attention__level').text()).toBe('偏差')
     expect(wrapper.get('[data-building-id="B2"] .customer-attention__level').text()).toBe('高')
     expect(wrapper.get('[data-building-marker="B1"]').classes()).toContain('is-warning')
+  })
+
+  it('treats an absent catalog building as normal only when all anomaly domains are complete', async () => {
+    const completeWrapper = await mountLoaded()
+    expect(completeWrapper.get('[data-building-marker="B3"]').classes()).toContain('is-normal')
+    completeWrapper.unmount()
+
+    vi.mocked(getAnomalyOverview).mockResolvedValue({
+      ...overview,
+      domainStatus: { alerts: 'OK', devices: 'OK', energy: 'UNAVAILABLE' },
+    })
+    const incompleteWrapper = await mountLoaded()
+    expect(incompleteWrapper.get('[data-building-marker="B3"]').classes()).toContain('is-unknown')
   })
 
   it('clears old evidence when a refreshed overview contains no buildings', async () => {

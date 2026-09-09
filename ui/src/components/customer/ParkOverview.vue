@@ -99,6 +99,7 @@ async function loadEvidence(buildingId: string, currentGeneration = requestGener
 }
 
 async function selectBuilding(buildingId: string): Promise<void> {
+  if (loading.value) return
   selectedBuildingId.value = buildingId
   selectionWasExplicit.value = true
   await loadEvidence(buildingId)
@@ -289,7 +290,10 @@ function attentionDescription(building: AnomalyBuildingSummary): string {
 }
 
 function markerState(summary: AnomalyBuildingSummary | null): 'unknown' | 'warning' | 'normal' {
-  if (!summary) return 'unknown'
+  if (!summary) {
+    if (overview.value && ['alerts', 'devices', 'energy'].every((domain) => overview.value?.domainStatus[domain] === 'OK')) return 'normal'
+    return 'unknown'
+  }
   const hasAlert = domainUsable('alerts') && summary.alertCount > 0
   const hasOfflineDevice = domainUsable('devices') && summary.offlineDeviceCount > 0
   const hasEnergyDeviation = domainUsable('energy')
@@ -415,6 +419,7 @@ watch(() => props.active, (active) => {
           class="customer-campus__marker"
           :class="[`is-${markerState(building.summary)}`, { 'is-selected': selectedBuildingId === building.id }]"
           :style="building.position"
+          :disabled="loading"
           :data-building-marker="building.id"
           :aria-pressed="selectedBuildingId === building.id"
           @click="selectBuilding(building.id)"
