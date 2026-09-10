@@ -3,13 +3,11 @@ import { describe, expect, it } from 'vitest'
 import CustomerShell from './CustomerShell.vue'
 
 describe('CustomerShell', () => {
-  it('opens all delivered customer pages while keeping only the assistant non-interactive', async () => {
+  it('opens all delivered customer pages and the customer assistant', async () => {
     const wrapper = mount(CustomerShell)
     const plannedNavigation = wrapper.findAll('.customer-shell__nav [aria-disabled="true"]')
 
-    expect(plannedNavigation).toHaveLength(1)
-    expect(plannedNavigation.every((item) => item.element.tagName === 'SPAN')).toBe(true)
-    expect(plannedNavigation.every((item) => item.attributes('title') === '功能暂未开放')).toBe(true)
+    expect(plannedNavigation).toHaveLength(0)
     expect(wrapper.text()).not.toMatch(/#(?:70|71|72|73)|后续 Issue|联调项/)
     expect(wrapper.get('[data-customer-nav="analysis"]').element.tagName).toBe('BUTTON')
 
@@ -19,6 +17,11 @@ describe('CustomerShell', () => {
     expect(wrapper.emitted('navigate')).toEqual([['analysis'], ['work-orders']])
     await wrapper.get('[data-customer-nav="reports"]').trigger('click')
     expect(wrapper.emitted('navigate')).toEqual([['analysis'], ['work-orders'], ['reports']])
+    await wrapper.get('[data-customer-nav="assistant"]').trigger('click')
+    expect(wrapper.emitted('open-assistant')).toHaveLength(1)
+    await wrapper.get('[data-restart-demo]').trigger('click')
+    expect(wrapper.emitted('restart-demo')).toHaveLength(1)
+    expect(wrapper.get('[data-restart-demo]').attributes('aria-label')).toBe('重开导览')
   })
 
   it('marks reports as the current page and exposes its skip target', () => {

@@ -133,6 +133,13 @@ class LlmAnalyticsModelClientTest {
     }
 
     @Test
+    void summaryPromptMatchesTheGroundingValidatorContract() {
+        assertThat(LlmAnalyticsModelClient.summarySystemPrompt())
+                .contains("不得复述问题里的日期时间", "结果单元格之外", "过滤实体")
+                .contains("异常、正常、偏高、偏低、严重、安全");
+    }
+
+    @Test
     void parsesExtendedChartProposalOptions() {
         TestChatModel model = new TestChatModel("""
                 {"type":"MAP","title":"楼宇分布","xField":"building_name",

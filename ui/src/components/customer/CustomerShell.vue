@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Cpu, OfficeBuilding, UserFilled } from '@element-plus/icons-vue'
+import { Cpu, OfficeBuilding, Refresh, UserFilled } from '@element-plus/icons-vue'
 import campusBanner from '../../assets/customer/campus-banner.png'
 import campusBanner960 from '../../assets/customer/campus-banner-960.webp'
 import campusBanner1440 from '../../assets/customer/campus-banner-1440.webp'
 import campusBanner2172 from '../../assets/customer/campus-banner-2172.webp'
 import type { CustomerPage } from '../../types/customer'
 
-const props = withDefaults(defineProps<{ activePage?: CustomerPage }>(), { activePage: 'overview' })
-defineEmits<{
+const props = withDefaults(defineProps<{ activePage?: CustomerPage; assistantOpen?: boolean }>(), { activePage: 'overview', assistantOpen: false })
+const emit = defineEmits<{
   'enter-workbench': []
+  'open-assistant': []
+  'restart-demo': []
   navigate: [page: CustomerPage]
 }>()
 
@@ -18,8 +20,13 @@ const customerNavigation = [
   { id: 'analysis', label: '运营分析', available: true },
   { id: 'work-orders', label: '事件与工单', available: true },
   { id: 'reports', label: '运营报告', available: true },
-  { id: 'assistant', label: 'AI 助手', available: false },
+  { id: 'assistant', label: 'AI 助手', available: true },
 ] as const
+
+function activateNavigation(id: typeof customerNavigation[number]['id']): void {
+  if (id === 'assistant') emit('open-assistant')
+  else emit('navigate', id)
+}
 
 const pageMeta = computed(() => ({
   overview: { mainId: 'customer-overview-main', titleId: 'customer-hero-title', label: '园区总览', scope: '总览内支持楼宇选择' },
@@ -45,30 +52,25 @@ const pageMeta = computed(() => ({
         <span>模拟业务数据</span>
       </div>
       <nav class="customer-shell__nav" aria-label="客户业务导航">
-        <template v-for="item in customerNavigation" :key="item.id">
-          <button
-            v-if="item.available"
-            type="button"
-            :class="{ 'is-current': activePage === item.id }"
-            :data-customer-nav="item.id"
-            :aria-current="activePage === item.id ? 'page' : undefined"
-            @click="$emit('navigate', item.id)"
-          >
-            {{ item.label }}
-          </button>
-          <span
-            v-else
-            class="is-planned"
-            :data-customer-nav="item.id"
-            aria-disabled="true"
-            title="功能暂未开放"
-          >
-            {{ item.label }}
-          </span>
-        </template>
+        <button
+          v-for="item in customerNavigation"
+          :key="item.id"
+          type="button"
+          :class="{ 'is-current': item.id === 'assistant' ? assistantOpen : activePage === item.id }"
+          :data-customer-nav="item.id"
+          :aria-current="item.id !== 'assistant' && activePage === item.id ? 'page' : undefined"
+          :aria-expanded="item.id === 'assistant' ? assistantOpen : undefined"
+          @click="activateNavigation(item.id)"
+        >
+          {{ item.label }}
+        </button>
       </nav>
       <div class="customer-shell__user-zone">
         <span class="customer-shell__scope">{{ pageMeta.scope }}</span>
+        <button type="button" class="customer-shell__restart" data-restart-demo aria-label="重开导览" @click="$emit('restart-demo')">
+          <Refresh aria-hidden="true" />
+          <span>重开导览</span>
+        </button>
         <button type="button" class="customer-shell__workbench" data-enter-workbench @click="$emit('enter-workbench')">
           <span class="customer-shell__avatar"><UserFilled aria-hidden="true" /></span>
           <span><strong>园区管理方</strong><small>进入内部工作台</small></span>

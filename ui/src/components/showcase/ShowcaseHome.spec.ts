@@ -8,7 +8,7 @@ describe('ShowcaseHome customer shell', () => {
     vi.unstubAllGlobals()
   })
 
-  it('defaults to the customer overview, enables all delivered pages, and keeps the assistant non-interactive', () => {
+  it('defaults to the customer overview and exposes every delivered customer entry', () => {
     const wrapper = mount(ShowcaseHome, {
       props: { active: false },
       global: {
@@ -26,8 +26,34 @@ describe('ShowcaseHome customer shell', () => {
     expect(wrapper.get('[data-customer-nav="work-orders"]').element.tagName).toBe('BUTTON')
     expect(wrapper.get('[data-customer-nav="reports"]').element.tagName).toBe('BUTTON')
     const assistant = wrapper.get('[data-customer-nav="assistant"]')
-    expect(assistant.element.tagName).toBe('SPAN')
-    expect(assistant.attributes('aria-disabled')).toBe('true')
+    expect(assistant.element.tagName).toBe('BUTTON')
+    expect(assistant.attributes('aria-expanded')).toBe('false')
+  })
+
+  it('opens the assistant without changing pages and restores focus after close', async () => {
+    const wrapper = mount(ShowcaseHome, {
+      props: { active: true },
+      attachTo: document.body,
+      global: { stubs: {
+        ParkOverview: { template: '<main id="customer-overview-main" data-park-overview />' },
+        EnergyAnalysis: { template: '<main id="customer-analysis-main" data-energy-analysis />' },
+        CustomerAssistantPanel: {
+          props: ['open', 'activePage', 'context'], emits: ['close'],
+          template: '<aside v-show="open" data-assistant-stub><span>{{ activePage }}</span><button data-close-stub @click="$emit(\'close\')">关闭</button></aside>',
+        },
+      } },
+    })
+    const trigger = wrapper.get('[data-customer-nav="assistant"]')
+    await trigger.trigger('click')
+    expect(wrapper.get('[data-assistant-stub]').isVisible()).toBe(true)
+    expect(wrapper.get('[data-assistant-stub]').text()).toContain('overview')
+    expect(trigger.attributes('aria-expanded')).toBe('true')
+
+    await wrapper.get('[data-close-stub]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-assistant-stub]').isVisible()).toBe(false)
+    expect(document.activeElement).toBe(trigger.element)
+    wrapper.unmount()
   })
 
   it('opens reports inside the same customer shell', async () => {
@@ -87,7 +113,8 @@ describe('ShowcaseHome customer shell', () => {
       global: { stubs: {
         ParkOverview: { emits: ['view-analysis'], template: '<button data-open-analysis @click="$emit(\'view-analysis\', context)">分析</button>', setup: () => ({ context }) },
         EnergyAnalysis: { props: ['context'], emits: ['open-work-orders'], template: '<main data-energy-analysis><button data-open-work-orders @click="$emit(\'open-work-orders\', context)">工单</button></main>' },
-        CustomerWorkOrders: { props: ['context'], template: '<main id="customer-work-orders-main" data-customer-work-orders>{{ context?.anomalyId }}</main>' },
+        CustomerWorkOrders: { props: ['context'], emits: ['open-reports'], template: '<main id="customer-work-orders-main" data-customer-work-orders>{{ context?.anomalyId }}<button data-continue-reports @click="$emit(\'open-reports\')">报告</button></main>' },
+        CustomerOperationsReports: { template: '<main id="customer-reports-main" data-customer-reports />' },
       } },
     })
     const shell = wrapper.get('[data-customer-shell]').element
@@ -96,9 +123,34 @@ describe('ShowcaseHome customer shell', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-customer-nav="work-orders"]').attributes('aria-current')).toBe('page')
-    expect(wrapper.get('[data-customer-work-orders]').text()).toBe('ALT-ORCH-ENERGY-B1-001')
+    expect(wrapper.get('[data-customer-work-orders]').text()).toContain('ALT-ORCH-ENERGY-B1-001')
     expect(wrapper.get('[data-customer-shell]').element).toBe(shell)
     expect(wrapper.findAll('.customer-shell__topbar')).toHaveLength(1)
+
+    await wrapper.get('[data-continue-reports]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-customer-nav="reports"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-customer-reports]').isVisible()).toBe(true)
+    expect(wrapper.get('[data-customer-shell]').element).toBe(shell)
+  })
+
+  it('restarts only the customer presentation state after explicit confirmation', async () => {
+    const wrapper = mount(ShowcaseHome, {
+      props: { active: true },
+      global: { stubs: {
+        ParkOverview: { template: '<main id="customer-overview-main" data-park-overview tabindex="-1" />' },
+        EnergyAnalysis: { template: '<main id="customer-analysis-main" data-energy-analysis />' },
+        CustomerAssistantPanel: { methods: { resetForDemo: vi.fn() }, template: '<aside />' },
+      } },
+    })
+    await wrapper.get('[data-customer-nav="reports"]').trigger('click')
+    await wrapper.get('[data-restart-demo]').trigger('click')
+    expect(wrapper.get('[role="dialog"]').text()).toContain('不会删除或重置后台工单、历史报告')
+
+    await wrapper.get('[data-confirm-restart]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-customer-nav="overview"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-restart-notice]').text()).toContain('后台工单、报告和进行中的任务均未删除')
   })
 
   it('uses the existing App event to enter the long-lived internal workbench', async () => {

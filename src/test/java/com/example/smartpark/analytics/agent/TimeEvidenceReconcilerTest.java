@@ -3,6 +3,7 @@ package com.example.smartpark.analytics.agent;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -87,6 +88,29 @@ class TimeEvidenceReconcilerTest {
     }
 
     @Test
+    void exactUtcRangeEndpointsAreAcceptedAsCompleteAtomicRangeEvidence() {
+        var question = "building_id=B2 从 2026-09-09T13:00:00.000Z 到 2026-09-10T13:00:00.000Z 的能耗基线偏差率";
+        var parser = structuredUtcRange(question);
+
+        var result = reconciler.reconcile(parser, List.of(
+                "2026-09-09T13:00:00.000Z", "2026-09-10T13:00:00.000Z"), question);
+
+        assertThat(result.status()).isEqualTo(TimeIntentResult.Status.PARSED);
+        assertThat(result.timeRange()).isEqualTo(parser.timeRange());
+    }
+
+    @Test
+    void oneUtcRangeEndpointStillFailsClosedAsAmbiguous() {
+        var question = "building_id=B2 从 2026-09-09T13:00:00.000Z 到 2026-09-10T13:00:00.000Z 的能耗基线偏差率";
+        var parser = structuredUtcRange(question);
+
+        var result = reconciler.reconcile(parser,
+                List.of("2026-09-09T13:00:00.000Z"), question);
+
+        assertThat(result.status()).isEqualTo(TimeIntentResult.Status.AMBIGUOUS);
+    }
+
+    @Test
     void multipleDistinctRangesRemainRejectedEvenWithModelAgreement() {
         var question = "对比本月和去年能耗";
         var parser = new WhitelistTimeIntentProvider().resolve(question, NOW);
@@ -132,5 +156,17 @@ class TimeEvidenceReconcilerTest {
 
         var missingResult = reconciler.reconcile(parser, List.of("不存在的时间词"), "过去一周能耗");
         assertThat(missingResult.status()).isEqualTo(TimeIntentResult.Status.UNSUPPORTED);
+    }
+
+    private static TimeIntentResult structuredUtcRange(String question) {
+        String range = "2026-09-09T13:00:00.000Z 到 2026-09-10T13:00:00.000Z";
+        int start = question.indexOf(range);
+        var timeRange = new com.example.smartpark.analytics.model.QueryPlan.TimeRange(
+                Instant.parse("2026-09-09T13:00:00Z"), Instant.parse("2026-09-10T13:00:00Z"));
+        var intent = new TimeIntent(range, TimeIntent.Kind.DATE_RANGE, 0, null,
+                LocalDate.of(2026, 9, 9), LocalDate.of(2026, 9, 10), null);
+        return new TimeIntentResult(TimeIntentResult.Status.PARSED,
+                List.of(new TimeIntentResult.TimeMention(range, start, start + range.length())),
+                intent, timeRange, "");
     }
 }

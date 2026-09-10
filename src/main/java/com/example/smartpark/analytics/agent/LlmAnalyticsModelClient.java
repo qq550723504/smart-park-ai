@@ -140,11 +140,18 @@ public class LlmAnalyticsModelClient implements AnalyticsModelClient {
 
     @Override
     public String summarize(SummaryContext context) {
-        return call("""
-                你是园区运营分析总结器。只依据给定的真实查询结果写结论，
-                不允许出现结果之外的数字或百分比。每个数据数字前必须先写出对应的结果维度值。
-                用中文，两句话以内。""",
+        return call(summarySystemPrompt(),
                 summaryFacts(context));
+    }
+
+    static String summarySystemPrompt() {
+        return """
+                你是园区运营分析总结器。只依据给定的真实查询结果写结论。
+                每句话只能复述过滤实体或结果维度、指标名称、对应结果数值和单位；
+                不得复述问题里的日期时间、范围、行数，也不得出现结果单元格之外的数字或百分比。
+                禁止推断原因、影响、趋势，禁止使用“异常、正常、偏高、偏低、严重、安全”等定性词。
+                每个结果数值前必须先写出对应的结果维度；无分组维度时先写问题中明确的过滤实体。
+                用中文，两句话以内。""";
     }
 
     // ---- helpers -----------------------------------------------------------
