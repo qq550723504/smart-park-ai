@@ -66,6 +66,8 @@ export function useOperationsAnalysis(
   function pollClarificationExpiry(): void {
     const generation = clarificationPollGeneration
     const operation = operationGeneration
+    const targetRunId = runId.value
+    if (!targetRunId) return
     const scheduleNext = () => {
       if (generation === clarificationPollGeneration) {
         clarificationPollTimer = setTimeout(pollClarificationExpiry, pollIntervalMs)
@@ -73,8 +75,9 @@ export function useOperationsAnalysis(
     }
 
     clarificationPollTimer = undefined
-    void getAnalysisStatus(runId.value!).then((current) => {
-      if (generation !== clarificationPollGeneration || operation !== operationGeneration) return
+    void getAnalysisStatus(targetRunId).then((current) => {
+      if (generation !== clarificationPollGeneration || operation !== operationGeneration
+        || runId.value !== targetRunId) return
       dto.value = current
       if (isTerminalAnalysisStatus(current.status)) {
         applyTerminal(current)
@@ -82,6 +85,8 @@ export function useOperationsAnalysis(
       }
       scheduleNext()
     }).catch((cause) => {
+      if (generation !== clarificationPollGeneration || operation !== operationGeneration
+        || runId.value !== targetRunId) return
       if (isMissingRun(cause)) {
         applyMissingRun()
         return
@@ -258,6 +263,9 @@ export function useOperationsAnalysis(
     error.value = '已受理的分析任务已不存在，请重新发起'
     phase.value = 'failed'
     runId.value = null
+    dto.value = null
+    chart.value = null
+    selections.value = []
   }
 
   function stopAcceptedRunPolling(): void {
@@ -286,6 +294,7 @@ export function useOperationsAnalysis(
         }
         scheduleNext()
       }).catch((cause) => {
+        if (generation !== operationGeneration || runId.value !== targetRunId) return
         if (isMissingRun(cause)) {
           applyMissingRun()
           return

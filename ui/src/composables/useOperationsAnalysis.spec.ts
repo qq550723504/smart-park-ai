@@ -3,7 +3,7 @@ import { useOperationsAnalysis } from './useOperationsAnalysis'
 import { ref } from 'vue'
 import type { ExecutionEvent } from '../types/execution'
 
-type FetchHandler = (url: string, init?: RequestInit) => Response
+type FetchHandler = (url: string, init?: RequestInit) => Response | Promise<Response>
 
 const originalFetch = globalThis.fetch
 let handler: FetchHandler = () => new Response('{}', { status: 200 })
@@ -13,6 +13,12 @@ function jsonResponse(body: unknown, status = 200): Response {
     status,
     headers: { 'Content-Type': 'application/json' },
   })
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((next) => { resolve = next })
+  return { promise, resolve }
 }
 
 const RUN_ID = '11111111-2222-3333-4444-555555555555'
@@ -132,6 +138,40 @@ describe('useOperationsAnalysis', () => {
     expect(analysis.error.value).toContain('任务已不存在')
     await new Promise((resolve) => setTimeout(resolve, 10))
     expect(statusCalls).toBe(1)
+  })
+
+  it('ignores a stale missing response from cancelled accepted-run polling', async () => {
+    const oldRunId = '10000000-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const newRunId = '20000000-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const staleStatus = deferred<Response>()
+    let starts = 0
+    let oldStatusCalls = 0
+    handler = (url, init) => {
+      if (init?.method === 'POST') {
+        starts += 1
+        return jsonResponse({ runId: starts === 1 ? oldRunId : newRunId }, 202)
+      }
+      if (url.endsWith(`/runs/${oldRunId}`)) {
+        oldStatusCalls += 1
+        if (oldStatusCalls === 1) throw new Error('temporary status failure')
+        return staleStatus.promise
+      }
+      if (url.endsWith(`/runs/${newRunId}`)) {
+        return jsonResponse({ runId: newRunId, status: 'COMPLETED', createdAt: '' })
+      }
+      return jsonResponse({}, 404)
+    }
+    const analysis = useOperationsAnalysis({ pollIntervalMs: 1, maxPolls: 1 })
+    await analysis.submit('旧任务')
+    await new Promise((resolve) => setTimeout(resolve, 5))
+
+    analysis.reset()
+    await analysis.submit('新任务')
+    staleStatus.resolve(jsonResponse({ message: 'missing' }, 404))
+    await new Promise((resolve) => setTimeout(resolve, 5))
+
+    expect(analysis.runId.value).toBe(newRunId)
+    expect(analysis.phase.value).toBe('completed')
   })
 
   it('surfaces clarification questions and resumes with structured selections', async () => {
@@ -270,6 +310,7 @@ describe('useOperationsAnalysis', () => {
 
     expect(analysis.phase.value).toBe('failed')
     expect(analysis.runId.value).toBeNull()
+    expect(analysis.dto.value).toBeNull()
     expect(analysis.error.value).toContain('任务已不存在')
   })
 
@@ -327,6 +368,47 @@ describe('useOperationsAnalysis', () => {
     expect(analysis.phase.value).toBe('failed')
     expect(analysis.runId.value).toBeNull()
     expect(analysis.error.value).toContain('任务已不存在')
+  })
+
+  it('ignores a stale missing response from cancelled clarification polling', async () => {
+    const oldRunId = '30000000-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const newRunId = '40000000-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const staleStatus = deferred<Response>()
+    let starts = 0
+    let oldStatusCalls = 0
+    handler = (url, init) => {
+      if (init?.method === 'POST') {
+        starts += 1
+        return jsonResponse({ runId: starts === 1 ? oldRunId : newRunId }, 202)
+      }
+      if (url.endsWith(`/runs/${oldRunId}`)) {
+        oldStatusCalls += 1
+        if (oldStatusCalls === 1) {
+          return jsonResponse({
+            runId: oldRunId,
+            status: 'NEEDS_CLARIFICATION',
+            clarificationQuestions: ['请选择能耗口径'],
+            createdAt: '',
+          })
+        }
+        return staleStatus.promise
+      }
+      if (url.endsWith(`/runs/${newRunId}`)) {
+        return jsonResponse({ runId: newRunId, status: 'COMPLETED', createdAt: '' })
+      }
+      return jsonResponse({}, 404)
+    }
+    const analysis = useOperationsAnalysis({ pollIntervalMs: 1 })
+    await analysis.submit('旧任务')
+    await new Promise((resolve) => setTimeout(resolve, 5))
+
+    analysis.reset()
+    await analysis.submit('新任务')
+    staleStatus.resolve(jsonResponse({ message: 'missing' }, 404))
+    await new Promise((resolve) => setTimeout(resolve, 5))
+
+    expect(analysis.runId.value).toBe(newRunId)
+    expect(analysis.phase.value).toBe('completed')
   })
 
   it('reports backend failures without fabricating results', async () => {
