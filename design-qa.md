@@ -222,5 +222,6 @@ The implementation is intentionally less dense where the source mock depends on 
 4. The running branch generated a real completed report. Same-ID recovery and checksum equality were verified before final screenshots.
 5. Same-size and responsive captures showed no layout overlap or horizontal document overflow, so no visual correction was required after the comparison pass.
 6. Final-head review connected the customer surface to the existing analytics capability endpoint, preserved unresolved idempotency identity across refresh, and stopped a failed history refresh from being hidden by a successful detail read. Three focused regressions lock those boundaries.
+7. The follow-up review identified that an HTTP error can occur after durable admission, not only before it. Create identity is now retired only for definitive validation, authorization or explicit idempotency-conflict responses; admission-ambiguous 429/5xx responses keep the same key and body for safe replay.
 
 final result: passed

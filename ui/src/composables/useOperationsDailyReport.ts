@@ -25,6 +25,11 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
   let pendingCreation: { role: DemoRole; key: string; request: OperationsReportCreateRequest; fingerprint: string; accepted: boolean } | null = null
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
+  function isDefinitiveCreateRejection(cause: OperationsReportHttpError): boolean {
+    if (cause.status === 400 || cause.status === 403) return true
+    return cause.status === 409 && /Idempotency-Key/.test(cause.message) && /请求键/.test(cause.message)
+  }
+
   function defaultRequest(): OperationsReportCreateRequest {
     const to = new Date()
     return {
@@ -126,7 +131,9 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
       throw new Error('运营日报超时，可稍后从报告历史查看最终状态')
     } catch (cause) {
       if (current === generation) {
-        if (!createAccepted && cause instanceof OperationsReportHttpError) pendingCreation = null
+        if (!createAccepted && cause instanceof OperationsReportHttpError && isDefinitiveCreateRejection(cause)) {
+          pendingCreation = null
+        }
         error.value = cause instanceof Error ? cause.message : String(cause)
       }
     } finally {

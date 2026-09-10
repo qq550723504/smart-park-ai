@@ -151,6 +151,37 @@ describe('CustomerOperationsReports', () => {
     expect(posts[0]![1]?.body).toBe(posts[1]![1]?.body)
   })
 
+  it('preserves the create identity for an HTTP failure that can happen after durable admission', async () => {
+    let postCount = 0
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (init?.method === 'POST') {
+        postCount += 1
+        if (postCount === 1) {
+          return Promise.resolve(new Response(JSON.stringify({ message: 'Operations report capacity is exhausted; retry later' }), { status: 429 }))
+        }
+        return Promise.resolve(new Response(JSON.stringify({ reportId: 'report-1', runId: 'run-1', statusUrl: '/api/operations-reports/report-1' }), { status: 202 }))
+      }
+      if (url.includes('?')) return Promise.resolve(new Response(JSON.stringify(page([])), { status: 200 }))
+      return Promise.resolve(new Response(JSON.stringify(detail), { status: 200 }))
+    }))
+    const wrapper = mountReports()
+    await flushPromises()
+
+    await wrapper.get('[data-generate-report]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-refresh-reports]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-generate-report]').trigger('click')
+    await flushPromises()
+
+    const posts = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')
+    expect(posts).toHaveLength(2)
+    expect((posts[0]![1]?.headers as Record<string, string>)['Idempotency-Key'])
+      .toBe((posts[1]![1]?.headers as Record<string, string>)['Idempotency-Key'])
+    expect(posts[0]![1]?.body).toBe(posts[1]![1]?.body)
+  })
+
   it('keeps a history refresh failure visible without discarding the selected receipt', async () => {
     let historyReads = 0
     let detailReads = 0
