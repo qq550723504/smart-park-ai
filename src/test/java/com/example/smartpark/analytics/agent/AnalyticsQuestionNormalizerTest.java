@@ -76,6 +76,18 @@ class AnalyticsQuestionNormalizerTest {
     }
 
     @Test
+    void stopsExplicitBuildingScopeBeforeSentencePunctuation() {
+        var modelUnderstanding = new AnalyticsModelClient.QuestionUnderstanding(
+                "楼宇能耗", List.of("energy_kwh"), List.of());
+
+        var sentence = normalizer.normalize("building_id=B1. 分析该楼宇能耗", modelUnderstanding);
+        var clause = normalizer.normalize("building_id=b2: 分析该楼宇能耗", modelUnderstanding);
+
+        assertThat(sentence.requestedFilters()).containsExactlyEntriesOf(Map.of("building_id", "B1"));
+        assertThat(clause.requestedFilters()).containsExactlyEntriesOf(Map.of("building_id", "B2"));
+    }
+
+    @Test
     void rejectsConflictingExplicitBuildingScopes() {
         var modelUnderstanding = new AnalyticsModelClient.QuestionUnderstanding(
                 "楼宇能耗", List.of("energy_kwh"), List.of());
