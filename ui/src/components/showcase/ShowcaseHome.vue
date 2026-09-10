@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import CustomerAnalysisHero from '../customer/CustomerAnalysisHero.vue'
 import CustomerShell from '../customer/CustomerShell.vue'
 import EnergyAnalysis from '../customer/EnergyAnalysis.vue'
@@ -18,6 +18,12 @@ defineEmits<{
 
 const activePage = ref<CustomerPage>('overview')
 const analysisContext = ref<CustomerAnalysisContext | null>(null)
+const analysisInstanceKey = computed(() => {
+  const context = analysisContext.value
+  return context
+    ? JSON.stringify({ buildingId: context.buildingId, source: context.source, energyWindow: context.energyWindow })
+    : 'no-analysis-context'
+})
 
 async function navigate(page: CustomerPage): Promise<void> {
   activePage.value = page
@@ -48,11 +54,14 @@ function openAnalysis(context: CustomerAnalysisContext): void {
       @context-change="updateContext"
       @view-analysis="openAnalysis"
     />
-    <EnergyAnalysis
-      v-show="activePage === 'analysis'"
-      :active="props.active !== false && activePage === 'analysis'"
-      :context="analysisContext"
-      @back="navigate('overview')"
-    />
+    <KeepAlive>
+      <EnergyAnalysis
+        :key="analysisInstanceKey"
+        v-show="activePage === 'analysis'"
+        :active="props.active !== false && activePage === 'analysis'"
+        :context="analysisContext"
+        @back="navigate('overview')"
+      />
+    </KeepAlive>
   </CustomerShell>
 </template>

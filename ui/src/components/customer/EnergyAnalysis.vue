@@ -462,6 +462,7 @@ watch(
         <p v-else-if="analysis.phase.value === 'failed'" class="energy-analysis__error" role="alert">AI 分析未完成：{{ safeAnalysisError }}。已有业务事实仍可继续查看。</p>
         <section v-if="analysis.phase.value === 'clarification'" class="energy-analysis__clarification">
           <strong>需要确认指标口径</strong>
+          <p v-if="analysis.error.value" class="energy-analysis__error" role="alert">口径提交未完成，请保留当前选择并重试。</p>
           <label v-for="(question, index) in analysis.dto.value?.clarificationQuestions ?? []" :key="question">
             <span>{{ question }}</span>
             <select v-model="clarificationSelections[index]">

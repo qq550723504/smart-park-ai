@@ -54,14 +54,22 @@ describe('ShowcaseHome customer shell', () => {
       energyWindow: { from: '2026-09-08T00:00:00Z', to: '2026-09-09T00:00:00Z', timezone: 'Asia/Shanghai', granularity: 'HOUR' },
       source: 'OPERATIONS_ANALYTICS',
     }
+    const otherContext = {
+      ...context,
+      buildingId: 'B3',
+      buildingName: '运营中心',
+      anomalyId: 'ALT-B3',
+      title: '运营中心能耗偏离基线',
+      summary: { ...context.summary, buildingId: 'B3' },
+    }
     const wrapper = mount(ShowcaseHome, {
       props: { active: true },
       global: {
         stubs: {
           ParkOverview: {
             emits: ['context-change', 'view-analysis'],
-            template: '<main data-park-overview><button data-open-analysis @click="$emit(\'view-analysis\', context)">查看分析</button></main>',
-            setup: () => ({ context }),
+            template: '<main data-park-overview><button data-open-analysis @click="$emit(\'view-analysis\', context)">查看 B2 分析</button><button data-open-other-analysis @click="$emit(\'view-analysis\', otherContext)">查看 B3 分析</button></main>',
+            setup: () => ({ context, otherContext }),
           },
           EnergyAnalysis: {
             props: ['context'],
@@ -94,6 +102,17 @@ describe('ShowcaseHome customer shell', () => {
     await flushPromises()
     expect(wrapper.get('[data-customer-nav="analysis"]').attributes('aria-current')).toBe('page')
     expect(wrapper.get('[data-energy-analysis]').attributes('style')).not.toContain('display: none')
+    expect(wrapper.get('[data-energy-analysis]').element).toBe(analysisPage)
+
+    await wrapper.get('[data-analysis-shell-back]').trigger('click')
+    await wrapper.get('[data-open-other-analysis]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-energy-analysis]').text()).toContain('运营中心')
+    expect(wrapper.get('[data-energy-analysis]').element).not.toBe(analysisPage)
+
+    await wrapper.get('[data-analysis-shell-back]').trigger('click')
+    await wrapper.get('[data-open-analysis]').trigger('click')
+    await flushPromises()
     expect(wrapper.get('[data-energy-analysis]').element).toBe(analysisPage)
   })
 })

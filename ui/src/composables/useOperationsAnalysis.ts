@@ -217,7 +217,12 @@ export function useOperationsAnalysis(
     } catch (cause) {
       if (generation !== operationGeneration) return
       error.value = cause instanceof Error ? cause.message : String(cause)
-      phase.value = 'failed'
+      if (runId.value === targetRunId && dto.value?.status === 'NEEDS_CLARIFICATION') {
+        phase.value = 'clarification'
+        startClarificationPolling()
+      } else {
+        phase.value = 'failed'
+      }
     }
   }
 

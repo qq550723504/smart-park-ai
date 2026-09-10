@@ -449,6 +449,28 @@ describe('EnergyAnalysis', () => {
     expect(wrapper.text()).toContain('澄清后的结论')
   })
 
+  it('keeps a clarification recoverable when its submission fails', async () => {
+    vi.mocked(getAnalysisStatus).mockResolvedValue({
+      runId: 'run-1',
+      status: 'NEEDS_CLARIFICATION',
+      clarificationQuestions: ['请选择能耗口径'],
+      clarificationOptions: [['energy_deviation_pct']],
+      createdAt: '2026-09-09T00:00:00Z',
+    })
+    vi.mocked(submitClarification).mockRejectedValue(new Error('temporary upstream failure'))
+    const wrapper = await mountLoaded()
+
+    await wrapper.get('[data-run-ai-analysis]').trigger('click')
+    await flushPromises()
+    await wrapper.get('.energy-analysis__clarification button').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('需要确认指标口径')
+    expect(wrapper.text()).toContain('口径提交未完成，请保留当前选择并重试')
+    expect(wrapper.get('[data-run-ai-analysis]').attributes('disabled')).toBeDefined()
+    expect(startAnalysis).toHaveBeenCalledTimes(1)
+  })
+
   it('shows a clear selection prompt when analysis is opened without context', async () => {
     const wrapper = await mountLoaded(null)
 
