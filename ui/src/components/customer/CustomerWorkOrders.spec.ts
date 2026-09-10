@@ -51,6 +51,12 @@ const completed = {
     summary: 'withheld', riskLevel: 'HIGH', status: 'PENDING_EXECUTION', approval: null, evidence: [], createdAt: '2026-09-10T07:00:01Z', updatedAt: '2026-09-10T07:00:01Z' },
 } as const
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise })
+  return { promise, resolve }
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.getAnomalyEvidence.mockResolvedValue(evidence)
@@ -166,5 +172,150 @@ describe('CustomerWorkOrders', () => {
 
     expect(wrapper.get('[data-actionability]').text()).toContain(nextContext.anomalyId)
     expect(wrapper.get('[data-actionability]').text()).not.toContain(context.anomalyId)
+  })
+
+  it('keeps the actual receipt through refresh, leave, and return without restarting or reapproving', async () => {
+    const wrapper = mount(CustomerWorkOrders, { props: { context, active: true } })
+    await flushPromises()
+    await wrapper.get('[data-confirm-work-order]').trigger('click')
+    await wrapper.get('[data-submit-work-order]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+    const statusReadsBeforeRefresh = mocks.getWorkflow.mock.calls.length
+    mocks.getWorkflow.mockResolvedValueOnce({
+      ...completed,
+      workOrder: { ...completed.workOrder, status: 'IN_PROGRESS' },
+    })
+
+    await wrapper.get('[data-refresh-work-orders]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.getWorkflow).toHaveBeenCalledTimes(statusReadsBeforeRefresh + 1)
+    expect(mocks.getWorkflow).toHaveBeenLastCalledWith('wf-71')
+    expect(mocks.startWorkflow).toHaveBeenCalledTimes(1)
+    expect(mocks.submitApproval).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-work-order-id]').text()).toBe('WO-0001')
+    expect(wrapper.get('[data-work-order-status]').text()).toBe('处理中')
+
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+    await flushPromises()
+
+    expect(mocks.getWorkflow).toHaveBeenCalledTimes(statusReadsBeforeRefresh + 1)
+    expect(mocks.startWorkflow).toHaveBeenCalledTimes(1)
+    expect(mocks.submitApproval).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-work-order-id]').text()).toBe('WO-0001')
+    expect(wrapper.get('[data-work-order-status]').text()).toBe('处理中')
+  })
+
+  it('retains the known receipt and marks the latest status unknown when its refresh fails', async () => {
+    const wrapper = mount(CustomerWorkOrders, { props: { context, active: true } })
+    await flushPromises()
+    await wrapper.get('[data-confirm-work-order]').trigger('click')
+    await wrapper.get('[data-submit-work-order]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+    mocks.getWorkflow.mockRejectedValueOnce(new Error('temporary offline'))
+
+    await wrapper.get('[data-refresh-work-orders]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-work-order-id]').text()).toBe('WO-0001')
+    expect(wrapper.get('[data-work-order-status]').text()).toBe('已创建，待处理')
+    expect(wrapper.get('[data-work-order-outcome]').text()).toContain('最新状态暂未确认')
+    expect(wrapper.get('[role="alert"]').text()).toContain('最新工作流状态暂未确认')
+    expect(wrapper.get('[data-confirm-work-order]').attributes('disabled')).toBeDefined()
+    expect(mocks.startWorkflow).toHaveBeenCalledTimes(1)
+    expect(mocks.submitApproval).toHaveBeenCalledTimes(1)
+  })
+
+  it('restarts an interrupted initial evidence load when returning to the same event', async () => {
+    const staleEvidence = {
+      ...evidence,
+      alerts: evidence.alerts.map((item) => ({ ...item, alertId: 'ALT-STALE-001' })),
+    }
+    const oldEvidence = deferred<typeof staleEvidence>()
+    const oldIdentity = deferred<Awaited<ReturnType<typeof mocks.getActionableAlert>>>()
+    mocks.getAnomalyEvidence.mockReset().mockReturnValueOnce(oldEvidence.promise).mockResolvedValue(evidence)
+    mocks.getActionableAlert.mockReset().mockReturnValueOnce(oldIdentity.promise).mockResolvedValue({
+      alertId: context.anomalyId,
+      parkId: 'PARK-A',
+      buildingId: 'B1',
+      deviceId: 'DEV-ENERGY-B1-001',
+      category: 'ENERGY',
+      riskLevel: 'HIGH',
+      occurredAt: '2026-08-23T00:27:00Z',
+    })
+    const wrapper = mount(CustomerWorkOrders, { props: { context, active: true } })
+    await flushPromises()
+
+    await wrapper.setProps({ active: false })
+    oldEvidence.resolve(staleEvidence)
+    oldIdentity.resolve({
+      alertId: 'ALT-STALE-001',
+      parkId: 'PARK-A',
+      buildingId: 'B1',
+      deviceId: 'DEV-ENERGY-B1-001',
+      category: 'ENERGY',
+      riskLevel: 'HIGH',
+      occurredAt: '2026-08-23T00:27:00Z',
+    })
+    await flushPromises()
+    await wrapper.setProps({ active: true })
+    await flushPromises()
+
+    expect(mocks.getAnomalyEvidence).toHaveBeenCalledTimes(2)
+    expect(mocks.getActionableAlert).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-actionability]').text()).toContain(context.anomalyId)
+    expect(wrapper.get('[data-actionability]').text()).not.toContain('ALT-STALE-001')
+    expect(wrapper.get('[data-confirm-work-order]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('disables page refresh while approval is in flight and keeps the same workflow association', async () => {
+    const approval = deferred<typeof completed>()
+    mocks.submitApproval.mockReturnValueOnce(approval.promise)
+    const wrapper = mount(CustomerWorkOrders, { props: { context, active: true } })
+    await flushPromises()
+    await wrapper.get('[data-confirm-work-order]').trigger('click')
+    await wrapper.get('[data-submit-work-order]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-refresh-work-orders]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-refresh-work-orders]').trigger('click')
+    expect(mocks.startWorkflow).toHaveBeenCalledTimes(1)
+    expect(mocks.submitApproval).toHaveBeenCalledTimes(1)
+    expect(mocks.getWorkflow).not.toHaveBeenCalled()
+
+    approval.resolve(completed)
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.get('[data-work-order-id]').text()).toBe('WO-0001')
+    expect(wrapper.get('[data-work-order-status]').text()).toBe('已创建，待处理')
+    expect(mocks.startWorkflow).toHaveBeenCalledTimes(1)
+    expect(mocks.submitApproval).toHaveBeenCalledTimes(1)
+  })
+
+  it('disables page refresh while workflow start is in flight', async () => {
+    const starting = deferred<typeof waiting>()
+    mocks.startWorkflow.mockReturnValueOnce(starting.promise)
+    const wrapper = mount(CustomerWorkOrders, { props: { context, active: true } })
+    await flushPromises()
+    await wrapper.get('[data-confirm-work-order]').trigger('click')
+    await wrapper.get('[data-submit-work-order]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-refresh-work-orders]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-refresh-work-orders]').trigger('click')
+    expect(mocks.startWorkflow).toHaveBeenCalledTimes(1)
+    expect(mocks.submitApproval).not.toHaveBeenCalled()
+    expect(mocks.getWorkflow).not.toHaveBeenCalled()
+
+    starting.resolve(waiting)
+    await flushPromises()
+    await flushPromises()
+
+    expect(mocks.submitApproval).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-work-order-id]').text()).toBe('WO-0001')
   })
 })

@@ -30,6 +30,8 @@ const confirmationTrigger = ref<HTMLElement | null>(null)
 const outcomeMessage = ref('')
 let requestGeneration = 0
 let loadedContextKey = ''
+let loadingContextKey = ''
+let workflowAlertId = ''
 
 const contextKey = computed(() => props.context
   ? JSON.stringify({ alertId: props.context.anomalyId, buildingId: props.context.buildingId, window: props.context.anomalyWindow })
@@ -171,31 +173,67 @@ async function refreshWorkItems(expectedGeneration = requestGeneration): Promise
 async function refresh(): Promise<void> {
   if (!props.active) return
   const context = props.context
+  const key = contextKey.value
   const generation = ++requestGeneration
-  workflow.reset()
-  evidence.value = null
-  actionableAlert.value = null
-  workItems.value = []
+  loadingContextKey = key
   errors.value = { evidence: '', identity: '', items: '' }
-  outcomeMessage.value = ''
   loading.value = true
   if (!context) {
+    if (workflowAlertId) workflow.reset()
+    workflowAlertId = ''
+    loadedContextKey = ''
+    loadingContextKey = ''
+    evidence.value = null
+    actionableAlert.value = null
+    workItems.value = []
+    outcomeMessage.value = ''
     loading.value = false
     return
   }
+  const alertId = text(context.anomalyId) ?? ''
+  if (workflowAlertId && workflowAlertId !== alertId) {
+    workflow.reset()
+    workflowAlertId = ''
+  }
+  const sameLoadedContext = loadedContextKey === key
+  if (!sameLoadedContext) {
+    evidence.value = null
+    actionableAlert.value = null
+    workItems.value = []
+    outcomeMessage.value = ''
+  }
+  const knownWorkflow = workflowAlertId === alertId ? workflow.workflow.value : null
   const evidencePromise = getAnomalyEvidence('VIEWER', context.buildingId, {
     from: context.anomalyWindow.from,
     to: context.anomalyWindow.to,
   })
   const identityPromise = context.anomalyId ? getActionableAlert(context.anomalyId) : Promise.resolve(null)
-  const [evidenceResult, identityResult] = await Promise.allSettled([evidencePromise, identityPromise])
+  const workflowPromise = knownWorkflow ? workflow.refresh() : Promise.resolve(null)
+  const [evidenceResult, identityResult, refreshedWorkflow] = await Promise.all([
+    Promise.resolve(evidencePromise).then((value) => ({ status: 'fulfilled', value }) as const, (reason) => ({ status: 'rejected', reason }) as const),
+    Promise.resolve(identityPromise).then((value) => ({ status: 'fulfilled', value }) as const, (reason) => ({ status: 'rejected', reason }) as const),
+    workflowPromise,
+  ])
   if (generation !== requestGeneration) return
   if (evidenceResult.status === 'fulfilled') evidence.value = evidenceResult.value
   else errors.value.evidence = '同一事件的告警依据读取失败，已阻止建单。'
   if (identityResult.status === 'fulfilled') actionableAlert.value = identityResult.value
   else errors.value.identity = '该分析告警不在现有可建单告警端口中，已阻止建单。'
+  loadedContextKey = key
+  loadingContextKey = ''
   loading.value = false
+  if (knownWorkflow?.workOrder) {
+    const receipt = refreshedWorkflow?.workOrder ?? knownWorkflow.workOrder
+    outcomeMessage.value = refreshedWorkflow
+      ? `工单 ${receipt.id} 已创建，当前状态：${workOrderStatusLabel(receipt.status)}。创建工单不表示问题已解决。`
+      : `工单 ${receipt.id} 的最新状态暂未确认；仍保留上次已知状态“${workOrderStatusLabel(receipt.status)}”，请稍后刷新重试。`
+  }
   await refreshWorkItems(generation)
+}
+
+function refreshPage(): void {
+  if (loading.value || workflow.loading.value || workflow.approving.value) return
+  void refresh()
 }
 
 function openConfirmation(event: MouseEvent): void {
@@ -223,7 +261,10 @@ async function confirmCreation(): Promise<void> {
   const expectedKey = contextKey.value
   if (!context || !alertId || !actionability.value.allowed) return
   let response = workflow.workflow.value
-  if (!response) response = await workflow.start(alertId)
+  if (!response) {
+    workflowAlertId = alertId
+    response = await workflow.start(alertId)
+  }
   if (expectedKey !== contextKey.value || !response) return
   if (response.status === 'WAITING_APPROVAL') {
     await workflow.approve({
@@ -257,11 +298,11 @@ function onDialogKeydown(event: KeyboardEvent): void {
 watch([() => props.active, contextKey], ([active, key]) => {
   if (!active) {
     requestGeneration++
+    loadingContextKey = ''
     loading.value = false
     return
   }
-  if (key !== loadedContextKey) {
-    loadedContextKey = key
+  if (key !== loadedContextKey && key !== loadingContextKey) {
     void refresh()
   }
 }, { immediate: true })
@@ -291,7 +332,7 @@ watch([() => props.active, contextKey], ([active, key]) => {
 
       <section class="customer-work-orders__workspace">
         <aside class="customer-card customer-work-orders__queue" aria-label="事项列表">
-          <header><div><Document /><h2>待处理事项</h2></div><button type="button" :disabled="loading" @click="refresh"><Refresh />刷新</button></header>
+          <header><div><Document /><h2>待处理事项</h2></div><button type="button" data-refresh-work-orders :disabled="loading || workflow.loading.value || workflow.approving.value" @click="refreshPage"><Refresh />刷新</button></header>
           <div class="customer-work-orders__filters" role="group" aria-label="事项状态筛选">
             <button v-for="option in [{ id: 'all', label: '全部' }, { id: 'pending', label: '待确认' }, { id: 'processing', label: '处理中' }]"
               :key="option.id" type="button" :class="{ 'is-current': filter === option.id }" @click="filter = option.id as typeof filter">

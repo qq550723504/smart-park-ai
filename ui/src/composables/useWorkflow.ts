@@ -48,8 +48,18 @@ export function useWorkflow() {
     approvalKey = null
   }
 
-  function mergeWorkflow(next: WorkflowResponse) {
-    workflow.value = next
+  function mergeWorkflow(next: WorkflowResponse): WorkflowResponse {
+    const current = workflow.value
+    const merged = current?.workflowId === next.workflowId
+      ? {
+          ...next,
+          approval: next.approval ?? current.approval,
+          workOrder: next.workOrder ?? current.workOrder,
+          eventSequence: Math.max(next.eventSequence, current.eventSequence),
+        }
+      : next
+    workflow.value = merged
+    return merged
   }
 
   function isCurrent(generation: number, workflowId: string): boolean {
@@ -69,15 +79,18 @@ export function useWorkflow() {
     }
   }
 
-  async function refresh(generation = operationGeneration, workflowId = workflow.value?.workflowId) {
-    if (!workflowId || !isCurrent(generation, workflowId)) return
+  async function refresh(generation = operationGeneration, workflowId = workflow.value?.workflowId): Promise<WorkflowResponse | null> {
+    if (!workflowId || !isCurrent(generation, workflowId)) return null
+    error.value = ''
     try {
       const refreshed = await getWorkflow(workflowId)
-      if (!isCurrent(generation, workflowId)) return
-      mergeWorkflow(refreshed)
+      if (!isCurrent(generation, workflowId)) return null
+      return mergeWorkflow(refreshed)
     } catch (cause) {
-      if (!isCurrent(generation, workflowId)) return
-      error.value = cause instanceof Error ? cause.message : '无法刷新工作流状态'
+      if (!isCurrent(generation, workflowId)) return null
+      const detail = cause instanceof Error ? cause.message : '无法读取工作流状态'
+      error.value = `最新工作流状态暂未确认：${detail}`
+      return null
     }
   }
 

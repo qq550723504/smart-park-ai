@@ -247,4 +247,38 @@ describe('useWorkflow', () => {
     expect(binding.error.value).toBe('forbidden')
     scope.stop()
   })
+
+  it('keeps a known work-order receipt when a later status read fails or omits it', async () => {
+    const completed = {
+      ...workflow('wf-receipt'),
+      status: 'COMPLETED' as const,
+      eventSequence: 8,
+      approval: { decision: 'APPROVED', reviewer: 'withheld', comment: 'recorded', decidedAt: '2026-09-10T07:00:00Z' },
+      workOrder: { id: 'WO-0001', workflowId: 'wf-receipt', parkId: 'PARK-A', buildingId: 'B1', deviceId: 'DEV-ENERGY-B1-001', alertId: 'ALT-TEMP-001', summary: 'withheld', riskLevel: 'HIGH', status: 'PENDING_EXECUTION', approval: null, evidence: [], createdAt: '2026-09-10T07:00:01Z', updatedAt: '2026-09-10T07:00:01Z' },
+    }
+    vi.mocked(startWorkflow).mockResolvedValue(completed)
+    vi.mocked(workflowApi.getWorkflow)
+      .mockRejectedValueOnce(new Error('temporary offline'))
+      .mockResolvedValueOnce({
+        ...completed,
+        eventSequence: 7,
+        approval: null,
+        workOrder: null,
+      })
+    vi.spyOn(workflowApi, 'subscribeToWorkflow').mockReturnValue({ close: vi.fn() } as unknown as EventSource)
+    const scope = effectScope()
+    let binding!: ReturnType<typeof useWorkflow>
+    scope.run(() => { binding = useWorkflow() })
+
+    await binding.start('ALT-TEMP-001')
+    await expect(binding.refresh()).resolves.toBeNull()
+
+    expect(binding.workflow.value?.workOrder?.id).toBe('WO-0001')
+    expect(binding.error.value).toContain('最新工作流状态暂未确认')
+
+    await expect(binding.refresh()).resolves.toMatchObject({ workOrder: { id: 'WO-0001' }, eventSequence: 8 })
+    expect(binding.workflow.value?.approval?.decision).toBe('APPROVED')
+    expect(binding.error.value).toBe('')
+    scope.stop()
+  })
 })
