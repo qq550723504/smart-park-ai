@@ -244,6 +244,56 @@ describe('CustomerOperationsReports', () => {
     await flushPromises()
   })
 
+  it('keeps tracking a newly accepted report when return history arrives before its first detail', async () => {
+    let resolveNewDetail!: (response: Response) => void
+    const oldSummary = { ...summary, reportId: 'report-old', runId: 'run-old', traceId: 'run-old' }
+    const oldDetail = { ...detail, ...oldSummary, summary: '历史报告，不应覆盖正在生成的新报告' }
+    let historyReads = 0
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (init?.method === 'POST') {
+        return Promise.resolve(new Response(JSON.stringify({
+          reportId: 'report-new',
+          runId: 'run-new',
+          statusUrl: '/api/operations-reports/report-new',
+        }), { status: 202 }))
+      }
+      if (url.includes('?')) {
+        historyReads += 1
+        return Promise.resolve(new Response(JSON.stringify(page(historyReads === 1 ? [] : [oldSummary])), { status: 200 }))
+      }
+      if (url.endsWith('/report-new')) {
+        return new Promise<Response>((resolve) => { resolveNewDetail = resolve })
+      }
+      return Promise.resolve(new Response(JSON.stringify(oldDetail), { status: 200 }))
+    }))
+    const wrapper = mountReports()
+    await flushPromises()
+
+    await wrapper.get('[data-generate-report]').trigger('click')
+    await flushPromises()
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+    await flushPromises()
+
+    expect(wrapper.get('[data-generate-report]').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).not.toContain('历史报告，不应覆盖正在生成的新报告')
+    expect(vi.mocked(fetch).mock.calls.filter(([, request]) => request?.method === 'POST')).toHaveLength(1)
+
+    resolveNewDetail(new Response(JSON.stringify({
+      ...detail,
+      reportId: 'report-new',
+      runId: 'run-new',
+      traceId: 'run-new',
+      status: 'GENERATING',
+      completedAt: null,
+    }), { status: 200 }))
+    await flushPromises()
+
+    expect(wrapper.get('[data-generate-report]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="report-preview"]').text()).toContain('report-new')
+  })
+
   it('keeps a history refresh failure visible without discarding the selected receipt', async () => {
     let historyReads = 0
     let detailReads = 0
