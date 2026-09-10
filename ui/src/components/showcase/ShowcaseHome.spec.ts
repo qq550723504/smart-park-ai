@@ -114,7 +114,7 @@ describe('ShowcaseHome customer shell', () => {
         stubs: {
           ParkOverview: {
             emits: ['context-change', 'view-analysis'],
-            template: '<main data-park-overview><button data-open-analysis @click="$emit(\'view-analysis\', context)">查看 B2 分析</button><button data-open-other-analysis @click="$emit(\'view-analysis\', otherContext)">查看 B3 分析</button><button data-refresh-context @click="$emit(\'context-change\', refreshedContext)">刷新窗口</button></main>',
+            template: '<main data-park-overview><button data-open-analysis @click="$emit(\'view-analysis\', context)">查看 B2 分析</button><button data-open-other-analysis @click="$emit(\'view-analysis\', otherContext)">查看 B3 分析</button><button data-select-other @click="$emit(\'context-change\', otherContext)">选择 B3</button><button data-refresh-context @click="$emit(\'context-change\', refreshedContext)">刷新窗口</button></main>',
             setup: () => ({ context, otherContext, refreshedContext }),
           },
           EnergyAnalysis: {
@@ -155,6 +155,13 @@ describe('ShowcaseHome customer shell', () => {
     expect(wrapper.get('[data-customer-nav="analysis"]').attributes('aria-current')).toBe('page')
     expect(wrapper.get('[data-energy-analysis]').attributes('style')).not.toContain('display: none')
     expect(wrapper.get('[data-energy-analysis]').element).toBe(analysisPage)
+
+    await wrapper.get('[data-analysis-shell-back]').trigger('click')
+    await wrapper.get('[data-select-other]').trigger('click')
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-energy-analysis]').text()).toContain('运营中心')
+    expect(wrapper.get('[data-energy-analysis]').element).not.toBe(analysisPage)
 
     await wrapper.get('[data-analysis-shell-back]').trigger('click')
     await wrapper.get('[data-open-other-analysis]').trigger('click')

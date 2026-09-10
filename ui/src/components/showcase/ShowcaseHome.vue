@@ -26,9 +26,13 @@ const analysisInstanceKey = computed(() => {
     : 'no-analysis-context'
 })
 
-async function navigate(page: CustomerPage): Promise<void> {
-  if (page === 'analysis' && !analysisContext.value) {
-    analysisContext.value = latestOverviewContext.value
+async function navigate(page: CustomerPage, requestedContext?: CustomerAnalysisContext): Promise<void> {
+  if (page === 'analysis') {
+    if (requestedContext) {
+      analysisContext.value = requestedContext
+    } else if (activePage.value !== 'analysis' || !analysisContext.value) {
+      analysisContext.value = latestOverviewContext.value
+    }
   }
   activePage.value = page
   await nextTick()
@@ -45,8 +49,7 @@ function updateContext(context: CustomerAnalysisContext | null): void {
 }
 
 function openAnalysis(context: CustomerAnalysisContext): void {
-  analysisContext.value = context
-  void navigate('analysis')
+  void navigate('analysis', context)
 }
 </script>
 
