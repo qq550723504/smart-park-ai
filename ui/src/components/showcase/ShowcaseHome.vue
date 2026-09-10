@@ -31,7 +31,11 @@ async function navigate(page: CustomerPage, requestedContext?: CustomerAnalysisC
     if (requestedContext) {
       analysisContext.value = requestedContext
     } else if (activePage.value !== 'analysis' && latestOverviewContext.value) {
-      analysisContext.value = latestOverviewContext.value
+      const current = analysisContext.value
+      const latest = latestOverviewContext.value
+      if (!current || current.buildingId !== latest.buildingId || current.source !== latest.source) {
+        analysisContext.value = latest
+      }
     }
   }
   activePage.value = page

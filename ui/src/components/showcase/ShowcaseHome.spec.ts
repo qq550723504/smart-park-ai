@@ -150,11 +150,13 @@ describe('ShowcaseHome customer shell', () => {
     expect(wrapper.get('[data-customer-shell]').element).toBe(shell)
     expect(wrapper.get('.customer-shell__topbar').element).toBe(topbar)
 
-    await wrapper.get('[data-open-analysis]').trigger('click')
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
     await flushPromises()
     expect(wrapper.get('[data-customer-nav="analysis"]').attributes('aria-current')).toBe('page')
     expect(wrapper.get('[data-energy-analysis]').attributes('style')).not.toContain('display: none')
     expect(wrapper.get('[data-energy-analysis]').element).toBe(analysisPage)
+    expect(wrapper.get('[data-energy-analysis]').text()).toContain(context.energyWindow.to)
+    expect(wrapper.get('[data-energy-analysis]').text()).not.toContain(refreshedContext.energyWindow.to)
 
     await wrapper.get('[data-analysis-shell-back]').trigger('click')
     await wrapper.get('[data-select-other]').trigger('click')
