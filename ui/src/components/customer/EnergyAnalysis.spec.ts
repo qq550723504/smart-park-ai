@@ -13,6 +13,11 @@ import type { EnergyAnalysisPoint } from './EnergyAnalysisChart.vue'
 vi.mock('../../services/energyTimeSeriesApi', () => ({ getEnergyTimeSeries: vi.fn() }))
 vi.mock('../../services/operationsAnomalyApi', () => ({ getAnomalyEvidence: vi.fn() }))
 vi.mock('../../services/analyticsApi', () => ({
+  AnalyticsApiError: class AnalyticsApiError extends Error {
+    constructor(public readonly status: number, message: string) {
+      super(message)
+    }
+  },
   getAnalysisStatus: vi.fn(),
   startAnalysis: vi.fn(),
   submitClarification: vi.fn(),
