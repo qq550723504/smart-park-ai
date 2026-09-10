@@ -155,7 +155,8 @@ async function send(): Promise<void> {
         sessionId.value = ''
         conversation.value = null
         confirmedHumanHandoff.value = false
-        error.value = '原会话已失效，本次回复已确认未受理；问题已保留，下次发送将创建新会话。'
+        messages.value = []
+        error.value = '原会话已失效，本次回复已确认未受理；旧会话记录已清除，问题已保留，下次发送将创建新会话。'
       } else {
         error.value = /报修|漏水|故障/.test(request.question)
           ? '报修请求已确认未受理，请检查问题后重新发送；页面不会显示虚假工单。'

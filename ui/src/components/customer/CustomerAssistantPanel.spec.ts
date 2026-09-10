@@ -221,7 +221,9 @@ describe('CustomerAssistantPanel', () => {
     await flushPromises()
 
     expect(wrapper.get('[role="alert"]').text()).toContain('原会话已失效')
+    expect(wrapper.get('[role="alert"]').text()).toContain('旧会话记录已清除')
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('继续说明停车规则')
+    expect(wrapper.findAll('.customer-assistant__messages article')).toHaveLength(0)
 
     await wrapper.get('form').trigger('submit')
     await flushPromises()
@@ -229,6 +231,9 @@ describe('CustomerAssistantPanel', () => {
     expect(replyCustomerSession).toHaveBeenCalledTimes(1)
     expect(askCustomerService).toHaveBeenCalledTimes(2)
     expect(vi.mocked(askCustomerService).mock.calls[1]?.[0]).toBe('继续说明停车规则')
+    expect(wrapper.findAll('.customer-assistant__messages article.user')).toHaveLength(1)
+    expect(wrapper.findAll('.customer-assistant__messages article.assistant')).toHaveLength(1)
+    expect(wrapper.text()).not.toContain(answer.answer)
     expect(wrapper.text()).toContain('已创建新会话。')
   })
 
