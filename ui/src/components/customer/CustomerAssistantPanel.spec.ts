@@ -187,6 +187,51 @@ describe('CustomerAssistantPanel', () => {
     expect(askCustomerService).toHaveBeenCalledTimes(1)
   })
 
+  it('releases the composer after a confirmed answer while conversation synchronization is still pending', async () => {
+    let resolveConversation: ((value: { sessionId: string; messages: never[]; retrievals: never[]; humanHandoff: boolean }) => void) | undefined
+    vi.mocked(askCustomerService).mockResolvedValue(answer)
+    vi.mocked(getCustomerConversation).mockReturnValue(new Promise((resolve) => { resolveConversation = resolve }))
+    const wrapper = mountPanel()
+
+    await wrapper.get('textarea').setValue('访客停车怎么收费？')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain(answer.answer)
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).disabled).toBe(false)
+    expect((wrapper.vm as unknown as { canResetForDemo: () => boolean }).canResetForDemo()).toBe(true)
+
+    resolveConversation?.({ sessionId: 'CS-1', messages: [], retrievals: [], humanHandoff: false })
+    await flushPromises()
+  })
+
+  it('starts a new conversation after a reply is confirmed missing', async () => {
+    vi.mocked(askCustomerService)
+      .mockResolvedValueOnce(answer)
+      .mockResolvedValueOnce({ ...answer, sessionId: 'CS-2', answer: '已创建新会话。' })
+    vi.mocked(replyCustomerSession).mockRejectedValue(new WorkflowApiError('missing', 404))
+    vi.mocked(getCustomerConversation).mockResolvedValue({ sessionId: 'CS-1', messages: [], retrievals: [], humanHandoff: false })
+    const wrapper = mountPanel()
+
+    await wrapper.get('textarea').setValue('访客停车怎么收费？')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    await wrapper.get('textarea').setValue('继续说明停车规则')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('原会话已失效')
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('继续说明停车规则')
+
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(replyCustomerSession).toHaveBeenCalledTimes(1)
+    expect(askCustomerService).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(askCustomerService).mock.calls[1]?.[0]).toBe('继续说明停车规则')
+    expect(wrapper.text()).toContain('已创建新会话。')
+  })
+
   it('shows a real repair receipt without claiming resolution', async () => {
     vi.mocked(askCustomerService).mockResolvedValue({
       ...answer,
