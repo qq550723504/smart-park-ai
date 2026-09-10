@@ -64,21 +64,28 @@ describe('ShowcaseHome customer shell', () => {
           },
           EnergyAnalysis: {
             props: ['context'],
-            emits: ['back'],
-            template: '<main data-energy-analysis><span>{{ context?.buildingName }}</span><button data-back @click="$emit(\'back\')">返回</button></main>',
+            template: '<main data-energy-analysis><span>{{ context?.buildingName }}</span></main>',
           },
         },
       },
     })
+    const shell = wrapper.get('[data-customer-shell]').element
+    const topbar = wrapper.get('.customer-shell__topbar').element
 
     await wrapper.get('[data-open-analysis]').trigger('click')
     expect(wrapper.get('[data-customer-nav="analysis"]').attributes('aria-current')).toBe('page')
     expect(wrapper.get('[data-energy-analysis]').text()).toContain('研发大厦')
+    expect(wrapper.get('#customer-analysis-title').text()).toContain('研发大厦能耗偏离基线')
+    expect(wrapper.get('[data-customer-shell]').element).toBe(shell)
+    expect(wrapper.get('.customer-shell__topbar').element).toBe(topbar)
+    expect(wrapper.findAll('.customer-shell__topbar')).toHaveLength(1)
     expect(wrapper.emitted('enter-workbench')).toBeUndefined()
 
-    await wrapper.get('[data-back]').trigger('click')
+    await wrapper.get('[data-analysis-shell-back]').trigger('click')
     expect(wrapper.get('[data-customer-nav="overview"]').attributes('aria-current')).toBe('page')
     expect(wrapper.find('[data-park-overview]').isVisible()).toBe(true)
     expect(wrapper.find('[data-energy-analysis]').exists()).toBe(false)
+    expect(wrapper.get('[data-customer-shell]').element).toBe(shell)
+    expect(wrapper.get('.customer-shell__topbar').element).toBe(topbar)
   })
 })

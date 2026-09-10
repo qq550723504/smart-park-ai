@@ -136,7 +136,6 @@ describe('EnergyAnalysis', () => {
       from: context.anomalyWindow.from,
       to: context.anomalyWindow.to,
     })
-    expect(wrapper.text()).toContain('创新中心能耗偏离基线')
     expect(wrapper.text()).toContain('210 kWh')
     expect(wrapper.text()).toContain('MTR-B1-1')
     expect(wrapper.text()).toContain('LFT-B1-01')

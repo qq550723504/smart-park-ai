@@ -1,10 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ArrowLeft, Calendar, Checked, DataAnalysis, DocumentChecked, Refresh, WarningFilled } from '@element-plus/icons-vue'
-import campusBanner from '../../assets/customer/campus-banner.png'
-import campusBanner960 from '../../assets/customer/campus-banner-960.webp'
-import campusBanner1440 from '../../assets/customer/campus-banner-1440.webp'
-import campusBanner2172 from '../../assets/customer/campus-banner-2172.webp'
+import { ArrowLeft, Calendar, Checked, DataAnalysis, Refresh, WarningFilled } from '@element-plus/icons-vue'
 import { useOperationsAnalysis } from '../../composables/useOperationsAnalysis'
 import { getEnergyTimeSeries } from '../../services/energyTimeSeriesApi'
 import { getAnomalyEvidence } from '../../services/operationsAnomalyApi'
@@ -368,26 +364,6 @@ watch(
     </section>
 
     <template v-else>
-      <section class="energy-analysis__hero" aria-labelledby="analysis-title">
-        <picture class="customer-art" aria-hidden="true">
-          <source type="image/webp" :srcset="`${campusBanner960} 960w, ${campusBanner1440} 1440w, ${campusBanner2172} 2172w`" sizes="98vw" />
-          <img :src="campusBanner" alt="" />
-        </picture>
-        <div class="energy-analysis__heading">
-          <button type="button" class="energy-analysis__back" data-analysis-back @click="$emit('back')"><ArrowLeft aria-hidden="true" /> 返回</button>
-          <div>
-            <span>{{ context.buildingId }} · {{ context.buildingName }}</span>
-            <h1 id="analysis-title">{{ context.title }}</h1>
-            <p>异常依据周期：{{ formatWindow(context.anomalyWindow.from, context.anomalyWindow.to, context.anomalyWindow.timezone) }}（{{ context.anomalyWindow.timezone }}）</p>
-          </div>
-          <strong class="energy-analysis__priority" :class="{ 'is-high': context.priority === '高' }">{{ context.priority }}优先级</strong>
-        </div>
-        <div class="energy-analysis__actions">
-          <button type="button" disabled title="事件与工单将在人工确认页面开放"><DocumentChecked aria-hidden="true" /> 进入人工确认</button>
-          <span>报告暂不支持自选分析内容</span>
-        </div>
-      </section>
-
       <nav class="energy-analysis__tabs" aria-label="分析页内容导航">
         <button type="button" class="is-current" @click="scrollToSection('analysis-conclusion')">综合分析</button>
         <button type="button" @click="scrollToSection('related-devices')">设备详情</button>

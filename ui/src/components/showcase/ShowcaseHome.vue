@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, ref } from 'vue'
+import CustomerAnalysisHero from '../customer/CustomerAnalysisHero.vue'
 import CustomerShell from '../customer/CustomerShell.vue'
 import EnergyAnalysis from '../customer/EnergyAnalysis.vue'
 import ParkOverview from '../customer/ParkOverview.vue'
@@ -38,6 +39,9 @@ function openAnalysis(context: CustomerAnalysisContext): void {
 
 <template>
   <CustomerShell :active-page="activePage" @navigate="navigate" @enter-workbench="$emit('enter-workbench')">
+    <template #analysis-hero>
+      <CustomerAnalysisHero :context="analysisContext" @back="navigate('overview')" />
+    </template>
     <ParkOverview
       v-show="activePage === 'overview'"
       :active="props.active !== false && activePage === 'overview'"

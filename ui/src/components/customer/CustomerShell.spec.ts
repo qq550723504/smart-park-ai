@@ -23,7 +23,9 @@ describe('CustomerShell', () => {
     expect(wrapper.get('[data-customer-nav="analysis"]').attributes('aria-current')).toBe('page')
     expect(wrapper.get('[data-customer-nav="overview"]').attributes('aria-current')).toBeUndefined()
     expect(wrapper.get('.customer-shell__skip').attributes('href')).toBe('#customer-analysis-main')
-    expect(wrapper.find('.customer-shell__hero').exists()).toBe(false)
+    expect(wrapper.get('.customer-shell__hero').text()).toContain('运营分析')
+    expect(wrapper.get('.customer-shell__hero').attributes('aria-labelledby')).toBe('customer-analysis-title')
+    expect(wrapper.find('.customer-shell__hero picture').exists()).toBe(true)
   })
 
   it('serves responsive WebP artwork with a PNG fallback', () => {

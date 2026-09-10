@@ -70,7 +70,10 @@ const customerNavigation = [
     </header>
 
     <div class="customer-shell__body">
-      <section v-if="props.activePage === 'overview'" class="customer-shell__hero" aria-labelledby="customer-hero-title">
+      <section
+        class="customer-shell__hero"
+        :aria-labelledby="props.activePage === 'analysis' ? 'customer-analysis-title' : 'customer-hero-title'"
+      >
         <picture class="customer-art" aria-hidden="true">
           <source
             type="image/webp"
@@ -79,11 +82,19 @@ const customerNavigation = [
           />
           <img :src="campusBanner" alt="" fetchpriority="high" />
         </picture>
-        <div>
-          <h1 id="customer-hero-title">AI 让园区更智慧，让运营更从容</h1>
-          <p>安全 · 绿色 · 高效 · 人性化　打造可持续发展的未来园区</p>
-        </div>
-        <span>科技赋能空间<br />让美好发生</span>
+        <slot v-if="props.activePage === 'analysis'" name="analysis-hero">
+          <div>
+            <h1 id="customer-analysis-title">运营分析</h1>
+            <p>请先从园区总览选择需要分析的楼宇</p>
+          </div>
+        </slot>
+        <template v-else>
+          <div>
+            <h1 id="customer-hero-title">AI 让园区更智慧，让运营更从容</h1>
+            <p>安全 · 绿色 · 高效 · 人性化　打造可持续发展的未来园区</p>
+          </div>
+          <span>科技赋能空间<br />让美好发生</span>
+        </template>
       </section>
       <slot />
       <footer class="customer-shell__footer">
