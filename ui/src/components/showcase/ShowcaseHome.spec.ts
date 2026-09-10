@@ -164,7 +164,7 @@ describe('ShowcaseHome customer shell', () => {
     expect(wrapper.get('[data-restart-notice]').text()).toContain('后台工单、报告和进行中的任务均未删除')
   })
 
-  it('moves focus into the restart dialog, traps Tab, and restores focus on Escape', async () => {
+  it('moves focus into the restart dialog, traps Tab, and restores focus when closing', async () => {
     const wrapper = mount(ShowcaseHome, {
       props: { active: true },
       attachTo: document.body,
@@ -194,6 +194,14 @@ describe('ShowcaseHome customer shell', () => {
     expect(document.activeElement).toBe(confirm.element)
 
     confirm.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await flushPromises()
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(document.activeElement).toBe(trigger.element)
+
+    await trigger.trigger('click')
+    await flushPromises()
+    expect(document.activeElement).toBe(wrapper.get('[role="dialog"]').element)
+    await wrapper.get('[data-cancel-restart]').trigger('click')
     await flushPromises()
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
     expect(document.activeElement).toBe(trigger.element)

@@ -207,8 +207,7 @@
   .customer-analysis-hero__heading { display: grid; gap: 10px; }
   .customer-analysis-hero__actions { justify-items: start; }
   .customer-shell__topbar { gap: 8px; }
-  .customer-shell__divider, .customer-shell__park, .customer-shell__workbench > svg { display: none; }
-  .customer-shell__restart { flex: 0 0 34px; justify-content: center; width: 34px; height: 34px; padding: 0; }
+  .customer-shell__divider, .customer-shell__park, .customer-shell__workbench > svg, .customer-shell__restart { display: none; }
   .customer-shell__user-zone { margin-left: auto; }
   .customer-shell__nav { justify-content: flex-start; min-width: 0; max-width: 100%; overflow-x: auto; }
   .customer-shell__nav button, .customer-shell__nav > span { flex: none; min-width: auto; padding: 0 12px; }
