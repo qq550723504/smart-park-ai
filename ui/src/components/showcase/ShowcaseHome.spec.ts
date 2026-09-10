@@ -135,7 +135,10 @@ describe('ShowcaseHome customer shell', () => {
   })
 
   it('restarts only the customer presentation state after explicit confirmation', async () => {
-    const overviewReset = vi.fn()
+    let finishOverviewRefresh!: () => void
+    const overviewReset = vi.fn(() => new Promise<void>((resolve) => {
+      finishOverviewRefresh = resolve
+    }))
     const assistantReset = vi.fn(() => true)
     const wrapper = mount(ShowcaseHome, {
       props: { active: true },
@@ -165,6 +168,8 @@ describe('ShowcaseHome customer shell', () => {
     expect(wrapper.get('[data-restart-notice]').text()).toContain('后台工单、报告和进行中的任务均未删除')
     expect(wrapper.get('[data-park-overview]').attributes('tabindex')).toBe('-1')
     expect(document.activeElement).toBe(wrapper.get('[data-park-overview]').element)
+    finishOverviewRefresh()
+    await flushPromises()
     wrapper.unmount()
   })
 
