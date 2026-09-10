@@ -400,7 +400,7 @@ describe('EnergyAnalysis', () => {
     await wrapper.get('[data-run-ai-analysis]').trigger('click')
     await wrapper.get('[data-run-ai-analysis]').trigger('click')
     expect(startAnalysis).toHaveBeenCalledTimes(1)
-    expect(startAnalysis).toHaveBeenCalledWith(expect.stringContaining('B1'))
+    expect(startAnalysis).toHaveBeenCalledWith(expect.stringContaining('building_id=B1'))
     expect(startAnalysis).toHaveBeenCalledWith(expect.stringContaining(context.energyWindow.from))
 
     started.resolve({ runId: 'run-1' })

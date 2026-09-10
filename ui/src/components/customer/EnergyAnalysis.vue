@@ -367,7 +367,7 @@ function scrollToSection(id: string): void {
 function runAiAnalysis(): void {
   const context = props.context
   if (!context || analysis.phase.value === 'running') return
-  const question = `${context.buildingId} 从 ${context.energyWindow.from} 到 ${context.energyWindow.to} 的能耗基线偏差率`
+  const question = `building_id=${context.buildingId} 从 ${context.energyWindow.from} 到 ${context.energyWindow.to} 的能耗基线偏差率`
   void analysis.submit(question)
 }
 

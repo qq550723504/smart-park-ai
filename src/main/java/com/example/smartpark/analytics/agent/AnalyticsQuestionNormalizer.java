@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Converts model-advisory dimensions and filters into a conservative canonical
@@ -15,6 +16,9 @@ import java.util.Set;
  * grouping dimension or entity predicate that the operator did not state.
  */
 public final class AnalyticsQuestionNormalizer {
+
+    private static final Pattern EXPLICIT_BUILDING_FILTER = Pattern.compile(
+            "(?i)(?<![A-Za-z0-9_])building_id\\s*=\\s*([A-Za-z0-9][A-Za-z0-9._:-]{0,63})(?![A-Za-z0-9._:-])");
 
     private static final Map<String, String> DIMENSION_ALIASES = Map.ofEntries(
             Map.entry("building", "building_id"),
@@ -73,6 +77,7 @@ public final class AnalyticsQuestionNormalizer {
         }
 
         LinkedHashMap<String, String> filters = new LinkedHashMap<>();
+        explicitBuildingFilter(question).ifPresent(value -> filters.put("building_id", value));
         for (var entry : understanding.requestedFilters().entrySet()) {
             String dimension = canonicalDimension(entry.getKey());
             String value = canonicalFilterValue(dimension, entry.getValue());
@@ -90,6 +95,16 @@ public final class AnalyticsQuestionNormalizer {
                 understanding.requestedTimeMentions(),
                 understanding.serverResolvedTimeRange(),
                 understanding.serverReferenceInstant());
+    }
+
+    private static java.util.Optional<String> explicitBuildingFilter(String question) {
+        LinkedHashSet<String> values = new LinkedHashSet<>();
+        var matcher = EXPLICIT_BUILDING_FILTER.matcher(question);
+        while (matcher.find()) values.add(matcher.group(1));
+        if (values.size() > 1) {
+            throw new IllegalArgumentException("问题包含多个 building_id 约束");
+        }
+        return values.stream().findFirst();
     }
 
     private static String canonicalDimension(String requested) {

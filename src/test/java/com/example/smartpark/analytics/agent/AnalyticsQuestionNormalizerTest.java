@@ -44,6 +44,32 @@ class AnalyticsQuestionNormalizerTest {
     }
 
     @Test
+    void derivesExplicitBuildingScopeWhenTheModelOmitsFilters() {
+        var modelUnderstanding = new AnalyticsModelClient.QuestionUnderstanding(
+                "B1楼宇的能耗",
+                List.of("energy_kwh"),
+                List.of(),
+                null,
+                List.of(),
+                Map.of());
+
+        var normalized = normalizer.normalize("building_id=B1 楼宇的能耗", modelUnderstanding);
+
+        assertThat(normalized.requestedFilters()).containsExactlyEntriesOf(Map.of("building_id", "B1"));
+    }
+
+    @Test
+    void rejectsConflictingExplicitBuildingScopes() {
+        var modelUnderstanding = new AnalyticsModelClient.QuestionUnderstanding(
+                "楼宇能耗", List.of("energy_kwh"), List.of());
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> normalizer.normalize(
+                        "building_id=B1 与 building_id=B2 的能耗", modelUnderstanding))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("多个 building_id");
+    }
+
+    @Test
     void preservesVisualizationDimensionsOnlyWhenTheQuestionStatesTheirMeaning() {
         var modelUnderstanding = new AnalyticsModelClient.QuestionUnderstanding(
                 "过去5天楼宇空间分布",
