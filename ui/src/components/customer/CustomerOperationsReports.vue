@@ -278,6 +278,7 @@ watch(() => state.reports.value, (reports) => {
                 v-for="item in state.reports.value"
                 :key="item.reportId"
                 type="button"
+                :disabled="state.busy.value"
                 :class="{ 'is-current': report?.reportId === item.reportId }"
                 :aria-current="report?.reportId === item.reportId ? 'true' : undefined"
                 :data-status="item.status"

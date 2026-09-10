@@ -183,12 +183,12 @@ describe('CustomerOperationsReports', () => {
   })
 
   it('binds a late acceptance to its submitted attempt instead of a replacement', async () => {
-    const postResolvers: Array<(response: Response) => void> = []
+    const postControls: Array<{ resolve: (response: Response) => void; reject: (cause: Error) => void }> = []
     let historyReads = 0
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       if (init?.method === 'POST') {
-        return new Promise<Response>((resolve) => { postResolvers.push(resolve) })
+        return new Promise<Response>((resolve, reject) => { postControls.push({ resolve, reject }) })
       }
       if (url.includes('?')) {
         historyReads += 1
@@ -204,7 +204,8 @@ describe('CustomerOperationsReports', () => {
     await flushPromises()
     await wrapper.get('[data-generate-report]').trigger('click')
 
-    postResolvers[0]!(new Response(JSON.stringify({ reportId: 'old-report', runId: 'old-run', statusUrl: '/api/operations-reports/old-report' }), { status: 202 }))
+    postControls[0]!.resolve(new Response(JSON.stringify({ reportId: 'old-report', runId: 'old-run', statusUrl: '/api/operations-reports/old-report' }), { status: 202 }))
+    postControls[1]!.reject(new Error('replacement response lost'))
     await flushPromises()
     await wrapper.get('.customer-reports__history-list > button').trigger('click')
     await flushPromises()
@@ -216,8 +217,30 @@ describe('CustomerOperationsReports', () => {
       .toBe((posts[2]![1]?.headers as Record<string, string>)['Idempotency-Key'])
     expect(posts[1]![1]?.body).toBe(posts[2]![1]?.body)
 
-    postResolvers[1]!(new Response(JSON.stringify({ reportId: 'report-1', runId: 'run-1', statusUrl: '/api/operations-reports/report-1' }), { status: 202 }))
-    postResolvers[2]!(new Response(JSON.stringify({ reportId: 'report-1', runId: 'run-1', statusUrl: '/api/operations-reports/report-1' }), { status: 202 }))
+    postControls[2]!.resolve(new Response(JSON.stringify({ reportId: 'report-1', runId: 'run-1', statusUrl: '/api/operations-reports/report-1' }), { status: 202 }))
+    await flushPromises()
+  })
+
+  it('does not let history selection cancel an in-flight generation', async () => {
+    let resolvePost!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (init?.method === 'POST') return new Promise<Response>((resolve) => { resolvePost = resolve })
+      if (url.includes('?')) return Promise.resolve(new Response(JSON.stringify(page([summary])), { status: 200 }))
+      return Promise.resolve(new Response(JSON.stringify(detail), { status: 200 }))
+    }))
+    const wrapper = mountReports()
+    await flushPromises()
+
+    await wrapper.get('[data-generate-report]').trigger('click')
+    await wrapper.get('.customer-reports__history-list > button').trigger('click')
+    await wrapper.get('[data-generate-report]').trigger('click')
+
+    expect(wrapper.get('.customer-reports__history-list > button').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-generate-report]').attributes('disabled')).toBeDefined()
+    expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
+
+    resolvePost(new Response(JSON.stringify({ reportId: 'report-1', runId: 'run-1', statusUrl: '/api/operations-reports/report-1' }), { status: 202 }))
     await flushPromises()
   })
 
