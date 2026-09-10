@@ -318,4 +318,126 @@ describe('CustomerWorkOrders', () => {
     expect(mocks.submitApproval).toHaveBeenCalledTimes(1)
     expect(wrapper.get('[data-work-order-id]').text()).toBe('WO-0001')
   })
+
+  it.each(['FAILED', 'WORK_ORDER_FAILED'] as const)(
+    'retries an explicit %s result once and follows the new execution to its actual receipt',
+    async (status) => {
+      const failed = {
+        ...waiting,
+        workflowId: 'wf-failed',
+        status,
+        approval: status === 'WORK_ORDER_FAILED' ? completed.approval : null,
+        errors: [`${status}: retryable failure`],
+      }
+      const retryWaiting = { ...waiting, workflowId: 'wf-retry' } as const
+      const retryCompleted = {
+        ...completed,
+        workflowId: 'wf-retry',
+        workOrder: { ...completed.workOrder, workflowId: 'wf-retry' },
+      } as const
+      const retryStart = deferred<typeof retryWaiting>()
+      mocks.startWorkflow.mockReset()
+        .mockResolvedValueOnce(failed)
+        .mockReturnValueOnce(retryStart.promise)
+      mocks.submitApproval.mockReset().mockResolvedValue(retryCompleted)
+      mocks.getWorkflow.mockReset().mockResolvedValue(retryCompleted)
+      const wrapper = mount(CustomerWorkOrders, { props: { context, active: true } })
+      await flushPromises()
+      await wrapper.get('[data-confirm-work-order]').trigger('click')
+      await wrapper.get('[data-submit-work-order]').trigger('click')
+      await flushPromises()
+
+      expect(mocks.startWorkflow).toHaveBeenCalledTimes(1)
+      expect(mocks.submitApproval).not.toHaveBeenCalled()
+      expect(wrapper.get('[data-work-order-id]').text()).toBe('尚未创建')
+      expect(wrapper.get('[data-work-order-outcome]').text()).toContain(status === 'FAILED' ? '分析失败' : '建单失败')
+
+      const submit = wrapper.get('[data-submit-work-order]')
+      await Promise.all([submit.trigger('click'), submit.trigger('click')])
+      expect(mocks.startWorkflow).toHaveBeenCalledTimes(2)
+      expect(mocks.startWorkflow).toHaveBeenLastCalledWith(context.anomalyId)
+      expect(mocks.submitApproval).not.toHaveBeenCalled()
+
+      retryStart.resolve(retryWaiting)
+      await flushPromises()
+      await flushPromises()
+
+      expect(mocks.startWorkflow).toHaveBeenCalledTimes(2)
+      expect(mocks.submitApproval).toHaveBeenCalledTimes(1)
+      expect(wrapper.get('[data-work-order-id]').text()).toBe('WO-0001')
+      expect(wrapper.get('[data-work-order-status]').text()).toBe('已创建，待处理')
+      expect(wrapper.get('[data-work-order-outcome]').text()).toContain('不表示问题已解决')
+    },
+  )
+
+  it('accepts an authoritative rejection after approval conflict without retrying approval or starting again', async () => {
+    const rejected = {
+      ...waiting,
+      status: 'REJECTED',
+      approval: { decision: 'REJECTED', reviewer: 'withheld', comment: 'recorded', decidedAt: '2026-09-10T07:00:00Z' },
+    } as const
+    mocks.submitApproval.mockRejectedValue(new WorkflowApiError('workflow is no longer waiting', 409))
+    mocks.getWorkflow.mockResolvedValue(rejected)
+    const wrapper = mount(CustomerWorkOrders, { props: { context, active: true } })
+    await flushPromises()
+    await wrapper.get('[data-confirm-work-order]').trigger('click')
+    await wrapper.get('[data-submit-work-order]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    expect(mocks.getWorkflow).toHaveBeenCalledWith('wf-71')
+    expect(wrapper.get('[data-work-order-outcome]').text()).toContain('人工决定为拒绝，未创建工单')
+    expect(mocks.startWorkflow).toHaveBeenCalledTimes(1)
+    expect(mocks.submitApproval).toHaveBeenCalledTimes(1)
+
+    await wrapper.get('[data-submit-work-order]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.startWorkflow).toHaveBeenCalledTimes(1)
+    expect(mocks.submitApproval).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-work-order-id]').text()).toBe('尚未创建')
+  })
+
+  it('shows the authoritative receipt after an approval 409 without creating or approving again', async () => {
+    mocks.submitApproval.mockRejectedValue(new WorkflowApiError('workflow already advanced', 409))
+    mocks.getWorkflow.mockResolvedValue(completed)
+    const wrapper = mount(CustomerWorkOrders, { props: { context, active: true } })
+    await flushPromises()
+    await wrapper.get('[data-confirm-work-order]').trigger('click')
+    await wrapper.get('[data-submit-work-order]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    expect(mocks.startWorkflow).toHaveBeenCalledTimes(1)
+    expect(mocks.submitApproval).toHaveBeenCalledTimes(1)
+    expect(mocks.getWorkflow).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-work-order-id]').text()).toBe('WO-0001')
+    expect(wrapper.get('[data-work-order-status]').text()).toBe('已创建，待处理')
+    expect(wrapper.get('[data-work-order-outcome]').text()).toContain('不表示问题已解决')
+    expect(wrapper.get('[data-confirm-work-order]').attributes('disabled')).toBeDefined()
+  })
+
+  it('blocks another approval after a 409 read failure until page refresh confirms the state', async () => {
+    mocks.submitApproval.mockRejectedValue(new WorkflowApiError('workflow state conflict', 409))
+    mocks.getWorkflow.mockRejectedValue(new Error('temporary offline'))
+    const wrapper = mount(CustomerWorkOrders, { props: { context, active: true } })
+    await flushPromises()
+    await wrapper.get('[data-confirm-work-order]').trigger('click')
+    await wrapper.get('[data-submit-work-order]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.get('[data-submit-work-order]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-submit-work-order]').text()).toContain('请先刷新状态')
+    await wrapper.get('[data-submit-work-order]').trigger('click')
+    expect(mocks.submitApproval).toHaveBeenCalledTimes(1)
+
+    mocks.getWorkflow.mockResolvedValueOnce(waiting)
+    await wrapper.get('[data-refresh-work-orders]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-submit-work-order]').attributes('disabled')).toBeUndefined()
+    expect(mocks.submitApproval).toHaveBeenCalledTimes(1)
+    expect(mocks.startWorkflow).toHaveBeenCalledTimes(1)
+  })
 })

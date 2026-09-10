@@ -237,7 +237,8 @@ function refreshPage(): void {
 }
 
 function openConfirmation(event: MouseEvent): void {
-  if (!actionability.value.allowed || workflow.loading.value || workflow.approving.value) return
+  if (!actionability.value.allowed || workflow.loading.value
+    || workflow.approving.value || workflow.approvalNeedsRefresh.value) return
   confirmationTrigger.value = event.currentTarget as HTMLElement
   confirmationOpen.value = true
   outcomeMessage.value = ''
@@ -259,9 +260,12 @@ async function confirmCreation(): Promise<void> {
   const context = props.context
   const alertId = context?.anomalyId
   const expectedKey = contextKey.value
-  if (!context || !alertId || !actionability.value.allowed) return
+  if (!context || !alertId || !actionability.value.allowed
+    || workflow.loading.value || workflow.approving.value || workflow.approvalNeedsRefresh.value) return
   let response = workflow.workflow.value
-  if (!response) {
+  const retryableFailure = response && !response.workOrder
+    && ['FAILED', 'WORK_ORDER_FAILED'].includes(response.status)
+  if (!response || retryableFailure) {
     workflowAlertId = alertId
     response = await workflow.start(alertId)
   }
@@ -395,7 +399,7 @@ watch([() => props.active, contextKey], ([active, key]) => {
 
           <article class="customer-card customer-work-orders__actions">
             <h2>业务动作</h2>
-            <button type="button" data-confirm-work-order :disabled="!actionability.allowed || Boolean(workflow.workflow.value?.workOrder) || workflow.loading.value || workflow.approving.value" @click="openConfirmation">
+            <button type="button" data-confirm-work-order :disabled="!actionability.allowed || Boolean(workflow.workflow.value?.workOrder) || workflow.loading.value || workflow.approving.value || workflow.approvalNeedsRefresh.value" @click="openConfirmation">
               <Checked /> {{ workflow.workflow.value?.workOrder ? '工单已创建' : '人工确认并创建工单' }}
             </button>
             <p v-if="workflow.error.value" role="alert">{{ workflow.error.value }}</p>
@@ -417,8 +421,8 @@ watch([() => props.active, contextKey], ([active, key]) => {
         <p v-if="workflow.error.value" role="alert">{{ workflow.error.value }}</p>
         <footer>
           <button type="button" :disabled="workflow.loading.value || workflow.approving.value" @click="rejectCreation">取消，不建单</button>
-          <button ref="confirmationButton" type="button" data-submit-work-order :disabled="workflow.loading.value || workflow.approving.value" @click="confirmCreation">
-            {{ workflow.loading.value ? '正在分析告警…' : workflow.approving.value ? '正在提交确认…' : '确认并执行' }}
+          <button ref="confirmationButton" type="button" data-submit-work-order :disabled="workflow.loading.value || workflow.approving.value || workflow.approvalNeedsRefresh.value" @click="confirmCreation">
+            {{ workflow.loading.value ? '正在分析告警…' : workflow.approving.value ? '正在提交确认…' : workflow.approvalNeedsRefresh.value ? '请先刷新状态' : '确认并执行' }}
           </button>
         </footer>
       </section>

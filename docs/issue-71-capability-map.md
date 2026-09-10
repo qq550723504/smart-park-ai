@@ -22,9 +22,9 @@
 
 1. `CustomerShell`：园区总览、运营分析、事件与工单共用唯一客户导航和园区横幅。
 2. `CustomerAnalysisContext`：从分析页携带同一楼宇、异常窗口和 `anomalyId`，不在工单页重新挑选对象。
-3. `POST /api/alerts/{alertId}/workflows`：启动现有告警工作流；同一告警保持幂等。
+3. `POST /api/alerts/{alertId}/workflows`：启动现有告警工作流；同一告警对运行中、待审批、完成或拒绝结果保持幂等，仅在权威状态为 `FAILED` / `WORK_ORDER_FAILED` 且没有工单回执时，由用户明确操作触发现有失败重试契约。
 4. `POST /api/workflows/{workflowId}/approval`：风险闸门暂停后由当前演示角色提交人工决定。
-5. `GET /api/workflows/{workflowId}`：审批响应不明确或页面内刷新时只读回查权威状态，避免重复人工决定；读取失败会保留同一事件的已知回执并明确标为“最新状态暂未确认”。
+5. `GET /api/workflows/{workflowId}`：审批响应不明确、审批 409 冲突或页面内刷新时只读回查权威状态，避免重复人工决定；回查结果同时校验请求 generation 与 workflowId。读取失败会保留同一事件的已知结果、阻止再次审批，并明确要求先刷新状态。
 6. 现有 `WorkOrderPort`：返回实际演示工单编号和状态；浏览器验证得到 `WO-0001 / PENDING_EXECUTION`。
 
 ## 真实性边界
