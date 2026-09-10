@@ -185,6 +185,9 @@ describe('ShowcaseHome customer shell', () => {
     const confirm = wrapper.get('[data-confirm-restart]')
     expect(document.activeElement).toBe(dialog.element)
 
+    dialog.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
+    expect(document.activeElement).toBe(confirm.element)
+
     ;(confirm.element as HTMLElement).focus()
     confirm.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
     expect(document.activeElement).toBe(cancel.element)
@@ -201,6 +204,8 @@ describe('ShowcaseHome customer shell', () => {
     await trigger.trigger('click')
     await flushPromises()
     expect(document.activeElement).toBe(wrapper.get('[role="dialog"]').element)
+    wrapper.get('[role="dialog"]').element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+    expect(document.activeElement).toBe(wrapper.get('[data-cancel-restart]').element)
     await wrapper.get('[data-cancel-restart]').trigger('click')
     await flushPromises()
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
