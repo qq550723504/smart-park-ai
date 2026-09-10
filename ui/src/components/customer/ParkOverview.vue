@@ -282,7 +282,14 @@ const analysisContext = computed<CustomerAnalysisContext | null>(() => {
   const currentOverview = overview.value
   const energyWindow = currentOverview ? alignedRecent24Hours(currentOverview.window) : null
   if (!buildingId || !currentOverview || !energyWindow) return null
-  const summary = currentOverview.buildings.find((building) => building.buildingId === buildingId) ?? null
+  const observedSummary = currentOverview.buildings.find((building) => building.buildingId === buildingId) ?? null
+  const summary: AnomalyBuildingSummary = observedSummary ?? {
+    buildingId,
+    alertCount: 0,
+    highRiskAlertCount: 0,
+    offlineDeviceCount: 0,
+    energyDeviationPct: null,
+  }
   const firstAlert = evidence.value?.buildingId === buildingId
     && evidence.value.domainStatus.alerts !== 'UNAVAILABLE'
     ? evidence.value.alerts.find((item) => typeof item.alertId === 'string')
@@ -298,7 +305,7 @@ const analysisContext = computed<CustomerAnalysisContext | null>(() => {
     buildingId,
     buildingName: buildingName(buildingId),
     anomalyId: typeof firstAlert?.alertId === 'string' ? firstAlert.alertId : null,
-    title: summary ? attentionTitle(summary) : `${buildingName(buildingId)}运营分析`,
+    title: observedSummary ? attentionTitle(observedSummary) : `${buildingName(buildingId)}运营分析`,
     priority,
     summary,
     overviewDomainStatus: { ...currentOverview.domainStatus },

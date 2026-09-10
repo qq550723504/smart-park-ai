@@ -545,6 +545,28 @@ describe('ParkOverview', () => {
     expect(incompleteWrapper.get('[data-building-marker="B3"]').classes()).toContain('is-unknown')
   })
 
+  it('carries known zero counts into analysis for an absent catalog building', async () => {
+    vi.mocked(getAnomalyEvidence).mockResolvedValue({ ...evidence, buildingId: 'B3', alerts: [] })
+    const wrapper = await mountLoaded()
+
+    await wrapper.get('[data-building-marker="B3"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-view-selected-analysis]').trigger('click')
+
+    expect(wrapper.emitted('view-analysis')?.at(-1)?.[0]).toMatchObject({
+      buildingId: 'B3',
+      title: '运营中心运营分析',
+      summary: {
+        buildingId: 'B3',
+        alertCount: 0,
+        highRiskAlertCount: 0,
+        offlineDeviceCount: 0,
+        energyDeviationPct: null,
+      },
+      overviewDomainStatus: { alerts: 'OK', devices: 'OK', energy: 'OK' },
+    })
+  })
+
   it('clears old evidence when a refreshed overview contains no buildings', async () => {
     const wrapper = await mountLoaded()
     expect(wrapper.text()).toContain('脱敏摘要：能耗告警 · 未处理')
