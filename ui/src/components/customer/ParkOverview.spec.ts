@@ -139,6 +139,7 @@ describe('ParkOverview', () => {
       buildingId: 'B1',
       buildingName: '创新中心',
       anomalyId: 'ALT-1',
+      overviewDomainStatus: { alerts: 'OK', devices: 'OK', energy: 'OK' },
       anomalyWindow: windowRange,
       energyWindow: {
         from: '2026-09-08T00:00:00.000Z',
@@ -149,6 +150,23 @@ describe('ParkOverview', () => {
     })
     const payload = emitted?.at(-1)?.[0] as { anomalyWindow: { to: string }; energyWindow: { to: string } }
     expect(payload.anomalyWindow.to).not.toBe(payload.energyWindow.to)
+  })
+
+  it('preserves incomplete overview domain statuses in the analysis context', async () => {
+    vi.mocked(getAnomalyOverview).mockResolvedValue({
+      ...overview,
+      domainStatus: { alerts: 'UNAVAILABLE', devices: 'PARTIAL', energy: 'OK' },
+    })
+    const wrapper = await mountLoaded()
+
+    await wrapper.get('[data-building-id="B1"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.emitted('view-analysis')?.at(-1)?.[0]).toMatchObject({
+      buildingId: 'B1',
+      overviewDomainStatus: { alerts: 'UNAVAILABLE', devices: 'PARTIAL', energy: 'OK' },
+      anomalyWindow: windowRange,
+    })
   })
 
   it('derives the overview from existing APIs without inventing device availability', async () => {

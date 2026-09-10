@@ -279,11 +279,14 @@ const analysisContext = computed<CustomerAnalysisContext | null>(() => {
   if (!buildingId || !currentOverview || !energyWindow) return null
   const summary = currentOverview.buildings.find((building) => building.buildingId === buildingId) ?? null
   const firstAlert = evidence.value?.buildingId === buildingId
+    && evidence.value.domainStatus.alerts !== 'UNAVAILABLE'
     ? evidence.value.alerts.find((item) => typeof item.alertId === 'string')
     : undefined
-  const priority = summary?.highRiskAlertCount
+  const priority = domainUsable('alerts') && summary?.highRiskAlertCount
     ? '高'
-    : summary && (summary.alertCount > 0 || summary.offlineDeviceCount > 0 || (summary.energyDeviationPct ?? 0) !== 0)
+    : summary && ((domainUsable('alerts') && summary.alertCount > 0)
+        || (domainUsable('devices') && summary.offlineDeviceCount > 0)
+        || (domainUsable('energy') && (summary.energyDeviationPct ?? 0) !== 0))
       ? '中'
       : '关注'
   return {
@@ -293,6 +296,7 @@ const analysisContext = computed<CustomerAnalysisContext | null>(() => {
     title: summary ? attentionTitle(summary) : `${buildingName(buildingId)}运营分析`,
     priority,
     summary,
+    overviewDomainStatus: { ...currentOverview.domainStatus },
     anomalyWindow: currentOverview.window,
     energyWindow,
     source: 'OPERATIONS_ANALYTICS',
@@ -376,7 +380,7 @@ function attentionDescription(building: AnomalyBuildingSummary): string {
 
 function markerState(summary: AnomalyBuildingSummary | null): 'unknown' | 'warning' | 'normal' {
   if (!summary) {
-    if (overview.value && ['alerts', 'devices', 'energy'].every((domain) => overview.value?.domainStatus[domain] === 'OK')) return 'normal'
+    if (overview.value && (['alerts', 'devices', 'energy'] as const).every((domain) => overview.value?.domainStatus[domain] === 'OK')) return 'normal'
     return 'unknown'
   }
   const hasAlert = domainUsable('alerts') && summary.alertCount > 0

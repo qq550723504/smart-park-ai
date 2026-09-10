@@ -49,6 +49,7 @@ describe('ShowcaseHome customer shell', () => {
       title: '研发大厦能耗偏离基线',
       priority: '中',
       summary: { buildingId: 'B2', alertCount: 1, highRiskAlertCount: 0, offlineDeviceCount: 0, energyDeviationPct: 12 },
+      overviewDomainStatus: { alerts: 'OK', devices: 'OK', energy: 'OK' },
       anomalyWindow: { from: '2026-09-01T00:00:00Z', to: '2026-09-09T00:37:00Z', timezone: 'Asia/Shanghai' },
       energyWindow: { from: '2026-09-08T00:00:00Z', to: '2026-09-09T00:00:00Z', timezone: 'Asia/Shanghai', granularity: 'HOUR' },
       source: 'OPERATIONS_ANALYTICS',

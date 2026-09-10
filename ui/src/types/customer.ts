@@ -1,4 +1,4 @@
-import type { AnomalyBuildingSummary, AnomalyWindow } from './operationsAnomaly'
+import type { AnomalyBuildingSummary, AnomalyDomainStatusMap, AnomalyWindow } from './operationsAnomaly'
 
 export type CustomerPage = 'overview' | 'analysis'
 
@@ -16,6 +16,7 @@ export interface CustomerAnalysisContext {
   title: string
   priority: '高' | '中' | '关注'
   summary: AnomalyBuildingSummary | null
+  overviewDomainStatus: AnomalyDomainStatusMap
   anomalyWindow: AnomalyWindow
   energyWindow: CustomerEnergyWindow
   source: 'OPERATIONS_ANALYTICS'

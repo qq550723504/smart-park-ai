@@ -15,6 +15,12 @@ function queryString(filters: AnomalyFilters = {}): string {
   return encoded ? `?${encoded}` : ''
 }
 
+function isDomainStatusMap(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  return ['alerts', 'devices', 'energy'].every((domain) =>
+    value[domain] === 'OK' || value[domain] === 'PARTIAL' || value[domain] === 'UNAVAILABLE')
+}
+
 function assertOverview(value: unknown): asserts value is AnomalyOverview {
   const candidate = isRecord(value) ? value : null
   const window = candidate && isRecord(candidate.window) ? candidate.window : null
@@ -24,7 +30,7 @@ function assertOverview(value: unknown): asserts value is AnomalyOverview {
     || typeof window.to !== 'string' || typeof window.timezone !== 'string'
     || !summary || !['alertCount', 'highRiskAlertCount', 'offlineDeviceCount', 'affectedBuildingCount']
       .every((key) => typeof summary[key] === 'number')
-    || !breakdowns || !isRecord(candidate.domainStatus) || !Array.isArray(candidate.buildings)
+    || !breakdowns || !isDomainStatusMap(candidate.domainStatus) || !Array.isArray(candidate.buildings)
     || !candidate.buildings.every((item) => isRecord(item)
       && typeof item.buildingId === 'string'
       && typeof item.alertCount === 'number'
@@ -55,7 +61,7 @@ function assertEvidence(value: unknown): asserts value is AnomalyEvidence {
     || !value.alerts.every(isRecord)
     || !value.devices.every(isRecord)
     || !value.energy.every(isRecord)
-    || !isRecord(value.domainStatus)) {
+    || !isDomainStatusMap(value.domainStatus)) {
     throw new Error('异常证据响应格式无效')
   }
 }

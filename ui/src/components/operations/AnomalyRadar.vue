@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import type { DemoRole } from '../../types/workflow'
-import type { AnomalyFilters, AnomalyOverview } from '../../types/operationsAnomaly'
+import type { AnomalyDomain, AnomalyFilters, AnomalyOverview } from '../../types/operationsAnomaly'
 import { getAnomalyOverview } from '../../services/operationsAnomalyApi'
 
 const props = withDefaults(defineProps<{ role: DemoRole; active?: boolean }>(), { active: true })
@@ -58,11 +58,11 @@ function dateLabel(value: string | null, timezone: string): string {
   }
 }
 
-function domainUnavailable(domain: string): boolean {
+function domainUnavailable(domain: AnomalyDomain): boolean {
   return overview.value?.domainStatus[domain] === 'UNAVAILABLE'
 }
 
-function valueOrDash(value: number, domain: string): string {
+function valueOrDash(value: number, domain: AnomalyDomain): string {
   return domainUnavailable(domain) || value == null ? '—' : String(value)
 }
 
@@ -112,7 +112,7 @@ function evidenceFilters(): AnomalyFilters {
   return { ...filters.value, from: overview.value.window.from, to: overview.value.window.to }
 }
 
-function breakdownDomain(name: string): string | null {
+function breakdownDomain(name: string): AnomalyDomain | null {
   return name === 'deviceTypes' ? 'devices' : ['riskLevels', 'categories', 'statuses'].includes(name) ? 'alerts' : null
 }
 

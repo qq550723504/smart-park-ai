@@ -6,7 +6,7 @@ import { getEnergyTimeSeries } from '../../services/energyTimeSeriesApi'
 import { getAnomalyEvidence } from '../../services/operationsAnomalyApi'
 import type { CustomerAnalysisContext } from '../../types/customer'
 import type { EnergyTimeSeriesFilters, EnergyTimeSeriesResponse } from '../../types/energyTimeSeries'
-import type { AnomalyEvidence } from '../../types/operationsAnomaly'
+import type { AnomalyDomain, AnomalyDomainStatus, AnomalyEvidence } from '../../types/operationsAnomaly'
 import EnergyAnalysisChart, { type EnergyAnalysisPoint } from './EnergyAnalysisChart.vue'
 
 const props = withDefaults(defineProps<{
@@ -185,18 +185,55 @@ const chartStatus = computed(() => {
   return '实际用电与基线来自同一楼宇、同一小时窗口。'
 })
 
+function overviewStatus(domain: AnomalyDomain): AnomalyDomainStatus {
+  return props.context?.overviewDomainStatus[domain] ?? 'UNAVAILABLE'
+}
+
+function evidenceStatus(domain: AnomalyDomain): AnomalyDomainStatus {
+  return evidence.value?.domainStatus[domain] ?? 'UNAVAILABLE'
+}
+
+function hasEvidenceRows(domain: AnomalyDomain): boolean {
+  return evidenceStatus(domain) !== 'UNAVAILABLE'
+}
+
+function overviewCountText(domain: 'alerts' | 'devices', value: number, unit: string): string {
+  const status = overviewStatus(domain)
+  if (status === 'UNAVAILABLE') return '未取得'
+  if (status === 'PARTIAL') return value > 0 ? `至少 ${formatNumber(value, 0)} ${unit}` : '总数未知'
+  return `${formatNumber(value, 0)} ${unit}`
+}
+
+const overviewDeviationText = computed(() => {
+  const deviation = props.context?.summary?.energyDeviationPct
+  const status = overviewStatus('energy')
+  if (status === 'UNAVAILABLE') return '未取得'
+  if (deviation == null) return status === 'PARTIAL' ? '偏差未知' : '—'
+  const value = `${formatNumber(Math.abs(deviation))}%`
+  return status === 'PARTIAL' ? `已观测 ${value}` : value
+})
+
+const overviewAlertCountText = computed(() => {
+  const count = props.context?.summary?.alertCount
+  return count == null ? '未取得' : overviewCountText('alerts', count, '条')
+})
+
 const observation = computed(() => {
   const context = props.context
   if (!context) return '请先从园区总览选择一个楼宇。'
   const facts: string[] = []
   const deviation = context.summary?.energyDeviationPct
-  if (deviation != null) {
-    facts.push(`${context.buildingName}在异常总览窗口内的能耗较基线${deviation >= 0 ? '高' : '低'} ${formatNumber(Math.abs(deviation))}%`)
+  if (overviewStatus('energy') === 'UNAVAILABLE') {
+    facts.push(`${context.buildingName}的能耗总览数据未取得`)
+  } else if (deviation != null) {
+    const scope = overviewStatus('energy') === 'PARTIAL' ? '已观测的部分能耗' : '能耗'
+    facts.push(`${context.buildingName}在异常总览窗口内${scope}较基线${deviation >= 0 ? '高' : '低'} ${formatNumber(Math.abs(deviation))}%`)
   } else {
-    facts.push(`${context.buildingName}当前缺少可用的总览基线偏差`)
+    facts.push(`${context.buildingName}当前未取得可展示的总览基线偏差`)
   }
   if (context.summary) {
-    facts.push(`同期记录未处理告警 ${context.summary.alertCount} 条、离线设备 ${context.summary.offlineDeviceCount} 台`)
+    facts.push(`同期未处理告警 ${overviewCountText('alerts', context.summary.alertCount, '条')}`)
+    facts.push(`同期离线设备 ${overviewCountText('devices', context.summary.offlineDeviceCount, '台')}`)
   }
   return `${facts.join('；')}。这是基于受治理事实的运营观察，不是模型生成的原因判断。`
 })
@@ -211,13 +248,14 @@ const safeAnalysisError = computed(() => analysis.error.value
 const causes = computed(() => {
   const rows: string[] = []
   const summary = props.context?.summary
-  if (summary?.energyDeviationPct != null && summary.energyDeviationPct > 0) {
+  if (overviewStatus('energy') !== 'UNAVAILABLE' && summary?.energyDeviationPct != null && summary.energyDeviationPct > 0) {
     rows.push('用电高于基线的时段与现场运行计划是否一致，仍需人工核查。')
   }
-  if ((summary?.offlineDeviceCount ?? 0) > 0) {
+  if (overviewStatus('devices') !== 'UNAVAILABLE' && (summary?.offlineDeviceCount ?? 0) > 0) {
     rows.push('离线设备与能耗变化是否相关尚未确认，应先核对设备状态和采集完整性。')
   }
-  const categories = [...new Set((evidence.value?.alerts ?? []).map((item) => textValue(item.category)).filter((item): item is string => item != null))]
+  const categories = [...new Set((hasEvidenceRows('alerts') ? evidence.value?.alerts ?? [] : [])
+    .map((item) => textValue(item.category)).filter((item): item is string => item != null))]
   if (categories.length) rows.push(`窗口内存在 ${categories.join('、')} 类告警；它们是关联线索，不等同于已确认故障原因。`)
   if (!rows.length) rows.push('现有事实不足以确认具体原因，暂不推断设备故障或运行违规。')
   return rows
@@ -225,8 +263,10 @@ const causes = computed(() => {
 
 const suggestions = computed(() => {
   const rows = ['按异常窗口核对楼宇运行计划与实际启停记录，保留人工确认。']
-  if ((props.context?.summary?.offlineDeviceCount ?? 0) > 0) rows.push('先恢复或核验离线设备的数据采集，再判断能耗变化。')
-  if ((props.context?.summary?.alertCount ?? 0) > 0) rows.push('逐条核对关联告警及现场情况，不把关联性直接写成故障结论。')
+  if (overviewStatus('devices') === 'UNAVAILABLE') rows.push('先恢复或补充设备状态数据，再判断设备与能耗变化的关系。')
+  else if ((props.context?.summary?.offlineDeviceCount ?? 0) > 0) rows.push('先恢复或核验离线设备的数据采集，再判断能耗变化。')
+  if (overviewStatus('alerts') === 'UNAVAILABLE') rows.push('先补充告警域数据，当前不确认窗口内是否没有关联告警。')
+  else if ((props.context?.summary?.alertCount ?? 0) > 0) rows.push('逐条核对关联告警及现场情况，不把关联性直接写成故障结论。')
   rows.push('在后续小时持续观察实际用电与基线；当前页面不会执行能源控制。')
   return rows
 })
@@ -241,7 +281,7 @@ interface RelatedDeviceRow {
 
 const relatedDevices = computed<RelatedDeviceRow[]>(() => {
   const rows = new Map<string, RelatedDeviceRow>()
-  for (const item of evidence.value?.devices ?? []) {
+  for (const item of hasEvidenceRows('devices') ? evidence.value?.devices ?? [] : []) {
     const id = textValue(item.deviceId)
     if (!id) continue
     rows.set(id, {
@@ -252,7 +292,7 @@ const relatedDevices = computed<RelatedDeviceRow[]>(() => {
       reading: '未提供设备级用电',
     })
   }
-  for (const item of evidence.value?.alerts ?? []) {
+  for (const item of hasEvidenceRows('alerts') ? evidence.value?.alerts ?? [] : []) {
     const id = textValue(item.deviceId)
     if (!id || rows.has(id)) continue
     rows.set(id, {
@@ -263,7 +303,7 @@ const relatedDevices = computed<RelatedDeviceRow[]>(() => {
       reading: `关联${textValue(item.category) ?? '类别未知'}告警`,
     })
   }
-  for (const item of evidence.value?.energy ?? []) {
+  for (const item of hasEvidenceRows('energy') ? evidence.value?.energy ?? [] : []) {
     const id = textValue(item.meterId)
     if (!id) continue
     const kwh = finiteNumber(item.kwh)
@@ -279,17 +319,46 @@ const relatedDevices = computed<RelatedDeviceRow[]>(() => {
 })
 
 const relatedRecords = computed(() => [
-  ...(evidence.value?.alerts ?? []).map((item) => ({
+  ...(hasEvidenceRows('alerts') ? evidence.value?.alerts ?? [] : []).map((item) => ({
     id: textValue(item.alertId) ?? '告警标识缺失',
     label: `${textValue(item.category) ?? '类别未知'}告警 · ${textValue(item.status) === 'OPEN' ? '未处理' : '状态未知'}`,
     at: textValue(item.occurredAt),
   })),
-  ...(evidence.value?.energy ?? []).map((item) => ({
+  ...(hasEvidenceRows('energy') ? evidence.value?.energy ?? [] : []).map((item) => ({
     id: textValue(item.meterId) ?? '计量点标识缺失',
     label: finiteNumber(item.deviationPct) == null ? '能耗观测' : `能耗观测 · 基线偏差 ${formatNumber(finiteNumber(item.deviationPct))}%`,
     at: textValue(item.measuredAt),
   })),
 ].sort((left, right) => Date.parse(right.at ?? '') - Date.parse(left.at ?? '')).slice(0, 8))
+
+const evidenceNotices = computed(() => {
+  if (!evidence.value) return []
+  const labels: Record<AnomalyDomain, string> = { alerts: '告警', devices: '设备', energy: '能耗' }
+  return (['alerts', 'devices', 'energy'] as const).flatMap((domain) => {
+    const status = evidenceStatus(domain)
+    if (status === 'UNAVAILABLE') return [`${labels[domain]}依据暂不可用，当前不能确认该域是否没有相关记录。`]
+    if (status === 'PARTIAL') return [`${labels[domain]}依据仅部分可用，已展示取得的记录，列表可能不完整。`]
+    return []
+  })
+})
+
+const relatedDevicesEmptyText = computed(() => {
+  if (errors.value.evidence) return errors.value.evidence
+  if (!evidence.value) return '当前未取得合法关联的设备或计量点'
+  if ((['alerts', 'devices', 'energy'] as const).some((domain) => evidenceStatus(domain) !== 'OK')) {
+    return '关联设备依据未完整取得，暂不能确认是否无相关设备或计量点'
+  }
+  return '当前窗口暂无相关设备或计量点'
+})
+
+const relatedRecordsEmptyText = computed(() => {
+  if (errors.value.evidence) return errors.value.evidence
+  if (!evidence.value) return '当前未取得相关记录'
+  if ((['alerts', 'energy'] as const).some((domain) => evidenceStatus(domain) !== 'OK')) {
+    return '关联记录依据未完整取得，暂不能确认当前窗口无相关记录'
+  }
+  return '当前窗口暂无相关记录'
+})
 
 function scrollToSection(id: string): void {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -324,16 +393,7 @@ function submitClarification(): void {
   void analysis.clarify()
 }
 
-const analysisContextKey = computed(() => [
-  props.context?.buildingId,
-  props.context?.anomalyWindow.from,
-  props.context?.anomalyWindow.to,
-  props.context?.anomalyWindow.timezone,
-  props.context?.energyWindow.from,
-  props.context?.energyWindow.to,
-  props.context?.energyWindow.timezone,
-  props.context?.energyWindow.granularity,
-].join('|'))
+const analysisContextKey = computed(() => JSON.stringify(props.context))
 
 watch(() => analysis.dto.value?.clarificationQuestions, (questions) => {
   clarificationSelections.value = (questions ?? []).map((_, index) => clarificationOptions(index)[0]!)
@@ -393,8 +453,8 @@ watch(
           <button type="button" @click="submitClarification">按所选口径继续</button>
         </section>
         <div class="energy-analysis__summary-grid">
-          <div><WarningFilled aria-hidden="true" /><span><strong>{{ context.summary?.energyDeviationPct == null ? '—' : `${formatNumber(Math.abs(context.summary.energyDeviationPct))}%` }}</strong><small>异常总览窗口基线偏差</small></span></div>
-          <div><Calendar aria-hidden="true" /><span><strong>{{ context.summary?.alertCount ?? '—' }} 条</strong><small>异常总览窗口未处理告警</small></span></div>
+          <div data-overview-energy-status><WarningFilled aria-hidden="true" /><span><strong>{{ overviewDeviationText }}</strong><small>异常总览窗口基线偏差</small></span></div>
+          <div data-overview-alert-status><Calendar aria-hidden="true" /><span><strong>{{ overviewAlertCountText }}</strong><small>异常总览窗口未处理告警</small></span></div>
           <div><DataAnalysis aria-hidden="true" /><span><strong>{{ formatNumber(actualTotal) }} {{ actual?.unit ?? 'kWh' }}</strong><small>单楼宇能耗窗口已观测值</small></span></div>
         </div>
       </section>
@@ -436,19 +496,22 @@ watch(
       <section id="related-devices" class="customer-card energy-analysis__table-card">
         <header><div><h2>相关设备与计量点</h2><p>{{ context.buildingId }} · {{ context.buildingName }} · 合法关联来自告警、设备快照与能耗证据</p></div></header>
         <div v-if="errors.evidence" class="energy-analysis__inline-error">{{ errors.evidence }} <button type="button" :disabled="loading" @click="refresh"><Refresh aria-hidden="true" /> 重试</button></div>
+        <ul v-if="evidenceNotices.length" class="energy-analysis__availability" data-evidence-availability role="status">
+          <li v-for="notice in evidenceNotices" :key="notice">{{ notice }}</li>
+        </ul>
         <div class="energy-analysis__table-wrap">
           <table v-if="relatedDevices.length">
             <thead><tr><th>设备/计量点</th><th>类型</th><th>位置</th><th>状态</th><th>可用读数/关联</th><th>观测时间</th></tr></thead>
             <tbody><tr v-for="item in relatedDevices" :key="item.id"><td>{{ item.id }}</td><td>{{ item.kind }}</td><td>{{ context.buildingName }}</td><td>{{ item.status }}</td><td>{{ item.reading }}</td><td>{{ formatTime(item.observedAt) }}</td></tr></tbody>
           </table>
-          <p v-else class="customer-state">{{ loading ? '正在读取相关设备…' : errors.evidence || '当前未取得合法关联的设备或计量点' }}</p>
+          <p v-else class="customer-state">{{ loading ? '正在读取相关设备…' : relatedDevicesEmptyText }}</p>
         </div>
       </section>
 
       <section id="related-records" class="customer-card energy-analysis__records">
         <header><div><h2>相关记录</h2><p>仅展示客户可读的业务依据，不展示内部技术执行细节。</p></div></header>
         <div v-for="record in relatedRecords" :key="`${record.id}:${record.at}`"><strong>{{ record.id }}</strong><span>{{ record.label }}</span><time>{{ formatTime(record.at) }}</time></div>
-        <p v-if="!loading && !relatedRecords.length" class="customer-state is-compact">{{ errors.evidence || '当前窗口暂无相关记录' }}</p>
+        <p v-if="!loading && !relatedRecords.length" class="customer-state is-compact">{{ relatedRecordsEmptyText }}</p>
       </section>
     </template>
   </main>

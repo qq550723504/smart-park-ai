@@ -25,6 +25,7 @@ const context: CustomerAnalysisContext = {
   title: '创新中心能耗偏离基线',
   priority: '中',
   summary: { buildingId: 'B1', alertCount: 2, highRiskAlertCount: 0, offlineDeviceCount: 1, energyDeviationPct: 18.5 },
+  overviewDomainStatus: { alerts: 'OK', devices: 'OK', energy: 'OK' },
   anomalyWindow: {
     from: '2026-09-01T00:18:26Z',
     to: '2026-09-09T00:18:26Z',
@@ -196,8 +197,99 @@ describe('EnergyAnalysis', () => {
     expect(wrapper.text()).toContain('该楼宇实际用电暂不可用')
     expect(wrapper.text()).toContain('该楼宇基线用电暂不可用')
     expect(wrapper.text()).toContain('当前能耗窗口没有可绘制数据')
-    expect(wrapper.text()).toContain('当前未取得合法关联的设备或计量点')
+    expect(wrapper.text()).toContain('当前窗口暂无相关设备或计量点')
     expect(wrapper.text()).not.toContain('完整窗口偏差')
+  })
+
+  it('shows observed zero counts only when the overview domains are complete', async () => {
+    const zeroContext: CustomerAnalysisContext = {
+      ...context,
+      summary: { ...context.summary!, alertCount: 0, highRiskAlertCount: 0, offlineDeviceCount: 0 },
+    }
+    const wrapper = await mountLoaded(zeroContext)
+
+    expect(wrapper.get('[data-overview-alert-status] strong').text()).toBe('0 条')
+    expect(wrapper.text()).toContain('同期未处理告警 0 条')
+    expect(wrapper.text()).toContain('同期离线设备 0 台')
+  })
+
+  it('does not turn unavailable overview domains with default zeroes into confirmed zero facts', async () => {
+    const unavailableContext: CustomerAnalysisContext = {
+      ...context,
+      summary: { ...context.summary!, alertCount: 0, highRiskAlertCount: 0, offlineDeviceCount: 0 },
+      overviewDomainStatus: { alerts: 'UNAVAILABLE', devices: 'UNAVAILABLE', energy: 'OK' },
+    }
+    const wrapper = await mountLoaded(unavailableContext)
+
+    expect(wrapper.get('[data-overview-alert-status] strong').text()).toBe('未取得')
+    expect(wrapper.text()).toContain('同期未处理告警 未取得')
+    expect(wrapper.text()).toContain('同期离线设备 未取得')
+    expect(wrapper.text()).not.toContain('同期未处理告警 0 条')
+    expect(wrapper.text()).not.toContain('同期离线设备 0 台')
+    expect(wrapper.text()).toContain('先补充告警域数据')
+  })
+
+  it('labels partially observed overview values without claiming complete totals', async () => {
+    const partialContext: CustomerAnalysisContext = {
+      ...context,
+      summary: { ...context.summary!, alertCount: 2, offlineDeviceCount: 0, energyDeviationPct: 18.5 },
+      overviewDomainStatus: { alerts: 'PARTIAL', devices: 'PARTIAL', energy: 'PARTIAL' },
+    }
+    const wrapper = await mountLoaded(partialContext)
+
+    expect(wrapper.get('[data-overview-alert-status] strong').text()).toBe('至少 2 条')
+    expect(wrapper.get('[data-overview-energy-status] strong').text()).toBe('已观测 18.5%')
+    expect(wrapper.text()).toContain('同期离线设备 总数未知')
+    expect(wrapper.text()).not.toContain('同期离线设备 0 台')
+  })
+
+  it('keeps partial evidence rows while showing every incomplete domain notice', async () => {
+    vi.mocked(getAnomalyEvidence).mockResolvedValue({
+      ...anomalyEvidence(),
+      domainStatus: { alerts: 'PARTIAL', devices: 'UNAVAILABLE', energy: 'OK' },
+    })
+
+    const wrapper = await mountLoaded()
+    const notice = wrapper.get('[data-evidence-availability]')
+
+    expect(notice.text()).toContain('告警依据仅部分可用')
+    expect(notice.text()).toContain('设备依据暂不可用')
+    expect(wrapper.text()).toContain('AC-B1-07')
+    expect(wrapper.text()).toContain('MTR-B1-1')
+  })
+
+  it('does not describe empty incomplete evidence domains as confirmed empty lists', async () => {
+    vi.mocked(getAnomalyEvidence).mockResolvedValue({
+      ...anomalyEvidence(),
+      alerts: [],
+      devices: [],
+      energy: [],
+      domainStatus: { alerts: 'PARTIAL', devices: 'UNAVAILABLE', energy: 'OK' },
+    })
+
+    const wrapper = await mountLoaded()
+
+    expect(wrapper.get('[data-evidence-availability]').text()).toContain('告警依据仅部分可用')
+    expect(wrapper.get('[data-evidence-availability]').text()).toContain('设备依据暂不可用')
+    expect(wrapper.text()).toContain('暂不能确认是否无相关设备或计量点')
+    expect(wrapper.text()).toContain('暂不能确认当前窗口无相关记录')
+    expect(wrapper.text()).not.toContain('当前窗口暂无相关设备或计量点')
+    expect(wrapper.text()).not.toContain('当前窗口暂无相关记录')
+  })
+
+  it('refreshes when availability changes within the same building and window', async () => {
+    const wrapper = await mountLoaded()
+    const changedContext: CustomerAnalysisContext = {
+      ...context,
+      summary: { ...context.summary!, alertCount: 0 },
+      overviewDomainStatus: { ...context.overviewDomainStatus, alerts: 'UNAVAILABLE' },
+    }
+
+    await wrapper.setProps({ context: changedContext })
+    await flushPromises()
+
+    expect(getEnergyTimeSeries).toHaveBeenCalledTimes(4)
+    expect(wrapper.get('[data-overview-alert-status] strong').text()).toBe('未取得')
   })
 
   it('shows safe failures and retries the same inherited context without success fallback', async () => {

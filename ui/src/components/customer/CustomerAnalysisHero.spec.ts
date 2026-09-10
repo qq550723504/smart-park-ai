@@ -10,6 +10,7 @@ const context: CustomerAnalysisContext = {
   title: '研发大厦存在高风险告警',
   priority: '高',
   summary: { buildingId: 'B2', alertCount: 2, highRiskAlertCount: 2, offlineDeviceCount: 0, energyDeviationPct: 7 },
+  overviewDomainStatus: { alerts: 'OK', devices: 'OK', energy: 'OK' },
   anomalyWindow: { from: '2026-09-01T00:00:00Z', to: '2026-09-09T00:00:00Z', timezone: 'Asia/Shanghai' },
   energyWindow: { from: '2026-09-08T00:00:00Z', to: '2026-09-09T00:00:00Z', timezone: 'Asia/Shanghai', granularity: 'HOUR' },
   source: 'OPERATIONS_ANALYTICS',
