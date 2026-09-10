@@ -221,5 +221,6 @@ The implementation is intentionally less dense where the source mock depends on 
 3. Focused regressions covered one-create behavior across refresh and leave-return, one-snapshot rendering, truthful partial/failed states and stale-detail ordering.
 4. The running branch generated a real completed report. Same-ID recovery and checksum equality were verified before final screenshots.
 5. Same-size and responsive captures showed no layout overlap or horizontal document overflow, so no visual correction was required after the comparison pass.
+6. Final-head review connected the customer surface to the existing analytics capability endpoint, preserved unresolved idempotency identity across refresh, and stopped a failed history refresh from being hidden by a successful detail read. Three focused regressions lock those boundaries.
 
 final result: passed

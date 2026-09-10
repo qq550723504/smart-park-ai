@@ -22,7 +22,7 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
   const maxPolls = options.maxPolls ?? 180
   let generation = 0
   let historyGeneration = 0
-  let pendingCreation: { role: DemoRole; key: string; request: OperationsReportCreateRequest; fingerprint: string } | null = null
+  let pendingCreation: { role: DemoRole; key: string; request: OperationsReportCreateRequest; fingerprint: string; accepted: boolean } | null = null
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
   function defaultRequest(): OperationsReportCreateRequest {
@@ -37,8 +37,8 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
     }
   }
 
-  async function loadHistory(role: DemoRole, append = false): Promise<void> {
-    if (append && (historyLoading.value || !historyHasNext.value)) return
+  async function loadHistory(role: DemoRole, append = false): Promise<boolean> {
+    if (append && (historyLoading.value || !historyHasNext.value)) return false
     const current = generation
     const currentHistory = ++historyGeneration
     const targetPage = append ? historyPage.value + 1 : 0
@@ -53,9 +53,12 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
         historyHasNext.value = page.hasNext
         historyTotal.value = page.totalElements
         historyLoaded.value = true
+        return true
       }
+      return false
     } catch (cause) {
       if (current === generation && currentHistory === historyGeneration) error.value = cause instanceof Error ? cause.message : String(cause)
+      return false
     } finally {
       if (current === generation && currentHistory === historyGeneration) historyLoading.value = false
     }
@@ -64,7 +67,7 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
   async function open(reportId: string, role: DemoRole): Promise<void> {
     const current = ++generation
     historyGeneration += 1
-    pendingCreation = null
+    if (pendingCreation?.accepted) pendingCreation = null
     busy.value = false
     historyLoading.value = false
     detailLoading.value = true
@@ -100,9 +103,11 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
           key: createRequestId(),
           request,
           fingerprint,
+          accepted: false,
         }
       }
       const accepted = await startOperationsDailyReport(role, pendingCreation.request, pendingCreation.key)
+      pendingCreation.accepted = true
       createAccepted = true
       if (current !== generation) return
       runId.value = accepted.runId
@@ -142,8 +147,8 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
     if (busy.value || detailLoading.value) return
     const reportId = report.value?.reportId ?? null
     error.value = ''
-    await loadHistory(role)
-    if (reportId) await open(reportId, role)
+    const historyRefreshed = await loadHistory(role)
+    if (historyRefreshed && reportId) await open(reportId, role)
   }
 
   function reset(): void {

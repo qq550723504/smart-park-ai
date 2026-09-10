@@ -183,7 +183,7 @@ watch(() => state.reports.value, (reports) => {
       </section>
 
       <p v-if="!props.available" class="customer-alert" role="status">
-        <WarningFilled aria-hidden="true" />当前分析链路未启用；仍可查看和下载已有快照，本页不会用静态成功内容替代。
+        <WarningFilled aria-hidden="true" />当前分析能力未确认或未启用；仍可查看和下载已有快照，本页不会用静态成功内容替代。
       </p>
       <p v-if="state.error.value" class="customer-alert" role="alert" data-testid="report-error">
         <WarningFilled aria-hidden="true" />{{ state.error.value }}

@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import CustomerAnalysisHero from '../customer/CustomerAnalysisHero.vue'
 import CustomerShell from '../customer/CustomerShell.vue'
 import EnergyAnalysis from '../customer/EnergyAnalysis.vue'
 import ParkOverview from '../customer/ParkOverview.vue'
 import CustomerWorkOrders from '../customer/CustomerWorkOrders.vue'
 import CustomerOperationsReports from '../customer/CustomerOperationsReports.vue'
-import type { ShowcaseScenario } from '../../services/workflowApi'
+import { getOperationsCapabilities, type ShowcaseScenario } from '../../services/workflowApi'
 import type { CustomerAnalysisContext, CustomerPage } from '../../types/customer'
 import type { WorkbenchView } from '../../types/workbench'
 import '../customer/customer-surface.css'
@@ -22,6 +22,7 @@ const activePage = ref<CustomerPage>('overview')
 const latestOverviewContext = ref<CustomerAnalysisContext | null>(null)
 const analysisContext = ref<CustomerAnalysisContext | null>(null)
 const workOrdersContext = ref<CustomerAnalysisContext | null>(null)
+const analyticsAvailable = ref(false)
 const analysisInstanceKey = computed(() => {
   const context = analysisContext.value
   return context
@@ -73,6 +74,12 @@ function openAnalysis(context: CustomerAnalysisContext): void {
 function openWorkOrders(context: CustomerAnalysisContext): void {
   void navigate('work-orders', context)
 }
+
+onMounted(() => {
+  void getOperationsCapabilities()
+    .then((capabilities) => { analyticsAvailable.value = capabilities.analyticsEnabled })
+    .catch(() => { analyticsAvailable.value = false })
+})
 </script>
 
 <template>
@@ -124,6 +131,7 @@ function openWorkOrders(context: CustomerAnalysisContext): void {
       <CustomerOperationsReports
         v-show="activePage === 'reports'"
         :active="props.active !== false && activePage === 'reports'"
+        :available="analyticsAvailable"
       />
     </KeepAlive>
   </CustomerShell>

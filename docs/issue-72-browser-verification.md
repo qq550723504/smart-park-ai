@@ -39,6 +39,6 @@ The 1672 and 1366 views reported document widths smaller than their CSS viewport
 ## Automated checks
 
 - Backend: `./mvnw.cmd test` -> 1328 tests passed, 3 existing conditional tests skipped.
-- Frontend: `npm.cmd run test:unit` -> 49 files / 502 tests passed.
+- Frontend: `npm.cmd run test:unit` -> 49 files / 505 tests passed.
 - Frontend typecheck: passed.
 - Frontend production build: passed; the existing Vite chunk-size advisory remains non-blocking and was not expanded into this issue.
