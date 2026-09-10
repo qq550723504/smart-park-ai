@@ -172,7 +172,9 @@ async function confirmRestart(): Promise<void> {
   await overviewPanel.value?.resetForDemo()
   restartNotice.value = '客户导览已回到起点；仅清除了本页选择与助手会话，后台工单、报告和进行中的任务均未删除。'
   await nextTick()
-  document.getElementById('customer-overview-main')?.focus()
+  const overviewMain = document.getElementById('customer-overview-main')
+  overviewMain?.setAttribute('tabindex', '-1')
+  overviewMain?.focus()
 }
 
 onMounted(() => {

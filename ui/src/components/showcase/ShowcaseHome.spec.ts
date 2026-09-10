@@ -139,8 +139,9 @@ describe('ShowcaseHome customer shell', () => {
     const assistantReset = vi.fn(() => true)
     const wrapper = mount(ShowcaseHome, {
       props: { active: true },
+      attachTo: document.body,
       global: { stubs: {
-        ParkOverview: { methods: { resetForDemo: overviewReset }, template: '<main id="customer-overview-main" data-park-overview tabindex="-1">B2</main>' },
+        ParkOverview: { methods: { resetForDemo: overviewReset }, template: '<main id="customer-overview-main" data-park-overview>B2</main>' },
         EnergyAnalysis: { template: '<main id="customer-analysis-main" data-energy-analysis />' },
         CustomerAssistantPanel: { methods: { canResetForDemo: () => true, resetForDemo: assistantReset }, template: '<aside />' },
       } },
@@ -162,6 +163,9 @@ describe('ShowcaseHome customer shell', () => {
     expect(overviewReset).toHaveBeenCalledTimes(1)
     expect(wrapper.get('[data-customer-nav="overview"]').attributes('aria-current')).toBe('page')
     expect(wrapper.get('[data-restart-notice]').text()).toContain('后台工单、报告和进行中的任务均未删除')
+    expect(wrapper.get('[data-park-overview]').attributes('tabindex')).toBe('-1')
+    expect(document.activeElement).toBe(wrapper.get('[data-park-overview]').element)
+    wrapper.unmount()
   })
 
   it('moves focus into the restart dialog, traps Tab, and restores focus when closing', async () => {
