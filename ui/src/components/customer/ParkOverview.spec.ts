@@ -152,6 +152,23 @@ describe('ParkOverview', () => {
     expect(payload.anomalyWindow.to).not.toBe(payload.energyWindow.to)
   })
 
+  it('opens analysis immediately without waiting for or duplicating overview evidence', async () => {
+    const pendingEvidence = deferred<AnomalyEvidence>()
+    vi.mocked(getAnomalyEvidence).mockReturnValue(pendingEvidence.promise)
+    const wrapper = mount(ParkOverview, { global: { stubs: { CustomerOverviewChart: chartStub } } })
+    await vi.waitFor(() => expect(wrapper.get('[data-building-id="B1"]').attributes('disabled')).toBeUndefined())
+
+    expect(getAnomalyEvidence).toHaveBeenCalledTimes(1)
+    await wrapper.get('[data-building-id="B1"]').trigger('click')
+
+    expect(getAnomalyEvidence).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('view-analysis')?.at(-1)?.[0]).toMatchObject({
+      buildingId: 'B1',
+      anomalyId: null,
+      anomalyWindow: windowRange,
+    })
+  })
+
   it('preserves incomplete overview domain statuses in the analysis context', async () => {
     vi.mocked(getAnomalyOverview).mockResolvedValue({
       ...overview,

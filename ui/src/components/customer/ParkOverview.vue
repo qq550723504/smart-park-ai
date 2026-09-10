@@ -147,10 +147,15 @@ async function selectBuilding(buildingId: string): Promise<void> {
   await loadEvidence(buildingId)
 }
 
-async function openAnalysis(buildingId: string): Promise<void> {
+function openAnalysis(buildingId: string): void {
   if (loading.value) return
-  if (selectedBuildingId.value !== buildingId || evidence.value?.buildingId !== buildingId) {
-    await selectBuilding(buildingId)
+  if (selectedBuildingId.value !== buildingId) {
+    selectedBuildingId.value = buildingId
+    preferredBuildingId.value = buildingId
+    evidenceGeneration++
+    evidence.value = null
+    errors.value.evidence = ''
+    detailLoading.value = false
   }
   if (analysisContext.value) emit('view-analysis', analysisContext.value)
 }
