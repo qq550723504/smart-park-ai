@@ -5,6 +5,7 @@ import com.example.smartpark.model.common.Diagnosis;
 import com.example.smartpark.model.common.WorkOrder;
 import com.example.smartpark.model.common.WorkOrderStatus;
 import com.example.smartpark.model.common.WorkflowStatus;
+import com.example.smartpark.model.alert.Alert;
 import com.example.smartpark.workflow.AlertWorkflowState;
 import com.example.smartpark.workflow.CustomerConversation;
 import com.example.smartpark.workflow.WorkflowEvent;
@@ -116,6 +117,28 @@ public final class WebDtos {
             status = Objects.requireNonNull(status, "status");
             errors = stableItems(errors, "Workflow error recorded");
             riskReasons = List.copyOf(Objects.requireNonNull(riskReasons, "riskReasons"));
+        }
+    }
+
+    public record ActionableAlertResponse(
+            String alertId,
+            String parkId,
+            String buildingId,
+            String deviceId,
+            String category,
+            String riskLevel,
+            Instant occurredAt) {
+
+        public ActionableAlertResponse {
+            alertId = safeIdentifier(alertId, ALERT_ID);
+            parkId = safeIdentifier(parkId, PARK_ID);
+            buildingId = safeIdentifier(buildingId, BUILDING_ID);
+            deviceId = safeIdentifier(deviceId, DEVICE_ID);
+            category = safeChoice(category, java.util.Arrays.stream(com.example.smartpark.model.alert.AlertClassification.values())
+                    .map(Enum::name)
+                    .collect(java.util.stream.Collectors.toUnmodifiableSet()));
+            riskLevel = safeChoice(riskLevel, Set.of("LOW", "MEDIUM", "HIGH"));
+            occurredAt = Objects.requireNonNull(occurredAt, "occurredAt");
         }
     }
 
@@ -267,6 +290,17 @@ public final class WebDtos {
                 snapshot.errors(),
                 snapshot.eventSequence(),
                 riskReasons(snapshot));
+    }
+
+    static ActionableAlertResponse from(Alert alert) {
+        return new ActionableAlertResponse(
+                alert.id(),
+                alert.parkId(),
+                alert.buildingId(),
+                alert.deviceId(),
+                alert.classification().name(),
+                alert.riskHint().name(),
+                alert.occurredAt());
     }
 
     private static List<String> riskReasons(WorkflowSnapshot snapshot) {

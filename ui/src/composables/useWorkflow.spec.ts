@@ -204,4 +204,47 @@ describe('useWorkflow', () => {
     expect(binding.events.value[0]).toMatchObject({ eventId: '1', node: 'diagnoseAlert' })
     scope.stop()
   })
+
+  it('reconciles an ambiguous approval response before allowing a retry', async () => {
+    const waiting = { ...workflow('wf-approval'), status: 'WAITING_APPROVAL' as const }
+    const completed = {
+      ...waiting,
+      status: 'COMPLETED' as const,
+      approval: { decision: 'APPROVED', reviewer: 'withheld', comment: 'recorded', decidedAt: '2026-09-10T07:00:00Z' },
+      workOrder: { id: 'WO-0001', workflowId: 'wf-approval', parkId: 'PARK-A', buildingId: 'B1', deviceId: 'DEV-ENERGY-B1-001', alertId: 'ALT-TEMP-001', summary: 'withheld', riskLevel: 'HIGH', status: 'PENDING_EXECUTION', approval: null, evidence: [], createdAt: '2026-09-10T07:00:01Z', updatedAt: '2026-09-10T07:00:01Z' },
+    }
+    vi.mocked(startWorkflow).mockResolvedValue(waiting)
+    vi.mocked(workflowApi.submitApproval).mockRejectedValue(new TypeError('response lost'))
+    vi.mocked(workflowApi.getWorkflow).mockResolvedValue(completed)
+    vi.spyOn(workflowApi, 'subscribeToWorkflow').mockReturnValue({ close: vi.fn() } as unknown as EventSource)
+    const scope = effectScope()
+    let binding!: ReturnType<typeof useWorkflow>
+    scope.run(() => { binding = useWorkflow() })
+
+    await binding.start('ALT-TEMP-001')
+    await binding.approve({ decision: 'APPROVE', reviewer: 'operator', comment: 'confirm', role: 'APPROVER' })
+
+    expect(workflowApi.getWorkflow).toHaveBeenCalledWith('wf-approval')
+    expect(binding.workflow.value?.workOrder?.id).toBe('WO-0001')
+    expect(binding.error.value).toBe('')
+    scope.stop()
+  })
+
+  it('keeps a definite permission rejection without ambiguous-state reconciliation', async () => {
+    const waiting = { ...workflow('wf-forbidden'), status: 'WAITING_APPROVAL' as const }
+    vi.mocked(startWorkflow).mockResolvedValue(waiting)
+    vi.mocked(workflowApi.submitApproval).mockRejectedValue(new workflowApi.WorkflowApiError('forbidden', 403))
+    vi.spyOn(workflowApi, 'subscribeToWorkflow').mockReturnValue({ close: vi.fn() } as unknown as EventSource)
+    const scope = effectScope()
+    let binding!: ReturnType<typeof useWorkflow>
+    scope.run(() => { binding = useWorkflow() })
+
+    await binding.start('ALT-TEMP-001')
+    await binding.approve({ decision: 'APPROVE', reviewer: 'operator', comment: 'confirm', role: 'VIEWER' })
+
+    expect(workflowApi.getWorkflow).not.toHaveBeenCalled()
+    expect(binding.workflow.value?.status).toBe('WAITING_APPROVAL')
+    expect(binding.error.value).toBe('forbidden')
+    scope.stop()
+  })
 })

@@ -1,6 +1,13 @@
-import type { AuditEntry, CustomerConversationResponse, CustomerServiceResponse, DemoRole, FeedbackRating, KnowledgeMetadata, OperationsMetrics, WorkflowEvent, WorkflowObservability, WorkflowResponse } from '../types/workflow'
+import type { ActionableAlertResponse, AuditEntry, CustomerConversationResponse, CustomerServiceResponse, DemoRole, FeedbackRating, KnowledgeMetadata, OperationsMetrics, WorkflowEvent, WorkflowObservability, WorkflowResponse } from '../types/workflow'
 import type { ShowcaseLaunchInput, ShowcaseScenarioId } from '../types/workbench'
 import type { CollaborationSlaSnapshot, CollaborationWorkItem, CollaborationWorkItemFilters } from '../types/collaborationCenter'
+
+export class WorkflowApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message)
+    this.name = 'WorkflowApiError'
+  }
+}
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -15,7 +22,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     } catch {
       // 后端返回非 JSON 错误时使用状态码提示。
     }
-    throw new Error(message)
+    throw new WorkflowApiError(message, response.status)
   }
   return response.json() as Promise<T>
 }
@@ -197,6 +204,10 @@ export function injectDemoFault(point: 'KNOWLEDGE_SEARCH', role: DemoRole) {
 
 export function startWorkflow(alertId: string) {
   return request<WorkflowResponse>(`/api/alerts/${alertId}/workflows`, { method: 'POST' })
+}
+
+export function getActionableAlert(alertId: string) {
+  return request<ActionableAlertResponse>(`/api/alerts/${encodeURIComponent(alertId)}`)
 }
 
 export function getWorkflow(workflowId: string) {

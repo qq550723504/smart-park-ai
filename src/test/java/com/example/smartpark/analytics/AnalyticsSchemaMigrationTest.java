@@ -99,7 +99,7 @@ class AnalyticsSchemaMigrationTest {
                 assertThat(rs.getString("building_id")).isEqualTo("B1");
                 assertThat(rs.getString("device_id")).isEqualTo("DEV-ENERGY-B1-001");
                 assertThat(rs.getString("category")).isEqualTo("ENERGY");
-                assertThat(rs.getString("risk_level")).isEqualTo("LOW");
+                assertThat(rs.getString("risk_level")).isEqualTo("HIGH");
                 assertThat(rs.getString("status")).isEqualTo("OPEN");
             }
         }

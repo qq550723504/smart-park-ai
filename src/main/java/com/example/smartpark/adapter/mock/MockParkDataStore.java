@@ -156,7 +156,7 @@ public class MockParkDataStore {
                 "Unexpected energy consumption in building A2", "Current interval consumption is 38 percent above the learned baseline.", ALERT_BASE_TIME.plus(Duration.ofMinutes(6)), List.of("meter:current-kwh=138", "baseline:kwh=100", "trend:after-hours")));
         putAlert(alert("ALT-ACCESS-001", "DEV-ACCESS-001", "A1", AlertClassification.ACCESS, RiskLevel.HIGH,
                 "Repeated access denial at the north entrance", "A redacted security event was correlated with repeated denied access attempts outside opening hours.", ALERT_BASE_TIME.plus(Duration.ofMinutes(9)), List.of("security-event:SEC-ACCESS-001", "evidence:redacted-only")));
-        putAlert(alert("ALT-ORCH-ENERGY-B1-001", "DEV-ENERGY-B1-001", "B1", AlertClassification.ENERGY, RiskLevel.LOW,
+        putAlert(alert("ALT-ORCH-ENERGY-B1-001", "DEV-ENERGY-B1-001", "B1", AlertClassification.ENERGY, RiskLevel.HIGH,
                 "B1 orchestration energy anomaly", "B1 consumption exceeded the demo baseline for joint assessment.", ALERT_BASE_TIME.plus(Duration.ofMinutes(12)), List.of("meter:current-kwh=112", "baseline:kwh=100")));
     }
 

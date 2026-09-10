@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import ShowcaseHome from './ShowcaseHome.vue'
 
 describe('ShowcaseHome customer shell', () => {
-  it('defaults to the customer overview, enables analysis, and keeps later pages non-interactive', () => {
+  it('defaults to the customer overview, enables analysis and work orders, and keeps later pages non-interactive', () => {
     const wrapper = mount(ShowcaseHome, {
       props: { active: false },
       global: {
@@ -18,11 +18,40 @@ describe('ShowcaseHome customer shell', () => {
     expect(wrapper.get('[data-customer-nav="overview"]').attributes('aria-current')).toBe('page')
     expect(wrapper.get('[data-customer-nav="analysis"]').element.tagName).toBe('BUTTON')
     expect(wrapper.get('[data-energy-analysis]').isVisible()).toBe(false)
-    for (const page of ['work-orders', 'reports', 'assistant']) {
+    expect(wrapper.get('[data-customer-nav="work-orders"]').element.tagName).toBe('BUTTON')
+    for (const page of ['reports', 'assistant']) {
       const item = wrapper.get(`[data-customer-nav="${page}"]`)
       expect(item.element.tagName).toBe('SPAN')
       expect(item.attributes('aria-disabled')).toBe('true')
     }
+  })
+
+  it('continues from analysis to work orders with the exact same context and shell', async () => {
+    const context = {
+      buildingId: 'B1', buildingName: '创新中心', anomalyId: 'ALT-ORCH-ENERGY-B1-001', title: '创新中心能耗偏离基线', priority: '高',
+      summary: { buildingId: 'B1', alertCount: 2, highRiskAlertCount: 2, offlineDeviceCount: 1, energyDeviationPct: 12 },
+      overviewDomainStatus: { alerts: 'OK', devices: 'OK', energy: 'OK' },
+      anomalyWindow: { from: '2026-09-01T00:00:00Z', to: '2026-09-09T00:37:00Z', timezone: 'Asia/Shanghai' },
+      energyWindow: { from: '2026-09-08T00:00:00Z', to: '2026-09-09T00:00:00Z', timezone: 'Asia/Shanghai', granularity: 'HOUR' },
+      source: 'OPERATIONS_ANALYTICS',
+    } as const
+    const wrapper = mount(ShowcaseHome, {
+      props: { active: true },
+      global: { stubs: {
+        ParkOverview: { emits: ['view-analysis'], template: '<button data-open-analysis @click="$emit(\'view-analysis\', context)">分析</button>', setup: () => ({ context }) },
+        EnergyAnalysis: { props: ['context'], emits: ['open-work-orders'], template: '<main data-energy-analysis><button data-open-work-orders @click="$emit(\'open-work-orders\', context)">工单</button></main>' },
+        CustomerWorkOrders: { props: ['context'], template: '<main id="customer-work-orders-main" data-customer-work-orders>{{ context?.anomalyId }}</main>' },
+      } },
+    })
+    const shell = wrapper.get('[data-customer-shell]').element
+    await wrapper.get('[data-open-analysis]').trigger('click')
+    await wrapper.get('[data-open-work-orders]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-customer-nav="work-orders"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-customer-work-orders]').text()).toBe('ALT-ORCH-ENERGY-B1-001')
+    expect(wrapper.get('[data-customer-shell]').element).toBe(shell)
+    expect(wrapper.findAll('.customer-shell__topbar')).toHaveLength(1)
   })
 
   it('uses the existing App event to enter the long-lived internal workbench', async () => {

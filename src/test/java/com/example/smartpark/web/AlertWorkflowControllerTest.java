@@ -68,6 +68,33 @@ class AlertWorkflowControllerTest {
     }
 
     @Test
+    void readingKnownAlertReturnsOnlyTheActionableIdentityContract() throws Exception {
+        when(alertPort.getAlert("ALT-TEMP-001")).thenReturn(alert("ALT-TEMP-001"));
+
+        mockMvc.perform(get("/api/alerts/ALT-TEMP-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.alertId").value("ALT-TEMP-001"))
+                .andExpect(jsonPath("$.parkId").value("PARK-A"))
+                .andExpect(jsonPath("$.buildingId").value("A1"))
+                .andExpect(jsonPath("$.deviceId").value("DEV-HVAC-001"))
+                .andExpect(jsonPath("$.category").value("TEMPERATURE"))
+                .andExpect(jsonPath("$.riskLevel").value("LOW"))
+                .andExpect(jsonPath("$.occurredAt").value("2026-08-23T00:15:00Z"))
+                .andExpect(jsonPath("$.summary").doesNotExist())
+                .andExpect(jsonPath("$.evidence").doesNotExist());
+    }
+
+    @Test
+    void readingUnknownAlertReturnsNotFound() throws Exception {
+        when(alertPort.getAlert("ALT-MISSING"))
+                .thenThrow(new IllegalArgumentException("Unknown alert: ALT-MISSING"));
+
+        mockMvc.perform(get("/api/alerts/ALT-MISSING"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404));
+    }
+
+    @Test
     void startingUnknownAlertReturnsNotFoundWithoutCreatingAWorkflow() throws Exception {
         when(alertPort.getAlert("ALT-MISSING"))
                 .thenThrow(new IllegalArgumentException("Unknown alert: ALT-MISSING"));

@@ -62,6 +62,9 @@
 .energy-analysis__list li { counter-increment: analysis-list; position: relative; min-height: 37px; padding: 9px 12px 9px 42px; color: #4f6681; background: #f7fafd; border-radius: 7px; font-size: 10px; line-height: 1.5; }
 .energy-analysis__list li::before { content: counter(analysis-list); position: absolute; top: 7px; left: 11px; display: grid; place-items: center; width: 22px; height: 22px; color: #fff; background: #4b85ef; border-radius: 50%; }
 .energy-analysis__list:last-child li::before { background: #2bbd96; }
+.energy-analysis__work-order-entry { width: 100%; margin-top: 10px; padding: 10px 14px; color: #fff; border: 0; border-radius: 8px; background: #2f6ff2; box-shadow: 0 8px 18px rgba(47,111,242,.18); font-weight: 700; cursor: pointer; }
+.energy-analysis__work-order-entry:hover { background: #245fd5; }
+.energy-analysis__work-order-entry:focus-visible { outline: 3px solid rgba(47,111,242,.28); outline-offset: 2px; }
 
 .energy-analysis__table-card, .energy-analysis__records { padding: 14px 18px; scroll-margin-top: 12px; }
 .energy-analysis__table-card > header, .energy-analysis__records > header { margin-bottom: 10px; }

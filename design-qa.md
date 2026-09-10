@@ -143,3 +143,40 @@ Intentional differences are capability-driven rather than visual drift. Search, 
 12. The customer-demo closeout localizes raw status and redaction metadata, removes delivery Issue numbers from customer copy, turns future navigation into explicit non-interactive “未开放” entries, moves the rule/no-model statement into expandable data-basis disclosure, and regenerates both approved browser capture sizes from commit `8b361b645f9b5cfd32dc94237f0c881cbc352daa`.
 13. Final-head review identified 5.9 MB of eager source PNG transfers. The page now uses responsive WebP `srcset` variants with PNG fallbacks; actual browser selection at both capture sizes was verified, and the screenshots were regenerated against `2e8c7227cec35d158606dd38ef6f3a740ce1420d` with no visual drift.
 14. The next final-head review found that energy appeared empty while its required overview window was still pending. Energy now stays in an explicit loading state until the window settles; an unavailable overview supplies an explicit energy-unavailable reason. The slow-overview and failure regressions assert both states, and the final browser captures were regenerated against `aeb2f43637d5f87809864e0976e8a0e23f5eb5f6`.
+
+---
+
+# Issue #71 Design QA
+
+Result: **PASSED**
+
+## Source and comparison
+
+- Approved reference: `03-events-workorders.png`, 1672×941, SHA-256 `B1B77357C426D4E371BB74FC23FB24583DBAA72658DF89A9D74CADE9DA9835A3`.
+- Implementation comparison: `docs/evidence/issue-71/05-design-qa-1672x941.png`, captured in the same 1672×941 CSS viewport.
+- The approved source and implementation capture were opened together in one comparison input after the final layout change.
+
+The implementation preserves the reference hierarchy: shared white customer header, wide campus banner, four KPI cards, left event queue, central event/progress area, split recommendation/history cards, and right work-order/participant/action rail. The first pass stacked recommendations and history, making the page visibly taller than the reference. The final pass places them side by side like the approved design; document height is 963px in a 941px viewport, with the remaining 22px attributable to the retained shared footer. There is no overlap or horizontal overflow.
+
+## Intentional capability-driven differences
+
+- KPI counts come from current evidence and collaboration APIs. Reference counts, trends and average duration were not copied; unavailable average duration reads “未提供”.
+- The reference's search, weather and live date remain absent because the unique existing customer shell has no reliable source for them.
+- Only the one verified same-event row is shown. Other reference work orders are not fabricated.
+- The reference's named assignee, department, three-party collaboration, status donut, follow-up and report actions are omitted or shown as unavailable unless the current backend supplies them.
+- The page adds a compact same-alert verification notice because identity equality is a product safety gate, not decorative copy.
+
+## Interaction and accessibility
+
+- The live path `overview → analysis suggestions → same event → manual confirmation → WO-0001 / PENDING_EXECUTION` passed in the browser.
+- The confirmation modal receives focus on its primary action, supports Escape/cancel without creating a work order, and restores focus to the trigger.
+- Native buttons, semantic headings, labeled navigation, status/alert roles, text-plus-icon states and `:focus-visible` are retained.
+- At 1366×768 the action remains visible and enabled; `scrollWidth=1351` for `innerWidth=1366`.
+- Browser console: no warnings or errors during the continuous flow.
+
+## Final checks
+
+- 1328 backend tests passed; 3 existing conditional tests skipped.
+- 475 frontend tests passed across 48 files.
+- TypeScript/Vue typecheck and production build passed.
+- Existing Vite chunk-size advisory remains a separate performance concern and was not hidden or expanded into this slice.

@@ -1,5 +1,5 @@
 import { computed, onScopeDispose, ref } from 'vue'
-import { getWorkflow, getWorkflowEventHistory, startWorkflow, submitApproval, subscribeToWorkflow } from '../services/workflowApi'
+import { getWorkflow, getWorkflowEventHistory, startWorkflow, submitApproval, subscribeToWorkflow, WorkflowApiError } from '../services/workflowApi'
 import type { DemoRole, WorkflowEvent, WorkflowResponse } from '../types/workflow'
 import { createRequestId } from '../utils/requestId'
 
@@ -167,7 +167,7 @@ export function useWorkflow() {
   }
 
   async function approve(payload: { decision: 'APPROVE' | 'REJECT'; reviewer: string; comment: string; role: DemoRole }) {
-    if (!workflow.value) return
+    if (!workflow.value || approving.value) return
     const generation = operationGeneration
     const workflowId = workflow.value.workflowId
     approving.value = true
@@ -185,7 +185,22 @@ export function useWorkflow() {
       await refresh(generation, workflowId)
     } catch (cause) {
       if (!isCurrent(generation, workflowId)) return
-      error.value = cause instanceof Error ? cause.message : '审批提交失败'
+      if (!(cause instanceof WorkflowApiError) || cause.status >= 500) {
+        try {
+          const reconciled = await getWorkflow(workflowId)
+          if (!isCurrent(generation, workflowId)) return
+          mergeWorkflow(reconciled)
+          if (reconciled.approval || reconciled.workOrder || isTerminalStatus(reconciled.status)) {
+            approvalKey = null
+            return
+          }
+        } catch {
+          if (!isCurrent(generation, workflowId)) return
+        }
+        error.value = '确认结果暂时未知，已保留本次请求；请查询状态后再重试。'
+      } else {
+        error.value = cause.message
+      }
     } finally {
       if (isCurrent(generation, workflowId)) approving.value = false
     }
