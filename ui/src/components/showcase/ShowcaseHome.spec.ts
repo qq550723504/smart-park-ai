@@ -164,6 +164,42 @@ describe('ShowcaseHome customer shell', () => {
     expect(wrapper.get('[data-restart-notice]').text()).toContain('后台工单、报告和进行中的任务均未删除')
   })
 
+  it('moves focus into the restart dialog, traps Tab, and restores focus on Escape', async () => {
+    const wrapper = mount(ShowcaseHome, {
+      props: { active: true },
+      attachTo: document.body,
+      global: { stubs: {
+        ParkOverview: { methods: { resetForDemo: vi.fn() }, template: '<main id="customer-overview-main" data-park-overview />' },
+        EnergyAnalysis: { template: '<main id="customer-analysis-main" data-energy-analysis />' },
+        CustomerAssistantPanel: { methods: { canResetForDemo: () => true, resetForDemo: () => true }, template: '<aside />' },
+      } },
+    })
+    const trigger = wrapper.get('[data-restart-demo]')
+    ;(trigger.element as HTMLElement).focus()
+
+    await trigger.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.get('[role="dialog"]')
+    const cancel = wrapper.get('[data-cancel-restart]')
+    const confirm = wrapper.get('[data-confirm-restart]')
+    expect(document.activeElement).toBe(dialog.element)
+
+    ;(confirm.element as HTMLElement).focus()
+    confirm.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+    expect(document.activeElement).toBe(cancel.element)
+
+    ;(cancel.element as HTMLElement).focus()
+    cancel.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
+    expect(document.activeElement).toBe(confirm.element)
+
+    confirm.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await flushPromises()
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(document.activeElement).toBe(trigger.element)
+    wrapper.unmount()
+  })
+
   it('blocks restart while an assistant write result is unconfirmed', async () => {
     const assistantReset = vi.fn(() => false)
     const wrapper = mount(ShowcaseHome, {

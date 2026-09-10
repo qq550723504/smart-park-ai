@@ -28,8 +28,10 @@ const capabilities = ref<OperationsCapabilities | null>(null)
 const assistantOpen = ref(false)
 const restartOpen = ref(false)
 const restartNotice = ref('')
+const restartDialog = ref<HTMLElement | null>(null)
 const assistantPanel = ref<{ canResetForDemo: () => boolean; resetForDemo: () => boolean } | null>(null)
 const overviewPanel = ref<{ resetForDemo: () => Promise<void> } | null>(null)
+let restartReturnFocus: HTMLElement | null = null
 const analysisInstanceKey = computed(() => {
   const context = analysisContext.value
   return context
@@ -104,24 +106,60 @@ function openAssistantAnalysis(context: CustomerAnalysisContext): void {
   void navigate('analysis', context)
 }
 
-function requestRestart(): void {
+async function requestRestart(): Promise<void> {
   if (assistantPanel.value && !assistantPanel.value.canResetForDemo()) {
     assistantOpen.value = true
     restartNotice.value = '助手仍有正在发送或结果未确认的请求。已保留请求关联，请先等待结果或原样重试，再重开导览。'
     return
   }
+  restartReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
   restartOpen.value = true
+  await nextTick()
+  restartDialog.value?.focus()
+}
+
+async function closeRestart(): Promise<void> {
+  restartOpen.value = false
+  await nextTick()
+  restartReturnFocus?.focus()
+  restartReturnFocus = null
+}
+
+function handleRestartKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    void closeRestart()
+    return
+  }
+  if (event.key !== 'Tab' || !restartDialog.value) return
+  const focusable = Array.from(restartDialog.value.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+  if (focusable.length === 0) {
+    event.preventDefault()
+    restartDialog.value.focus()
+    return
+  }
+  const first = focusable[0]!
+  const last = focusable[focusable.length - 1]!
+  if (event.shiftKey && (document.activeElement === first || !restartDialog.value.contains(document.activeElement))) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && (document.activeElement === last || !restartDialog.value.contains(document.activeElement))) {
+    event.preventDefault()
+    first.focus()
+  }
 }
 
 async function confirmRestart(): Promise<void> {
   if (assistantPanel.value && !assistantPanel.value.canResetForDemo()) {
     restartOpen.value = false
+    restartReturnFocus = null
     assistantOpen.value = true
     restartNotice.value = '助手请求尚未确认，导览没有重置；原问题与请求身份仍保留在助手中。'
     return
   }
   if (assistantPanel.value?.resetForDemo() === false) return
   restartOpen.value = false
+  restartReturnFocus = null
   assistantOpen.value = false
   latestOverviewContext.value = null
   analysisContext.value = null
@@ -218,14 +256,14 @@ onMounted(() => {
       @close="closeAssistant"
       @open-analysis="openAssistantAnalysis"
     />
-    <div v-if="restartOpen" class="customer-demo-restart" @keydown.esc="restartOpen = false">
-      <button type="button" class="customer-demo-restart__backdrop" aria-label="取消重开导览" @click="restartOpen = false"></button>
-      <section role="dialog" aria-modal="true" aria-labelledby="restart-demo-title">
+    <div v-if="restartOpen" class="customer-demo-restart" @keydown="handleRestartKeydown">
+      <button type="button" class="customer-demo-restart__backdrop" aria-label="取消重开导览" tabindex="-1" @click="closeRestart"></button>
+      <section ref="restartDialog" role="dialog" aria-modal="true" aria-labelledby="restart-demo-title" tabindex="-1">
         <h2 id="restart-demo-title">重开客户导览？</h2>
         <p>将返回园区总览，并清除当前页面选择、助手输入和本地会话展示。</p>
         <strong>不会删除或重置后台工单、历史报告及共享演示数据；进行中的任务会继续执行。</strong>
         <footer>
-          <button type="button" @click="restartOpen = false">取消</button>
+          <button type="button" data-cancel-restart @click="closeRestart">取消</button>
           <button type="button" data-confirm-restart @click="confirmRestart">确认重开导览</button>
         </footer>
       </section>
