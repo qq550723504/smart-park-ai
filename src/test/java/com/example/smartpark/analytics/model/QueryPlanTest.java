@@ -77,11 +77,10 @@ class QueryPlanTest {
                 new QueryPlan.TimeRange(now.minusSeconds(60), now), 100))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("original question");
-        assertThatThrownBy(() -> new QueryPlan("B1 energy", List.of(metric("energy_kwh")),
+        QueryPlan lowercase = new QueryPlan("b1 energy", List.of(metric("energy_kwh")),
                 List.of(), Map.of("building_id", "b1"),
-                new QueryPlan.TimeRange(now.minusSeconds(60), now), 100))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("original question");
+                new QueryPlan.TimeRange(now.minusSeconds(60), now), 100);
+        assertThat(lowercase.filters()).containsEntry("building_id", "B1");
     }
 
     @Test

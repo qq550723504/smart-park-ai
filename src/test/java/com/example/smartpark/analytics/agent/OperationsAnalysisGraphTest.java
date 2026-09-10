@@ -200,19 +200,19 @@ class OperationsAnalysisGraphTest {
     }
 
     @Test
-    void preservesEntityFiltersFromUnderstandingThroughPlanValidationAndBinding() {
+    void canonicalizesEntityFiltersThroughPlanValidationAndBinding() {
         String filteredSql = """
                 SELECT SUM(kwh) AS energy_kwh FROM analytics.v_energy_hourly
                 WHERE hour_ts >= :fromTs AND hour_ts < :toTs
                   AND building_id = :filter_building_id LIMIT 200""";
         modelClient.reset(
-                new AnalyticsModelClient.QuestionUnderstanding("B1楼宇的能耗", List.of("能耗"),
-                        List.of(), null, List.of(), Map.of("building_id", "B1")),
+                new AnalyticsModelClient.QuestionUnderstanding("b1楼宇的能耗", List.of("能耗"),
+                        List.of(), null, List.of(), Map.of("building_id", "b1")),
                 List.of(filteredSql),
                 new ChartSpec.Proposal("TABLE", "B1能耗", "energy_kwh", List.of(), "", "kWh"),
                 "共 1 行结果。");
 
-        var outcome = graph.run(UUID.randomUUID(), "B1楼宇的能耗");
+        var outcome = graph.run(UUID.randomUUID(), "b1楼宇的能耗");
 
         assertThat(outcome.outcome()).isEqualTo(OperationsAnalysisGraph.RunOutcome.COMPLETED);
         assertThat(modelClient.lastPlan().filters()).containsExactlyEntriesOf(
