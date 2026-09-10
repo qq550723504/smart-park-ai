@@ -127,6 +127,16 @@ export interface WorkflowResponse {
   riskReasons: string[]
 }
 
+export interface ActionableAlertResponse {
+  alertId: string
+  parkId: string
+  buildingId: string
+  deviceId: string
+  category: string
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'
+  occurredAt: string
+}
+
 export interface WorkflowEvent {
   eventId: string
   type: string

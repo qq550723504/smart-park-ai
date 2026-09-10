@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest'
 import CustomerShell from './CustomerShell.vue'
 
 describe('CustomerShell', () => {
-  it('opens overview and analysis while keeping later customer navigation non-interactive', async () => {
+  it('opens overview, analysis and work orders while keeping later customer navigation non-interactive', async () => {
     const wrapper = mount(CustomerShell)
     const plannedNavigation = wrapper.findAll('.customer-shell__nav [aria-disabled="true"]')
 
-    expect(plannedNavigation).toHaveLength(3)
+    expect(plannedNavigation).toHaveLength(2)
     expect(plannedNavigation.every((item) => item.element.tagName === 'SPAN')).toBe(true)
     expect(plannedNavigation.every((item) => item.attributes('title') === '功能暂未开放')).toBe(true)
     expect(wrapper.text()).not.toMatch(/#(?:70|71|72|73)|后续 Issue|联调项/)
@@ -15,6 +15,17 @@ describe('CustomerShell', () => {
 
     await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
     expect(wrapper.emitted('navigate')).toEqual([['analysis']])
+    await wrapper.get('[data-customer-nav="work-orders"]').trigger('click')
+    expect(wrapper.emitted('navigate')).toEqual([['analysis'], ['work-orders']])
+  })
+
+  it('marks work orders as the current page and exposes its skip target', () => {
+    const wrapper = mount(CustomerShell, { props: { activePage: 'work-orders' } })
+
+    expect(wrapper.get('[data-customer-nav="work-orders"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('.customer-shell__skip').attributes('href')).toBe('#customer-work-orders-main')
+    expect(wrapper.get('.customer-shell__hero').attributes('aria-labelledby')).toBe('customer-work-orders-title')
+    expect(wrapper.get('.customer-shell__hero').text()).toContain('事件与工单中心')
   })
 
   it('marks the active customer page and updates the skip link', () => {

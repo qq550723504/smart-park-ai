@@ -153,7 +153,7 @@ public class DemoDataRefresher {
             + "('ALT-HUM-003',  'B2', 'HUM-B2-11', 'HUMIDITY',   'MEDIUM', (((CURRENT_DATE - 2)::timestamp + TIME '03:05') AT TIME ZONE 'Asia/Shanghai'), 'OPEN'), "
             + "('ALT-DOOR-004', 'B2', 'DR-B2-01',  'ACCESS',     'HIGH',   (((CURRENT_DATE - 2)::timestamp + TIME '22:30') AT TIME ZONE 'Asia/Shanghai'), 'OPEN'), "
             + "('ALT-TEMP-005', 'B3', 'AC-B3-03',  'TEMPERATURE', 'LOW',   (((CURRENT_DATE - 1)::timestamp + TIME '11:20') AT TIME ZONE 'Asia/Shanghai'), 'RESOLVED'), "
-            + "('ALT-ORCH-ENERGY-B1-001', 'B1', 'DEV-ENERGY-B1-001', 'ENERGY', 'LOW', (((CURRENT_DATE - 1)::timestamp + TIME '10:12') AT TIME ZONE 'Asia/Shanghai'), 'OPEN') "
+            + "('ALT-ORCH-ENERGY-B1-001', 'B1', 'DEV-ENERGY-B1-001', 'ENERGY', 'HIGH', (((CURRENT_DATE - 1)::timestamp + TIME '10:12') AT TIME ZONE 'Asia/Shanghai'), 'OPEN') "
             + "ON CONFLICT DO NOTHING";
 
     private static final String OCCUPANCY_SEED =

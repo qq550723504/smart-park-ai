@@ -73,7 +73,7 @@ class MockParkFixtureTest {
         assertThat(alert.deviceId()).isEqualTo("DEV-ENERGY-B1-001");
         assertThat(alert.classification())
                 .isEqualTo(com.example.smartpark.model.alert.AlertClassification.ENERGY);
-        assertThat(alert.riskHint()).isEqualTo(RiskLevel.LOW);
+        assertThat(alert.riskHint()).isEqualTo(RiskLevel.HIGH);
         assertThat(fixture.devices().getDevice(alert.deviceId()).buildingId()).isEqualTo("B1");
     }
 

@@ -7,6 +7,7 @@ import { getAnomalyEvidence } from '../../services/operationsAnomalyApi'
 import type { CustomerAnalysisContext } from '../../types/customer'
 import type { EnergyTimeSeriesFilters, EnergyTimeSeriesResponse } from '../../types/energyTimeSeries'
 import type { AnomalyDomain, AnomalyDomainStatus, AnomalyEvidence } from '../../types/operationsAnomaly'
+import { customerRecommendations } from '../../utils/customerRecommendations'
 import EnergyAnalysisChart, { type EnergyAnalysisPoint } from './EnergyAnalysisChart.vue'
 
 const props = withDefaults(defineProps<{
@@ -15,7 +16,10 @@ const props = withDefaults(defineProps<{
   analysisPollIntervalMs?: number
 }>(), { active: true })
 
-const emit = defineEmits<{ back: [] }>()
+const emit = defineEmits<{
+  back: []
+  'open-work-orders': [context: CustomerAnalysisContext]
+}>()
 const actual = ref<EnergyTimeSeriesResponse | null>(null)
 const baseline = ref<EnergyTimeSeriesResponse | null>(null)
 const evidence = ref<AnomalyEvidence | null>(null)
@@ -278,15 +282,7 @@ const causes = computed(() => {
   return rows
 })
 
-const suggestions = computed(() => {
-  const rows = ['按异常窗口核对楼宇运行计划与实际启停记录，保留人工确认。']
-  if (overviewStatus('devices') === 'UNAVAILABLE') rows.push('先恢复或补充设备状态数据，再判断设备与能耗变化的关系。')
-  else if ((props.context?.summary?.offlineDeviceCount ?? 0) > 0) rows.push('先恢复或核验离线设备的数据采集，再判断能耗变化。')
-  if (overviewStatus('alerts') === 'UNAVAILABLE') rows.push('先补充告警域数据，当前不确认窗口内是否没有关联告警。')
-  else if ((props.context?.summary?.alertCount ?? 0) > 0) rows.push('逐条核对关联告警及现场情况，不把关联性直接写成故障结论。')
-  rows.push('在后续小时持续观察实际用电与基线；当前页面不会执行能源控制。')
-  return rows
-})
+const suggestions = computed(() => props.context ? customerRecommendations(props.context) : [])
 
 interface RelatedDeviceRow {
   id: string
@@ -534,6 +530,9 @@ watch(
         <article id="analysis-actions" class="customer-card energy-analysis__list">
           <header><span class="is-green"><Checked aria-hidden="true" /></span><h2>建议处理措施</h2><small>需人工确认</small></header>
           <ol><li v-for="suggestion in suggestions" :key="suggestion">{{ suggestion }}</li></ol>
+          <button type="button" class="energy-analysis__work-order-entry" data-open-work-orders @click="emit('open-work-orders', context)">
+            查看同一事件并人工确认
+          </button>
         </article>
       </section>
 

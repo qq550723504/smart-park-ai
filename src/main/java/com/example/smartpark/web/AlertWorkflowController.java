@@ -43,14 +43,19 @@ public class AlertWorkflowController {
         return WebDtos.from(workflow.start(alertId));
     }
 
+    @GetMapping("/alerts/{alertId}")
+    public WebDtos.ActionableAlertResponse alert(@PathVariable String alertId) {
+        return WebDtos.from(requireKnownAlert(alertId));
+    }
+
     @GetMapping("/workflows/{workflowId}")
     public WebDtos.WorkflowResponse status(@PathVariable String workflowId) {
         return WebDtos.from(workflow.status(workflowId));
     }
 
-    private void requireKnownAlert(String alertId) {
+    private com.example.smartpark.model.alert.Alert requireKnownAlert(String alertId) {
         try {
-            alertPort.getAlert(alertId);
+            return alertPort.getAlert(alertId);
         }
         catch (IllegalArgumentException exception) {
             throw new NoSuchElementException("Unknown alert: " + alertId, exception);

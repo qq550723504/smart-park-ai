@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { askCustomerService, getShowcaseScenarios, listCollaborationSlaTrend, replyCustomerSession } from './workflowApi'
+import { askCustomerService, getActionableAlert, getShowcaseScenarios, listCollaborationSlaTrend, replyCustomerSession, WorkflowApiError } from './workflowApi'
 import type { ShowcaseScenarioCatalog } from './workflowApi'
 
 const originalFetch = globalThis.fetch
@@ -63,4 +63,22 @@ it('retains the customer execution run id from the response header', async () =>
   await expect(askCustomerService('访客停车怎么收费？', 'key-1')).resolves.toMatchObject({ executionRunId: 'run-customer-1' })
   const reply = await replyCustomerSession('cs-1', '继续咨询', 'key-2')
   expect(reply.executionRunId).toBeUndefined()
+})
+
+it('reads the exact actionable alert identity without starting a workflow', async () => {
+  const alert = { alertId: 'ALT-ORCH-ENERGY-B1-001', parkId: 'PARK-A', buildingId: 'B1', deviceId: 'DEV-ENERGY-B1-001', category: 'ENERGY', riskLevel: 'HIGH', occurredAt: '2026-08-23T00:27:00Z' }
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(alert), { status: 200 }))
+  globalThis.fetch = fetchMock as typeof fetch
+
+  await expect(getActionableAlert(alert.alertId)).resolves.toEqual(alert)
+  expect(fetchMock).toHaveBeenCalledWith(`/api/alerts/${alert.alertId}`, expect.objectContaining({ headers: expect.any(Object) }))
+  expect(fetchMock.mock.calls[0]?.[1]?.method).toBeUndefined()
+})
+
+it('preserves HTTP status for definite workflow errors', async () => {
+  globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: 'forbidden' }), { status: 403 })) as typeof fetch
+
+  const error = await getActionableAlert('ALT-MISSING').catch((cause) => cause)
+  expect(error).toBeInstanceOf(WorkflowApiError)
+  expect(error).toMatchObject({ message: 'forbidden', status: 403 })
 })
