@@ -39,6 +39,9 @@ async function navigate(page: CustomerPage): Promise<void> {
 
 function updateContext(context: CustomerAnalysisContext | null): void {
   latestOverviewContext.value = context
+  if (activePage.value === 'analysis' && !analysisContext.value && context) {
+    analysisContext.value = context
+  }
 }
 
 function openAnalysis(context: CustomerAnalysisContext): void {

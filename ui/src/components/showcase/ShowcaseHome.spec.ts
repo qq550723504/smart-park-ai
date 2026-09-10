@@ -41,6 +41,44 @@ describe('ShowcaseHome customer shell', () => {
     expect(wrapper.emitted('enter-workbench')).toEqual([[]])
   })
 
+  it('adopts the first overview context when analysis was opened before loading finished', async () => {
+    const context = {
+      buildingId: 'B1',
+      buildingName: '创新中心',
+      anomalyId: 'ALT-B1',
+      title: '创新中心运营分析',
+      priority: '低',
+      summary: null,
+      overviewDomainStatus: { alerts: 'OK', devices: 'OK', energy: 'OK' },
+      anomalyWindow: { from: '2026-09-01T00:00:00Z', to: '2026-09-09T00:37:00Z', timezone: 'Asia/Shanghai' },
+      energyWindow: { from: '2026-09-08T00:00:00Z', to: '2026-09-09T00:00:00Z', timezone: 'Asia/Shanghai', granularity: 'HOUR' },
+      source: 'OPERATIONS_ANALYTICS',
+    }
+    const wrapper = mount(ShowcaseHome, {
+      props: { active: true },
+      global: {
+        stubs: {
+          ParkOverview: {
+            emits: ['context-change'],
+            template: '<main data-park-overview><button data-finish-loading @click="$emit(\'context-change\', context)">完成加载</button></main>',
+            setup: () => ({ context }),
+          },
+          EnergyAnalysis: {
+            props: ['context'],
+            template: '<main data-energy-analysis>{{ context?.buildingName ?? \'等待上下文\' }}</main>',
+          },
+        },
+      },
+    })
+
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    expect(wrapper.get('[data-energy-analysis]').text()).toContain('等待上下文')
+
+    await wrapper.get('[data-finish-loading]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-energy-analysis]').text()).toContain('创新中心')
+  })
+
   it('moves from an overview issue to analysis and returns without entering the workbench', async () => {
     const context = {
       buildingId: 'B2',

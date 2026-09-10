@@ -1,5 +1,12 @@
 import type { AnalysisStatusDto } from '../types/analytics'
 
+export class AnalyticsApiError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message)
+    this.name = 'AnalyticsApiError'
+  }
+}
+
 async function postJson<T>(url: string, body: unknown): Promise<T> {
   const response = await fetch(url, {
     method: 'POST',
@@ -8,7 +15,7 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   })
   if (!response.ok && response.status !== 202) {
     const detail = await response.json().catch(() => null)
-    throw new Error((detail as { message?: string })?.message ?? `请求失败（${response.status}）`)
+    throw new AnalyticsApiError(response.status, (detail as { message?: string })?.message ?? `请求失败（${response.status}）`)
   }
   return response.json() as Promise<T>
 }
@@ -30,6 +37,6 @@ export async function submitClarification(
 
 export async function getAnalysisStatus(runId: string): Promise<AnalysisStatusDto> {
   const response = await fetch(`/api/operations-analysis/runs/${encodeURIComponent(runId)}`)
-  if (!response.ok) throw new Error(`查询分析状态失败（${response.status}）`)
+  if (!response.ok) throw new AnalyticsApiError(response.status, `查询分析状态失败（${response.status}）`)
   return response.json() as Promise<AnalysisStatusDto>
 }

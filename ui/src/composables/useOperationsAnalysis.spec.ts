@@ -112,6 +112,28 @@ describe('useOperationsAnalysis', () => {
     expect(analysis.phase.value).toBe('clarification')
   })
 
+  it('stops retrying and unlocks a replacement when an accepted run no longer exists', async () => {
+    const missingRunId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    let statusCalls = 0
+    handler = (url, init) => {
+      if (init?.method === 'POST') return jsonResponse({ runId: missingRunId }, 202)
+      if (url.endsWith(`/runs/${missingRunId}`)) {
+        statusCalls += 1
+        return jsonResponse({ message: 'missing' }, 404)
+      }
+      return jsonResponse({}, 404)
+    }
+    const analysis = useOperationsAnalysis({ pollIntervalMs: 1 })
+
+    await analysis.submit('上周能耗')
+
+    expect(analysis.phase.value).toBe('failed')
+    expect(analysis.runId.value).toBeNull()
+    expect(analysis.error.value).toContain('任务已不存在')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(statusCalls).toBe(1)
+  })
+
   it('surfaces clarification questions and resumes with structured selections', async () => {
     const trace = fakeTrace()
     let clarified = false
@@ -251,6 +273,35 @@ describe('useOperationsAnalysis', () => {
     expect(statusCalls).toBeGreaterThan(1)
     expect(analysis.phase.value).toBe('failed')
     expect(analysis.dto.value?.failureStage).toBe('CLARIFICATION_TIMEOUT')
+  })
+
+  it('unlocks a paused analysis when its server-side run disappears', async () => {
+    const missingRunId = 'ffffffff-bbbb-cccc-dddd-eeeeeeeeeeee'
+    let statusCalls = 0
+    handler = (url, init) => {
+      if (init?.method === 'POST') return jsonResponse({ runId: missingRunId }, 202)
+      if (url.endsWith(`/runs/${missingRunId}`)) {
+        statusCalls += 1
+        return statusCalls === 1
+          ? jsonResponse({
+              runId: missingRunId,
+              status: 'NEEDS_CLARIFICATION',
+              clarificationQuestions: ['请选择能耗口径'],
+              createdAt: '',
+            })
+          : jsonResponse({ message: 'missing' }, 404)
+      }
+      return jsonResponse({}, 404)
+    }
+    const analysis = useOperationsAnalysis({ pollIntervalMs: 1 })
+
+    await analysis.submit('上周能耗')
+    expect(analysis.phase.value).toBe('clarification')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(analysis.phase.value).toBe('failed')
+    expect(analysis.runId.value).toBeNull()
+    expect(analysis.error.value).toContain('任务已不存在')
   })
 
   it('reports backend failures without fabricating results', async () => {

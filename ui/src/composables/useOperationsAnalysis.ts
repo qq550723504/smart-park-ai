@@ -5,7 +5,7 @@ import { isTerminalAnalysisStatus } from '../types/analytics'
 import type { DisplayPayload, ExecutionEvent } from '../types/execution'
 import { isTerminalEvent } from '../types/execution'
 import type { DemoRole } from '../types/workflow'
-import { getAnalysisStatus, startAnalysis, submitClarification } from '../services/analyticsApi'
+import { AnalyticsApiError, getAnalysisStatus, startAnalysis, submitClarification } from '../services/analyticsApi'
 
 export interface ExecutionTraceLike {
   events: Ref<ExecutionEvent[]>
@@ -81,7 +81,11 @@ export function useOperationsAnalysis(
         return
       }
       scheduleNext()
-    }).catch(() => {
+    }).catch((cause) => {
+      if (isMissingRun(cause)) {
+        applyMissingRun()
+        return
+      }
       // A transient status failure must not disable expiry detection.
       scheduleNext()
     })
@@ -119,6 +123,7 @@ export function useOperationsAnalysis(
         }
       } catch (cause) {
         if (generation !== operationGeneration) return null
+        if (cause instanceof AnalyticsApiError && cause.status === 404) throw cause
         lastError = cause instanceof Error ? cause.message : String(cause)
       }
       await sleep(pollIntervalMs)
@@ -192,7 +197,9 @@ export function useOperationsAnalysis(
     } catch (cause) {
       if (generation !== operationGeneration) return
       const failure = cause instanceof Error ? cause : new Error(String(cause))
-      if (accepted && runId.value) {
+      if (accepted && isMissingRun(cause)) {
+        applyMissingRun()
+      } else if (accepted && runId.value) {
         continueAcceptedRunPolling(runId.value, generation)
       } else {
         error.value = failure.message
@@ -226,7 +233,9 @@ export function useOperationsAnalysis(
       applyTerminal(terminal)
     } catch (cause) {
       if (generation !== operationGeneration) return
-      if (accepted && runId.value === targetRunId) {
+      if (accepted && isMissingRun(cause)) {
+        applyMissingRun()
+      } else if (accepted && runId.value === targetRunId) {
         continueAcceptedRunPolling(targetRunId, generation)
       } else if (runId.value === targetRunId && dto.value?.status === 'NEEDS_CLARIFICATION') {
         error.value = cause instanceof Error ? cause.message : String(cause)
@@ -237,6 +246,18 @@ export function useOperationsAnalysis(
         phase.value = 'failed'
       }
     }
+  }
+
+  function isMissingRun(cause: unknown): boolean {
+    return cause instanceof AnalyticsApiError && cause.status === 404
+  }
+
+  function applyMissingRun(): void {
+    stopClarificationPolling()
+    stopAcceptedRunPolling()
+    error.value = '已受理的分析任务已不存在，请重新发起'
+    phase.value = 'failed'
+    runId.value = null
   }
 
   function stopAcceptedRunPolling(): void {
@@ -264,7 +285,11 @@ export function useOperationsAnalysis(
           return
         }
         scheduleNext()
-      }).catch(() => {
+      }).catch((cause) => {
+        if (isMissingRun(cause)) {
+          applyMissingRun()
+          return
+        }
         // The run has already been accepted. Keep its identity and retry status
         // lookup instead of enabling a replacement POST against the singleton.
         scheduleNext()
