@@ -10,7 +10,10 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
   const reports = ref<OperationsReportSummary[]>([])
   const runId = ref<string | null>(null)
   const busy = ref(false)
+  const detailLoading = ref(false)
+  const downloadingId = ref<string | null>(null)
   const historyLoading = ref(false)
+  const historyLoaded = ref(false)
   const historyPage = ref(-1)
   const historyHasNext = ref(false)
   const historyTotal = ref(0)
@@ -18,36 +21,53 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
   const pollIntervalMs = options.pollIntervalMs ?? 500
   const maxPolls = options.maxPolls ?? 180
   let generation = 0
-  let pendingCreation: { role: DemoRole; key: string; request: OperationsReportCreateRequest } | null = null
+  let historyGeneration = 0
+  let pendingCreation: { role: DemoRole; key: string; request: OperationsReportCreateRequest; fingerprint: string } | null = null
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  function defaultRequest(): OperationsReportCreateRequest {
+    const to = new Date()
+    return {
+      reportType: 'OPERATIONS_DAILY',
+      timeWindow: {
+        fromInclusive: new Date(to.getTime() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+        toExclusive: to.toISOString(),
+      },
+      timezone: 'Asia/Shanghai',
+    }
+  }
 
   async function loadHistory(role: DemoRole, append = false): Promise<void> {
     if (append && (historyLoading.value || !historyHasNext.value)) return
     const current = generation
+    const currentHistory = ++historyGeneration
     const targetPage = append ? historyPage.value + 1 : 0
     historyLoading.value = true
     try {
       const page = await listOperationsDailyReports(role, { page: targetPage, size: 20 })
-      if (current === generation) {
+      if (current === generation && currentHistory === historyGeneration) {
         reports.value = append
           ? [...new Map([...reports.value, ...page.content].map((item) => [item.reportId, item])).values()]
           : page.content
         historyPage.value = page.page
         historyHasNext.value = page.hasNext
         historyTotal.value = page.totalElements
+        historyLoaded.value = true
       }
     } catch (cause) {
-      if (current === generation) error.value = cause instanceof Error ? cause.message : String(cause)
+      if (current === generation && currentHistory === historyGeneration) error.value = cause instanceof Error ? cause.message : String(cause)
     } finally {
-      if (current === generation) historyLoading.value = false
+      if (current === generation && currentHistory === historyGeneration) historyLoading.value = false
     }
   }
 
   async function open(reportId: string, role: DemoRole): Promise<void> {
     const current = ++generation
+    historyGeneration += 1
     pendingCreation = null
     busy.value = false
     historyLoading.value = false
+    detailLoading.value = true
     error.value = ''
     try {
       const detail = await getOperationsDailyReport(reportId, role)
@@ -57,27 +77,29 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
       options.trace?.subscribe(detail.traceId, role)
     } catch (cause) {
       if (current === generation) error.value = cause instanceof Error ? cause.message : String(cause)
+    } finally {
+      if (current === generation) detailLoading.value = false
     }
   }
 
-  async function start(role: DemoRole): Promise<void> {
+  async function start(role: DemoRole, requested?: OperationsReportCreateRequest, requestIdentity?: string): Promise<void> {
     if (busy.value) return
     const current = ++generation
+    historyGeneration += 1
     busy.value = true
+    detailLoading.value = false
     historyLoading.value = false
     error.value = ''
     let createAccepted = false
     try {
-      if (!pendingCreation || pendingCreation.role !== role) {
-        const to = new Date()
+      const request = requested ?? defaultRequest()
+      const fingerprint = requestIdentity ?? (requested ? JSON.stringify(request) : 'default:5-day-window')
+      if (!pendingCreation || pendingCreation.role !== role || pendingCreation.fingerprint !== fingerprint) {
         pendingCreation = {
           role,
           key: createRequestId(),
-          request: {
-            reportType: 'OPERATIONS_DAILY',
-            timeWindow: { fromInclusive: new Date(to.getTime() - 5 * 24 * 60 * 60 * 1000).toISOString(), toExclusive: to.toISOString() },
-            timezone: 'Asia/Shanghai',
-          },
+          request,
+          fingerprint,
         }
       }
       const accepted = await startOperationsDailyReport(role, pendingCreation.request, pendingCreation.key)
@@ -108,19 +130,34 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
   }
 
   async function download(reportId: string, role: DemoRole): Promise<void> {
+    if (downloadingId.value) return
+    downloadingId.value = reportId
     error.value = ''
     try { await downloadOperationsDailyReport(reportId, role) }
     catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) }
+    finally { if (downloadingId.value === reportId) downloadingId.value = null }
+  }
+
+  async function refresh(role: DemoRole): Promise<void> {
+    if (busy.value || detailLoading.value) return
+    const reportId = report.value?.reportId ?? null
+    error.value = ''
+    await loadHistory(role)
+    if (reportId) await open(reportId, role)
   }
 
   function reset(): void {
     generation += 1
+    historyGeneration += 1
     pendingCreation = null
     report.value = null
     reports.value = []
     runId.value = null
     busy.value = false
+    detailLoading.value = false
+    downloadingId.value = null
     historyLoading.value = false
+    historyLoaded.value = false
     historyPage.value = -1
     historyHasNext.value = false
     historyTotal.value = 0
@@ -128,6 +165,6 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
   }
 
   onScopeDispose(reset)
-  return { report, reports, runId, busy, historyLoading, historyHasNext, historyTotal, error,
-    start, open, loadHistory, download, reset }
+  return { report, reports, runId, busy, detailLoading, downloadingId, historyLoading, historyLoaded,
+    historyHasNext, historyTotal, error, start, open, loadHistory, download, refresh, reset }
 }

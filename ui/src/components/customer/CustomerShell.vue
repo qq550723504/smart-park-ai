@@ -17,7 +17,7 @@ const customerNavigation = [
   { id: 'overview', label: '园区总览', available: true },
   { id: 'analysis', label: '运营分析', available: true },
   { id: 'work-orders', label: '事件与工单', available: true },
-  { id: 'reports', label: '运营报告', available: false },
+  { id: 'reports', label: '运营报告', available: true },
   { id: 'assistant', label: 'AI 助手', available: false },
 ] as const
 
@@ -25,6 +25,7 @@ const pageMeta = computed(() => ({
   overview: { mainId: 'customer-overview-main', titleId: 'customer-hero-title', label: '园区总览', scope: '总览内支持楼宇选择' },
   analysis: { mainId: 'customer-analysis-main', titleId: 'customer-analysis-title', label: '运营分析', scope: '分析页继承总览选择' },
   'work-orders': { mainId: 'customer-work-orders-main', titleId: 'customer-work-orders-title', label: '事件与工单', scope: '工单页继承同一告警' },
+  reports: { mainId: 'customer-reports-main', titleId: 'customer-reports-title', label: '运营报告', scope: '报告页读取不可变快照' },
 }[props.activePage]))
 </script>
 
@@ -99,6 +100,12 @@ const pageMeta = computed(() => ({
           <div>
             <h1 id="customer-work-orders-title">事件与工单中心</h1>
             <p>围绕异常发现、确认、建单与跟进，形成可核验的处理闭环</p>
+          </div>
+        </slot>
+        <slot v-else-if="props.activePage === 'reports'" name="reports-hero">
+          <div>
+            <h1 id="customer-reports-title">运营报告中心</h1>
+            <p>生成、阅读并下载同一份不可变运营快照</p>
           </div>
         </slot>
         <template v-else>

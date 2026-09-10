@@ -149,7 +149,7 @@
 .customer-report-promo > svg { width: 40px; height: 40px; color: #77a8e9; opacity: .8; }
 .customer-report-promo h2 { margin: 0; color: #2b5689; font-size: 13px; }
 .customer-report-promo p { margin: 4px 0 0; color: #7590a9; font-size: 8px; line-height: 1.4; }
-.customer-report-promo > span { position: absolute; right: 10px; bottom: 8px; padding: 2px 6px; color: #7f96ac; background: rgba(255,255,255,.72); border-radius: 4px; font-size: 8px; }
+.customer-report-promo > button { position: absolute; right: 10px; bottom: 8px; padding: 3px 7px; color: #3477df; background: rgba(255,255,255,.88); border: 1px solid #bcd4f1; border-radius: 5px; cursor: pointer; font-size: 8px; }
 
 .park-overview__bottom-grid { display: grid; grid-template-columns: 1.35fr .92fr .92fr 1.08fr; gap: 12px; }
 .customer-chart-card, .customer-latest { min-height: 205px; padding: 13px 16px; }

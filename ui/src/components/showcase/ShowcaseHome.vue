@@ -5,6 +5,7 @@ import CustomerShell from '../customer/CustomerShell.vue'
 import EnergyAnalysis from '../customer/EnergyAnalysis.vue'
 import ParkOverview from '../customer/ParkOverview.vue'
 import CustomerWorkOrders from '../customer/CustomerWorkOrders.vue'
+import CustomerOperationsReports from '../customer/CustomerOperationsReports.vue'
 import type { ShowcaseScenario } from '../../services/workflowApi'
 import type { CustomerAnalysisContext, CustomerPage } from '../../types/customer'
 import type { WorkbenchView } from '../../types/workbench'
@@ -50,6 +51,8 @@ async function navigate(page: CustomerPage, requestedContext?: CustomerAnalysisC
     ? 'customer-analysis-main'
     : page === 'work-orders'
       ? 'customer-work-orders-main'
+      : page === 'reports'
+        ? 'customer-reports-main'
       : 'customer-overview-main'
   const main = document.getElementById(mainId)
   main?.setAttribute('tabindex', '-1')
@@ -84,11 +87,19 @@ function openWorkOrders(context: CustomerAnalysisContext): void {
       </div>
       <span>同一事件<br />真实回执</span>
     </template>
+    <template #reports-hero>
+      <div>
+        <h1 id="customer-reports-title">运营报告中心</h1>
+        <p>一键沉淀园区运营亮点、问题与改进建议</p>
+      </div>
+      <span>数据洞察价值<br />报告驱动成长</span>
+    </template>
     <ParkOverview
       v-show="activePage === 'overview'"
       :active="props.active !== false"
       @context-change="updateContext"
       @view-analysis="openAnalysis"
+      @view-reports="navigate('reports')"
     />
     <KeepAlive>
       <EnergyAnalysis
@@ -107,6 +118,12 @@ function openWorkOrders(context: CustomerAnalysisContext): void {
         :active="props.active !== false && activePage === 'work-orders'"
         :context="workOrdersContext"
         @back="navigate('analysis')"
+      />
+    </KeepAlive>
+    <KeepAlive>
+      <CustomerOperationsReports
+        v-show="activePage === 'reports'"
+        :active="props.active !== false && activePage === 'reports'"
       />
     </KeepAlive>
   </CustomerShell>

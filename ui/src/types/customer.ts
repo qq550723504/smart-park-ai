@@ -1,6 +1,6 @@
 import type { AnomalyBuildingSummary, AnomalyDomainStatusMap, AnomalyWindow } from './operationsAnomaly'
 
-export type CustomerPage = 'overview' | 'analysis' | 'work-orders'
+export type CustomerPage = 'overview' | 'analysis' | 'work-orders' | 'reports'
 
 export interface CustomerEnergyWindow {
   from: string
