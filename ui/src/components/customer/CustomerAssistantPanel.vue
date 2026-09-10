@@ -43,6 +43,7 @@ const conversationWarning = ref('')
 const messages = ref<AssistantMessage[]>([])
 const sessionId = ref('')
 const conversation = ref<CustomerConversationResponse | null>(null)
+const confirmedHumanHandoff = ref(false)
 const unconfirmedRequest = ref<UnconfirmedRequest | null>(null)
 const composer = ref<HTMLTextAreaElement | null>(null)
 let requestGeneration = 0
@@ -66,6 +67,8 @@ const serviceMode = computed(() => {
   if (props.answerMode === 'mock') return '演示知识模式'
   return '服务能力待确认'
 })
+
+const humanHandoff = computed(() => confirmedHumanHandoff.value || Boolean(conversation.value?.humanHandoff))
 
 function reasonLabel(reason: CustomerServiceResponse['reason']): string {
   return ({
@@ -129,6 +132,7 @@ async function send(): Promise<void> {
     if (generation !== requestGeneration) return
     unconfirmedRequest.value = null
     sessionId.value = result.sessionId
+    confirmedHumanHandoff.value ||= result.needsHuman
     const answer = result.answer.trim()
     if (!answer) {
       error.value = '请求已受理，但服务未返回可展示内容；不会自动重发本次问题。'
@@ -183,6 +187,7 @@ function resetForDemo(): boolean {
   messages.value = []
   sessionId.value = ''
   conversation.value = null
+  confirmedHumanHandoff.value = false
   return true
 }
 
@@ -272,12 +277,12 @@ defineExpose({ canResetForDemo, resetForDemo })
           ref="composer"
           v-model="question"
           maxlength="500"
-          :disabled="loading || Boolean(conversation?.humanHandoff)"
-          :placeholder="conversation?.humanHandoff ? '当前会话已转人工，请等待处理' : '输入园区咨询或报修问题'"
+          :disabled="loading || humanHandoff"
+          :placeholder="humanHandoff ? '当前会话已转人工，请等待处理' : '输入园区咨询或报修问题'"
         ></textarea>
         <footer>
           <span>{{ question.length }} / 500 · 请勿输入个人敏感信息</span>
-          <button type="submit" data-send-assistant :disabled="loading || !question.trim() || Boolean(conversation?.humanHandoff)">
+          <button type="submit" data-send-assistant :disabled="loading || !question.trim() || humanHandoff">
             <Promotion aria-hidden="true" />{{ loading ? '发送中…' : '发送' }}
           </button>
         </footer>

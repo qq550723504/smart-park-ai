@@ -166,6 +166,27 @@ describe('CustomerAssistantPanel', () => {
     expect(wrapper.find('[data-unconfirmed-assistant-request]').exists()).toBe(false)
   })
 
+  it('locks the composer from the confirmed handoff receipt when conversation synchronization fails', async () => {
+    vi.mocked(askCustomerService).mockResolvedValue({
+      ...answer,
+      answer: '已转人工处理。',
+      needsHuman: true,
+      reason: 'INSUFFICIENT_EVIDENCE',
+    })
+    vi.mocked(getCustomerConversation).mockRejectedValue(new Error('read failed'))
+    const wrapper = mountPanel()
+
+    await wrapper.get('textarea').setValue('需要人工协助')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('回答已收到，会话详情暂未同步')
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).disabled).toBe(true)
+    expect((wrapper.get('[data-send-assistant]').element as HTMLButtonElement).disabled).toBe(true)
+    expect(wrapper.get('textarea').attributes('placeholder')).toBe('当前会话已转人工，请等待处理')
+    expect(askCustomerService).toHaveBeenCalledTimes(1)
+  })
+
   it('shows a real repair receipt without claiming resolution', async () => {
     vi.mocked(askCustomerService).mockResolvedValue({
       ...answer,
