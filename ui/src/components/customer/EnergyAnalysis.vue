@@ -402,14 +402,17 @@ const analysisQueryContextKey = computed(() => {
     energyWindow: context.energyWindow,
   }) : ''
 })
+let lastAnalysisQueryContextKey = ''
 
 watch(() => analysis.dto.value?.clarificationQuestions, (questions) => {
   clarificationSelections.value = (questions ?? []).map((_, index) => clarificationOptions(index)[0]!)
 })
 
-watch(analysisQueryContextKey, (contextKey, previousKey) => {
-  if (previousKey !== undefined && previousKey !== contextKey) analysis.reset()
-})
+watch(analysisQueryContextKey, (contextKey) => {
+  if (!contextKey) return
+  if (lastAnalysisQueryContextKey && lastAnalysisQueryContextKey !== contextKey) analysis.reset()
+  lastAnalysisQueryContextKey = contextKey
+}, { immediate: true })
 
 watch(
   [() => props.active, () => refreshContextKey.value],

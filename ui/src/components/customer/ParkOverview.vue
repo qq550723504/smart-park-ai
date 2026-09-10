@@ -156,6 +156,7 @@ function openAnalysis(buildingId: string): void {
     evidence.value = null
     errors.value.evidence = ''
     detailLoading.value = false
+    void loadEvidence(buildingId)
   }
   if (analysisContext.value) emit('view-analysis', analysisContext.value)
 }

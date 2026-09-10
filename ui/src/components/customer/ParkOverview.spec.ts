@@ -169,6 +169,20 @@ describe('ParkOverview', () => {
     })
   })
 
+  it('starts replacement evidence without delaying analysis when switching attention buildings', async () => {
+    const wrapper = await mountLoaded()
+    const pendingEvidence = deferred<AnomalyEvidence>()
+    vi.mocked(getAnomalyEvidence).mockReturnValueOnce(pendingEvidence.promise)
+
+    await wrapper.get('[data-building-id="B2"]').trigger('click')
+
+    expect(wrapper.emitted('view-analysis')?.at(-1)?.[0]).toMatchObject({ buildingId: 'B2' })
+    expect(getAnomalyEvidence).toHaveBeenLastCalledWith('VIEWER', 'B2', {
+      from: windowRange.from,
+      to: windowRange.to,
+    })
+  })
+
   it('preserves incomplete overview domain statuses in the analysis context', async () => {
     vi.mocked(getAnomalyOverview).mockResolvedValue({
       ...overview,

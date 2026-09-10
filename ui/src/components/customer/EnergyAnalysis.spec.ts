@@ -436,6 +436,13 @@ describe('EnergyAnalysis', () => {
     expect(wrapper.get('[data-run-ai-analysis]').attributes('disabled')).toBeDefined()
     expect(startAnalysis).toHaveBeenCalledTimes(1)
 
+    await wrapper.setProps({ context: null })
+    await wrapper.setProps({ context })
+    await flushPromises()
+    expect(wrapper.text()).toContain('需要确认指标口径')
+    expect(wrapper.get('[data-run-ai-analysis]').attributes('disabled')).toBeDefined()
+    expect(startAnalysis).toHaveBeenCalledTimes(1)
+
     await wrapper.get('.energy-analysis__clarification button').trigger('click')
     await flushPromises()
     expect(submitClarification).toHaveBeenCalledWith('run-1', [{ term: '请选择能耗口径', metric: 'energy_deviation_pct' }])
