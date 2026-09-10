@@ -13,12 +13,22 @@ import { getAnomalyEvidence, getAnomalyOverview } from '../../services/operation
 import { getEnergyTimeSeries } from '../../services/energyTimeSeriesApi'
 import { getOperationsMetrics, listCollaborationWorkItems } from '../../services/workflowApi'
 import type { CollaborationWorkItem } from '../../types/collaborationCenter'
+import {
+  alignedRecent24Hours,
+  CUSTOMER_BUILDINGS,
+  customerBuildingName,
+  type CustomerAnalysisContext,
+} from '../../types/customer'
 import type { EnergyTimeSeriesResponse } from '../../types/energyTimeSeries'
 import type { AnomalyBuildingSummary, AnomalyEvidence, AnomalyOverview } from '../../types/operationsAnomaly'
 import type { OperationsMetrics } from '../../types/workflow'
 import CustomerOverviewChart, { type CustomerChartDatum } from './CustomerOverviewChart.vue'
 
 const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true })
+const emit = defineEmits<{
+  'context-change': [context: CustomerAnalysisContext | null]
+  'view-analysis': [context: CustomerAnalysisContext]
+}>()
 
 const overview = ref<AnomalyOverview | null>(null)
 const energy = ref<EnergyTimeSeriesResponse | null>(null)
@@ -74,14 +84,8 @@ const customerStatusLabels: Record<string, string> = {
   INACTIVE: '未运行',
 }
 
-const buildingCatalog: Record<string, { name: string; position: { left: string; top: string } }> = {
-  B1: { name: '创新中心', position: { left: '30%', top: '65%' } },
-  B2: { name: '研发大厦', position: { left: '58%', top: '46%' } },
-  B3: { name: '运营中心', position: { left: '76%', top: '24%' } },
-}
-
 function buildingName(id: string): string {
-  return buildingCatalog[id]?.name ?? id
+  return customerBuildingName(id)
 }
 
 function locationLabel(item: CollaborationWorkItem): string {
@@ -118,17 +122,6 @@ function formatTime(value: string | null | undefined, options: Intl.DateTimeForm
   return new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false, ...options }).format(date)
 }
 
-function last24Hours(window: AnomalyOverview['window']): { from: string; to: string } | null {
-  const to = Date.parse(window.to)
-  const from = Date.parse(window.from)
-  if (!Number.isFinite(to) || !Number.isFinite(from)) return null
-  const hour = 60 * 60 * 1000
-  const alignedTo = Math.floor(to / hour) * hour
-  const alignedFrom = Math.max(Math.ceil(from / hour) * hour, alignedTo - 24 * hour)
-  if (alignedFrom >= alignedTo) return null
-  return { from: new Date(alignedFrom).toISOString(), to: new Date(alignedTo).toISOString() }
-}
-
 async function loadEvidence(buildingId: string, currentGeneration = requestGeneration): Promise<void> {
   const generation = ++evidenceGeneration
   evidence.value = null
@@ -152,6 +145,20 @@ async function selectBuilding(buildingId: string): Promise<void> {
   selectedBuildingId.value = buildingId
   preferredBuildingId.value = buildingId
   await loadEvidence(buildingId)
+}
+
+function openAnalysis(buildingId: string): void {
+  if (loading.value) return
+  if (selectedBuildingId.value !== buildingId) {
+    selectedBuildingId.value = buildingId
+    preferredBuildingId.value = buildingId
+    evidenceGeneration++
+    evidence.value = null
+    errors.value.evidence = ''
+    detailLoading.value = false
+    void loadEvidence(buildingId)
+  }
+  if (analysisContext.value) emit('view-analysis', analysisContext.value)
 }
 
 async function loadMetrics(generation: number): Promise<void> {
@@ -208,7 +215,7 @@ async function refresh(): Promise<void> {
     const nextOverview = await getAnomalyOverview('VIEWER', { status: 'OPEN' })
     if (generation !== requestGeneration) return
     overview.value = nextOverview
-    const ids = Object.keys(buildingCatalog)
+    const ids = Object.keys(CUSTOMER_BUILDINGS)
     const affectedIds = overview.value.buildings.map((building) => building.buildingId)
     selectedBuildingId.value = savedPreferredBuildingId && ids.includes(savedPreferredBuildingId)
       ? savedPreferredBuildingId
@@ -216,7 +223,7 @@ async function refresh(): Promise<void> {
     loading.value = false
     if (selectedBuildingId.value) void loadEvidence(selectedBuildingId.value, generation)
     if (ids.length > 0) {
-      const window = last24Hours(overview.value.window)
+      const window = alignedRecent24Hours(overview.value.window)
       if (window) {
         energyLoading.value = true
         try {
@@ -271,6 +278,43 @@ const openAlertCount = computed(() => domainUsable('alerts')
   ? overview.value?.breakdowns.statuses?.find((item) => item.key === 'OPEN')?.count ?? 0
   : null)
 const selectedBuilding = computed(() => overview.value?.buildings.find((building) => building.buildingId === selectedBuildingId.value) ?? null)
+const analysisContext = computed<CustomerAnalysisContext | null>(() => {
+  const buildingId = selectedBuildingId.value
+  const currentOverview = overview.value
+  const energyWindow = currentOverview ? alignedRecent24Hours(currentOverview.window) : null
+  if (!buildingId || !currentOverview || !energyWindow) return null
+  const observedSummary = currentOverview.buildings.find((building) => building.buildingId === buildingId) ?? null
+  const summary: AnomalyBuildingSummary = observedSummary ?? {
+    buildingId,
+    alertCount: 0,
+    highRiskAlertCount: 0,
+    offlineDeviceCount: 0,
+    energyDeviationPct: null,
+  }
+  const firstAlert = evidence.value?.buildingId === buildingId
+    && evidence.value.domainStatus.alerts !== 'UNAVAILABLE'
+    ? evidence.value.alerts.find((item) => typeof item.alertId === 'string')
+    : undefined
+  const priority = domainUsable('alerts') && summary?.highRiskAlertCount
+    ? '高'
+    : summary && ((domainUsable('alerts') && summary.alertCount > 0)
+        || (domainUsable('devices') && summary.offlineDeviceCount > 0)
+        || (domainUsable('energy') && (summary.energyDeviationPct ?? 0) !== 0))
+      ? '中'
+      : '关注'
+  return {
+    buildingId,
+    buildingName: buildingName(buildingId),
+    anomalyId: typeof firstAlert?.alertId === 'string' ? firstAlert.alertId : null,
+    title: observedSummary ? attentionTitle(observedSummary) : `${buildingName(buildingId)}运营分析`,
+    priority,
+    summary,
+    overviewDomainStatus: { ...currentOverview.domainStatus },
+    anomalyWindow: currentOverview.window,
+    energyWindow,
+    source: 'OPERATIONS_ANALYTICS',
+  }
+})
 const attentionItems = computed(() => [...(overview.value?.buildings ?? [])]
   .sort((left, right) => right.highRiskAlertCount - left.highRiskAlertCount
     || right.offlineDeviceCount - left.offlineDeviceCount
@@ -278,8 +322,8 @@ const attentionItems = computed(() => [...(overview.value?.buildings ?? [])]
   .slice(0, 4))
 const visibleBuildings = computed(() => {
   const rows = new Map((overview.value?.buildings ?? []).map((building) => [building.buildingId, building]))
-  return Object.keys(buildingCatalog).map((id) => {
-    const definition = buildingCatalog[id]!
+  return Object.keys(CUSTOMER_BUILDINGS).map((id) => {
+    const definition = CUSTOMER_BUILDINGS[id]!
     return { id, summary: rows.get(id) ?? null, ...definition }
   })
 })
@@ -349,7 +393,7 @@ function attentionDescription(building: AnomalyBuildingSummary): string {
 
 function markerState(summary: AnomalyBuildingSummary | null): 'unknown' | 'warning' | 'normal' {
   if (!summary) {
-    if (overview.value && ['alerts', 'devices', 'energy'].every((domain) => overview.value?.domainStatus[domain] === 'OK')) return 'normal'
+    if (overview.value && (['alerts', 'devices', 'energy'] as const).every((domain) => overview.value?.domainStatus[domain] === 'OK')) return 'normal'
     return 'unknown'
   }
   const hasAlert = domainUsable('alerts') && summary.alertCount > 0
@@ -414,6 +458,8 @@ watch(() => props.active, (active) => {
     detailLoading.value = false
   }
 }, { immediate: true })
+
+watch(analysisContext, (context) => emit('context-change', context), { immediate: true })
 </script>
 
 <template>
@@ -473,11 +519,12 @@ watch(() => props.active, (active) => {
           class="customer-attention__item"
           :class="{ 'is-selected': selectedBuildingId === building.buildingId }"
           :data-building-id="building.buildingId"
-          @click="selectBuilding(building.buildingId)"
+          :disabled="loading"
+          @click="openAnalysis(building.buildingId)"
         >
           <span class="customer-attention__level" :class="attentionSignal(building).className">{{ attentionSignal(building).label }}</span>
           <span><strong>{{ attentionTitle(building) }}</strong><small>{{ attentionDescription(building) }}</small></span>
-          <span>定位楼宇</span>
+          <span>查看分析</span>
         </button>
       </article>
 
@@ -511,6 +558,13 @@ watch(() => props.active, (active) => {
           <span>当前选择</span>
           <strong>{{ selectedBuildingId ? `${selectedBuildingId} · ${buildingName(selectedBuildingId)}` : '尚无可选楼宇' }}</strong>
           <small v-if="selectedBuilding">告警 {{ domainUsable('alerts') ? selectedBuilding.alertCount : '—' }} · 离线设备 {{ domainUsable('devices') ? selectedBuilding.offlineDeviceCount : '—' }} · 能耗偏差 {{ domainUsable('energy') ? formatNumber(selectedBuilding.energyDeviationPct) : '—' }}%</small>
+          <button
+            v-if="analysisContext && selectedBuildingId"
+            type="button"
+            class="customer-campus__analysis"
+            data-view-selected-analysis
+            @click="openAnalysis(selectedBuildingId)"
+          >查看分析</button>
         </footer>
       </article>
 

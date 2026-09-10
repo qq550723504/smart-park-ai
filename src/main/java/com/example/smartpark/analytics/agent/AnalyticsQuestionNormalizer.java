@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Converts model-advisory dimensions and filters into a conservative canonical
@@ -15,6 +16,9 @@ import java.util.Set;
  * grouping dimension or entity predicate that the operator did not state.
  */
 public final class AnalyticsQuestionNormalizer {
+
+    private static final Pattern EXPLICIT_BUILDING_FILTER = Pattern.compile(
+            "(?i)(?<![A-Za-z0-9_])building_id\\s*=\\s*(B\\d+)(?![A-Za-z0-9_])");
 
     private static final Map<String, String> DIMENSION_ALIASES = Map.ofEntries(
             Map.entry("building", "building_id"),
@@ -73,6 +77,7 @@ public final class AnalyticsQuestionNormalizer {
         }
 
         LinkedHashMap<String, String> filters = new LinkedHashMap<>();
+        explicitBuildingFilter(question).ifPresent(value -> filters.put("building_id", value));
         for (var entry : understanding.requestedFilters().entrySet()) {
             String dimension = canonicalDimension(entry.getKey());
             String value = canonicalFilterValue(dimension, entry.getValue());
@@ -92,6 +97,16 @@ public final class AnalyticsQuestionNormalizer {
                 understanding.serverReferenceInstant());
     }
 
+    private static java.util.Optional<String> explicitBuildingFilter(String question) {
+        LinkedHashSet<String> values = new LinkedHashSet<>();
+        var matcher = EXPLICIT_BUILDING_FILTER.matcher(question);
+        while (matcher.find()) values.add(matcher.group(1).toUpperCase(Locale.ROOT));
+        if (values.size() > 1) {
+            throw new IllegalArgumentException("问题包含多个 building_id 约束");
+        }
+        return values.stream().findFirst();
+    }
+
     private static String canonicalDimension(String requested) {
         if (requested == null || requested.isBlank()) return null;
         String normalized = requested.strip().toLowerCase(Locale.ROOT);
@@ -100,11 +115,16 @@ public final class AnalyticsQuestionNormalizer {
     }
 
     private static String canonicalFilterValue(String dimension, String value) {
-        return value == null || value.isBlank() ? null
-                : CategoricalFilterVocabulary.canonicalValue(dimension, value.strip());
+        if (value == null || value.isBlank()) return null;
+        String stripped = value.strip();
+        return "building_id".equals(dimension) ? stripped.toUpperCase(Locale.ROOT)
+                : CategoricalFilterVocabulary.canonicalValue(dimension, stripped);
     }
 
     private static boolean valueAppearsInQuestion(String dimension, String value, String question) {
+        if ("building_id".equals(dimension)) {
+            return question.toUpperCase(Locale.ROOT).contains(value);
+        }
         if (Set.of("status", "risk_level", "category").contains(dimension)) {
             return CategoricalFilterVocabulary.valueAppearsInQuestion(dimension, value, question);
         }

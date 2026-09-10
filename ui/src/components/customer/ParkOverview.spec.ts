@@ -127,6 +127,79 @@ beforeEach(() => {
 afterEach(() => vi.resetAllMocks())
 
 describe('ParkOverview', () => {
+  it('opens the selected issue with distinct inherited anomaly and energy windows', async () => {
+    const wrapper = await mountLoaded()
+
+    await wrapper.get('[data-building-id="B1"]').trigger('click')
+    await flushPromises()
+
+    const emitted = wrapper.emitted('view-analysis')
+    expect(emitted).toHaveLength(1)
+    expect(emitted?.[0]?.[0]).toMatchObject({
+      buildingId: 'B1',
+      buildingName: '创新中心',
+      anomalyId: 'ALT-1',
+      overviewDomainStatus: { alerts: 'OK', devices: 'OK', energy: 'OK' },
+      anomalyWindow: windowRange,
+      energyWindow: {
+        from: '2026-09-08T00:00:00.000Z',
+        to: '2026-09-09T00:00:00.000Z',
+        timezone: 'Asia/Shanghai',
+        granularity: 'HOUR',
+      },
+    })
+    const payload = emitted?.at(-1)?.[0] as { anomalyWindow: { to: string }; energyWindow: { to: string } }
+    expect(payload.anomalyWindow.to).not.toBe(payload.energyWindow.to)
+  })
+
+  it('opens analysis immediately without waiting for or duplicating overview evidence', async () => {
+    const pendingEvidence = deferred<AnomalyEvidence>()
+    vi.mocked(getAnomalyEvidence).mockReturnValue(pendingEvidence.promise)
+    const wrapper = mount(ParkOverview, { global: { stubs: { CustomerOverviewChart: chartStub } } })
+    await vi.waitFor(() => expect(wrapper.get('[data-building-id="B1"]').attributes('disabled')).toBeUndefined())
+
+    expect(getAnomalyEvidence).toHaveBeenCalledTimes(1)
+    await wrapper.get('[data-building-id="B1"]').trigger('click')
+
+    expect(getAnomalyEvidence).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('view-analysis')?.at(-1)?.[0]).toMatchObject({
+      buildingId: 'B1',
+      anomalyId: null,
+      anomalyWindow: windowRange,
+    })
+  })
+
+  it('starts replacement evidence without delaying analysis when switching attention buildings', async () => {
+    const wrapper = await mountLoaded()
+    const pendingEvidence = deferred<AnomalyEvidence>()
+    vi.mocked(getAnomalyEvidence).mockReturnValueOnce(pendingEvidence.promise)
+
+    await wrapper.get('[data-building-id="B2"]').trigger('click')
+
+    expect(wrapper.emitted('view-analysis')?.at(-1)?.[0]).toMatchObject({ buildingId: 'B2' })
+    expect(getAnomalyEvidence).toHaveBeenLastCalledWith('VIEWER', 'B2', {
+      from: windowRange.from,
+      to: windowRange.to,
+    })
+  })
+
+  it('preserves incomplete overview domain statuses in the analysis context', async () => {
+    vi.mocked(getAnomalyOverview).mockResolvedValue({
+      ...overview,
+      domainStatus: { alerts: 'UNAVAILABLE', devices: 'PARTIAL', energy: 'OK' },
+    })
+    const wrapper = await mountLoaded()
+
+    await wrapper.get('[data-building-id="B1"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.emitted('view-analysis')?.at(-1)?.[0]).toMatchObject({
+      buildingId: 'B1',
+      overviewDomainStatus: { alerts: 'UNAVAILABLE', devices: 'PARTIAL', energy: 'OK' },
+      anomalyWindow: windowRange,
+    })
+  })
+
   it('derives the overview from existing APIs without inventing device availability', async () => {
     const wrapper = await mountLoaded()
 
@@ -484,6 +557,28 @@ describe('ParkOverview', () => {
     })
     const incompleteWrapper = await mountLoaded()
     expect(incompleteWrapper.get('[data-building-marker="B3"]').classes()).toContain('is-unknown')
+  })
+
+  it('carries known zero counts into analysis for an absent catalog building', async () => {
+    vi.mocked(getAnomalyEvidence).mockResolvedValue({ ...evidence, buildingId: 'B3', alerts: [] })
+    const wrapper = await mountLoaded()
+
+    await wrapper.get('[data-building-marker="B3"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-view-selected-analysis]').trigger('click')
+
+    expect(wrapper.emitted('view-analysis')?.at(-1)?.[0]).toMatchObject({
+      buildingId: 'B3',
+      title: '运营中心运营分析',
+      summary: {
+        buildingId: 'B3',
+        alertCount: 0,
+        highRiskAlertCount: 0,
+        offlineDeviceCount: 0,
+        energyDeviationPct: null,
+      },
+      overviewDomainStatus: { alerts: 'OK', devices: 'OK', energy: 'OK' },
+    })
   })
 
   it('clears old evidence when a refreshed overview contains no buildings', async () => {

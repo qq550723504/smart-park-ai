@@ -7,6 +7,7 @@
 - 来源系统：`OPERATIONS_ANALYTICS`。
 - 底层事实：按楼宇、电表、小时记录的 `kwh`、`baseline_kwh` 和 `peak_kw`。
 - `energy_kwh`：按楼宇和请求 bucket 对已存在的 `kwh` 求和，单位来自指标注册表（`kWh`）。
+- `energy_baseline_kwh`：按相同楼宇和请求 bucket 对已存在的 `baseline_kwh` 求和，单位为 `kWh`；用于与实际用电做同源对比，不在客户端倒算。
 - `energy_deviation_pct`：按同一 bucket 使用注册口径 `(SUM(kwh)-SUM(baseline_kwh))/SUM(baseline_kwh)`，单位 `%`。
 - `HOUR` 直接使用小时事实；`DAY` 只对小时事实做聚合，不插值、不生成更细数据。
 - 时区来自现有分析视图的登记口径，固定为 `Asia/Shanghai`；客户端不能覆盖或猜测。若未来迁移事实时区，必须同时迁移视图分桶口径与该契约，不能只改返回字符串。

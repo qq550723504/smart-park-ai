@@ -29,6 +29,10 @@ export interface AnomalyBuildingSummary {
   energyDeviationPct: number | null
 }
 
+export type AnomalyDomain = 'alerts' | 'devices' | 'energy'
+export type AnomalyDomainStatus = 'OK' | 'PARTIAL' | 'UNAVAILABLE'
+export type AnomalyDomainStatusMap = Record<AnomalyDomain, AnomalyDomainStatus>
+
 export interface AnomalyOverview {
   window: AnomalyWindow
   asOf: string | null
@@ -40,7 +44,7 @@ export interface AnomalyOverview {
   }
   breakdowns: Record<string, AnomalyBreakdown[]>
   buildings: AnomalyBuildingSummary[]
-  domainStatus: Record<string, string>
+  domainStatus: AnomalyDomainStatusMap
 }
 
 export interface AnomalyEvidence {
@@ -50,7 +54,7 @@ export interface AnomalyEvidence {
   alerts: Array<Record<string, unknown>>
   devices: Array<Record<string, unknown>>
   energy: Array<Record<string, unknown>>
-  domainStatus: Record<string, string>
+  domainStatus: AnomalyDomainStatusMap
 }
 
 export type { DemoRole }

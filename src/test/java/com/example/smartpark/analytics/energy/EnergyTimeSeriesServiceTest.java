@@ -87,6 +87,20 @@ class EnergyTimeSeriesServiceTest {
     }
 
     @Test
+    void exposesHourlyBaselineFromTheSameGovernedEnergySource() {
+        FakeReader reader = new FakeReader(EnergyTimeSeriesReader.Snapshot.available(List.of(
+                row("B1", H0, "17"), row("B1", H1, "17")), false));
+
+        var response = service(reader).query(query("energy_baseline_kwh", List.of("B1"), H0, H2,
+                EnergyTimeSeriesQuery.Granularity.HOUR));
+
+        assertThat(response.metric()).isEqualTo("energy_baseline_kwh");
+        assertThat(response.unit()).isEqualTo("kWh");
+        assertThat(reader.metric.sourceView()).isEqualTo("analytics.v_energy_hourly");
+        assertThat(reader.metric.expression()).isEqualTo("SUM(baseline_kwh)");
+    }
+
+    @Test
     void returnsUnavailableWithNoFakeSeriesForEmptyOrFailedSources() {
         for (EnergyTimeSeriesReader.Snapshot snapshot : List.of(
                 EnergyTimeSeriesReader.Snapshot.available(List.of(), false),

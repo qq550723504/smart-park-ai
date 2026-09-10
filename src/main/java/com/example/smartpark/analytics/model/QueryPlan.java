@@ -26,6 +26,9 @@ public record QueryPlan(
         TimeRangeSource timeRangeSource,
         Sort sort) {
 
+    private static final Set<String> ENTITY_FILTER_DIMENSIONS = Set.of(
+            "building_id", "meter_id", "device_id", "alert_id");
+
     public QueryPlan(String question, List<MetricDefinition> metrics, List<String> dimensions,
                      Map<String, String> filters, TimeRange timeRange, int limit) {
         this(question, metrics, dimensions, filters, timeRange, limit,
@@ -92,6 +95,9 @@ public record QueryPlan(
                 throw new IllegalArgumentException("filter dimension is not approved by every metric: " + dimension);
             }
             String value = filter.getValue().strip();
+            if (ENTITY_FILTER_DIMENSIONS.contains(dimension)) {
+                value = value.toUpperCase(Locale.ROOT);
+            }
             if (!isFilterValueCompatible(dimension, value)) {
                 throw new IllegalArgumentException("filter value is incompatible with dimension "
                         + dimension + ": " + value);
@@ -106,7 +112,7 @@ public record QueryPlan(
         Set<String> filterValues = normalizedFilters.values().stream()
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
         for (QuestionTokenScanner.Token scopedEntity : QuestionTokenScanner.entityIdentifiers(question)) {
-            String identifier = scopedEntity.text();
+            String identifier = scopedEntity.text().toUpperCase(Locale.ROOT);
             if (!filterValues.contains(identifier)) {
                 throw new IllegalArgumentException(
                         "query plan dropped entity identifier from original question: " + identifier);
@@ -142,6 +148,9 @@ public record QueryPlan(
     }
 
     private static boolean valueAppearsInQuestion(String question, String dimension, String value) {
+        if (ENTITY_FILTER_DIMENSIONS.contains(dimension)) {
+            return question.toUpperCase(Locale.ROOT).contains(value);
+        }
         if (Set.of("status", "risk_level", "category").contains(dimension)) {
             return CategoricalFilterVocabulary.valueAppearsInQuestion(dimension, value, question);
         }

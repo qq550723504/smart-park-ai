@@ -5,7 +5,7 @@ import { isTerminalAnalysisStatus } from '../types/analytics'
 import type { DisplayPayload, ExecutionEvent } from '../types/execution'
 import { isTerminalEvent } from '../types/execution'
 import type { DemoRole } from '../types/workflow'
-import { getAnalysisStatus, startAnalysis, submitClarification } from '../services/analyticsApi'
+import { AnalyticsApiError, getAnalysisStatus, startAnalysis, submitClarification } from '../services/analyticsApi'
 
 export interface ExecutionTraceLike {
   events: Ref<ExecutionEvent[]>
@@ -51,6 +51,7 @@ export function useOperationsAnalysis(
   const chart = ref<DisplayPayload | null>(null)
   const selections = ref<Array<{ term: string; metric: string }>>([])
   let clarificationPollTimer: ReturnType<typeof setTimeout> | undefined
+  let acceptedRunPollTimer: ReturnType<typeof setTimeout> | undefined
   let clarificationPollGeneration = 0
   let operationGeneration = 0
 
@@ -65,6 +66,8 @@ export function useOperationsAnalysis(
   function pollClarificationExpiry(): void {
     const generation = clarificationPollGeneration
     const operation = operationGeneration
+    const targetRunId = runId.value
+    if (!targetRunId) return
     const scheduleNext = () => {
       if (generation === clarificationPollGeneration) {
         clarificationPollTimer = setTimeout(pollClarificationExpiry, pollIntervalMs)
@@ -72,15 +75,27 @@ export function useOperationsAnalysis(
     }
 
     clarificationPollTimer = undefined
-    void getAnalysisStatus(runId.value!).then((current) => {
-      if (generation !== clarificationPollGeneration || operation !== operationGeneration) return
+    void getAnalysisStatus(targetRunId).then((current) => {
+      if (generation !== clarificationPollGeneration || operation !== operationGeneration
+        || runId.value !== targetRunId) return
       dto.value = current
       if (isTerminalAnalysisStatus(current.status)) {
         applyTerminal(current)
         return
       }
+      if (current.status === 'RUNNING') {
+        stopClarificationPolling()
+        continueAcceptedRunPolling(targetRunId, operation)
+        return
+      }
       scheduleNext()
-    }).catch(() => {
+    }).catch((cause) => {
+      if (generation !== clarificationPollGeneration || operation !== operationGeneration
+        || runId.value !== targetRunId) return
+      if (isMissingRun(cause)) {
+        applyMissingRun()
+        return
+      }
       // A transient status failure must not disable expiry detection.
       scheduleNext()
     })
@@ -118,6 +133,7 @@ export function useOperationsAnalysis(
         }
       } catch (cause) {
         if (generation !== operationGeneration) return null
+        if (cause instanceof AnalyticsApiError && cause.status === 404) throw cause
         lastError = cause instanceof Error ? cause.message : String(cause)
       }
       await sleep(pollIntervalMs)
@@ -152,6 +168,7 @@ export function useOperationsAnalysis(
   function reset(): void {
     operationGeneration++
     stopClarificationPolling()
+    stopAcceptedRunPolling()
     phase.value = 'idle'
     dto.value = null
     error.value = ''
@@ -169,6 +186,7 @@ export function useOperationsAnalysis(
     const generation = ++operationGeneration
     error.value = ''
     stopClarificationPolling()
+    stopAcceptedRunPolling()
     // A failed POST must not leave the previous run addressable to the page;
     // otherwise the page can emit that old ID as if this attempt had started.
     runId.value = null
@@ -189,9 +207,15 @@ export function useOperationsAnalysis(
     } catch (cause) {
       if (generation !== operationGeneration) return
       const failure = cause instanceof Error ? cause : new Error(String(cause))
-      error.value = failure.message
-      phase.value = 'failed'
-      if (!accepted) callbacks?.onFailed?.(failure)
+      if (accepted && isMissingRun(cause)) {
+        applyMissingRun()
+      } else if (accepted && runId.value) {
+        continueAcceptedRunPolling(runId.value, generation)
+      } else {
+        error.value = failure.message
+        phase.value = 'failed'
+        callbacks?.onFailed?.(failure)
+      }
     }
   }
 
@@ -205,20 +229,104 @@ export function useOperationsAnalysis(
     const targetRunId = runId.value
     error.value = ''
     stopClarificationPolling()
+    stopAcceptedRunPolling()
     chart.value = null
     phase.value = 'running'
+    let accepted = false
     try {
       await submitClarification(targetRunId, selections.value)
       if (generation !== operationGeneration) return
+      accepted = true
       subscribeTraceBestEffort(targetRunId)
       const terminal = await pollToTerminal(targetRunId, generation)
       if (generation !== operationGeneration || !terminal) return
       applyTerminal(terminal)
     } catch (cause) {
       if (generation !== operationGeneration) return
-      error.value = cause instanceof Error ? cause.message : String(cause)
-      phase.value = 'failed'
+      if (isMissingRun(cause)) {
+        applyMissingRun()
+      } else if (accepted && runId.value === targetRunId) {
+        continueAcceptedRunPolling(targetRunId, generation)
+      } else if (runId.value === targetRunId && dto.value?.status === 'NEEDS_CLARIFICATION') {
+        const submissionError = cause instanceof Error ? cause.message : String(cause)
+        try {
+          const current = await getAnalysisStatus(targetRunId)
+          if (generation !== operationGeneration || runId.value !== targetRunId) return
+          dto.value = current
+          if (current.status === 'NEEDS_CLARIFICATION') {
+            error.value = submissionError
+            phase.value = 'clarification'
+            startClarificationPolling()
+          } else if (isTerminalAnalysisStatus(current.status)) {
+            applyTerminal(current)
+          } else {
+            subscribeTraceBestEffort(targetRunId)
+            continueAcceptedRunPolling(targetRunId, generation)
+          }
+        } catch (statusCause) {
+          if (generation !== operationGeneration || runId.value !== targetRunId) return
+          if (isMissingRun(statusCause)) applyMissingRun()
+          else continueAcceptedRunPolling(targetRunId, generation)
+        }
+      } else {
+        error.value = cause instanceof Error ? cause.message : String(cause)
+        phase.value = 'failed'
+      }
     }
+  }
+
+  function isMissingRun(cause: unknown): boolean {
+    return cause instanceof AnalyticsApiError && cause.status === 404
+  }
+
+  function applyMissingRun(): void {
+    stopClarificationPolling()
+    stopAcceptedRunPolling()
+    error.value = '已受理的分析任务已不存在，请重新发起'
+    phase.value = 'failed'
+    runId.value = null
+    dto.value = null
+    chart.value = null
+    selections.value = []
+  }
+
+  function stopAcceptedRunPolling(): void {
+    if (acceptedRunPollTimer !== undefined) {
+      clearTimeout(acceptedRunPollTimer)
+      acceptedRunPollTimer = undefined
+    }
+  }
+
+  function continueAcceptedRunPolling(targetRunId: string, generation: number): void {
+    stopAcceptedRunPolling()
+    phase.value = 'running'
+    const scheduleNext = () => {
+      if (generation === operationGeneration && runId.value === targetRunId) {
+        acceptedRunPollTimer = setTimeout(pollOnce, pollIntervalMs)
+      }
+    }
+    const pollOnce = () => {
+      acceptedRunPollTimer = undefined
+      void getAnalysisStatus(targetRunId).then((current) => {
+        if (generation !== operationGeneration || runId.value !== targetRunId) return
+        dto.value = current
+        if (isTerminalAnalysisStatus(current.status) || current.status === 'NEEDS_CLARIFICATION') {
+          applyTerminal(current)
+          return
+        }
+        scheduleNext()
+      }).catch((cause) => {
+        if (generation !== operationGeneration || runId.value !== targetRunId) return
+        if (isMissingRun(cause)) {
+          applyMissingRun()
+          return
+        }
+        // The run has already been accepted. Keep its identity and retry status
+        // lookup instead of enabling a replacement POST against the singleton.
+        scheduleNext()
+      })
+    }
+    scheduleNext()
   }
 
   const isBusy = computed(() => phase.value === 'running')
@@ -226,6 +334,7 @@ export function useOperationsAnalysis(
   onScopeDispose(() => {
     operationGeneration++
     stopClarificationPolling()
+    stopAcceptedRunPolling()
   })
   return { phase, dto, error, runId, chart, selections, reset, submit, clarify }
 }

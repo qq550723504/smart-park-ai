@@ -3,7 +3,7 @@ import { useOperationsAnalysis } from './useOperationsAnalysis'
 import { ref } from 'vue'
 import type { ExecutionEvent } from '../types/execution'
 
-type FetchHandler = (url: string, init?: RequestInit) => Response
+type FetchHandler = (url: string, init?: RequestInit) => Response | Promise<Response>
 
 const originalFetch = globalThis.fetch
 let handler: FetchHandler = () => new Response('{}', { status: 200 })
@@ -13,6 +13,12 @@ function jsonResponse(body: unknown, status = 200): Response {
     status,
     headers: { 'Content-Type': 'application/json' },
   })
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((next) => { resolve = next })
+  return { promise, resolve }
 }
 
 const RUN_ID = '11111111-2222-3333-4444-555555555555'
@@ -77,6 +83,94 @@ describe('useOperationsAnalysis', () => {
 
     expect(accepted).toEqual([RUN_ID])
     expect(failures).toEqual([])
+    expect(analysis.phase.value).toBe('completed')
+  })
+
+  it('keeps polling an accepted run after the bounded initial polling window expires', async () => {
+    let starts = 0
+    let statusCalls = 0
+    handler = (url, init) => {
+      if (init?.method === 'POST' && url.endsWith('/api/operations-analysis/runs')) {
+        starts += 1
+        return jsonResponse({ runId: RUN_ID }, 202)
+      }
+      if (/\/runs\/[0-9a-f-]+$/.test(url)) {
+        statusCalls += 1
+        if (statusCalls === 1) throw new Error('status unavailable')
+        return jsonResponse({
+          runId: RUN_ID,
+          status: 'NEEDS_CLARIFICATION',
+          clarificationQuestions: ['请选择能耗口径'],
+          createdAt: '',
+        })
+      }
+      return jsonResponse({}, 404)
+    }
+    const analysis = useOperationsAnalysis({ pollIntervalMs: 1, maxPolls: 1 })
+
+    await analysis.submit('上周能耗')
+
+    expect(analysis.runId.value).toBe(RUN_ID)
+    expect(analysis.phase.value).toBe('running')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(starts).toBe(1)
+    expect(statusCalls).toBeGreaterThan(1)
+    expect(analysis.phase.value).toBe('clarification')
+  })
+
+  it('stops retrying and unlocks a replacement when an accepted run no longer exists', async () => {
+    const missingRunId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    let statusCalls = 0
+    handler = (url, init) => {
+      if (init?.method === 'POST') return jsonResponse({ runId: missingRunId }, 202)
+      if (url.endsWith(`/runs/${missingRunId}`)) {
+        statusCalls += 1
+        return jsonResponse({ message: 'missing' }, 404)
+      }
+      return jsonResponse({}, 404)
+    }
+    const analysis = useOperationsAnalysis({ pollIntervalMs: 1 })
+
+    await analysis.submit('上周能耗')
+
+    expect(analysis.phase.value).toBe('failed')
+    expect(analysis.runId.value).toBeNull()
+    expect(analysis.error.value).toContain('任务已不存在')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(statusCalls).toBe(1)
+  })
+
+  it('ignores a stale missing response from cancelled accepted-run polling', async () => {
+    const oldRunId = '10000000-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const newRunId = '20000000-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const staleStatus = deferred<Response>()
+    let starts = 0
+    let oldStatusCalls = 0
+    handler = (url, init) => {
+      if (init?.method === 'POST') {
+        starts += 1
+        return jsonResponse({ runId: starts === 1 ? oldRunId : newRunId }, 202)
+      }
+      if (url.endsWith(`/runs/${oldRunId}`)) {
+        oldStatusCalls += 1
+        if (oldStatusCalls === 1) throw new Error('temporary status failure')
+        return staleStatus.promise
+      }
+      if (url.endsWith(`/runs/${newRunId}`)) {
+        return jsonResponse({ runId: newRunId, status: 'COMPLETED', createdAt: '' })
+      }
+      return jsonResponse({}, 404)
+    }
+    const analysis = useOperationsAnalysis({ pollIntervalMs: 1, maxPolls: 1 })
+    await analysis.submit('旧任务')
+    await new Promise((resolve) => setTimeout(resolve, 5))
+
+    analysis.reset()
+    await analysis.submit('新任务')
+    staleStatus.resolve(jsonResponse({ message: 'missing' }, 404))
+    await new Promise((resolve) => setTimeout(resolve, 5))
+
+    expect(analysis.runId.value).toBe(newRunId)
     expect(analysis.phase.value).toBe('completed')
   })
 
@@ -157,6 +251,111 @@ describe('useOperationsAnalysis', () => {
     expect(analysis.error.value).toBe('')
   })
 
+  it('keeps polling after an accepted clarification outlives the bounded polling window', async () => {
+    let clarified = false
+    let postClarificationStatusCalls = 0
+    handler = (url, init) => {
+      if (url.includes('/clarifications')) {
+        clarified = true
+        return jsonResponse({ runId: RUN_ID, status: 'RUNNING', createdAt: '' })
+      }
+      if (init?.method === 'POST') return jsonResponse({ runId: RUN_ID }, 202)
+      if (/\/runs\/[0-9a-f-]+$/.test(url)) {
+        if (!clarified) {
+          return jsonResponse({
+            runId: RUN_ID,
+            status: 'NEEDS_CLARIFICATION',
+            clarificationQuestions: ['请选择能耗口径'],
+            createdAt: '',
+          })
+        }
+        postClarificationStatusCalls += 1
+        if (postClarificationStatusCalls === 1) throw new Error('status unavailable')
+        return jsonResponse({ runId: RUN_ID, status: 'COMPLETED', createdAt: '' })
+      }
+      return jsonResponse({}, 404)
+    }
+    const analysis = useOperationsAnalysis({ pollIntervalMs: 1, maxPolls: 1 })
+    await analysis.submit('上周能耗')
+    analysis.selections.value = [{ term: '请选择能耗口径', metric: 'energy_kwh' }]
+
+    await analysis.clarify()
+
+    expect(analysis.runId.value).toBe(RUN_ID)
+    expect(analysis.phase.value).toBe('running')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(postClarificationStatusCalls).toBeGreaterThan(1)
+    expect(analysis.phase.value).toBe('completed')
+  })
+
+  it('reconciles a lost clarification response before restoring the form', async () => {
+    let clarificationPosts = 0
+    let clarificationAccepted = false
+    let reconciledStatusCalls = 0
+    handler = (url, init) => {
+      if (url.includes('/clarifications')) {
+        clarificationPosts += 1
+        clarificationAccepted = true
+        throw new Error('response lost')
+      }
+      if (init?.method === 'POST') return jsonResponse({ runId: RUN_ID }, 202)
+      if (/\/runs\/[0-9a-f-]+$/.test(url)) {
+        if (!clarificationAccepted) {
+          return jsonResponse({
+            runId: RUN_ID,
+            status: 'NEEDS_CLARIFICATION',
+            clarificationQuestions: ['请选择能耗口径'],
+            createdAt: '',
+          })
+        }
+        reconciledStatusCalls += 1
+        return jsonResponse({
+          runId: RUN_ID,
+          status: reconciledStatusCalls === 1 ? 'RUNNING' : 'COMPLETED',
+          createdAt: '',
+        })
+      }
+      return jsonResponse({}, 404)
+    }
+    const analysis = useOperationsAnalysis({ pollIntervalMs: 1 })
+    await analysis.submit('上周能耗')
+    analysis.selections.value = [{ term: '请选择能耗口径', metric: 'energy_kwh' }]
+
+    await analysis.clarify()
+
+    expect(clarificationPosts).toBe(1)
+    expect(analysis.phase.value).toBe('running')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(analysis.phase.value).toBe('completed')
+    expect(clarificationPosts).toBe(1)
+  })
+
+  it('unlocks immediately when a clarification targets a missing run', async () => {
+    handler = (url, init) => {
+      if (url.includes('/clarifications')) return jsonResponse({ message: 'missing' }, 404)
+      if (init?.method === 'POST') return jsonResponse({ runId: RUN_ID }, 202)
+      if (/\/runs\/[0-9a-f-]+$/.test(url)) {
+        return jsonResponse({
+          runId: RUN_ID,
+          status: 'NEEDS_CLARIFICATION',
+          clarificationQuestions: ['请选择能耗口径'],
+          createdAt: '',
+        })
+      }
+      return jsonResponse({}, 404)
+    }
+    const analysis = useOperationsAnalysis({ pollIntervalMs: 60_000 })
+    await analysis.submit('上周能耗')
+    analysis.selections.value = [{ term: '请选择能耗口径', metric: 'energy_kwh' }]
+
+    await analysis.clarify()
+
+    expect(analysis.phase.value).toBe('failed')
+    expect(analysis.runId.value).toBeNull()
+    expect(analysis.dto.value).toBeNull()
+    expect(analysis.error.value).toContain('任务已不存在')
+  })
+
   it('continues checking a paused run so clarification expiry reaches the UI', async () => {
     const trace = fakeTrace()
     let statusCalls = 0
@@ -182,6 +381,76 @@ describe('useOperationsAnalysis', () => {
     expect(statusCalls).toBeGreaterThan(1)
     expect(analysis.phase.value).toBe('failed')
     expect(analysis.dto.value?.failureStage).toBe('CLARIFICATION_TIMEOUT')
+  })
+
+  it('unlocks a paused analysis when its server-side run disappears', async () => {
+    const missingRunId = 'ffffffff-bbbb-cccc-dddd-eeeeeeeeeeee'
+    let statusCalls = 0
+    handler = (url, init) => {
+      if (init?.method === 'POST') return jsonResponse({ runId: missingRunId }, 202)
+      if (url.endsWith(`/runs/${missingRunId}`)) {
+        statusCalls += 1
+        return statusCalls === 1
+          ? jsonResponse({
+              runId: missingRunId,
+              status: 'NEEDS_CLARIFICATION',
+              clarificationQuestions: ['请选择能耗口径'],
+              createdAt: '',
+            })
+          : jsonResponse({ message: 'missing' }, 404)
+      }
+      return jsonResponse({}, 404)
+    }
+    const analysis = useOperationsAnalysis({ pollIntervalMs: 1 })
+
+    await analysis.submit('上周能耗')
+    expect(analysis.phase.value).toBe('clarification')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(analysis.phase.value).toBe('failed')
+    expect(analysis.runId.value).toBeNull()
+    expect(analysis.error.value).toContain('任务已不存在')
+  })
+
+  it('ignores a stale missing response from cancelled clarification polling', async () => {
+    const oldRunId = '30000000-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const newRunId = '40000000-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const staleStatus = deferred<Response>()
+    let starts = 0
+    let oldStatusCalls = 0
+    handler = (url, init) => {
+      if (init?.method === 'POST') {
+        starts += 1
+        return jsonResponse({ runId: starts === 1 ? oldRunId : newRunId }, 202)
+      }
+      if (url.endsWith(`/runs/${oldRunId}`)) {
+        oldStatusCalls += 1
+        if (oldStatusCalls === 1) {
+          return jsonResponse({
+            runId: oldRunId,
+            status: 'NEEDS_CLARIFICATION',
+            clarificationQuestions: ['请选择能耗口径'],
+            createdAt: '',
+          })
+        }
+        return staleStatus.promise
+      }
+      if (url.endsWith(`/runs/${newRunId}`)) {
+        return jsonResponse({ runId: newRunId, status: 'COMPLETED', createdAt: '' })
+      }
+      return jsonResponse({}, 404)
+    }
+    const analysis = useOperationsAnalysis({ pollIntervalMs: 1 })
+    await analysis.submit('旧任务')
+    await new Promise((resolve) => setTimeout(resolve, 5))
+
+    analysis.reset()
+    await analysis.submit('新任务')
+    staleStatus.resolve(jsonResponse({ message: 'missing' }, 404))
+    await new Promise((resolve) => setTimeout(resolve, 5))
+
+    expect(analysis.runId.value).toBe(newRunId)
+    expect(analysis.phase.value).toBe('completed')
   })
 
   it('reports backend failures without fabricating results', async () => {
