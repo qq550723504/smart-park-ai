@@ -233,7 +233,7 @@ export function useOperationsAnalysis(
       applyTerminal(terminal)
     } catch (cause) {
       if (generation !== operationGeneration) return
-      if (accepted && isMissingRun(cause)) {
+      if (isMissingRun(cause)) {
         applyMissingRun()
       } else if (accepted && runId.value === targetRunId) {
         continueAcceptedRunPolling(targetRunId, generation)

@@ -248,6 +248,31 @@ describe('useOperationsAnalysis', () => {
     expect(analysis.phase.value).toBe('completed')
   })
 
+  it('unlocks immediately when a clarification targets a missing run', async () => {
+    handler = (url, init) => {
+      if (url.includes('/clarifications')) return jsonResponse({ message: 'missing' }, 404)
+      if (init?.method === 'POST') return jsonResponse({ runId: RUN_ID }, 202)
+      if (/\/runs\/[0-9a-f-]+$/.test(url)) {
+        return jsonResponse({
+          runId: RUN_ID,
+          status: 'NEEDS_CLARIFICATION',
+          clarificationQuestions: ['请选择能耗口径'],
+          createdAt: '',
+        })
+      }
+      return jsonResponse({}, 404)
+    }
+    const analysis = useOperationsAnalysis({ pollIntervalMs: 60_000 })
+    await analysis.submit('上周能耗')
+    analysis.selections.value = [{ term: '请选择能耗口径', metric: 'energy_kwh' }]
+
+    await analysis.clarify()
+
+    expect(analysis.phase.value).toBe('failed')
+    expect(analysis.runId.value).toBeNull()
+    expect(analysis.error.value).toContain('任务已不存在')
+  })
+
   it('continues checking a paused run so clarification expiry reaches the UI', async () => {
     const trace = fakeTrace()
     let statusCalls = 0
