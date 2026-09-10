@@ -190,6 +190,8 @@ const energyWindowDeviation = computed(() => {
 })
 const incompleteEnergy = computed(() => actual.value?.status === 'PARTIAL' || baseline.value?.status === 'PARTIAL')
 const energyLoading = computed(() => loading.value.actual || loading.value.baseline)
+const energyRetryLoading = computed(() => (Boolean(errors.value.actual) && loading.value.actual)
+  || (Boolean(errors.value.baseline) && loading.value.baseline))
 const evidenceLoading = computed(() => loading.value.evidence)
 const chartStatus = computed(() => {
   if (energyLoading.value) return '正在读取单楼宇小时数据…'
@@ -508,7 +510,7 @@ watch(
         </header>
         <div class="energy-analysis__notice" :class="{ 'is-error': errors.actual || errors.baseline }">
           <span>{{ chartStatus }}</span>
-          <button v-if="errors.actual || errors.baseline" type="button" data-retry-energy :disabled="energyLoading" @click="refresh"><Refresh aria-hidden="true" /> 重试</button>
+          <button v-if="errors.actual || errors.baseline" type="button" data-retry-energy :disabled="energyRetryLoading" @click="refresh"><Refresh aria-hidden="true" /> 重试</button>
         </div>
         <EnergyAnalysisChart v-if="chartPoints.length" :points="chartPoints" :timezone="context.energyWindow.timezone" :unit="actual?.unit ?? baseline?.unit ?? 'kWh'" />
         <p v-else class="customer-state">{{ energyLoading ? '正在读取单楼宇小时数据…' : '当前能耗窗口没有可绘制数据' }}</p>

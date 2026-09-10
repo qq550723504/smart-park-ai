@@ -363,6 +363,28 @@ describe('EnergyAnalysis', () => {
     expect(wrapper.text()).toContain('210 kWh')
   })
 
+  it('allows a failed energy request to retry while its sibling request is still pending', async () => {
+    const stalledBaseline = deferred<EnergyTimeSeriesResponse>()
+    vi.mocked(getEnergyTimeSeries)
+      .mockRejectedValueOnce(new Error('actual unavailable'))
+      .mockReturnValueOnce(stalledBaseline.promise)
+      .mockResolvedValueOnce(series('energy_kwh', [100, 110]))
+      .mockResolvedValueOnce(series('energy_baseline_kwh', [80, 90]))
+    const wrapper = mount(EnergyAnalysis, {
+      props: { context, active: true, analysisPollIntervalMs: 60_000 },
+      global: { stubs: { EnergyAnalysisChart: chartStub } },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-retry-energy]').attributes('disabled')).toBeUndefined()
+
+    await wrapper.get('[data-retry-energy]').trigger('click')
+    await flushPromises()
+
+    expect(getEnergyTimeSeries).toHaveBeenCalledTimes(4)
+    expect(wrapper.text()).toContain('210 kWh')
+  })
+
   it('ignores old responses after a rapid building switch', async () => {
     const oldActual = deferred<EnergyTimeSeriesResponse>()
     const oldBaseline = deferred<EnergyTimeSeriesResponse>()
