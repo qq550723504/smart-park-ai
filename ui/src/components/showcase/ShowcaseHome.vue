@@ -44,12 +44,12 @@ function openAnalysis(context: CustomerAnalysisContext): void {
     </template>
     <ParkOverview
       v-show="activePage === 'overview'"
-      :active="props.active !== false && activePage === 'overview'"
+      :active="props.active !== false"
       @context-change="updateContext"
       @view-analysis="openAnalysis"
     />
     <EnergyAnalysis
-      v-if="activePage === 'analysis'"
+      v-show="activePage === 'analysis'"
       :active="props.active !== false && activePage === 'analysis'"
       :context="analysisContext"
       @back="navigate('overview')"

@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import ShowcaseHome from './ShowcaseHome.vue'
 
@@ -17,7 +17,7 @@ describe('ShowcaseHome customer shell', () => {
     expect(wrapper.find('[data-customer-shell]').exists()).toBe(true)
     expect(wrapper.get('[data-customer-nav="overview"]').attributes('aria-current')).toBe('page')
     expect(wrapper.get('[data-customer-nav="analysis"]').element.tagName).toBe('BUTTON')
-    expect(wrapper.find('[data-energy-analysis]').exists()).toBe(false)
+    expect(wrapper.get('[data-energy-analysis]').isVisible()).toBe(false)
     for (const page of ['work-orders', 'reports', 'assistant']) {
       const item = wrapper.get(`[data-customer-nav="${page}"]`)
       expect(item.element.tagName).toBe('SPAN')
@@ -81,12 +81,19 @@ describe('ShowcaseHome customer shell', () => {
     expect(wrapper.get('.customer-shell__topbar').element).toBe(topbar)
     expect(wrapper.findAll('.customer-shell__topbar')).toHaveLength(1)
     expect(wrapper.emitted('enter-workbench')).toBeUndefined()
+    const analysisPage = wrapper.get('[data-energy-analysis]').element
 
     await wrapper.get('[data-analysis-shell-back]').trigger('click')
     expect(wrapper.get('[data-customer-nav="overview"]').attributes('aria-current')).toBe('page')
     expect(wrapper.find('[data-park-overview]').isVisible()).toBe(true)
-    expect(wrapper.find('[data-energy-analysis]').exists()).toBe(false)
+    expect(wrapper.get('[data-energy-analysis]').isVisible()).toBe(false)
     expect(wrapper.get('[data-customer-shell]').element).toBe(shell)
     expect(wrapper.get('.customer-shell__topbar').element).toBe(topbar)
+
+    await wrapper.get('[data-open-analysis]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-customer-nav="analysis"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-energy-analysis]').attributes('style')).not.toContain('display: none')
+    expect(wrapper.get('[data-energy-analysis]').element).toBe(analysisPage)
   })
 })
