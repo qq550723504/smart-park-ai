@@ -142,7 +142,7 @@ watch(() => props.active, (active) => {
 })
 
 watch(() => state.reports.value, (reports) => {
-  if (props.active && !state.report.value && !state.detailLoading.value && reports[0]) {
+  if (props.active && !state.busy.value && !state.report.value && !state.detailLoading.value && reports[0]) {
     void state.open(reports[0].reportId, props.demoRole)
   }
 })
