@@ -366,7 +366,7 @@ function scrollToSection(id: string): void {
 
 function runAiAnalysis(): void {
   const context = props.context
-  if (!context || analysis.phase.value === 'running') return
+  if (!context || analysis.phase.value === 'running' || analysis.phase.value === 'clarification') return
   const question = `building_id=${context.buildingId} 从 ${context.energyWindow.from} 到 ${context.energyWindow.to} 的能耗基线偏差率`
   void analysis.submit(question)
 }
@@ -393,17 +393,27 @@ function submitClarification(): void {
   void analysis.clarify()
 }
 
-const analysisContextKey = computed(() => JSON.stringify(props.context))
+const refreshContextKey = computed(() => JSON.stringify(props.context))
+const analysisQueryContextKey = computed(() => {
+  const context = props.context
+  return context ? JSON.stringify({
+    buildingId: context.buildingId,
+    source: context.source,
+    energyWindow: context.energyWindow,
+  }) : ''
+})
 
 watch(() => analysis.dto.value?.clarificationQuestions, (questions) => {
   clarificationSelections.value = (questions ?? []).map((_, index) => clarificationOptions(index)[0]!)
 })
 
+watch(analysisQueryContextKey, (contextKey, previousKey) => {
+  if (previousKey !== undefined && previousKey !== contextKey) analysis.reset()
+})
+
 watch(
-  [() => props.active, () => analysisContextKey.value],
-  ([active, contextKey], previous) => {
-    const contextChanged = previous != null && previous[1] !== contextKey
-    if (contextChanged) analysis.reset()
+  [() => props.active, () => refreshContextKey.value],
+  ([active]) => {
     if (active) void refresh()
     else {
       requestGeneration++
@@ -434,8 +444,13 @@ watch(
       <section id="analysis-conclusion" class="customer-card energy-analysis__conclusion">
         <header>
           <div><span class="energy-analysis__ai">AI</span><h2>{{ analysisSummary ? 'AI 分析结论' : '运营观察' }}</h2></div>
-          <button type="button" data-run-ai-analysis :disabled="analysis.phase.value === 'running'" @click="runAiAnalysis">
-            {{ analysis.phase.value === 'running' ? '分析中…' : analysisSummary ? '重新分析' : '运行 AI 分析' }}
+          <button
+            type="button"
+            data-run-ai-analysis
+            :disabled="analysis.phase.value === 'running' || analysis.phase.value === 'clarification'"
+            @click="runAiAnalysis"
+          >
+            {{ analysis.phase.value === 'running' ? '分析中…' : analysis.phase.value === 'clarification' ? '等待口径确认' : analysisSummary ? '重新分析' : '运行 AI 分析' }}
           </button>
         </header>
         <p class="energy-analysis__lead">{{ analysisSummary ?? observation }}</p>

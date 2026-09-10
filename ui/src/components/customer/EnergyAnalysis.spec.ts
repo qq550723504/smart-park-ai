@@ -427,6 +427,14 @@ describe('EnergyAnalysis', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('需要确认指标口径')
     expect(wrapper.text()).toContain('能耗基线偏差率')
+    expect(wrapper.get('[data-run-ai-analysis]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-run-ai-analysis]').text()).toContain('等待口径确认')
+
+    await wrapper.setProps({ context: { ...context, anomalyId: 'ALT-LATE' } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('需要确认指标口径')
+    expect(wrapper.get('[data-run-ai-analysis]').attributes('disabled')).toBeDefined()
+    expect(startAnalysis).toHaveBeenCalledTimes(1)
 
     await wrapper.get('.energy-analysis__clarification button').trigger('click')
     await flushPromises()
