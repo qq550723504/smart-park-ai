@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { ChatDotRound, Close, Connection, Document, OfficeBuilding, Promotion, WarningFilled } from '@element-plus/icons-vue'
-import { askCustomerService, getCustomerConversation, replyCustomerSession } from '../../services/workflowApi'
+import { askCustomerService, getCustomerConversation, replyCustomerSession, WorkflowApiError } from '../../services/workflowApi'
 import type { OperationsCapabilities } from '../../services/workflowApi'
 import type { CustomerAnalysisContext, CustomerPage } from '../../types/customer'
 import type { CustomerConversationResponse, CustomerServiceResponse } from '../../types/workflow'
@@ -28,6 +28,14 @@ type AssistantMessage = {
   result?: CustomerServiceResponse
 }
 
+type UnconfirmedRequest = {
+  operation: 'create' | 'reply'
+  sessionId: string
+  question: string
+  idempotencyKey: string
+  state: 'in-flight' | 'outcome-unknown'
+}
+
 const question = ref('')
 const loading = ref(false)
 const error = ref('')
@@ -35,6 +43,7 @@ const conversationWarning = ref('')
 const messages = ref<AssistantMessage[]>([])
 const sessionId = ref('')
 const conversation = ref<CustomerConversationResponse | null>(null)
+const unconfirmedRequest = ref<UnconfirmedRequest | null>(null)
 const composer = ref<HTMLTextAreaElement | null>(null)
 let requestGeneration = 0
 
@@ -93,24 +102,36 @@ function applyContextDraft(): void {
 async function send(): Promise<void> {
   const normalized = question.value.trim()
   if (!normalized || loading.value) return
+  const retainedRequest = unconfirmedRequest.value
+  if (retainedRequest && normalized !== retainedRequest.question) {
+    error.value = '上次请求结果尚未确认，不能把修改后的问题与原请求身份混用。请恢复原问题后重试。'
+    return
+  }
   const generation = ++requestGeneration
-  const previousSessionId = sessionId.value
-  messages.value.push({ role: 'user', text: normalized })
+  const request = retainedRequest ?? {
+    operation: sessionId.value ? 'reply' : 'create',
+    sessionId: sessionId.value,
+    question: normalized,
+    idempotencyKey: createRequestId(),
+    state: 'in-flight',
+  } satisfies UnconfirmedRequest
+  request.state = 'in-flight'
+  unconfirmedRequest.value = request
+  if (!retainedRequest) messages.value.push({ role: 'user', text: normalized })
   question.value = ''
   error.value = ''
   conversationWarning.value = ''
   loading.value = true
   try {
-    const idempotencyKey = createRequestId()
-    const result = previousSessionId
-      ? await replyCustomerSession(previousSessionId, normalized, idempotencyKey)
-      : await askCustomerService(normalized, idempotencyKey)
+    const result = request.operation === 'reply'
+      ? await replyCustomerSession(request.sessionId, request.question, request.idempotencyKey)
+      : await askCustomerService(request.question, request.idempotencyKey)
     if (generation !== requestGeneration) return
+    unconfirmedRequest.value = null
     sessionId.value = result.sessionId
     const answer = result.answer.trim()
     if (!answer) {
-      question.value = normalized
-      error.value = '服务未返回可展示内容，请保留问题后重试。'
+      error.value = '请求已受理，但服务未返回可展示内容；不会自动重发本次问题。'
       return
     }
     messages.value.push({ role: 'assistant', text: answer, result })
@@ -120,22 +141,40 @@ async function send(): Promise<void> {
     } catch {
       if (generation === requestGeneration) conversationWarning.value = '回答已收到，会话详情暂未同步；不会重复发送本次问题。'
     }
-  } catch {
+  } catch (cause) {
     if (generation !== requestGeneration) return
-    question.value = normalized
-    error.value = /报修|漏水|故障/.test(normalized)
-      ? '报修请求未完成，请保留问题后重试；页面不会显示虚假工单。'
-      : 'AI 服务或园区知识暂不可用，请保留问题后重试。'
+    question.value = request.question
+    if (cause instanceof WorkflowApiError && cause.status >= 400 && cause.status < 500) {
+      unconfirmedRequest.value = null
+      error.value = /报修|漏水|故障/.test(request.question)
+        ? '报修请求已确认未受理，请检查问题后重新发送；页面不会显示虚假工单。'
+        : '请求已确认未受理，请检查问题后重新发送。'
+    } else {
+      request.state = 'outcome-unknown'
+      unconfirmedRequest.value = request
+      error.value = '请求结果尚未确认，可能已经被服务端受理。请原样重试；系统会复用同一请求身份，避免重复会话或工单。'
+    }
   } finally {
     if (generation === requestGeneration) loading.value = false
   }
+}
+
+function retryUnconfirmed(): void {
+  if (!unconfirmedRequest.value || loading.value) return
+  question.value = unconfirmedRequest.value.question
+  void send()
 }
 
 function close(): void {
   emit('close')
 }
 
-function resetForDemo(): void {
+function canResetForDemo(): boolean {
+  return unconfirmedRequest.value === null && !loading.value
+}
+
+function resetForDemo(): boolean {
+  if (!canResetForDemo()) return false
   requestGeneration += 1
   question.value = ''
   loading.value = false
@@ -144,13 +183,14 @@ function resetForDemo(): void {
   messages.value = []
   sessionId.value = ''
   conversation.value = null
+  return true
 }
 
 watch(() => props.open, (open) => {
   if (open) void nextTick(() => composer.value?.focus())
 })
 
-defineExpose({ resetForDemo })
+defineExpose({ canResetForDemo, resetForDemo })
 </script>
 
 <template>
@@ -212,6 +252,17 @@ defineExpose({ resetForDemo })
       </div>
 
       <p v-if="error" class="customer-assistant__error" role="alert"><WarningFilled aria-hidden="true" />{{ error }}</p>
+      <div v-if="unconfirmedRequest" class="customer-assistant__retry" data-unconfirmed-assistant-request role="status">
+        <strong>{{ unconfirmedRequest.state === 'in-flight' ? '请求正在发送' : '请求结果未确认' }}</strong>
+        <span>已保留原问题与请求身份；关闭助手或切换页面不会丢失关联。</span>
+        <button
+          v-if="unconfirmedRequest.state === 'outcome-unknown'"
+          type="button"
+          data-retry-assistant-request
+          :disabled="loading"
+          @click="retryUnconfirmed"
+        >原样重试</button>
+      </div>
       <p v-if="conversationWarning" class="customer-assistant__warning" role="status">{{ conversationWarning }}</p>
 
       <form class="customer-assistant__composer" @submit.prevent="send">

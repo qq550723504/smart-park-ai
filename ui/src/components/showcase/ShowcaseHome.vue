@@ -28,7 +28,8 @@ const capabilities = ref<OperationsCapabilities | null>(null)
 const assistantOpen = ref(false)
 const restartOpen = ref(false)
 const restartNotice = ref('')
-const assistantPanel = ref<InstanceType<typeof CustomerAssistantPanel> | null>(null)
+const assistantPanel = ref<{ canResetForDemo: () => boolean; resetForDemo: () => boolean } | null>(null)
+const overviewPanel = ref<{ resetForDemo: () => Promise<void> } | null>(null)
 const analysisInstanceKey = computed(() => {
   const context = analysisContext.value
   return context
@@ -104,17 +105,29 @@ function openAssistantAnalysis(context: CustomerAnalysisContext): void {
 }
 
 function requestRestart(): void {
+  if (assistantPanel.value && !assistantPanel.value.canResetForDemo()) {
+    assistantOpen.value = true
+    restartNotice.value = '助手仍有正在发送或结果未确认的请求。已保留请求关联，请先等待结果或原样重试，再重开导览。'
+    return
+  }
   restartOpen.value = true
 }
 
 async function confirmRestart(): Promise<void> {
+  if (assistantPanel.value && !assistantPanel.value.canResetForDemo()) {
+    restartOpen.value = false
+    assistantOpen.value = true
+    restartNotice.value = '助手请求尚未确认，导览没有重置；原问题与请求身份仍保留在助手中。'
+    return
+  }
+  if (assistantPanel.value?.resetForDemo() === false) return
   restartOpen.value = false
   assistantOpen.value = false
   latestOverviewContext.value = null
   analysisContext.value = null
   workOrdersContext.value = null
-  assistantPanel.value?.resetForDemo()
   activePage.value = 'overview'
+  await overviewPanel.value?.resetForDemo()
   restartNotice.value = '客户导览已回到起点；仅清除了本页选择与助手会话，后台工单、报告和进行中的任务均未删除。'
   await nextTick()
   document.getElementById('customer-overview-main')?.focus()
@@ -161,6 +174,7 @@ onMounted(() => {
     </template>
     <p v-if="restartNotice" class="customer-alert customer-demo-restart__notice" role="status" data-restart-notice>{{ restartNotice }}</p>
     <ParkOverview
+      ref="overviewPanel"
       v-show="activePage === 'overview'"
       :active="props.active !== false"
       @context-change="updateContext"

@@ -1,7 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import CustomerAssistantPanel from './CustomerAssistantPanel.vue'
-import { askCustomerService, getCustomerConversation, replyCustomerSession } from '../../services/workflowApi'
+import { askCustomerService, getCustomerConversation, replyCustomerSession, WorkflowApiError } from '../../services/workflowApi'
 import type { CustomerServiceResponse } from '../../types/workflow'
 
 vi.mock('../../services/workflowApi', async () => {
@@ -96,6 +96,76 @@ describe('CustomerAssistantPanel', () => {
     expect(wrapper.text()).toContain(answer.answer)
   })
 
+  it('retries an unconfirmed first request with the same question and idempotency key', async () => {
+    vi.mocked(askCustomerService)
+      .mockRejectedValueOnce(new Error('response lost'))
+      .mockResolvedValueOnce(answer)
+    vi.mocked(getCustomerConversation).mockResolvedValue({ sessionId: 'CS-1', messages: [], retrievals: [], humanHandoff: false })
+    const wrapper = mountPanel()
+
+    await wrapper.get('textarea').setValue('访客停车怎么收费？')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    const firstAttempt = vi.mocked(askCustomerService).mock.calls[0]!
+    expect(wrapper.get('[role="alert"]').text()).toContain('请求结果尚未确认')
+    expect(wrapper.get('[data-unconfirmed-assistant-request]').text()).toContain('已保留原问题与请求身份')
+    expect((wrapper.vm as unknown as { resetForDemo: () => boolean }).resetForDemo()).toBe(false)
+
+    await wrapper.get('textarea').setValue('我改问访客预约')
+    await wrapper.get('form').trigger('submit')
+    expect(askCustomerService).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[role="alert"]').text()).toContain('不能把修改后的问题与原请求身份混用')
+
+    await wrapper.get('[data-retry-assistant-request]').trigger('click')
+    await flushPromises()
+    expect(askCustomerService).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(askCustomerService).mock.calls[1]).toEqual(firstAttempt)
+    expect(wrapper.findAll('.customer-assistant__messages article.user')).toHaveLength(1)
+    expect(wrapper.find('[data-unconfirmed-assistant-request]').exists()).toBe(false)
+  })
+
+  it('retries an unconfirmed reply against the same session with the same identity', async () => {
+    vi.mocked(askCustomerService).mockResolvedValue(answer)
+    vi.mocked(replyCustomerSession)
+      .mockRejectedValueOnce(new Error('response lost'))
+      .mockResolvedValueOnce({ ...answer, answer: '补充停车说明。' })
+    vi.mocked(getCustomerConversation).mockResolvedValue({ sessionId: 'CS-1', messages: [], retrievals: [], humanHandoff: false })
+    const wrapper = mountPanel()
+
+    await wrapper.get('textarea').setValue('访客停车怎么收费？')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    await wrapper.get('textarea').setValue('夜间停车规则是什么？')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    const firstReplyAttempt = vi.mocked(replyCustomerSession).mock.calls[0]!
+
+    await wrapper.setProps({ open: false, activePage: 'reports', context: null })
+    await wrapper.setProps({ open: true })
+    await wrapper.get('[data-retry-assistant-request]').trigger('click')
+    await flushPromises()
+
+    expect(replyCustomerSession).toHaveBeenCalledTimes(2)
+    expect(firstReplyAttempt[0]).toBe('CS-1')
+    expect(vi.mocked(replyCustomerSession).mock.calls[1]).toEqual(firstReplyAttempt)
+    expect(wrapper.findAll('.customer-assistant__messages article.user')).toHaveLength(2)
+  })
+
+  it('does not resend a confirmed answer when only conversation synchronization fails', async () => {
+    vi.mocked(askCustomerService).mockResolvedValue(answer)
+    vi.mocked(getCustomerConversation).mockRejectedValue(new Error('read failed'))
+    const wrapper = mountPanel()
+
+    await wrapper.get('textarea').setValue('访客停车怎么收费？')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain(answer.answer)
+    expect(wrapper.text()).toContain('回答已收到，会话详情暂未同步')
+    expect(askCustomerService).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-unconfirmed-assistant-request]').exists()).toBe(false)
+  })
+
   it('shows a real repair receipt without claiming resolution', async () => {
     vi.mocked(askCustomerService).mockResolvedValue({
       ...answer,
@@ -113,16 +183,17 @@ describe('CustomerAssistantPanel', () => {
     expect(wrapper.get('[data-assistant-ticket]').text()).toContain('不表示问题已经解决')
   })
 
-  it('retains a failed repair question and does not fabricate a ticket', async () => {
-    vi.mocked(askCustomerService).mockRejectedValue(new Error('internal provider trace'))
+  it('labels a confirmed rejection and does not fabricate a ticket', async () => {
+    vi.mocked(askCustomerService).mockRejectedValue(new WorkflowApiError('invalid request', 400))
     const wrapper = mountPanel()
     await wrapper.get('textarea').setValue('洗手间漏水，需要报修')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 
-    expect(wrapper.get('[role="alert"]').text()).toContain('报修请求未完成')
-    expect(wrapper.get('[role="alert"]').text()).not.toContain('internal provider trace')
+    expect(wrapper.get('[role="alert"]').text()).toContain('报修请求已确认未受理')
+    expect(wrapper.get('[role="alert"]').text()).not.toContain('invalid request')
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('洗手间漏水，需要报修')
     expect(wrapper.find('[data-assistant-ticket]').exists()).toBe(false)
+    expect(wrapper.find('[data-unconfirmed-assistant-request]').exists()).toBe(false)
   })
 })

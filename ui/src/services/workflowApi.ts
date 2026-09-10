@@ -40,7 +40,7 @@ async function customerRequest(url: string, options?: RequestInit): Promise<Cust
     } catch {
       // Keep the same status-only fallback as the shared request helper.
     }
-    throw new Error(message)
+    throw new WorkflowApiError(message, response.status)
   }
   const result = await response.json() as CustomerServiceResponse
   const executionRunId = response.headers.get('X-Execution-Run-Id')

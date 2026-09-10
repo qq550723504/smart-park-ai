@@ -135,22 +135,54 @@ describe('ShowcaseHome customer shell', () => {
   })
 
   it('restarts only the customer presentation state after explicit confirmation', async () => {
+    const overviewReset = vi.fn()
+    const assistantReset = vi.fn(() => true)
     const wrapper = mount(ShowcaseHome, {
       props: { active: true },
       global: { stubs: {
-        ParkOverview: { template: '<main id="customer-overview-main" data-park-overview tabindex="-1" />' },
+        ParkOverview: { methods: { resetForDemo: overviewReset }, template: '<main id="customer-overview-main" data-park-overview tabindex="-1">B2</main>' },
         EnergyAnalysis: { template: '<main id="customer-analysis-main" data-energy-analysis />' },
-        CustomerAssistantPanel: { methods: { resetForDemo: vi.fn() }, template: '<aside />' },
+        CustomerAssistantPanel: { methods: { canResetForDemo: () => true, resetForDemo: assistantReset }, template: '<aside />' },
       } },
     })
     await wrapper.get('[data-customer-nav="reports"]').trigger('click')
     await wrapper.get('[data-restart-demo]').trigger('click')
     expect(wrapper.get('[role="dialog"]').text()).toContain('不会删除或重置后台工单、历史报告')
 
+    await wrapper.get('[aria-label="取消重开导览"]').trigger('click')
+    expect(wrapper.get('[data-customer-nav="reports"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-park-overview]').text()).toBe('B2')
+    expect(overviewReset).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-restart-demo]').trigger('click')
+
     await wrapper.get('[data-confirm-restart]').trigger('click')
     await flushPromises()
+    expect(assistantReset).toHaveBeenCalledTimes(1)
+    expect(overviewReset).toHaveBeenCalledTimes(1)
     expect(wrapper.get('[data-customer-nav="overview"]').attributes('aria-current')).toBe('page')
     expect(wrapper.get('[data-restart-notice]').text()).toContain('后台工单、报告和进行中的任务均未删除')
+  })
+
+  it('blocks restart while an assistant write result is unconfirmed', async () => {
+    const assistantReset = vi.fn(() => false)
+    const wrapper = mount(ShowcaseHome, {
+      props: { active: true },
+      global: { stubs: {
+        ParkOverview: { methods: { resetForDemo: vi.fn() }, template: '<main id="customer-overview-main" data-park-overview />' },
+        EnergyAnalysis: { template: '<main id="customer-analysis-main" data-energy-analysis />' },
+        CustomerAssistantPanel: { methods: { canResetForDemo: () => false, resetForDemo: assistantReset }, template: '<aside />' },
+      } },
+    })
+
+    await wrapper.get('[data-customer-nav="reports"]').trigger('click')
+    await wrapper.get('[data-restart-demo]').trigger('click')
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.get('[data-customer-nav="reports"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-customer-nav="assistant"]').attributes('aria-expanded')).toBe('true')
+    expect(wrapper.get('[data-restart-notice]').text()).toContain('已保留请求关联')
+    expect(assistantReset).not.toHaveBeenCalled()
   })
 
   it('uses the existing App event to enter the long-lived internal workbench', async () => {

@@ -1,0 +1,4 @@
+01-park-overview.png: 1672x941, sha256=8dd9a1af3aec1256d795aedb592b10db8ac4c8e704fe5d85cd841fdd6f2cce25
+02-energy-analysis.png: 1672x941, sha256=a3309c127c7f575ecdbb358b0a1e8531abe8510df08b7493bd185f24e0d56758
+03-events-workorders.png: 1672x941, sha256=b1b77357c426d4e371bb74fc23fb24583dbaa72658df89a9d74cade9da9835a3
+04-operations-reports.png: 1672x941, sha256=621eb96b910b86f4bfba75609a3557b3cff4ab4ee5c9dc2fa80f0cf9ccd17f3f
