@@ -322,11 +322,19 @@ const relatedDevices = computed<RelatedDeviceRow[]>(() => {
     const id = textValue(item.meterId)
     if (!id) continue
     const kwh = finiteNumber(item.kwh)
+    const observedAt = textValue(item.measuredAt)
+    const existing = rows.get(id)
+    if (existing?.kind === '能耗计量点') {
+      const existingTime = Date.parse(existing.observedAt ?? '')
+      const candidateTime = Date.parse(observedAt ?? '')
+      if (!Number.isFinite(candidateTime)
+        || (Number.isFinite(existingTime) && existingTime >= candidateTime)) continue
+    }
     rows.set(id, {
       id,
       kind: '能耗计量点',
       status: '已取得观测',
-      observedAt: textValue(item.measuredAt),
+      observedAt,
       reading: kwh == null ? '读数缺失' : `${formatNumber(kwh, 2)} kWh`,
     })
   }

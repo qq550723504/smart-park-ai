@@ -100,7 +100,7 @@ public final class AnalyticsQuestionNormalizer {
     private static java.util.Optional<String> explicitBuildingFilter(String question) {
         LinkedHashSet<String> values = new LinkedHashSet<>();
         var matcher = EXPLICIT_BUILDING_FILTER.matcher(question);
-        while (matcher.find()) values.add(matcher.group(1));
+        while (matcher.find()) values.add(matcher.group(1).toUpperCase(Locale.ROOT));
         if (values.size() > 1) {
             throw new IllegalArgumentException("问题包含多个 building_id 约束");
         }
@@ -115,11 +115,16 @@ public final class AnalyticsQuestionNormalizer {
     }
 
     private static String canonicalFilterValue(String dimension, String value) {
-        return value == null || value.isBlank() ? null
-                : CategoricalFilterVocabulary.canonicalValue(dimension, value.strip());
+        if (value == null || value.isBlank()) return null;
+        String stripped = value.strip();
+        return "building_id".equals(dimension) ? stripped.toUpperCase(Locale.ROOT)
+                : CategoricalFilterVocabulary.canonicalValue(dimension, stripped);
     }
 
     private static boolean valueAppearsInQuestion(String dimension, String value, String question) {
+        if ("building_id".equals(dimension)) {
+            return question.toUpperCase(Locale.ROOT).contains(value);
+        }
         if (Set.of("status", "risk_level", "category").contains(dimension)) {
             return CategoricalFilterVocabulary.valueAppearsInQuestion(dimension, value, question);
         }

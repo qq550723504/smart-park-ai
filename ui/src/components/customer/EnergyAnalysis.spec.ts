@@ -146,6 +146,22 @@ describe('EnergyAnalysis', () => {
     expect(wrapper.text()).not.toMatch(/SQL|Trace|run-1/)
   })
 
+  it('shows the newest observation when one meter has multiple evidence rows', async () => {
+    vi.mocked(getAnomalyEvidence).mockResolvedValue({
+      ...anomalyEvidence(),
+      energy: [
+        { meterId: 'MTR-B1-1', kwh: 42, baselineKwh: 35, deviationPct: 20, measuredAt: '2026-09-08T01:00:00.000Z' },
+        { meterId: 'MTR-B1-1', kwh: 30, baselineKwh: 28, deviationPct: 7.1, measuredAt: '2026-09-08T00:00:00.000Z' },
+      ],
+    })
+
+    const wrapper = await mountLoaded()
+
+    const meterRow = wrapper.findAll('tbody tr').find((row) => row.text().includes('MTR-B1-1'))
+    expect(meterRow?.text()).toContain('42 kWh')
+    expect(meterRow?.text()).not.toContain('30 kWh')
+  })
+
   it('preserves missing hourly buckets and withholds a complete-window deviation for partial data', async () => {
     vi.mocked(getEnergyTimeSeries).mockImplementation(async (_role, filters) => filters.metric === 'energy_baseline_kwh'
       ? series('energy_baseline_kwh', [80, 90], 'PARTIAL')

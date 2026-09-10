@@ -59,6 +59,23 @@ class AnalyticsQuestionNormalizerTest {
     }
 
     @Test
+    void canonicalizesBuildingFiltersBeforeTheyReachCaseSensitiveBindings() {
+        var modelUnderstanding = new AnalyticsModelClient.QuestionUnderstanding(
+                "b1楼宇的能耗",
+                List.of("energy_kwh"),
+                List.of(),
+                null,
+                List.of(),
+                Map.of("building_id", "b1"));
+
+        var explicit = normalizer.normalize("building_id=b1 楼宇的能耗", modelUnderstanding);
+        var inferred = normalizer.normalize("b1楼宇的能耗", modelUnderstanding);
+
+        assertThat(explicit.requestedFilters()).containsExactlyEntriesOf(Map.of("building_id", "B1"));
+        assertThat(inferred.requestedFilters()).containsExactlyEntriesOf(Map.of("building_id", "B1"));
+    }
+
+    @Test
     void rejectsConflictingExplicitBuildingScopes() {
         var modelUnderstanding = new AnalyticsModelClient.QuestionUnderstanding(
                 "楼宇能耗", List.of("energy_kwh"), List.of());
