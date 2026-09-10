@@ -80,6 +80,38 @@ describe('useOperationsAnalysis', () => {
     expect(analysis.phase.value).toBe('completed')
   })
 
+  it('keeps polling an accepted run after the bounded initial polling window expires', async () => {
+    let starts = 0
+    let statusCalls = 0
+    handler = (url, init) => {
+      if (init?.method === 'POST' && url.endsWith('/api/operations-analysis/runs')) {
+        starts += 1
+        return jsonResponse({ runId: RUN_ID }, 202)
+      }
+      if (/\/runs\/[0-9a-f-]+$/.test(url)) {
+        statusCalls += 1
+        if (statusCalls === 1) throw new Error('status unavailable')
+        return jsonResponse({
+          runId: RUN_ID,
+          status: 'NEEDS_CLARIFICATION',
+          clarificationQuestions: ['请选择能耗口径'],
+          createdAt: '',
+        })
+      }
+      return jsonResponse({}, 404)
+    }
+    const analysis = useOperationsAnalysis({ pollIntervalMs: 1, maxPolls: 1 })
+
+    await analysis.submit('上周能耗')
+
+    expect(analysis.runId.value).toBe(RUN_ID)
+    expect(analysis.phase.value).toBe('running')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(starts).toBe(1)
+    expect(statusCalls).toBeGreaterThan(1)
+    expect(analysis.phase.value).toBe('clarification')
+  })
+
   it('surfaces clarification questions and resumes with structured selections', async () => {
     const trace = fakeTrace()
     let clarified = false
@@ -155,6 +187,43 @@ describe('useOperationsAnalysis', () => {
     expect(analysis.phase.value).toBe('completed')
     expect(analysis.dto.value?.status).toBe('COMPLETED')
     expect(analysis.error.value).toBe('')
+  })
+
+  it('keeps polling after an accepted clarification outlives the bounded polling window', async () => {
+    let clarified = false
+    let postClarificationStatusCalls = 0
+    handler = (url, init) => {
+      if (url.includes('/clarifications')) {
+        clarified = true
+        return jsonResponse({ runId: RUN_ID, status: 'RUNNING', createdAt: '' })
+      }
+      if (init?.method === 'POST') return jsonResponse({ runId: RUN_ID }, 202)
+      if (/\/runs\/[0-9a-f-]+$/.test(url)) {
+        if (!clarified) {
+          return jsonResponse({
+            runId: RUN_ID,
+            status: 'NEEDS_CLARIFICATION',
+            clarificationQuestions: ['请选择能耗口径'],
+            createdAt: '',
+          })
+        }
+        postClarificationStatusCalls += 1
+        if (postClarificationStatusCalls === 1) throw new Error('status unavailable')
+        return jsonResponse({ runId: RUN_ID, status: 'COMPLETED', createdAt: '' })
+      }
+      return jsonResponse({}, 404)
+    }
+    const analysis = useOperationsAnalysis({ pollIntervalMs: 1, maxPolls: 1 })
+    await analysis.submit('上周能耗')
+    analysis.selections.value = [{ term: '请选择能耗口径', metric: 'energy_kwh' }]
+
+    await analysis.clarify()
+
+    expect(analysis.runId.value).toBe(RUN_ID)
+    expect(analysis.phase.value).toBe('running')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(postClarificationStatusCalls).toBeGreaterThan(1)
+    expect(analysis.phase.value).toBe('completed')
   })
 
   it('continues checking a paused run so clarification expiry reaches the UI', async () => {

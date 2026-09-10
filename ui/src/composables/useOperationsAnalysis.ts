@@ -51,6 +51,7 @@ export function useOperationsAnalysis(
   const chart = ref<DisplayPayload | null>(null)
   const selections = ref<Array<{ term: string; metric: string }>>([])
   let clarificationPollTimer: ReturnType<typeof setTimeout> | undefined
+  let acceptedRunPollTimer: ReturnType<typeof setTimeout> | undefined
   let clarificationPollGeneration = 0
   let operationGeneration = 0
 
@@ -152,6 +153,7 @@ export function useOperationsAnalysis(
   function reset(): void {
     operationGeneration++
     stopClarificationPolling()
+    stopAcceptedRunPolling()
     phase.value = 'idle'
     dto.value = null
     error.value = ''
@@ -169,6 +171,7 @@ export function useOperationsAnalysis(
     const generation = ++operationGeneration
     error.value = ''
     stopClarificationPolling()
+    stopAcceptedRunPolling()
     // A failed POST must not leave the previous run addressable to the page;
     // otherwise the page can emit that old ID as if this attempt had started.
     runId.value = null
@@ -189,9 +192,13 @@ export function useOperationsAnalysis(
     } catch (cause) {
       if (generation !== operationGeneration) return
       const failure = cause instanceof Error ? cause : new Error(String(cause))
-      error.value = failure.message
-      phase.value = 'failed'
-      if (!accepted) callbacks?.onFailed?.(failure)
+      if (accepted && runId.value) {
+        continueAcceptedRunPolling(runId.value, generation)
+      } else {
+        error.value = failure.message
+        phase.value = 'failed'
+        callbacks?.onFailed?.(failure)
+      }
     }
   }
 
@@ -205,25 +212,65 @@ export function useOperationsAnalysis(
     const targetRunId = runId.value
     error.value = ''
     stopClarificationPolling()
+    stopAcceptedRunPolling()
     chart.value = null
     phase.value = 'running'
+    let accepted = false
     try {
       await submitClarification(targetRunId, selections.value)
       if (generation !== operationGeneration) return
+      accepted = true
       subscribeTraceBestEffort(targetRunId)
       const terminal = await pollToTerminal(targetRunId, generation)
       if (generation !== operationGeneration || !terminal) return
       applyTerminal(terminal)
     } catch (cause) {
       if (generation !== operationGeneration) return
-      error.value = cause instanceof Error ? cause.message : String(cause)
-      if (runId.value === targetRunId && dto.value?.status === 'NEEDS_CLARIFICATION') {
+      if (accepted && runId.value === targetRunId) {
+        continueAcceptedRunPolling(targetRunId, generation)
+      } else if (runId.value === targetRunId && dto.value?.status === 'NEEDS_CLARIFICATION') {
+        error.value = cause instanceof Error ? cause.message : String(cause)
         phase.value = 'clarification'
         startClarificationPolling()
       } else {
+        error.value = cause instanceof Error ? cause.message : String(cause)
         phase.value = 'failed'
       }
     }
+  }
+
+  function stopAcceptedRunPolling(): void {
+    if (acceptedRunPollTimer !== undefined) {
+      clearTimeout(acceptedRunPollTimer)
+      acceptedRunPollTimer = undefined
+    }
+  }
+
+  function continueAcceptedRunPolling(targetRunId: string, generation: number): void {
+    stopAcceptedRunPolling()
+    phase.value = 'running'
+    const scheduleNext = () => {
+      if (generation === operationGeneration && runId.value === targetRunId) {
+        acceptedRunPollTimer = setTimeout(pollOnce, pollIntervalMs)
+      }
+    }
+    const pollOnce = () => {
+      acceptedRunPollTimer = undefined
+      void getAnalysisStatus(targetRunId).then((current) => {
+        if (generation !== operationGeneration || runId.value !== targetRunId) return
+        dto.value = current
+        if (isTerminalAnalysisStatus(current.status) || current.status === 'NEEDS_CLARIFICATION') {
+          applyTerminal(current)
+          return
+        }
+        scheduleNext()
+      }).catch(() => {
+        // The run has already been accepted. Keep its identity and retry status
+        // lookup instead of enabling a replacement POST against the singleton.
+        scheduleNext()
+      })
+    }
+    scheduleNext()
   }
 
   const isBusy = computed(() => phase.value === 'running')
@@ -231,6 +278,7 @@ export function useOperationsAnalysis(
   onScopeDispose(() => {
     operationGeneration++
     stopClarificationPolling()
+    stopAcceptedRunPolling()
   })
   return { phase, dto, error, runId, chart, selections, reset, submit, clarify }
 }
