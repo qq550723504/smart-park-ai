@@ -28,6 +28,7 @@ const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true }
 const emit = defineEmits<{
   'context-change': [context: CustomerAnalysisContext | null]
   'view-analysis': [context: CustomerAnalysisContext]
+  'view-reports': []
 }>()
 
 const overview = ref<AnomalyOverview | null>(null)
@@ -580,8 +581,8 @@ watch(analysisContext, (context) => emit('context-change', context), { immediate
         </article>
         <article class="customer-report-promo">
           <Document aria-hidden="true" />
-          <div><h2>运营简报入口</h2><p>运营报告功能尚未开放，当前不会生成报告。</p></div>
-          <span aria-disabled="true">尚未开放</span>
+          <div><h2>运营简报入口</h2><p>查看真实历史快照，或显式生成新的运营日报。</p></div>
+          <button type="button" @click="$emit('view-reports')">查看报告</button>
         </article>
       </aside>
     </section>

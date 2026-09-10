@@ -1,9 +1,14 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import ShowcaseHome from './ShowcaseHome.vue'
 
 describe('ShowcaseHome customer shell', () => {
-  it('defaults to the customer overview, enables analysis and work orders, and keeps later pages non-interactive', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('defaults to the customer overview, enables all delivered pages, and keeps the assistant non-interactive', () => {
     const wrapper = mount(ShowcaseHome, {
       props: { active: false },
       global: {
@@ -19,11 +24,53 @@ describe('ShowcaseHome customer shell', () => {
     expect(wrapper.get('[data-customer-nav="analysis"]').element.tagName).toBe('BUTTON')
     expect(wrapper.get('[data-energy-analysis]').isVisible()).toBe(false)
     expect(wrapper.get('[data-customer-nav="work-orders"]').element.tagName).toBe('BUTTON')
-    for (const page of ['reports', 'assistant']) {
-      const item = wrapper.get(`[data-customer-nav="${page}"]`)
-      expect(item.element.tagName).toBe('SPAN')
-      expect(item.attributes('aria-disabled')).toBe('true')
-    }
+    expect(wrapper.get('[data-customer-nav="reports"]').element.tagName).toBe('BUTTON')
+    const assistant = wrapper.get('[data-customer-nav="assistant"]')
+    expect(assistant.element.tagName).toBe('SPAN')
+    expect(assistant.attributes('aria-disabled')).toBe('true')
+  })
+
+  it('opens reports inside the same customer shell', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({
+      knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none', analyticsEnabled: true,
+      collaborationEnabled: false, voiceEnabled: false, securityIncidentEnabled: false,
+    }), { status: 200 }))))
+    const wrapper = mount(ShowcaseHome, {
+      props: { active: true },
+      global: { stubs: {
+        ParkOverview: { template: '<main data-park-overview />' },
+        EnergyAnalysis: { template: '<main data-energy-analysis />' },
+        CustomerOperationsReports: { props: ['active', 'available'], template: '<main id="customer-reports-main" data-customer-reports>{{ active }}:{{ available }}</main>' },
+      } },
+    })
+    const shell = wrapper.get('[data-customer-shell]').element
+
+    await wrapper.get('[data-customer-nav="reports"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-customer-nav="reports"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-customer-reports]').text()).toBe('true:true')
+    expect(wrapper.get('[data-customer-shell]').element).toBe(shell)
+    expect(wrapper.findAll('.customer-shell__topbar')).toHaveLength(1)
+  })
+
+  it('keeps report generation unavailable when the backend capability is disabled', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({
+      knowledgeMode: 'mock', customerAnswerMode: 'mock', vectorStore: 'none', analyticsEnabled: false,
+      collaborationEnabled: false, voiceEnabled: false, securityIncidentEnabled: false,
+    }), { status: 200 }))))
+    const wrapper = mount(ShowcaseHome, {
+      props: { active: true },
+      global: { stubs: {
+        ParkOverview: { template: '<main data-park-overview />' },
+        EnergyAnalysis: { template: '<main data-energy-analysis />' },
+        CustomerOperationsReports: { props: ['available'], template: '<main id="customer-reports-main" data-report-available>{{ available }}</main>' },
+      } },
+    })
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="reports"]').trigger('click')
+
+    expect(wrapper.get('[data-report-available]').text()).toBe('false')
   })
 
   it('continues from analysis to work orders with the exact same context and shell', async () => {

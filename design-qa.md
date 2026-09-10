@@ -180,3 +180,48 @@ The implementation preserves the reference hierarchy: shared white customer head
 - 475 frontend tests passed across 48 files.
 - TypeScript/Vue typecheck and production build passed.
 - Existing Vite chunk-size advisory remains a separate performance concern and was not hidden or expanded into this slice.
+
+---
+
+# Issue #72 Design QA
+
+Result: **PASSED**
+
+## Source and comparison
+
+- Approved reference: `04-operations-reports.png`, 1672 x 941, SHA-256 `621EB96B910B86F4BFBA75609A3557B3CFF4AB4EE5C9DC2FA80F0CF9CCD17F3F`.
+- Implementation comparison: `docs/evidence/issue-72/operations-reports-1672x941.png`, captured in the same 1672 x 941 CSS viewport.
+- The approved source and implementation capture were opened together in one comparison input after the final layout pass.
+
+The implementation preserves the approved hierarchy and design language: the unique white customer header, wide campus banner, overlapping report-generation toolbar, large left report preview, right report directory, key conclusions and download rail, pale-blue canvas, blue/green state accents, compact white cards, and a report-snapshot chart.
+
+The implementation is intentionally less dense where the source mock depends on unsupported or invented information. All visible report facts come from one selected server snapshot. Unsupported weekly/monthly/special report types, PDF, share and send actions are omitted; no source sample number or conclusion was copied into the product.
+
+## Lifecycle and interaction
+
+- Explicit generation produced report `089421b0-2130-424f-8ade-cd35b286203e` and one immutable Markdown artifact.
+- Page refresh, browser reload, leave-return and history reopen all recovered that same report through GET requests. History remained exactly one record.
+- Preview summary, chart, conclusions, status cards, section tables, source metadata and download all refer to that same report detail.
+- The download endpoint returned HTTP 200 for that exact report ID, and the downloaded SHA-256 matched the receipt checksum.
+- Partial and failed states have separate labels and warning copy. Missing rows are not converted to zeros, and no failed report is rendered as successful or downloadable.
+- Concurrent clicks cannot start a second generation or download. Stale detail/history responses cannot replace a newer selection.
+
+## Responsive and accessibility checks
+
+- 1672 x 941: source hierarchy and two-column report layout retained; no horizontal overflow.
+- 1366 x 768: primary generation action, selected history row, snapshot chart and download remain visible; `scrollWidth=1351`, `innerWidth=1366`.
+- 820 x 900: the report rail stacks below the preview; `scrollWidth=805`, `innerWidth=820`.
+- Native buttons, a labeled report-period radio group, active navigation state, skip target, semantic headings, textual status alongside color, and keyboard focus behavior are retained.
+- Browser reload and re-entry produced no console errors.
+
+## Iterations
+
+1. The source was first mapped to the existing report endpoints and immutable persistence boundary. This removed unsupported mock controls before implementation.
+2. The first implementation separated report history/detail/download state from create/poll state, so navigation reads cannot trigger generation and late responses cannot overwrite the selected snapshot.
+3. Focused regressions covered one-create behavior across refresh and leave-return, one-snapshot rendering, truthful partial/failed states and stale-detail ordering.
+4. The running branch generated a real completed report. Same-ID recovery and checksum equality were verified before final screenshots.
+5. Same-size and responsive captures showed no layout overlap or horizontal document overflow, so no visual correction was required after the comparison pass.
+6. Final-head review connected the customer surface to the existing analytics capability endpoint, preserved unresolved idempotency identity across refresh, and stopped a failed history refresh from being hidden by a successful detail read. Three focused regressions lock those boundaries.
+7. The follow-up review identified that an HTTP error can occur after durable admission, not only before it. Create identity is now retired only for definitive validation, authorization or explicit idempotency-conflict responses; admission-ambiguous 429/5xx responses keep the same key and body for safe replay.
+
+final result: passed

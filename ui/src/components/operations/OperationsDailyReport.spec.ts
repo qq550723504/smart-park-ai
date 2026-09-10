@@ -131,7 +131,7 @@ describe('OperationsDailyReport', () => {
     expect(posts[0][1]?.body).toBe(posts[1][1]?.body)
   })
 
-  it('uses a fresh key and window after a definitive create rejection', async () => {
+  it('uses a fresh key and window after a definitive create validation rejection', async () => {
     vi.useFakeTimers()
     let wrapper: ReturnType<typeof mount> | undefined
     try {
@@ -141,7 +141,7 @@ describe('OperationsDailyReport', () => {
         if (url.includes('?')) return Promise.resolve(new Response(JSON.stringify({ content: [], page: 0, size: 20, totalElements: 0, hasNext: false }), { status: 200 }))
         if (init?.method === 'POST') {
           postCount += 1
-          if (postCount === 1) return Promise.resolve(new Response(JSON.stringify({ message: 'capacity exhausted' }), { status: 429 }))
+          if (postCount === 1) return Promise.resolve(new Response(JSON.stringify({ message: 'invalid report request' }), { status: 400 }))
           return Promise.resolve(new Response(JSON.stringify({ reportId: 'report-1', runId: 'run-1', statusUrl: '/api/operations-reports/report-1' }), { status: 202 }))
         }
         return Promise.resolve(new Response(JSON.stringify(detail), { status: 200 }))

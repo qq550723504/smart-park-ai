@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import CustomerAnalysisHero from '../customer/CustomerAnalysisHero.vue'
 import CustomerShell from '../customer/CustomerShell.vue'
 import EnergyAnalysis from '../customer/EnergyAnalysis.vue'
 import ParkOverview from '../customer/ParkOverview.vue'
 import CustomerWorkOrders from '../customer/CustomerWorkOrders.vue'
-import type { ShowcaseScenario } from '../../services/workflowApi'
+import CustomerOperationsReports from '../customer/CustomerOperationsReports.vue'
+import { getOperationsCapabilities, type ShowcaseScenario } from '../../services/workflowApi'
 import type { CustomerAnalysisContext, CustomerPage } from '../../types/customer'
 import type { WorkbenchView } from '../../types/workbench'
 import '../customer/customer-surface.css'
@@ -21,6 +22,7 @@ const activePage = ref<CustomerPage>('overview')
 const latestOverviewContext = ref<CustomerAnalysisContext | null>(null)
 const analysisContext = ref<CustomerAnalysisContext | null>(null)
 const workOrdersContext = ref<CustomerAnalysisContext | null>(null)
+const analyticsAvailable = ref(false)
 const analysisInstanceKey = computed(() => {
   const context = analysisContext.value
   return context
@@ -50,6 +52,8 @@ async function navigate(page: CustomerPage, requestedContext?: CustomerAnalysisC
     ? 'customer-analysis-main'
     : page === 'work-orders'
       ? 'customer-work-orders-main'
+      : page === 'reports'
+        ? 'customer-reports-main'
       : 'customer-overview-main'
   const main = document.getElementById(mainId)
   main?.setAttribute('tabindex', '-1')
@@ -70,6 +74,12 @@ function openAnalysis(context: CustomerAnalysisContext): void {
 function openWorkOrders(context: CustomerAnalysisContext): void {
   void navigate('work-orders', context)
 }
+
+onMounted(() => {
+  void getOperationsCapabilities()
+    .then((capabilities) => { analyticsAvailable.value = capabilities.analyticsEnabled })
+    .catch(() => { analyticsAvailable.value = false })
+})
 </script>
 
 <template>
@@ -84,11 +94,19 @@ function openWorkOrders(context: CustomerAnalysisContext): void {
       </div>
       <span>同一事件<br />真实回执</span>
     </template>
+    <template #reports-hero>
+      <div>
+        <h1 id="customer-reports-title">运营报告中心</h1>
+        <p>一键沉淀园区运营亮点、问题与改进建议</p>
+      </div>
+      <span>数据洞察价值<br />报告驱动成长</span>
+    </template>
     <ParkOverview
       v-show="activePage === 'overview'"
       :active="props.active !== false"
       @context-change="updateContext"
       @view-analysis="openAnalysis"
+      @view-reports="navigate('reports')"
     />
     <KeepAlive>
       <EnergyAnalysis
@@ -107,6 +125,13 @@ function openWorkOrders(context: CustomerAnalysisContext): void {
         :active="props.active !== false && activePage === 'work-orders'"
         :context="workOrdersContext"
         @back="navigate('analysis')"
+      />
+    </KeepAlive>
+    <KeepAlive>
+      <CustomerOperationsReports
+        v-show="activePage === 'reports'"
+        :active="props.active !== false && activePage === 'reports'"
+        :available="analyticsAvailable"
       />
     </KeepAlive>
   </CustomerShell>
