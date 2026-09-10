@@ -288,6 +288,48 @@ describe('useOperationsAnalysis', () => {
     expect(analysis.phase.value).toBe('completed')
   })
 
+  it('reconciles a lost clarification response before restoring the form', async () => {
+    let clarificationPosts = 0
+    let clarificationAccepted = false
+    let reconciledStatusCalls = 0
+    handler = (url, init) => {
+      if (url.includes('/clarifications')) {
+        clarificationPosts += 1
+        clarificationAccepted = true
+        throw new Error('response lost')
+      }
+      if (init?.method === 'POST') return jsonResponse({ runId: RUN_ID }, 202)
+      if (/\/runs\/[0-9a-f-]+$/.test(url)) {
+        if (!clarificationAccepted) {
+          return jsonResponse({
+            runId: RUN_ID,
+            status: 'NEEDS_CLARIFICATION',
+            clarificationQuestions: ['请选择能耗口径'],
+            createdAt: '',
+          })
+        }
+        reconciledStatusCalls += 1
+        return jsonResponse({
+          runId: RUN_ID,
+          status: reconciledStatusCalls === 1 ? 'RUNNING' : 'COMPLETED',
+          createdAt: '',
+        })
+      }
+      return jsonResponse({}, 404)
+    }
+    const analysis = useOperationsAnalysis({ pollIntervalMs: 1 })
+    await analysis.submit('上周能耗')
+    analysis.selections.value = [{ term: '请选择能耗口径', metric: 'energy_kwh' }]
+
+    await analysis.clarify()
+
+    expect(clarificationPosts).toBe(1)
+    expect(analysis.phase.value).toBe('running')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(analysis.phase.value).toBe('completed')
+    expect(clarificationPosts).toBe(1)
+  })
+
   it('unlocks immediately when a clarification targets a missing run', async () => {
     handler = (url, init) => {
       if (url.includes('/clarifications')) return jsonResponse({ message: 'missing' }, 404)

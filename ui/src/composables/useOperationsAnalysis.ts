@@ -83,6 +83,11 @@ export function useOperationsAnalysis(
         applyTerminal(current)
         return
       }
+      if (current.status === 'RUNNING') {
+        stopClarificationPolling()
+        continueAcceptedRunPolling(targetRunId, operation)
+        return
+      }
       scheduleNext()
     }).catch((cause) => {
       if (generation !== clarificationPollGeneration || operation !== operationGeneration
@@ -243,9 +248,26 @@ export function useOperationsAnalysis(
       } else if (accepted && runId.value === targetRunId) {
         continueAcceptedRunPolling(targetRunId, generation)
       } else if (runId.value === targetRunId && dto.value?.status === 'NEEDS_CLARIFICATION') {
-        error.value = cause instanceof Error ? cause.message : String(cause)
-        phase.value = 'clarification'
-        startClarificationPolling()
+        const submissionError = cause instanceof Error ? cause.message : String(cause)
+        try {
+          const current = await getAnalysisStatus(targetRunId)
+          if (generation !== operationGeneration || runId.value !== targetRunId) return
+          dto.value = current
+          if (current.status === 'NEEDS_CLARIFICATION') {
+            error.value = submissionError
+            phase.value = 'clarification'
+            startClarificationPolling()
+          } else if (isTerminalAnalysisStatus(current.status)) {
+            applyTerminal(current)
+          } else {
+            subscribeTraceBestEffort(targetRunId)
+            continueAcceptedRunPolling(targetRunId, generation)
+          }
+        } catch (statusCause) {
+          if (generation !== operationGeneration || runId.value !== targetRunId) return
+          if (isMissingRun(statusCause)) applyMissingRun()
+          else continueAcceptedRunPolling(targetRunId, generation)
+        }
       } else {
         error.value = cause instanceof Error ? cause.message : String(cause)
         phase.value = 'failed'
