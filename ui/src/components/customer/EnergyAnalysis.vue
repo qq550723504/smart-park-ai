@@ -19,7 +19,7 @@ const emit = defineEmits<{ back: [] }>()
 const actual = ref<EnergyTimeSeriesResponse | null>(null)
 const baseline = ref<EnergyTimeSeriesResponse | null>(null)
 const evidence = ref<AnomalyEvidence | null>(null)
-const loading = ref(false)
+const loading = ref({ actual: false, baseline: false, evidence: false })
 const errors = ref({ actual: '', baseline: '', evidence: '' })
 const analysis = useOperationsAnalysis({
   ...(props.analysisPollIntervalMs != null ? { pollIntervalMs: props.analysisPollIntervalMs } : {}),
@@ -86,7 +86,7 @@ async function refresh(): Promise<void> {
   const context = props.context
   if (!props.active || !context) return
   const generation = ++requestGeneration
-  loading.value = true
+  loading.value = { actual: true, baseline: true, evidence: true }
   actual.value = null
   baseline.value = null
   evidence.value = null
@@ -98,48 +98,61 @@ async function refresh(): Promise<void> {
     to: context.energyWindow.to,
     granularity: context.energyWindow.granularity,
   }
-  const [actualResult, baselineResult, evidenceResult] = await Promise.allSettled([
-    getEnergyTimeSeries('VIEWER', { ...filters, metric: 'energy_kwh' }),
-    getEnergyTimeSeries('VIEWER', { ...filters, metric: 'energy_baseline_kwh' }),
-    getAnomalyEvidence('VIEWER', context.buildingId, {
-      from: context.anomalyWindow.from,
-      to: context.anomalyWindow.to,
-    }),
-  ])
-  if (generation !== requestGeneration || props.context?.buildingId !== context.buildingId) return
-
-  if (actualResult.status === 'fulfilled') {
-    if (matchesEnergyContext(actualResult.value, context, 'energy_kwh')) {
-      actual.value = actualResult.value
-      if (actualResult.value.status === 'UNAVAILABLE') errors.value.actual = '该楼宇实际用电暂不可用。'
-    } else {
-      errors.value.actual = '实际用电返回范围与当前选择不一致。'
-    }
-  } else {
-    errors.value.actual = '该楼宇实际用电读取失败。'
-  }
-  if (baselineResult.status === 'fulfilled') {
-    if (matchesEnergyContext(baselineResult.value, context, 'energy_baseline_kwh')) {
-      baseline.value = baselineResult.value
-      if (baselineResult.value.status === 'UNAVAILABLE') errors.value.baseline = '该楼宇基线用电暂不可用。'
-    } else {
-      errors.value.baseline = '基线用电返回范围与当前选择不一致。'
-    }
-  } else {
-    errors.value.baseline = '该楼宇基线用电读取失败。'
-  }
-  if (evidenceResult.status === 'fulfilled'
-    && evidenceResult.value.buildingId === context.buildingId
-    && sameInstant(evidenceResult.value.window.from, context.anomalyWindow.from)
-    && sameInstant(evidenceResult.value.window.to, context.anomalyWindow.to)
-    && evidenceResult.value.window.timezone === context.anomalyWindow.timezone) {
-    evidence.value = evidenceResult.value
-  } else if (evidenceResult.status === 'fulfilled') {
-    errors.value.evidence = '告警与设备依据返回范围与当前选择不一致。'
-  } else {
-    errors.value.evidence = '该楼宇的告警与设备依据读取失败。'
-  }
-  loading.value = false
+  const isCurrent = () => generation === requestGeneration && props.context?.buildingId === context.buildingId
+  const actualRequest = getEnergyTimeSeries('VIEWER', { ...filters, metric: 'energy_kwh' })
+    .then((response) => {
+      if (!isCurrent()) return
+      if (matchesEnergyContext(response, context, 'energy_kwh')) {
+        actual.value = response
+        if (response.status === 'UNAVAILABLE') errors.value.actual = '该楼宇实际用电暂不可用。'
+      } else {
+        errors.value.actual = '实际用电返回范围与当前选择不一致。'
+      }
+    })
+    .catch(() => {
+      if (isCurrent()) errors.value.actual = '该楼宇实际用电读取失败。'
+    })
+    .finally(() => {
+      if (isCurrent()) loading.value.actual = false
+    })
+  const baselineRequest = getEnergyTimeSeries('VIEWER', { ...filters, metric: 'energy_baseline_kwh' })
+    .then((response) => {
+      if (!isCurrent()) return
+      if (matchesEnergyContext(response, context, 'energy_baseline_kwh')) {
+        baseline.value = response
+        if (response.status === 'UNAVAILABLE') errors.value.baseline = '该楼宇基线用电暂不可用。'
+      } else {
+        errors.value.baseline = '基线用电返回范围与当前选择不一致。'
+      }
+    })
+    .catch(() => {
+      if (isCurrent()) errors.value.baseline = '该楼宇基线用电读取失败。'
+    })
+    .finally(() => {
+      if (isCurrent()) loading.value.baseline = false
+    })
+  const evidenceRequest = getAnomalyEvidence('VIEWER', context.buildingId, {
+    from: context.anomalyWindow.from,
+    to: context.anomalyWindow.to,
+  })
+    .then((response) => {
+      if (!isCurrent()) return
+      if (response.buildingId === context.buildingId
+        && sameInstant(response.window.from, context.anomalyWindow.from)
+        && sameInstant(response.window.to, context.anomalyWindow.to)
+        && response.window.timezone === context.anomalyWindow.timezone) {
+        evidence.value = response
+      } else {
+        errors.value.evidence = '告警与设备依据返回范围与当前选择不一致。'
+      }
+    })
+    .catch(() => {
+      if (isCurrent()) errors.value.evidence = '该楼宇的告警与设备依据读取失败。'
+    })
+    .finally(() => {
+      if (isCurrent()) loading.value.evidence = false
+    })
+  await Promise.allSettled([actualRequest, baselineRequest, evidenceRequest])
 }
 
 const chartPoints = computed<EnergyAnalysisPoint[]>(() => {
@@ -176,8 +189,10 @@ const energyWindowDeviation = computed(() => {
   return (actualTotal.value - baselineTotal.value) * 100 / baselineTotal.value
 })
 const incompleteEnergy = computed(() => actual.value?.status === 'PARTIAL' || baseline.value?.status === 'PARTIAL')
+const energyLoading = computed(() => loading.value.actual || loading.value.baseline)
+const evidenceLoading = computed(() => loading.value.evidence)
 const chartStatus = computed(() => {
-  if (loading.value) return '正在读取单楼宇小时数据…'
+  if (energyLoading.value) return '正在读取单楼宇小时数据…'
   if (errors.value.actual && errors.value.baseline) return `${errors.value.actual} ${errors.value.baseline} 未绘制曲线。`
   if (errors.value.actual) return `${errors.value.actual} 仅展示可用基线，不形成偏差结论。`
   if (errors.value.baseline) return `${errors.value.baseline} 仅展示实际用电，不绘制正常范围。`
@@ -420,7 +435,7 @@ watch(
     if (active) void refresh()
     else {
       requestGeneration++
-      loading.value = false
+      loading.value = { actual: false, baseline: false, evidence: false }
     }
   },
   { immediate: true },
@@ -485,10 +500,10 @@ watch(
         </header>
         <div class="energy-analysis__notice" :class="{ 'is-error': errors.actual || errors.baseline }">
           <span>{{ chartStatus }}</span>
-          <button v-if="errors.actual || errors.baseline" type="button" data-retry-energy :disabled="loading" @click="refresh"><Refresh aria-hidden="true" /> 重试</button>
+          <button v-if="errors.actual || errors.baseline" type="button" data-retry-energy :disabled="energyLoading" @click="refresh"><Refresh aria-hidden="true" /> 重试</button>
         </div>
         <EnergyAnalysisChart v-if="chartPoints.length" :points="chartPoints" :timezone="context.energyWindow.timezone" :unit="actual?.unit ?? baseline?.unit ?? 'kWh'" />
-        <p v-else class="customer-state">{{ loading ? '正在读取单楼宇小时数据…' : '当前能耗窗口没有可绘制数据' }}</p>
+        <p v-else class="customer-state">{{ energyLoading ? '正在读取单楼宇小时数据…' : '当前能耗窗口没有可绘制数据' }}</p>
         <details class="energy-analysis__basis" data-analysis-basis>
           <summary>查看数据依据与缺失说明</summary>
           <dl>
@@ -514,7 +529,7 @@ watch(
 
       <section id="related-devices" class="customer-card energy-analysis__table-card">
         <header><div><h2>相关设备与计量点</h2><p>{{ context.buildingId }} · {{ context.buildingName }} · 合法关联来自告警、设备快照与能耗证据</p></div></header>
-        <div v-if="errors.evidence" class="energy-analysis__inline-error">{{ errors.evidence }} <button type="button" :disabled="loading" @click="refresh"><Refresh aria-hidden="true" /> 重试</button></div>
+        <div v-if="errors.evidence" class="energy-analysis__inline-error">{{ errors.evidence }} <button type="button" :disabled="evidenceLoading" @click="refresh"><Refresh aria-hidden="true" /> 重试</button></div>
         <ul v-if="evidenceNotices.length" class="energy-analysis__availability" data-evidence-availability role="status">
           <li v-for="notice in evidenceNotices" :key="notice">{{ notice }}</li>
         </ul>
@@ -523,14 +538,14 @@ watch(
             <thead><tr><th>设备/计量点</th><th>类型</th><th>位置</th><th>状态</th><th>可用读数/关联</th><th>观测时间</th></tr></thead>
             <tbody><tr v-for="item in relatedDevices" :key="item.id"><td>{{ item.id }}</td><td>{{ item.kind }}</td><td>{{ context.buildingName }}</td><td>{{ item.status }}</td><td>{{ item.reading }}</td><td>{{ formatTime(item.observedAt) }}</td></tr></tbody>
           </table>
-          <p v-else class="customer-state">{{ loading ? '正在读取相关设备…' : relatedDevicesEmptyText }}</p>
+          <p v-else class="customer-state">{{ evidenceLoading ? '正在读取相关设备…' : relatedDevicesEmptyText }}</p>
         </div>
       </section>
 
       <section id="related-records" class="customer-card energy-analysis__records">
         <header><div><h2>相关记录</h2><p>仅展示客户可读的业务依据，不展示内部技术执行细节。</p></div></header>
         <div v-for="record in relatedRecords" :key="`${record.id}:${record.at}`"><strong>{{ record.id }}</strong><span>{{ record.label }}</span><time>{{ formatTime(record.at) }}</time></div>
-        <p v-if="!loading && !relatedRecords.length" class="customer-state is-compact">{{ relatedRecordsEmptyText }}</p>
+        <p v-if="!evidenceLoading && !relatedRecords.length" class="customer-state is-compact">{{ relatedRecordsEmptyText }}</p>
       </section>
     </template>
   </main>

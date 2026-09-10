@@ -17,6 +17,7 @@ defineEmits<{
 }>()
 
 const activePage = ref<CustomerPage>('overview')
+const latestOverviewContext = ref<CustomerAnalysisContext | null>(null)
 const analysisContext = ref<CustomerAnalysisContext | null>(null)
 const analysisInstanceKey = computed(() => {
   const context = analysisContext.value
@@ -26,6 +27,9 @@ const analysisInstanceKey = computed(() => {
 })
 
 async function navigate(page: CustomerPage): Promise<void> {
+  if (page === 'analysis' && !analysisContext.value) {
+    analysisContext.value = latestOverviewContext.value
+  }
   activePage.value = page
   await nextTick()
   const main = document.getElementById(page === 'analysis' ? 'customer-analysis-main' : 'customer-overview-main')
@@ -34,7 +38,7 @@ async function navigate(page: CustomerPage): Promise<void> {
 }
 
 function updateContext(context: CustomerAnalysisContext | null): void {
-  analysisContext.value = context
+  latestOverviewContext.value = context
 }
 
 function openAnalysis(context: CustomerAnalysisContext): void {

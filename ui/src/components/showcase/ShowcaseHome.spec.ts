@@ -62,18 +62,26 @@ describe('ShowcaseHome customer shell', () => {
       title: '运营中心能耗偏离基线',
       summary: { ...context.summary, buildingId: 'B3' },
     }
+    const refreshedContext = {
+      ...context,
+      energyWindow: {
+        ...context.energyWindow,
+        from: '2026-09-08T01:00:00Z',
+        to: '2026-09-09T01:00:00Z',
+      },
+    }
     const wrapper = mount(ShowcaseHome, {
       props: { active: true },
       global: {
         stubs: {
           ParkOverview: {
             emits: ['context-change', 'view-analysis'],
-            template: '<main data-park-overview><button data-open-analysis @click="$emit(\'view-analysis\', context)">查看 B2 分析</button><button data-open-other-analysis @click="$emit(\'view-analysis\', otherContext)">查看 B3 分析</button></main>',
-            setup: () => ({ context, otherContext }),
+            template: '<main data-park-overview><button data-open-analysis @click="$emit(\'view-analysis\', context)">查看 B2 分析</button><button data-open-other-analysis @click="$emit(\'view-analysis\', otherContext)">查看 B3 分析</button><button data-refresh-context @click="$emit(\'context-change\', refreshedContext)">刷新窗口</button></main>',
+            setup: () => ({ context, otherContext, refreshedContext }),
           },
           EnergyAnalysis: {
             props: ['context'],
-            template: '<main data-energy-analysis><span>{{ context?.buildingName }}</span></main>',
+            template: '<main data-energy-analysis><span>{{ context?.buildingName }}</span><time>{{ context?.energyWindow.to }}</time></main>',
           },
         },
       },
@@ -90,6 +98,12 @@ describe('ShowcaseHome customer shell', () => {
     expect(wrapper.findAll('.customer-shell__topbar')).toHaveLength(1)
     expect(wrapper.emitted('enter-workbench')).toBeUndefined()
     const analysisPage = wrapper.get('[data-energy-analysis]').element
+
+    await wrapper.get('[data-refresh-context]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-energy-analysis]').element).toBe(analysisPage)
+    expect(wrapper.get('[data-energy-analysis]').text()).toContain(context.energyWindow.to)
+    expect(wrapper.get('[data-energy-analysis]').text()).not.toContain(refreshedContext.energyWindow.to)
 
     await wrapper.get('[data-analysis-shell-back]').trigger('click')
     expect(wrapper.get('[data-customer-nav="overview"]').attributes('aria-current')).toBe('page')

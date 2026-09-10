@@ -183,6 +183,37 @@ describe('EnergyAnalysis', () => {
     expect(wrapper.text()).not.toContain('正在读取单楼宇小时数据')
   })
 
+  it('renders each data domain as it settles without waiting for slower requests', async () => {
+    const slowBaseline = deferred<EnergyTimeSeriesResponse>()
+    const slowEvidence = deferred<AnomalyEvidence>()
+    vi.mocked(getEnergyTimeSeries).mockImplementation(async (_role, filters) => {
+      if (filters.metric === 'energy_baseline_kwh') return slowBaseline.promise
+      return series('energy_kwh', [100, 110])
+    })
+    vi.mocked(getAnomalyEvidence).mockReturnValue(slowEvidence.promise)
+
+    const wrapper = mount(EnergyAnalysis, {
+      props: { context, active: true, analysisPollIntervalMs: 60_000 },
+      global: { stubs: { EnergyAnalysisChart: chartStub } },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-analysis-chart]').attributes('data-points')).toContain('"actual":100')
+    expect(wrapper.text()).toContain('210 kWh')
+    expect(wrapper.text()).toContain('正在读取单楼宇小时数据')
+    expect(wrapper.text()).toContain('正在读取相关设备')
+
+    slowBaseline.resolve(series('energy_baseline_kwh', [80, 90]))
+    await flushPromises()
+    expect(wrapper.text()).toContain('完整窗口偏差')
+    expect(wrapper.text()).not.toContain('正在读取单楼宇小时数据')
+    expect(wrapper.text()).toContain('正在读取相关设备')
+
+    slowEvidence.resolve(anomalyEvidence())
+    await flushPromises()
+    expect(wrapper.text()).toContain('MTR-B1-1')
+  })
+
   it('shows an explicit unavailable state instead of manufacturing empty-window values', async () => {
     vi.mocked(getEnergyTimeSeries).mockImplementation(async (_role, filters) => series(filters.metric!, [], 'UNAVAILABLE'))
     vi.mocked(getAnomalyEvidence).mockResolvedValue({
