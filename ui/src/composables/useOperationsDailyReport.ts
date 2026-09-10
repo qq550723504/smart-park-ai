@@ -99,6 +99,7 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
     historyLoading.value = false
     error.value = ''
     let createAccepted = false
+    let submittedCreation: typeof pendingCreation = null
     try {
       const request = requested ?? defaultRequest()
       const fingerprint = requestIdentity ?? (requested ? JSON.stringify(request) : 'default:5-day-window')
@@ -111,8 +112,9 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
           accepted: false,
         }
       }
-      const accepted = await startOperationsDailyReport(role, pendingCreation.request, pendingCreation.key)
-      pendingCreation.accepted = true
+      submittedCreation = pendingCreation
+      const accepted = await startOperationsDailyReport(role, submittedCreation.request, submittedCreation.key)
+      if (pendingCreation === submittedCreation) submittedCreation.accepted = true
       createAccepted = true
       if (current !== generation) return
       runId.value = accepted.runId
@@ -122,7 +124,7 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
         if (current !== generation) return
         report.value = detail
         if (detail.status !== 'REQUESTED' && detail.status !== 'GENERATING') {
-          pendingCreation = null
+          if (pendingCreation === submittedCreation) pendingCreation = null
           await loadHistory(role)
           return
         }
@@ -131,7 +133,7 @@ export function useOperationsDailyReport(options: { trace?: ExecutionTraceLike; 
       throw new Error('运营日报超时，可稍后从报告历史查看最终状态')
     } catch (cause) {
       if (current === generation) {
-        if (!createAccepted && cause instanceof OperationsReportHttpError && isDefinitiveCreateRejection(cause)) {
+        if (!createAccepted && pendingCreation === submittedCreation && cause instanceof OperationsReportHttpError && isDefinitiveCreateRejection(cause)) {
           pendingCreation = null
         }
         error.value = cause instanceof Error ? cause.message : String(cause)

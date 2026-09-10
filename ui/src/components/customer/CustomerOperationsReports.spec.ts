@@ -182,6 +182,45 @@ describe('CustomerOperationsReports', () => {
     expect(posts[0]![1]?.body).toBe(posts[1]![1]?.body)
   })
 
+  it('binds a late acceptance to its submitted attempt instead of a replacement', async () => {
+    const postResolvers: Array<(response: Response) => void> = []
+    let historyReads = 0
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (init?.method === 'POST') {
+        return new Promise<Response>((resolve) => { postResolvers.push(resolve) })
+      }
+      if (url.includes('?')) {
+        historyReads += 1
+        return Promise.resolve(new Response(JSON.stringify(page(historyReads === 1 ? [] : [summary])), { status: 200 }))
+      }
+      return Promise.resolve(new Response(JSON.stringify(detail), { status: 200 }))
+    }))
+    const wrapper = mountReports()
+    await flushPromises()
+
+    await wrapper.get('[data-generate-report]').trigger('click')
+    await wrapper.setProps({ demoRole: 'ADMIN' })
+    await flushPromises()
+    await wrapper.get('[data-generate-report]').trigger('click')
+
+    postResolvers[0]!(new Response(JSON.stringify({ reportId: 'old-report', runId: 'old-run', statusUrl: '/api/operations-reports/old-report' }), { status: 202 }))
+    await flushPromises()
+    await wrapper.get('.customer-reports__history-list > button').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-generate-report]').trigger('click')
+
+    const posts = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')
+    expect(posts).toHaveLength(3)
+    expect((posts[1]![1]?.headers as Record<string, string>)['Idempotency-Key'])
+      .toBe((posts[2]![1]?.headers as Record<string, string>)['Idempotency-Key'])
+    expect(posts[1]![1]?.body).toBe(posts[2]![1]?.body)
+
+    postResolvers[1]!(new Response(JSON.stringify({ reportId: 'report-1', runId: 'run-1', statusUrl: '/api/operations-reports/report-1' }), { status: 202 }))
+    postResolvers[2]!(new Response(JSON.stringify({ reportId: 'report-1', runId: 'run-1', statusUrl: '/api/operations-reports/report-1' }), { status: 202 }))
+    await flushPromises()
+  })
+
   it('keeps a history refresh failure visible without discarding the selected receipt', async () => {
     let historyReads = 0
     let detailReads = 0
