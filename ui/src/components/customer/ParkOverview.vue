@@ -20,7 +20,7 @@ import {
   customerBuildingName,
   type CustomerAnalysisContext,
 } from '../../types/customer'
-import type { EnergyTimeSeriesResponse } from '../../types/energyTimeSeries'
+import type { EnergyTimeSeriesResponse, EnergyTimeSeriesStatus } from '../../types/energyTimeSeries'
 import type { AnomalyBuildingSummary, AnomalyEvidence, AnomalyOverview } from '../../types/operationsAnomaly'
 import type { OperationsMetrics } from '../../types/workflow'
 import { alertCategoryLabel } from '../../utils/labels'
@@ -86,6 +86,7 @@ const customerStatusLabels: Record<string, string> = {
   ACTIVE: '运行中',
   INACTIVE: '未运行',
 }
+const energyTimeSeriesStatuses = new Set<EnergyTimeSeriesStatus>(['AVAILABLE', 'PARTIAL', 'UNAVAILABLE'])
 
 function buildingName(id: string): string {
   return customerBuildingName(id)
@@ -323,13 +324,55 @@ const energyTrendPeriods = computed(() => {
 })
 const energyTrend = computed(() => energyTrendPeriods.value.current)
 const previousEnergyTrend = computed(() => energyTrendPeriods.value.previous)
+const energyPeriodStatuses = computed<{ current: EnergyTimeSeriesStatus, previous: EnergyTimeSeriesStatus }>(() => {
+  const currentWindow = currentEnergyWindow.value
+  const currentEnergy = energy.value
+  if (!currentWindow || !currentEnergy?.series.length) {
+    return { current: 'UNAVAILABLE', previous: 'UNAVAILABLE' }
+  }
+  const currentFrom = Date.parse(currentWindow.from)
+  const currentTo = Date.parse(currentWindow.to)
+  const previousFrom = currentFrom - 24 * 60 * 60 * 1000
+  const inWindow = (timestamp: string, from: number, to: number) => {
+    const value = Date.parse(timestamp)
+    return value >= from && value < to
+  }
+  const observations = currentEnergy.series.flatMap((series) => series.points)
+  const missing = currentEnergy.series.flatMap((series) => series.missingTimestamps)
+  const responsePartialWithoutLocatedGaps = currentEnergy.status === 'PARTIAL' && missing.length === 0
+  const statusFor = (from: number, to: number): EnergyTimeSeriesStatus => {
+    const hasObservation = observations.some((point) => inWindow(point.timestamp, from, to))
+    if (!hasObservation) return 'UNAVAILABLE'
+    const hasMissing = missing.some((timestamp) => inWindow(timestamp, from, to))
+    return hasMissing || responsePartialWithoutLocatedGaps ? 'PARTIAL' : 'AVAILABLE'
+  }
+  return {
+    current: statusFor(currentFrom, currentTo),
+    previous: statusFor(previousFrom, currentFrom),
+  }
+})
+const currentEnergyStatus = computed(() => energyPeriodStatuses.value.current)
+const hasCurrentEnergyObservations = computed(() => energyTrend.value.some((item) => item.value != null))
 const hasPreviousEnergyObservations = computed(() => previousEnergyTrend.value.some((item) => item.value != null))
-const energyTrendSubtitle = computed(() => hasPreviousEnergyObservations.value
-  ? '近 24 小时 / 前 24 小时 · 实际观测'
-  : '近 24 小时 · 前一周期暂无观测')
-const energyTrendLabel = computed(() => hasPreviousEnergyObservations.value
-  ? '园区近二十四小时与前二十四小时实际能耗对比，缺失时段保留断点'
-  : '园区近二十四小时实际能耗趋势，前二十四小时暂无可用观测，缺失时段保留断点')
+const hasEnergyTrendObservations = computed(() => hasCurrentEnergyObservations.value || hasPreviousEnergyObservations.value)
+const energyTrendSubtitle = computed(() => {
+  if (hasCurrentEnergyObservations.value && hasPreviousEnergyObservations.value) return '近 24 小时 / 前 24 小时 · 实际观测'
+  if (hasCurrentEnergyObservations.value) return '近 24 小时 · 前一周期暂无观测'
+  if (hasPreviousEnergyObservations.value) return '前 24 小时 · 当前周期暂无观测'
+  return '近 24 小时与前 24 小时 · 暂无观测'
+})
+const energyTrendLabel = computed(() => {
+  if (hasCurrentEnergyObservations.value && hasPreviousEnergyObservations.value) {
+    return '园区近二十四小时与前二十四小时实际能耗对比，缺失时段保留断点'
+  }
+  if (hasCurrentEnergyObservations.value) {
+    return '园区近二十四小时实际能耗趋势，前二十四小时暂无可用观测，缺失时段保留断点'
+  }
+  if (hasPreviousEnergyObservations.value) {
+    return '园区前二十四小时实际能耗趋势，当前二十四小时暂无可用观测，缺失时段保留断点'
+  }
+  return '园区近二十四小时与前二十四小时均暂无可用能耗观测'
+})
 const energyTotal = computed(() => {
   const currentWindow = currentEnergyWindow.value
   const currentEnergy = energy.value
@@ -427,7 +470,16 @@ const evidenceAvailabilityMessage = computed(() => {
 const energyStatusText = computed(() => {
   if (energyLoading.value && !energy.value) return '读取中'
   if (errors.value.energy) return '暂不可用'
-  return customerStatusLabel(energy.value?.status)
+  if (energy.value && !energyTimeSeriesStatuses.has(energy.value.status)) return customerStatusLabel(energy.value.status)
+  return customerStatusLabel(currentEnergyStatus.value)
+})
+const energyKpiHelperText = computed(() => {
+  if (energyLoading.value) return '正在读取能耗观测…'
+  if (errors.value.energy) return errors.value.energy
+  if (energy.value && !energyTimeSeriesStatuses.has(energy.value.status)) return '能耗数据状态未知'
+  if (currentEnergyStatus.value === 'UNAVAILABLE') return '当前周期暂无能耗观测'
+  if (currentEnergyStatus.value === 'PARTIAL') return '部分观测，缺口未补零'
+  return '各楼宇小时观测汇总'
 })
 
 function attentionTitle(building: AnomalyBuildingSummary): string {
@@ -524,7 +576,7 @@ defineExpose({ resetForDemo })
     <section class="park-overview__kpis" aria-label="园区关键指标">
       <article class="customer-card customer-kpi" data-kpi="energy">
         <span class="customer-kpi__icon is-green"><TrendCharts aria-hidden="true" /></span>
-        <div><p>最近 24 小时园区能耗</p><strong>{{ formatNumber(energyTotal) }} <small>{{ energy?.unit ?? 'kWh' }}</small></strong><span>{{ energyLoading ? '正在读取能耗观测…' : energy?.status === 'PARTIAL' ? '部分观测，缺口未补零' : errors.energy || '各楼宇小时观测汇总' }}</span></div>
+        <div><p>最近 24 小时园区能耗</p><strong>{{ formatNumber(energyTotal) }} <small>{{ energy?.unit ?? 'kWh' }}</small></strong><span>{{ energyKpiHelperText }}</span></div>
       </article>
       <article class="customer-card customer-kpi" data-kpi="buildings">
         <span class="customer-kpi__icon is-blue"><OfficeBuilding aria-hidden="true" /></span>
@@ -651,8 +703,8 @@ defineExpose({ resetForDemo })
     <section class="park-overview__bottom-grid">
       <article class="customer-card customer-chart-card is-wide">
         <header><div><h2>园区能耗趋势</h2><small>{{ energyTrendSubtitle }}</small></div><span data-energy-status>{{ energyStatusText }}</span></header>
-        <CustomerOverviewChart v-if="energyTrend.some((item) => item.value != null)" kind="line" :data="energyTrend" :comparison-data="previousEnergyTrend" :unit="energy?.unit" :label="energyTrendLabel" />
-        <p v-else class="customer-state">{{ energyLoading ? '正在读取能耗观测…' : errors.energy || '当前窗口暂无可绘制的能耗观测' }}</p>
+        <CustomerOverviewChart v-if="hasEnergyTrendObservations" kind="line" :data="energyTrend" :comparison-data="previousEnergyTrend" :unit="energy?.unit" :label="energyTrendLabel" />
+        <p v-else class="customer-state">{{ energyLoading ? '正在读取能耗观测…' : errors.energy || '当前与前一周期暂无可绘制的能耗观测' }}</p>
       </article>
       <article class="customer-card customer-chart-card">
         <header><div><h2>能耗分布</h2><small>按楼宇已观测值</small></div></header>

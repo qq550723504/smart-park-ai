@@ -21,7 +21,9 @@ let observer: ResizeObserver | null = null
 
 const option = computed<echarts.EChartsOption>(() => {
   if (props.kind === 'line') {
+    const hasCurrent = props.data.some((item) => item.value != null)
     const hasComparison = props.comparisonData?.some((item) => item.value != null) ?? false
+    const categories = props.data.length > 0 ? props.data : props.comparisonData ?? []
     return {
       animation: false,
       grid: { left: 42, right: 14, top: hasComparison ? 34 : 18, bottom: 28 },
@@ -39,7 +41,7 @@ const option = computed<echarts.EChartsOption>(() => {
       xAxis: {
         type: 'category',
         boundaryGap: false,
-        data: props.data.map((item) => item.name),
+        data: categories.map((item) => item.name),
         axisLine: { lineStyle: { color: '#dce8f5' } },
         axisLabel: { color: '#7890ad', fontSize: 10 },
       },
@@ -49,9 +51,9 @@ const option = computed<echarts.EChartsOption>(() => {
         splitLine: { lineStyle: { color: '#e8f0f8', type: 'dashed' } },
       },
       series: [
-        {
+        ...(hasCurrent ? [{
           name: '近 24 小时',
-          type: 'line',
+          type: 'line' as const,
           smooth: 0.28,
           connectNulls: false,
           showSymbol: false,
@@ -59,7 +61,7 @@ const option = computed<echarts.EChartsOption>(() => {
           lineStyle: { color: '#4386f5', width: 2.5 },
           itemStyle: { color: '#4386f5' },
           areaStyle: { color: 'rgba(67, 134, 245, .10)' },
-        },
+        }] : []),
         ...(hasComparison ? [{
           name: '前 24 小时',
           type: 'line' as const,
@@ -118,7 +120,7 @@ const option = computed<echarts.EChartsOption>(() => {
 })
 
 function render(): void {
-  if (!root.value || props.data.length === 0) return
+  if (!root.value || (props.data.length === 0 && !props.comparisonData?.length)) return
   chart ??= echarts.init(root.value)
   chart.setOption(option.value, true)
 }

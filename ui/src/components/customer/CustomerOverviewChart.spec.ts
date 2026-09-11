@@ -34,6 +34,24 @@ describe('CustomerOverviewChart', () => {
     ])
   })
 
+  it('renders only the previous series when the current period has no drawable observations', () => {
+    mount(CustomerOverviewChart, {
+      props: {
+        kind: 'line',
+        data: [{ name: '08:00', value: null }, { name: '09:00', value: null }],
+        comparisonData: [{ name: '08:00', value: 100 }, { name: '09:00', value: 130 }],
+        unit: 'kWh',
+        label: '当前周期暂无观测，展示前期基线',
+      },
+    })
+
+    const option = chart.setOption.mock.calls.at(-1)?.[0]
+    expect(option.legend).toBeTruthy()
+    expect(option.series).toMatchObject([
+      { name: '前 24 小时', data: [100, 130] },
+    ])
+  })
+
   it('shows the real donut total and derives legend percentages from the same values', () => {
     mount(CustomerOverviewChart, {
       props: {

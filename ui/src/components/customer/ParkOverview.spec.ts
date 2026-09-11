@@ -760,6 +760,48 @@ describe('ParkOverview', () => {
     expect(line.attributes('data-chart-label')).toContain('前二十四小时暂无可用观测')
   })
 
+  it('derives the current KPI completeness independently from a partial comparison period', async () => {
+    vi.mocked(getEnergyTimeSeries).mockResolvedValue({
+      ...energy,
+      window: { from: '2026-09-07T00:00:00Z', to: '2026-09-09T00:00:00Z', granularity: 'HOUR' },
+      status: 'PARTIAL',
+      series: [{
+        buildingId: 'B1',
+        points: [{ timestamp: '2026-09-08T22:00:00Z', value: 10 }],
+        missingTimestamps: ['2026-09-07T22:00:00Z'],
+      }],
+    })
+
+    const wrapper = await mountLoaded()
+
+    expect(wrapper.get('[data-kpi="energy"]').text()).toContain('各楼宇小时观测汇总')
+    expect(wrapper.get('[data-kpi="energy"]').text()).not.toContain('部分观测')
+    expect(wrapper.get('[data-energy-status]').text()).toBe('数据完整')
+  })
+
+  it('keeps the previous-period baseline visible when the current period has no observations', async () => {
+    vi.mocked(getEnergyTimeSeries).mockResolvedValue({
+      ...energy,
+      window: { from: '2026-09-07T00:00:00Z', to: '2026-09-09T00:00:00Z', granularity: 'HOUR' },
+      status: 'PARTIAL',
+      series: [{
+        buildingId: 'B1',
+        points: [{ timestamp: '2026-09-07T22:00:00Z', value: 5 }],
+        missingTimestamps: ['2026-09-08T22:00:00Z'],
+      }],
+    })
+
+    const wrapper = await mountLoaded()
+    const line = wrapper.get('[data-chart-kind="line"]')
+
+    expect(line.attributes('data-chart-values')).not.toContain('5')
+    expect(line.attributes('data-chart-comparison-values')).toContain('5')
+    expect(line.attributes('data-chart-label')).toContain('当前二十四小时暂无可用观测')
+    expect(wrapper.text()).toContain('前 24 小时 · 当前周期暂无观测')
+    expect(wrapper.get('[data-kpi="energy"]').text()).toContain('当前周期暂无能耗观测')
+    expect(wrapper.get('[data-energy-status]').text()).toBe('暂不可用')
+  })
+
   it('shows independent failure states and never substitutes a success fixture', async () => {
     vi.mocked(getAnomalyOverview).mockRejectedValue(new Error('database password SQL trace'))
     vi.mocked(getOperationsMetrics).mockRejectedValue(new Error('secret'))
