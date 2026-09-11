@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { BellFilled, Checked, DataLine, Document, OfficeBuilding, Refresh, Service, TrendCharts, WarningFilled } from '@element-plus/icons-vue'
-import parkAerial from '../../assets/customer/park-aerial-daylight.png'
-import parkAerial720 from '../../assets/customer/park-aerial-daylight-720.webp'
-import parkAerial1200 from '../../assets/customer/park-aerial-daylight-1200.webp'
-import parkAerial1672 from '../../assets/customer/park-aerial-daylight-1672.webp'
+import { ArrowRight, BellFilled, Checked, DataLine, Document, OfficeBuilding, Refresh, Service, TrendCharts, WarningFilled } from '@element-plus/icons-vue'
+import parkAerial from '../../assets/customer/park-aerial-reference-v2.png'
+import parkAerial720 from '../../assets/customer/park-aerial-reference-v2-720.webp'
+import parkAerial1200 from '../../assets/customer/park-aerial-reference-v2-1200.webp'
+import parkAerial1672 from '../../assets/customer/park-aerial-reference-v2-1672.webp'
 import ecoOperations from '../../assets/customer/eco-operations.png'
 import ecoOperations480 from '../../assets/customer/eco-operations-480.webp'
 import ecoOperations960 from '../../assets/customer/eco-operations-960.webp'
 import ecoOperations1600 from '../../assets/customer/eco-operations-1600.webp'
+import reportDocument from '../../assets/customer/report-document-v2.png'
 import { getAnomalyEvidence, getAnomalyOverview } from '../../services/operationsAnomalyApi'
 import { getEnergyTimeSeries } from '../../services/energyTimeSeriesApi'
 import { getOperationsMetrics, listCollaborationWorkItems } from '../../services/workflowApi'
@@ -19,7 +20,7 @@ import {
   customerBuildingName,
   type CustomerAnalysisContext,
 } from '../../types/customer'
-import type { EnergyTimeSeriesResponse } from '../../types/energyTimeSeries'
+import type { EnergyTimeSeriesResponse, EnergyTimeSeriesStatus } from '../../types/energyTimeSeries'
 import type { AnomalyBuildingSummary, AnomalyEvidence, AnomalyOverview } from '../../types/operationsAnomaly'
 import type { OperationsMetrics } from '../../types/workflow'
 import { alertCategoryLabel } from '../../utils/labels'
@@ -85,6 +86,7 @@ const customerStatusLabels: Record<string, string> = {
   ACTIVE: '运行中',
   INACTIVE: '未运行',
 }
+const energyTimeSeriesStatuses = new Set<EnergyTimeSeriesStatus>(['AVAILABLE', 'PARTIAL', 'UNAVAILABLE'])
 
 function buildingName(id: string): string {
   return customerBuildingName(id)
@@ -227,11 +229,12 @@ async function refresh(): Promise<void> {
     if (ids.length > 0) {
       const window = alignedRecent24Hours(overview.value.window)
       if (window) {
+        const comparisonFrom = new Date(Date.parse(window.from) - 24 * 60 * 60 * 1000).toISOString()
         energyLoading.value = true
         try {
           const nextEnergy = await getEnergyTimeSeries('VIEWER', {
             buildingIds: ids,
-            from: window.from,
+            from: comparisonFrom,
             to: window.to,
             granularity: 'HOUR',
           })
@@ -284,9 +287,106 @@ async function resetForDemo(): Promise<void> {
   await refresh()
 }
 
-const energyTotal = computed(() => energy.value?.status === 'UNAVAILABLE'
-  ? null
-  : energy.value?.series.flatMap((series) => series.points).reduce((sum, point) => sum + point.value, 0) ?? null)
+const currentEnergyWindow = computed(() => overview.value ? alignedRecent24Hours(overview.value.window) : null)
+const energyTrendPeriods = computed(() => {
+  const currentWindow = currentEnergyWindow.value
+  const currentEnergy = energy.value
+  if (!currentWindow || !currentEnergy?.series.length) return { current: [], previous: [] }
+  const hour = 60 * 60 * 1000
+  const currentStart = Date.parse(currentWindow.from)
+  const seriesValues = currentEnergy.series.map((series) => new Map(
+    series.points.map((point) => [Date.parse(point.timestamp), point.value]),
+  ))
+  const missingValues = currentEnergy.series.map((series) => new Set(
+    series.missingTimestamps.map((timestamp) => Date.parse(timestamp)),
+  ))
+  const aggregateAt = (timestamp: number): number | null => {
+    const values = seriesValues.map((valuesByTimestamp, index) =>
+      missingValues[index]!.has(timestamp) ? null : valuesByTimestamp.get(timestamp) ?? null)
+    return values.every((value) => value != null)
+      ? values.reduce((sum, value) => sum + (value ?? 0), 0)
+      : null
+  }
+  const current: CustomerChartDatum[] = []
+  const previous: CustomerChartDatum[] = []
+  for (let index = 0; index < 24; index++) {
+    const currentTimestamp = currentStart + index * hour
+    current.push({
+      name: formatTime(new Date(currentTimestamp).toISOString(), { hour: '2-digit', minute: '2-digit' }),
+      value: aggregateAt(currentTimestamp),
+    })
+    previous.push({
+      name: formatTime(new Date(currentTimestamp).toISOString(), { hour: '2-digit', minute: '2-digit' }),
+      value: aggregateAt(currentTimestamp - 24 * hour),
+    })
+  }
+  return { current, previous }
+})
+const energyTrend = computed(() => energyTrendPeriods.value.current)
+const previousEnergyTrend = computed(() => energyTrendPeriods.value.previous)
+const energyPeriodStatuses = computed<{ current: EnergyTimeSeriesStatus, previous: EnergyTimeSeriesStatus }>(() => {
+  const currentWindow = currentEnergyWindow.value
+  const currentEnergy = energy.value
+  if (!currentWindow || !currentEnergy?.series.length) {
+    return { current: 'UNAVAILABLE', previous: 'UNAVAILABLE' }
+  }
+  const currentFrom = Date.parse(currentWindow.from)
+  const currentTo = Date.parse(currentWindow.to)
+  const previousFrom = currentFrom - 24 * 60 * 60 * 1000
+  const inWindow = (timestamp: string, from: number, to: number) => {
+    const value = Date.parse(timestamp)
+    return value >= from && value < to
+  }
+  const observations = currentEnergy.series.flatMap((series) => series.points)
+  const missing = currentEnergy.series.flatMap((series) => series.missingTimestamps)
+  const responsePartialWithoutLocatedGaps = currentEnergy.status === 'PARTIAL' && missing.length === 0
+  const statusFor = (from: number, to: number): EnergyTimeSeriesStatus => {
+    const hasObservation = observations.some((point) => inWindow(point.timestamp, from, to))
+    if (!hasObservation) return 'UNAVAILABLE'
+    const hasMissing = missing.some((timestamp) => inWindow(timestamp, from, to))
+    return hasMissing || responsePartialWithoutLocatedGaps ? 'PARTIAL' : 'AVAILABLE'
+  }
+  return {
+    current: statusFor(currentFrom, currentTo),
+    previous: statusFor(previousFrom, currentFrom),
+  }
+})
+const currentEnergyStatus = computed(() => energyPeriodStatuses.value.current)
+const hasCurrentEnergyObservations = computed(() => energyTrend.value.some((item) => item.value != null))
+const hasPreviousEnergyObservations = computed(() => previousEnergyTrend.value.some((item) => item.value != null))
+const hasEnergyTrendObservations = computed(() => hasCurrentEnergyObservations.value || hasPreviousEnergyObservations.value)
+const energyTrendSubtitle = computed(() => {
+  if (hasCurrentEnergyObservations.value && hasPreviousEnergyObservations.value) return '近 24 小时 / 前 24 小时 · 实际观测'
+  if (hasCurrentEnergyObservations.value) return '近 24 小时 · 前一周期暂无观测'
+  if (hasPreviousEnergyObservations.value) return '前 24 小时 · 当前周期暂无观测'
+  return '近 24 小时与前 24 小时 · 暂无观测'
+})
+const energyTrendLabel = computed(() => {
+  if (hasCurrentEnergyObservations.value && hasPreviousEnergyObservations.value) {
+    return '园区近二十四小时与前二十四小时实际能耗对比，缺失时段保留断点'
+  }
+  if (hasCurrentEnergyObservations.value) {
+    return '园区近二十四小时实际能耗趋势，前二十四小时暂无可用观测，缺失时段保留断点'
+  }
+  if (hasPreviousEnergyObservations.value) {
+    return '园区前二十四小时实际能耗趋势，当前二十四小时暂无可用观测，缺失时段保留断点'
+  }
+  return '园区近二十四小时与前二十四小时均暂无可用能耗观测'
+})
+const energyTotal = computed(() => {
+  const currentWindow = currentEnergyWindow.value
+  const currentEnergy = energy.value
+  if (!currentWindow || !currentEnergy || currentEnergy.status === 'UNAVAILABLE') return null
+  const from = Date.parse(currentWindow.from)
+  const to = Date.parse(currentWindow.to)
+  const values = currentEnergy.series.flatMap((series) => series.points
+    .filter((point) => {
+      const timestamp = Date.parse(point.timestamp)
+      return timestamp >= from && timestamp < to
+    })
+    .map((point) => point.value))
+  return values.length ? values.reduce((sum, value) => sum + value, 0) : null
+})
 const openAlertCount = computed(() => domainUsable('alerts')
   ? overview.value?.breakdowns.statuses?.find((item) => item.key === 'OPEN')?.count ?? 0
   : null)
@@ -340,30 +440,15 @@ const visibleBuildings = computed(() => {
     return { id, summary: rows.get(id) ?? null, ...definition }
   })
 })
-const energyTrend = computed<CustomerChartDatum[]>(() => {
-  if (!energy.value?.series.length) return []
-  const timelines = new Map<string, Array<number | null>>()
-  energy.value.series.forEach((series, seriesIndex) => {
-    series.points.forEach((point) => {
-      const values = timelines.get(point.timestamp) ?? Array<number | null>(energy.value!.series.length).fill(null)
-      values[seriesIndex] = point.value
-      timelines.set(point.timestamp, values)
-    })
-    series.missingTimestamps.forEach((timestamp) => {
-      const values = timelines.get(timestamp) ?? Array<number | null>(energy.value!.series.length).fill(null)
-      timelines.set(timestamp, values)
-    })
-  })
-  return [...timelines.entries()]
-    .sort(([left], [right]) => Date.parse(left) - Date.parse(right))
-    .map(([timestamp, values]) => ({
-      name: formatTime(timestamp, { hour: '2-digit', minute: '2-digit' }),
-      value: values.every((value) => value != null) ? values.reduce((sum, value) => sum + (value ?? 0), 0) : null,
-    }))
-})
 const energyDistribution = computed<CustomerChartDatum[]>(() => energy.value?.series.map((series) => ({
   name: buildingName(series.buildingId),
-  value: series.points.reduce((sum, point) => sum + point.value, 0),
+  value: series.points
+    .filter((point) => {
+      const window = currentEnergyWindow.value
+      const timestamp = Date.parse(point.timestamp)
+      return window && timestamp >= Date.parse(window.from) && timestamp < Date.parse(window.to)
+    })
+    .reduce((sum, point) => sum + point.value, 0),
 })) ?? [])
 const eventDistribution = computed<CustomerChartDatum[]>(() => domainUsable('alerts')
   ? (overview.value?.breakdowns.categories ?? []).map((item) => ({ name: alertCategoryLabel(item.key), value: item.count }))
@@ -385,7 +470,16 @@ const evidenceAvailabilityMessage = computed(() => {
 const energyStatusText = computed(() => {
   if (energyLoading.value && !energy.value) return '读取中'
   if (errors.value.energy) return '暂不可用'
-  return customerStatusLabel(energy.value?.status)
+  if (energy.value && !energyTimeSeriesStatuses.has(energy.value.status)) return customerStatusLabel(energy.value.status)
+  return customerStatusLabel(currentEnergyStatus.value)
+})
+const energyKpiHelperText = computed(() => {
+  if (energyLoading.value) return '正在读取能耗观测…'
+  if (errors.value.energy) return errors.value.energy
+  if (energy.value && !energyTimeSeriesStatuses.has(energy.value.status)) return '能耗数据状态未知'
+  if (currentEnergyStatus.value === 'UNAVAILABLE') return '当前周期暂无能耗观测'
+  if (currentEnergyStatus.value === 'PARTIAL') return '部分观测，缺口未补零'
+  return '各楼宇小时观测汇总'
 })
 
 function attentionTitle(building: AnomalyBuildingSummary): string {
@@ -482,7 +576,7 @@ defineExpose({ resetForDemo })
     <section class="park-overview__kpis" aria-label="园区关键指标">
       <article class="customer-card customer-kpi" data-kpi="energy">
         <span class="customer-kpi__icon is-green"><TrendCharts aria-hidden="true" /></span>
-        <div><p>最近 24 小时园区能耗</p><strong>{{ formatNumber(energyTotal) }} <small>{{ energy?.unit ?? 'kWh' }}</small></strong><span>{{ energyLoading ? '正在读取能耗观测…' : energy?.status === 'PARTIAL' ? '部分观测，缺口未补零' : errors.energy || '各楼宇小时观测汇总' }}</span></div>
+        <div><p>最近 24 小时园区能耗</p><strong>{{ formatNumber(energyTotal) }} <small>{{ energy?.unit ?? 'kWh' }}</small></strong><span>{{ energyKpiHelperText }}</span></div>
       </article>
       <article class="customer-card customer-kpi" data-kpi="buildings">
         <span class="customer-kpi__icon is-blue"><OfficeBuilding aria-hidden="true" /></span>
@@ -507,6 +601,7 @@ defineExpose({ resetForDemo })
         </picture>
         <strong>绿色低碳　智慧运营</strong>
         <span>共建更美好的产业社区</span>
+        <button type="button" aria-label="查看运营报告" @click="$emit('view-reports')"><ArrowRight aria-hidden="true" /></button>
       </article>
     </section>
 
@@ -588,24 +683,28 @@ defineExpose({ resetForDemo })
           <header><h2><Checked aria-hidden="true" /> 我的待办</h2><small>只读队列</small></header>
           <p v-if="errors.workItems" class="customer-state is-compact">{{ errors.workItems }}</p>
           <p v-else-if="workItemsLoading" class="customer-state is-compact">正在读取待办…</p>
-          <p v-else-if="workItems.length === 0" class="customer-state is-compact">当前队列暂无待办</p>
+          <div v-else-if="workItems.length === 0" class="customer-todos__empty">
+            <Checked aria-hidden="true" />
+            <strong>当前队列暂无待办</strong>
+            <span>报修转人工或告警进入审批后，将在这里显示</span>
+          </div>
           <div v-for="item in workItems" :key="item.id" class="customer-todos__item">
             <span></span><div><strong>{{ item.title }}</strong><small :data-work-item-status="item.status">{{ locationLabel(item) }} · {{ workItemStatusLabel(item.status) }}</small></div><time>{{ formatTime(item.slaDueAt ?? item.updatedAt, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }}</time>
           </div>
         </article>
         <article class="customer-report-promo">
-          <Document aria-hidden="true" />
-          <div><h2>运营简报入口</h2><p>查看真实历史快照，或显式生成新的运营日报。</p></div>
-          <button type="button" @click="$emit('view-reports')">查看报告</button>
+          <span class="customer-report-promo__icon"><Document aria-hidden="true" /></span>
+          <div><h2>生成运营简报</h2><p>基于园区最新观测生成可追溯报告，回顾运营亮点、问题与改进建议。</p><button type="button" @click="$emit('view-reports')">查看报告</button></div>
+          <img :src="reportDocument" alt="" aria-hidden="true" />
         </article>
       </aside>
     </section>
 
     <section class="park-overview__bottom-grid">
       <article class="customer-card customer-chart-card is-wide">
-        <header><div><h2>园区能耗趋势</h2><small>最近 24 小时 · 实际观测</small></div><span data-energy-status>{{ energyStatusText }}</span></header>
-        <CustomerOverviewChart v-if="energyTrend.length" kind="line" :data="energyTrend" :unit="energy?.unit" label="园区最近二十四小时实际能耗趋势，缺失时段保留断点" />
-        <p v-else class="customer-state">{{ energyLoading ? '正在读取能耗观测…' : errors.energy || '当前窗口暂无可绘制的能耗观测' }}</p>
+        <header><div><h2>园区能耗趋势</h2><small>{{ energyTrendSubtitle }}</small></div><span data-energy-status>{{ energyStatusText }}</span></header>
+        <CustomerOverviewChart v-if="hasEnergyTrendObservations" kind="line" :data="energyTrend" :comparison-data="previousEnergyTrend" :unit="energy?.unit" :label="energyTrendLabel" />
+        <p v-else class="customer-state">{{ energyLoading ? '正在读取能耗观测…' : errors.energy || '当前与前一周期暂无可绘制的能耗观测' }}</p>
       </article>
       <article class="customer-card customer-chart-card">
         <header><div><h2>能耗分布</h2><small>按楼宇已观测值</small></div></header>
