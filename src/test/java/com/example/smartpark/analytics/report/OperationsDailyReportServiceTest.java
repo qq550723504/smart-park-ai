@@ -9,6 +9,9 @@ import com.example.smartpark.execution.model.ExecutionScenario;
 import com.example.smartpark.execution.model.ExecutionStage;
 import com.example.smartpark.execution.model.ExecutionStatus;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -57,7 +60,8 @@ class OperationsDailyReportServiceTest {
         });
         assertThat(requests).allMatch(request -> request.timeWindow().equals(service.defaultRequest().timeWindow()));
         assertThat(historical.sections().get(0).rows().get(0)).containsExactly(100);
-        assertThat(service.download(report.reportId(), "OPERATOR").content()).contains("100").doesNotContain("200");
+        assertThat(pdfText(service.download(report.reportId(), "OPERATOR").content()))
+                .contains("100").doesNotContain("200");
         assertThat(calls).hasValue(3);
         assertThat(publisher.history(report.traceId())).extracting(event -> event.eventType())
                 .containsExactly(ExecutionEventType.RUN_STARTED,
@@ -282,7 +286,7 @@ class OperationsDailyReportServiceTest {
         assertThat(recovered.sections().get(0).rows().get(0)).containsExactly(100);
         assertThat(recovered.sections().subList(1, 3)).allMatch(section ->
                 "GENERATION_INTERRUPTED".equals(section.partialReason()));
-        assertThat(recovered.artifact().content()).contains("100").doesNotContain("200");
+        assertThat(pdfText(recovered.artifact().content())).contains("100").doesNotContain("200");
         assertThat(restartedPublisher.history(recovered.traceId())).last().satisfies(event -> {
             assertThat(event.eventType()).isEqualTo(ExecutionEventType.RUN_COMPLETED);
             assertThat(event.status().name()).isEqualTo("SUCCEEDED");
@@ -594,5 +598,13 @@ class OperationsDailyReportServiceTest {
                 "安全摘要", 1, false, 3, null, NOW.minusSeconds(1), NOW,
                 List.of("metric"), List.of(java.util.Collections.singletonList(value)),
                 TimeResolutionMetadata.defaultLookback(NOW.minusSeconds(3600), NOW));
+    }
+
+    private static String pdfText(byte[] content) {
+        try (PDDocument document = Loader.loadPDF(content)) {
+            return new PDFTextStripper().getText(document);
+        } catch (java.io.IOException failure) {
+            throw new IllegalStateException("unable to read generated PDF", failure);
+        }
     }
 }

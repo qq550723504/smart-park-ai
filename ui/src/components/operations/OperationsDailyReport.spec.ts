@@ -13,7 +13,7 @@ const summary = {
 
 const detail = {
   ...summary, requestedBy: 'demo-role:OPERATOR', role: 'OPERATOR', startedAt: summary.createdAt,
-  summary: '基于生成时证据的摘要', schemaVersion: 1, generationVersion: 'operations-daily-v2',
+  summary: '基于生成时证据的摘要', schemaVersion: 2, generationVersion: 'operations-daily-v3',
   sections: [{ sectionId: 'ENERGY_BASELINE', title: '能耗基线偏差', question: '过去5天各楼宇能耗基线偏差', status: 'COMPLETED',
     summary: '后端摘要', rowCount: 1, truncated: false, columns: ['building', 'value'], rows: [['B1', 100]],
     timeResolution: { status: 'PARSED', fromInclusive: '2026-09-04T01:00:00Z', toExclusive: '2026-09-09T01:00:00Z', source: 'EXPLICIT_USER_RANGE', explanation: '已按报告窗口查询', empty: false },

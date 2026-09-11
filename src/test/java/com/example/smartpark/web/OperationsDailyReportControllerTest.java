@@ -65,9 +65,9 @@ class OperationsDailyReportControllerTest {
                 .andExpect(jsonPath("$.artifact.content").doesNotExist());
         mockMvc.perform(get("/api/operations-reports/" + report.reportId() + "/download")
                         .header("X-Demo-Role", "OPERATOR"))
-                .andExpect(status().isOk()).andExpect(content().string("# report\n"))
-                .andExpect(header().string("Content-Type", "text/markdown;charset=UTF-8"))
-                .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.containsString("safe.md")))
+                .andExpect(status().isOk()).andExpect(content().bytes("%PDF-test".getBytes()))
+                .andExpect(header().string("Content-Type", "application/pdf"))
+                .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.containsString("safe.pdf")))
                 .andExpect(header().longValue("Content-Length", 9))
                 .andExpect(header().string("X-Checksum-SHA256", "abc123"));
         verify(auditTrail).record("OPERATOR", "OPERATIONS_REPORT_DOWNLOAD",
@@ -172,13 +172,14 @@ class OperationsDailyReportControllerTest {
     private static OperationsDailyReport report() {
         UUID reportId = UUID.randomUUID();
         UUID runId = UUID.randomUUID();
-        String content = "# report\n";
+        byte[] content = "%PDF-test".getBytes();
         OperationsDailyReport.Artifact artifact = new OperationsDailyReport.Artifact(UUID.randomUUID(),
-                "MARKDOWN", "safe.md", "text/markdown;charset=UTF-8", content.getBytes().length,
-                NOW, "abc123", "markdown-v1", content);
+                "PDF", "safe.pdf", "application/pdf", content.length,
+                NOW, "abc123", "pdfbox-v1", content);
         return new OperationsDailyReport(reportId, OperationsReportRequest.DAILY, "智慧园区运营日报",
                 OperationsReportStatus.COMPLETED, "demo-role:OPERATOR", "OPERATOR", NOW, NOW, NOW,
                 request().timeWindow(), "Asia/Shanghai", NOW, "完成", List.of(), List.of(), List.of(),
-                runId, runId, 1, "v1", artifact, "key", "fingerprint", 1, List.of());
+                runId, runId, OperationsDailyReport.CURRENT_SCHEMA_VERSION,
+                OperationsDailyReport.CURRENT_GENERATION_VERSION, artifact, "key", "fingerprint", 1, List.of());
     }
 }

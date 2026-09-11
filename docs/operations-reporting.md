@@ -7,7 +7,7 @@ OperationsDailyReport
         -> existing OperationsAnalysisService sections
         -> durable structured report snapshot
         -> history / detail API
-        -> persisted Markdown artifact / download
+        -> persisted PDF artifact / download
 ```
 
 `OperationsDailyReportService` remains the only report orchestrator. It executes the three server-owned
@@ -102,7 +102,7 @@ history, detail, download, and trace replay remain available; only creation is r
 - `GET /api/operations-reports` returns a descending, paged history and supports report type, status, and
   half-open created-time filters.
 - `GET /api/operations-reports/{reportId}` returns the persisted detail snapshot.
-- `GET /api/operations-reports/{reportId}/download` returns the persisted Markdown artifact.
+- `GET /api/operations-reports/{reportId}/download` returns the persisted PDF artifact (`application/pdf`).
 
 The client cannot submit SQL, HTML, an artifact filename, or a server path. Artifact identifiers and metadata
 are server-generated. The filename contains only the fixed product prefix and report date. Download lookup is
@@ -110,6 +110,12 @@ by `reportId`, applies the same authorization as detail, and never accepts a fil
 records content type, byte size, SHA-256 checksum, creation time, and renderer version. If rendering or embedding
 the optional artifact exceeds a configured byte limit, the completed structured snapshot remains successful and
 explicitly marks download unavailable.
+
+The server renders A4 pages with Apache PDFBox and embeds the bundled Noto Sans SC font so Chinese text does not
+depend on fonts installed on the runtime host. Headings, lifecycle states, common result-column labels, missing
+data reasons, evidence references, source status, and page numbers are presented in Chinese. Long table cells
+show an explicit ellipsis when the display limit is reached; the structured snapshot remains the complete source
+of truth.
 
 ## Idempotency and concurrency
 
@@ -140,7 +146,7 @@ No report remains permanently `GENERATING` after restart.
 ## Schema and retention
 
 Every report includes `schemaVersion` and `generationVersion`; every artifact includes `rendererVersion`.
-The current reader exposes schema version 1. Records with another version are preserved verbatim, excluded from
+The current reader exposes schema version 2. Records with another version are preserved verbatim, excluded from
 current APIs, and count toward retention rather than being silently misread or preventing startup. Retention is
 count-based. Lowering the configured retention compacts the oldest supported terminal records during load and
 fails only when active or unsupported records make the reduced capacity unreclaimable. When a terminal report is
@@ -153,5 +159,5 @@ report projection is also rejected by the trace archive. A user-facing delete AP
   transaction store.
 - Report generation still requires the Analytics capability and its model/database dependencies.
 - AuditTrail is currently in memory, although the report and report trace are durable.
-- Markdown is the only download format in this slice; PDF, scheduling, email, designers, custom SQL,
+- PDF is the only download format in this slice; scheduling, email, designers, custom SQL,
   predictive maintenance, and production IAM/tenant isolation are out of scope.

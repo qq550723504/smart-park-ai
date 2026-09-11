@@ -19,8 +19,8 @@ public record OperationsDailyReport(
         String idempotencyKey, String requestFingerprint, long revision,
         List<OperationsReportTraceRecord> traceEvents) {
 
-    public static final int CURRENT_SCHEMA_VERSION = 1;
-    public static final String CURRENT_GENERATION_VERSION = "operations-daily-v2";
+    public static final int CURRENT_SCHEMA_VERSION = 2;
+    public static final String CURRENT_GENERATION_VERSION = "operations-daily-v3";
 
     public OperationsDailyReport {
         Objects.requireNonNull(reportId, "reportId");
@@ -134,7 +134,7 @@ public record OperationsDailyReport(
     /** Content is persisted atomically with the terminal report and omitted from detail DTOs. */
     public record Artifact(UUID artifactId, String format, String fileName, String contentType,
                            long size, Instant createdAt, String checksum, String rendererVersion,
-                           String content) {
+                           byte[] content) {
         public Artifact {
             Objects.requireNonNull(artifactId, "artifactId");
             format = requireText(format, "format");
@@ -147,7 +147,34 @@ public record OperationsDailyReport(
             Objects.requireNonNull(createdAt, "createdAt");
             checksum = requireText(checksum, "checksum");
             rendererVersion = requireText(rendererVersion, "rendererVersion");
-            content = Objects.requireNonNull(content, "content");
+            content = Objects.requireNonNull(content, "content").clone();
+        }
+
+        @Override
+        public byte[] content() {
+            return content.clone();
+        }
+
+        @Override
+        public boolean equals(Object candidate) {
+            if (this == candidate) return true;
+            if (!(candidate instanceof Artifact other)) return false;
+            return size == other.size
+                    && artifactId.equals(other.artifactId)
+                    && format.equals(other.format)
+                    && fileName.equals(other.fileName)
+                    && contentType.equals(other.contentType)
+                    && createdAt.equals(other.createdAt)
+                    && checksum.equals(other.checksum)
+                    && rendererVersion.equals(other.rendererVersion)
+                    && java.util.Arrays.equals(content, other.content);
+        }
+
+        @Override
+        public int hashCode() {
+            int result = Objects.hash(artifactId, format, fileName, contentType, size,
+                    createdAt, checksum, rendererVersion);
+            return 31 * result + java.util.Arrays.hashCode(content);
         }
     }
 

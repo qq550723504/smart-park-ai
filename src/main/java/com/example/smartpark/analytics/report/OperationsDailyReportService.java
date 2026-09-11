@@ -324,7 +324,7 @@ public final class OperationsDailyReportService {
                 recovered = recoverInterrupted(interrupted.reportId(), status, now, true, false);
             } catch (OperationsReportCapacityException artifactTooLarge) {
                 // A valid structured snapshot must never make startup dependent on whether
-                // its optional Markdown projection fits the smaller artifact byte limit.
+                // its optional PDF projection fits the smaller artifact byte limit.
                 try {
                     recovered = recoverInterrupted(interrupted.reportId(), status, now, false, false);
                 } catch (OperationsReportCapacityException reportTooLarge) {

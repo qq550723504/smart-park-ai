@@ -95,7 +95,7 @@ public class OperationsDailyReportController {
         DemoRole.require(role, DemoRole.OPERATOR, DemoRole.ADMIN);
         var artifact = service.download(reportId, actual.name());
         auditTrail.record(actual.name(), "OPERATIONS_REPORT_DOWNLOAD", reportId.toString(), "SUCCEEDED");
-        byte[] content = artifact.content().getBytes(StandardCharsets.UTF_8);
+        byte[] content = artifact.content();
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(artifact.contentType()))
                 .contentLength(content.length)
