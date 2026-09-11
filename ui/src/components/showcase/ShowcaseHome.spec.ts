@@ -8,7 +8,7 @@ describe('ShowcaseHome customer shell', () => {
     vi.unstubAllGlobals()
   })
 
-  it('defaults to the customer overview, enables all delivered pages, and keeps the assistant non-interactive', () => {
+  it('defaults to the customer overview and exposes every delivered customer entry', () => {
     const wrapper = mount(ShowcaseHome, {
       props: { active: false },
       global: {
@@ -26,8 +26,34 @@ describe('ShowcaseHome customer shell', () => {
     expect(wrapper.get('[data-customer-nav="work-orders"]').element.tagName).toBe('BUTTON')
     expect(wrapper.get('[data-customer-nav="reports"]').element.tagName).toBe('BUTTON')
     const assistant = wrapper.get('[data-customer-nav="assistant"]')
-    expect(assistant.element.tagName).toBe('SPAN')
-    expect(assistant.attributes('aria-disabled')).toBe('true')
+    expect(assistant.element.tagName).toBe('BUTTON')
+    expect(assistant.attributes('aria-expanded')).toBe('false')
+  })
+
+  it('opens the assistant without changing pages and restores focus after close', async () => {
+    const wrapper = mount(ShowcaseHome, {
+      props: { active: true },
+      attachTo: document.body,
+      global: { stubs: {
+        ParkOverview: { template: '<main id="customer-overview-main" data-park-overview />' },
+        EnergyAnalysis: { template: '<main id="customer-analysis-main" data-energy-analysis />' },
+        CustomerAssistantPanel: {
+          props: ['open', 'activePage', 'context'], emits: ['close'],
+          template: '<aside v-show="open" data-assistant-stub><span>{{ activePage }}</span><button data-close-stub @click="$emit(\'close\')">关闭</button></aside>',
+        },
+      } },
+    })
+    const trigger = wrapper.get('[data-customer-nav="assistant"]')
+    await trigger.trigger('click')
+    expect(wrapper.get('[data-assistant-stub]').isVisible()).toBe(true)
+    expect(wrapper.get('[data-assistant-stub]').text()).toContain('overview')
+    expect(trigger.attributes('aria-expanded')).toBe('true')
+
+    await wrapper.get('[data-close-stub]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-assistant-stub]').isVisible()).toBe(false)
+    expect(document.activeElement).toBe(trigger.element)
+    wrapper.unmount()
   })
 
   it('opens reports inside the same customer shell', async () => {
@@ -87,7 +113,8 @@ describe('ShowcaseHome customer shell', () => {
       global: { stubs: {
         ParkOverview: { emits: ['view-analysis'], template: '<button data-open-analysis @click="$emit(\'view-analysis\', context)">分析</button>', setup: () => ({ context }) },
         EnergyAnalysis: { props: ['context'], emits: ['open-work-orders'], template: '<main data-energy-analysis><button data-open-work-orders @click="$emit(\'open-work-orders\', context)">工单</button></main>' },
-        CustomerWorkOrders: { props: ['context'], template: '<main id="customer-work-orders-main" data-customer-work-orders>{{ context?.anomalyId }}</main>' },
+        CustomerWorkOrders: { props: ['context'], emits: ['open-reports'], template: '<main id="customer-work-orders-main" data-customer-work-orders>{{ context?.anomalyId }}<button data-continue-reports @click="$emit(\'open-reports\')">报告</button></main>' },
+        CustomerOperationsReports: { template: '<main id="customer-reports-main" data-customer-reports />' },
       } },
     })
     const shell = wrapper.get('[data-customer-shell]').element
@@ -96,9 +123,124 @@ describe('ShowcaseHome customer shell', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-customer-nav="work-orders"]').attributes('aria-current')).toBe('page')
-    expect(wrapper.get('[data-customer-work-orders]').text()).toBe('ALT-ORCH-ENERGY-B1-001')
+    expect(wrapper.get('[data-customer-work-orders]').text()).toContain('ALT-ORCH-ENERGY-B1-001')
     expect(wrapper.get('[data-customer-shell]').element).toBe(shell)
     expect(wrapper.findAll('.customer-shell__topbar')).toHaveLength(1)
+
+    await wrapper.get('[data-continue-reports]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-customer-nav="reports"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-customer-reports]').isVisible()).toBe(true)
+    expect(wrapper.get('[data-customer-shell]').element).toBe(shell)
+  })
+
+  it('restarts only the customer presentation state after explicit confirmation', async () => {
+    let finishOverviewRefresh!: () => void
+    const overviewReset = vi.fn(() => new Promise<void>((resolve) => {
+      finishOverviewRefresh = resolve
+    }))
+    const assistantReset = vi.fn(() => true)
+    const wrapper = mount(ShowcaseHome, {
+      props: { active: true },
+      attachTo: document.body,
+      global: { stubs: {
+        ParkOverview: { methods: { resetForDemo: overviewReset }, template: '<main id="customer-overview-main" data-park-overview>B2</main>' },
+        EnergyAnalysis: { template: '<main id="customer-analysis-main" data-energy-analysis />' },
+        CustomerAssistantPanel: { methods: { canResetForDemo: () => true, resetForDemo: assistantReset }, template: '<aside />' },
+      } },
+    })
+    await wrapper.get('[data-customer-nav="reports"]').trigger('click')
+    await wrapper.get('[data-restart-demo]').trigger('click')
+    expect(wrapper.get('[role="dialog"]').text()).toContain('不会删除或重置后台工单、历史报告')
+
+    await wrapper.get('[aria-label="取消重开导览"]').trigger('click')
+    expect(wrapper.get('[data-customer-nav="reports"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-park-overview]').text()).toBe('B2')
+    expect(overviewReset).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-restart-demo]').trigger('click')
+
+    await wrapper.get('[data-confirm-restart]').trigger('click')
+    await flushPromises()
+    expect(assistantReset).toHaveBeenCalledTimes(1)
+    expect(overviewReset).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-customer-nav="overview"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-restart-notice]').text()).toContain('后台工单、报告和进行中的任务均未删除')
+    expect(wrapper.get('[data-park-overview]').attributes('tabindex')).toBe('-1')
+    expect(document.activeElement).toBe(wrapper.get('[data-park-overview]').element)
+    finishOverviewRefresh()
+    await flushPromises()
+    wrapper.unmount()
+  })
+
+  it('moves focus into the restart dialog, traps Tab, and restores focus when closing', async () => {
+    const wrapper = mount(ShowcaseHome, {
+      props: { active: true },
+      attachTo: document.body,
+      global: { stubs: {
+        ParkOverview: { methods: { resetForDemo: vi.fn() }, template: '<main id="customer-overview-main" data-park-overview />' },
+        EnergyAnalysis: { template: '<main id="customer-analysis-main" data-energy-analysis />' },
+        CustomerAssistantPanel: { methods: { canResetForDemo: () => true, resetForDemo: () => true }, template: '<aside />' },
+      } },
+    })
+    const trigger = wrapper.get('[data-restart-demo]')
+    ;(trigger.element as HTMLElement).focus()
+
+    await trigger.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.get('[role="dialog"]')
+    const cancel = wrapper.get('[data-cancel-restart]')
+    const confirm = wrapper.get('[data-confirm-restart]')
+    expect(document.activeElement).toBe(dialog.element)
+
+    dialog.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
+    expect(document.activeElement).toBe(confirm.element)
+
+    ;(confirm.element as HTMLElement).focus()
+    confirm.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+    expect(document.activeElement).toBe(cancel.element)
+
+    ;(cancel.element as HTMLElement).focus()
+    cancel.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
+    expect(document.activeElement).toBe(confirm.element)
+
+    confirm.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await flushPromises()
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(document.activeElement).toBe(trigger.element)
+
+    await trigger.trigger('click')
+    await flushPromises()
+    expect(document.activeElement).toBe(wrapper.get('[role="dialog"]').element)
+    wrapper.get('[role="dialog"]').element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+    expect(document.activeElement).toBe(wrapper.get('[data-cancel-restart]').element)
+    await wrapper.get('[data-cancel-restart]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(document.activeElement).toBe(trigger.element)
+    wrapper.unmount()
+  })
+
+  it('blocks restart while an assistant write result is unconfirmed', async () => {
+    const assistantReset = vi.fn(() => false)
+    const wrapper = mount(ShowcaseHome, {
+      props: { active: true },
+      global: { stubs: {
+        ParkOverview: { methods: { resetForDemo: vi.fn() }, template: '<main id="customer-overview-main" data-park-overview />' },
+        EnergyAnalysis: { template: '<main id="customer-analysis-main" data-energy-analysis />' },
+        CustomerAssistantPanel: { methods: { canResetForDemo: () => false, resetForDemo: assistantReset }, template: '<aside />' },
+      } },
+    })
+
+    await wrapper.get('[data-customer-nav="reports"]').trigger('click')
+    await wrapper.get('[data-restart-demo]').trigger('click')
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.get('[data-customer-nav="reports"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-customer-nav="assistant"]').attributes('aria-expanded')).toBe('true')
+    expect(wrapper.get('[data-restart-notice]').text()).toContain('已保留请求关联')
+    expect(assistantReset).not.toHaveBeenCalled()
   })
 
   it('uses the existing App event to enter the long-lived internal workbench', async () => {

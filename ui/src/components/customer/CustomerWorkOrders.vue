@@ -16,7 +16,7 @@ const props = withDefaults(defineProps<{
   demoRole?: DemoRole
 }>(), { active: true, demoRole: 'APPROVER' })
 
-const emit = defineEmits<{ back: [] }>()
+const emit = defineEmits<{ back: []; 'open-reports': [] }>()
 const workflow = useWorkflow()
 const evidence = ref<AnomalyEvidence | null>(null)
 const actionableAlert = ref<ActionableAlertResponse | null>(null)
@@ -405,6 +405,10 @@ watch([() => props.active, contextKey], ([active, key]) => {
             <p v-if="workflow.error.value" role="alert">{{ workflow.error.value }}</p>
             <p v-if="outcomeMessage" data-work-order-outcome role="status">{{ outcomeMessage }}</p>
             <small>创建成功仅表示已生成待处理工单；催办、派发、完工等未支持动作不在本页模拟。</small>
+            <button v-if="workflow.workflow.value?.workOrder" type="button" class="is-secondary" data-open-reports @click="emit('open-reports')">
+              <Document /> 继续查看运营报告
+            </button>
+            <small v-if="workflow.workflow.value?.workOrder">仅进入报告中心；现有日报不会自动声明已纳入本工单。</small>
           </article>
         </aside>
       </section>

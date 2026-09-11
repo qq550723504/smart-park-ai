@@ -490,6 +490,38 @@ describe('ParkOverview', () => {
     expect(getAnomalyEvidence).toHaveBeenLastCalledWith('VIEWER', 'B2', { from: windowRange.from, to: windowRange.to })
   })
 
+  it('resets an explicit B2 choice to the initial building and ignores its late evidence', async () => {
+    const wrapper = await mountLoaded()
+    const staleEvidence = deferred<AnomalyEvidence>()
+    vi.mocked(getAnomalyEvidence).mockReset()
+    vi.mocked(getAnomalyEvidence)
+      .mockReturnValueOnce(staleEvidence.promise)
+      .mockResolvedValue({ ...evidence, buildingId: 'B1' })
+
+    await wrapper.get('[data-building-marker="B2"]').trigger('click')
+    await vi.waitFor(() => expect(getAnomalyEvidence).toHaveBeenCalledTimes(1))
+    expect(wrapper.get('[data-building-marker="B2"]').attributes('aria-pressed')).toBe('true')
+
+    await (wrapper.vm as unknown as { resetForDemo: () => Promise<void> }).resetForDemo()
+    await flushPromises()
+
+    expect(wrapper.get('[data-building-marker="B1"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.get('[data-building-marker="B2"]').attributes('aria-pressed')).toBe('false')
+    expect(getAnomalyEvidence).toHaveBeenLastCalledWith('VIEWER', 'B1', { from: windowRange.from, to: windowRange.to })
+    expect(wrapper.emitted('context-change')?.at(-1)?.[0]).toMatchObject({ buildingId: 'B1' })
+
+    staleEvidence.resolve({
+      ...evidence,
+      buildingId: 'B2',
+      alerts: [{ ...evidence.alerts[0]!, redactedSummary: 'STALE B2 EVIDENCE' }],
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-building-marker="B1"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.text()).not.toContain('STALE B2 EVIDENCE')
+    expect(wrapper.emitted('context-change')?.at(-1)?.[0]).toMatchObject({ buildingId: 'B1' })
+  })
+
   it('preserves an explicitly selected catalog building across reactivation', async () => {
     const wrapper = await mountLoaded()
     vi.mocked(getAnomalyEvidence).mockResolvedValue({ ...evidence, buildingId: 'B3', alerts: [] })

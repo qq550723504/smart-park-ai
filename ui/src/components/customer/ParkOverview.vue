@@ -272,6 +272,17 @@ async function refresh(): Promise<void> {
   }
 }
 
+async function resetForDemo(): Promise<void> {
+  preferredBuildingId.value = null
+  selectedBuildingId.value = null
+  evidence.value = null
+  errors.value.evidence = ''
+  requestGeneration++
+  evidenceGeneration++
+  detailLoading.value = false
+  await refresh()
+}
+
 const energyTotal = computed(() => energy.value?.status === 'UNAVAILABLE'
   ? null
   : energy.value?.series.flatMap((series) => series.points).reduce((sum, point) => sum + point.value, 0) ?? null)
@@ -461,6 +472,8 @@ watch(() => props.active, (active) => {
 }, { immediate: true })
 
 watch(analysisContext, (context) => emit('context-change', context), { immediate: true })
+
+defineExpose({ resetForDemo })
 </script>
 
 <template>

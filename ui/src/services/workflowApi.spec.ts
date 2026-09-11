@@ -65,6 +65,15 @@ it('retains the customer execution run id from the response header', async () =>
   expect(reply.executionRunId).toBeUndefined()
 })
 
+it('preserves customer HTTP status so confirmed rejection is distinct from an unknown outcome', async () => {
+  globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: '问题格式无效' }), { status: 400 })) as typeof fetch
+
+  const error = await askCustomerService('无效问题', 'key-rejected').catch((cause) => cause)
+
+  expect(error).toBeInstanceOf(WorkflowApiError)
+  expect(error).toMatchObject({ message: '问题格式无效', status: 400 })
+})
+
 it('reads the exact actionable alert identity without starting a workflow', async () => {
   const alert = { alertId: 'ALT-ORCH-ENERGY-B1-001', parkId: 'PARK-A', buildingId: 'B1', deviceId: 'DEV-ENERGY-B1-001', category: 'ENERGY', riskLevel: 'HIGH', occurredAt: '2026-08-23T00:27:00Z' }
   const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(alert), { status: 200 }))
