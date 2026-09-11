@@ -96,6 +96,7 @@ const chartStub = defineComponent({
   setup(props) {
     return () => h('div', {
       'data-chart-kind': props.kind,
+      'data-chart-label': props.label,
       'data-chart-names': JSON.stringify(props.data.map((item) => item.name)),
       'data-chart-values': JSON.stringify(props.data.map((item) => item.value)),
       'data-chart-comparison-values': JSON.stringify(props.comparisonData.map((item) => item.value)),
@@ -745,8 +746,18 @@ describe('ParkOverview', () => {
     const line = wrapper.get('[data-chart-kind="line"]')
 
     expect(line.attributes('data-chart-values')).toContain('null')
+    expect(wrapper.get('[data-kpi="energy"] strong').text()).toContain('80')
     expect(wrapper.get('[data-kpi="energy"]').text()).toContain('部分观测，缺口未补零')
     expect(wrapper.get('[data-energy-status]').text()).toBe('部分可用')
+  })
+
+  it('states that the comparison period is unavailable when it has no observations', async () => {
+    const wrapper = await mountLoaded()
+    const line = wrapper.get('[data-chart-kind="line"]')
+
+    expect(wrapper.text()).toContain('近 24 小时 · 前一周期暂无观测')
+    expect(wrapper.text()).not.toContain('近 24 小时 / 前 24 小时')
+    expect(line.attributes('data-chart-label')).toContain('前二十四小时暂无可用观测')
   })
 
   it('shows independent failure states and never substitutes a success fixture', async () => {

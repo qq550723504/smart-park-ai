@@ -323,9 +323,25 @@ const energyTrendPeriods = computed(() => {
 })
 const energyTrend = computed(() => energyTrendPeriods.value.current)
 const previousEnergyTrend = computed(() => energyTrendPeriods.value.previous)
+const hasPreviousEnergyObservations = computed(() => previousEnergyTrend.value.some((item) => item.value != null))
+const energyTrendSubtitle = computed(() => hasPreviousEnergyObservations.value
+  ? '近 24 小时 / 前 24 小时 · 实际观测'
+  : '近 24 小时 · 前一周期暂无观测')
+const energyTrendLabel = computed(() => hasPreviousEnergyObservations.value
+  ? '园区近二十四小时与前二十四小时实际能耗对比，缺失时段保留断点'
+  : '园区近二十四小时实际能耗趋势，前二十四小时暂无可用观测，缺失时段保留断点')
 const energyTotal = computed(() => {
-  if (energy.value?.status === 'UNAVAILABLE') return null
-  const values = energyTrend.value.flatMap((item) => item.value == null ? [] : [item.value])
+  const currentWindow = currentEnergyWindow.value
+  const currentEnergy = energy.value
+  if (!currentWindow || !currentEnergy || currentEnergy.status === 'UNAVAILABLE') return null
+  const from = Date.parse(currentWindow.from)
+  const to = Date.parse(currentWindow.to)
+  const values = currentEnergy.series.flatMap((series) => series.points
+    .filter((point) => {
+      const timestamp = Date.parse(point.timestamp)
+      return timestamp >= from && timestamp < to
+    })
+    .map((point) => point.value))
   return values.length ? values.reduce((sum, value) => sum + value, 0) : null
 })
 const openAlertCount = computed(() => domainUsable('alerts')
@@ -634,8 +650,8 @@ defineExpose({ resetForDemo })
 
     <section class="park-overview__bottom-grid">
       <article class="customer-card customer-chart-card is-wide">
-        <header><div><h2>园区能耗趋势</h2><small>近 24 小时 / 前 24 小时 · 实际观测</small></div><span data-energy-status>{{ energyStatusText }}</span></header>
-        <CustomerOverviewChart v-if="energyTrend.some((item) => item.value != null)" kind="line" :data="energyTrend" :comparison-data="previousEnergyTrend" :unit="energy?.unit" label="园区近二十四小时与前二十四小时实际能耗对比，缺失时段保留断点" />
+        <header><div><h2>园区能耗趋势</h2><small>{{ energyTrendSubtitle }}</small></div><span data-energy-status>{{ energyStatusText }}</span></header>
+        <CustomerOverviewChart v-if="energyTrend.some((item) => item.value != null)" kind="line" :data="energyTrend" :comparison-data="previousEnergyTrend" :unit="energy?.unit" :label="energyTrendLabel" />
         <p v-else class="customer-state">{{ energyLoading ? '正在读取能耗观测…' : errors.energy || '当前窗口暂无可绘制的能耗观测' }}</p>
       </article>
       <article class="customer-card customer-chart-card">

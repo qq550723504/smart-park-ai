@@ -126,6 +126,7 @@ The repair restores the reference's visual hierarchy without copying fictional b
 3. Same-size and focused side-by-side comparisons were inspected after the repair. No P0, P1, or P2 visual issue remains within the truthful-data boundary.
 4. Remaining differences are accepted P3 capability constraints listed above, not unfinished styling defects.
 5. Follow-up comparison found that the runtime returned 72 hourly points but the first chart presentation collapsed them into one unlabeled total line and omitted donut totals, making the bottom row appear data-empty. The homepage now requests the preceding 24-hour window as well, plots `近 24 小时 / 前 24 小时` from those real observations, keeps the KPI and distribution scoped to the current period, and derives donut totals and percentages from the same response. The post-fix focused evidence is `docs/evidence/homepage-fidelity-followup/bottom-charts-focus.png`.
+6. PR review follow-up separated the strict all-building completeness rule used by the trend from the partial observed-total rule used by the KPI: one missing building bucket still leaves a chart gap, while known current-window readings from other buildings remain included in the KPI. The chart subtitle and accessible label now explicitly say when the preceding period has no usable observations instead of claiming a comparison that is not rendered. These partial-data states are covered by component regressions; the normal-state visual evidence above is unchanged.
 
 final result: passed
 
