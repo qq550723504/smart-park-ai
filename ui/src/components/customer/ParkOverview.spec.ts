@@ -90,6 +90,7 @@ const chartStub = defineComponent({
   props: {
     kind: { type: String, required: true },
     data: { type: Array as PropType<CustomerChartDatum[]>, required: true },
+    comparisonData: { type: Array as PropType<CustomerChartDatum[]>, default: () => [] },
     label: { type: String, required: true },
   },
   setup(props) {
@@ -97,6 +98,7 @@ const chartStub = defineComponent({
       'data-chart-kind': props.kind,
       'data-chart-names': JSON.stringify(props.data.map((item) => item.name)),
       'data-chart-values': JSON.stringify(props.data.map((item) => item.value)),
+      'data-chart-comparison-values': JSON.stringify(props.comparisonData.map((item) => item.value)),
     })
   },
 })
@@ -223,7 +225,7 @@ describe('ParkOverview', () => {
     expect(getAnomalyOverview).toHaveBeenCalledWith('VIEWER', { status: 'OPEN' })
     expect(getEnergyTimeSeries).toHaveBeenCalledWith('VIEWER', {
       buildingIds: ['B1', 'B2', 'B3'],
-      from: '2026-09-08T00:00:00.000Z',
+      from: '2026-09-07T00:00:00.000Z',
       to: '2026-09-09T00:00:00.000Z',
       granularity: 'HOUR',
     })
@@ -236,6 +238,43 @@ describe('ParkOverview', () => {
       .find((chart) => chart.attributes('data-chart-values') === '[2,1]')
 
     expect(eventChart?.attributes('data-chart-names')).toBe('["能耗","门禁"]')
+  })
+
+  it('plots real previous-period observations without adding them to the current KPI', async () => {
+    vi.mocked(getEnergyTimeSeries).mockResolvedValue({
+      ...energy,
+      window: { from: '2026-09-07T00:00:00Z', to: '2026-09-09T00:00:00Z', granularity: 'HOUR' },
+      series: [
+        {
+          buildingId: 'B1',
+          points: [
+            { timestamp: '2026-09-07T22:00:00Z', value: 5 },
+            { timestamp: '2026-09-07T23:00:00Z', value: 10 },
+            { timestamp: '2026-09-08T22:00:00Z', value: 10 },
+            { timestamp: '2026-09-08T23:00:00Z', value: 20 },
+          ],
+          missingTimestamps: [],
+        },
+        {
+          buildingId: 'B2',
+          points: [
+            { timestamp: '2026-09-07T22:00:00Z', value: 15 },
+            { timestamp: '2026-09-07T23:00:00Z', value: 20 },
+            { timestamp: '2026-09-08T22:00:00Z', value: 30 },
+            { timestamp: '2026-09-08T23:00:00Z', value: 40 },
+          ],
+          missingTimestamps: [],
+        },
+      ],
+    })
+
+    const wrapper = await mountLoaded()
+    const line = wrapper.get('[data-chart-kind="line"]')
+
+    expect(line.attributes('data-chart-values')).toContain('40,60')
+    expect(line.attributes('data-chart-comparison-values')).toContain('20,30')
+    expect(wrapper.get('[data-kpi="energy"] strong').text()).toContain('100')
+    expect(wrapper.text()).toContain('近 24 小时 / 前 24 小时')
   })
 
   it('queries the complete current park catalog even when no building is affected', async () => {

@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Cpu, OfficeBuilding, Refresh, UserFilled } from '@element-plus/icons-vue'
+import { Cpu, Refresh, UserFilled } from '@element-plus/icons-vue'
 import campusBanner from '../../assets/customer/campus-banner.png'
 import campusBanner960 from '../../assets/customer/campus-banner-960.webp'
 import campusBanner1440 from '../../assets/customer/campus-banner-1440.webp'
 import campusBanner2172 from '../../assets/customer/campus-banner-2172.webp'
+import brandMark from '../../assets/customer/smart-park-brand-mark-v2.png'
 import type { CustomerPage } from '../../types/customer'
 
 const props = withDefaults(defineProps<{ activePage?: CustomerPage; assistantOpen?: boolean }>(), { activePage: 'overview', assistantOpen: false })
@@ -43,7 +44,7 @@ const pageMeta = computed(() => ({
     </a>
     <header class="customer-shell__topbar">
       <div class="customer-shell__brand" aria-label="AI 智慧园区">
-        <span class="customer-shell__brand-mark"><OfficeBuilding aria-hidden="true" /></span>
+        <img class="customer-shell__brand-mark" :src="brandMark" alt="" aria-hidden="true" />
         <strong>AI 智慧园区</strong>
       </div>
       <span class="customer-shell__divider" aria-hidden="true"></span>
@@ -112,7 +113,7 @@ const pageMeta = computed(() => ({
         </slot>
         <template v-else>
           <div>
-            <h1 id="customer-hero-title">AI 让园区更智慧，让运营更从容</h1>
+            <h1 id="customer-hero-title">AI 让园区更智慧，让企业更卓越</h1>
             <p>安全 · 绿色 · 高效 · 人性化　打造可持续发展的未来园区</p>
           </div>
           <span>科技赋能空间<br />让美好发生</span>

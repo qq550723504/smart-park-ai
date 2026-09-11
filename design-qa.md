@@ -82,6 +82,55 @@ final result: passed
 
 ---
 
+# 2026-09-11 Homepage Fidelity Repair Design QA
+
+Result: **PASSED**
+
+## Source and comparison
+
+- Approved reference: `docs/design-references/issue-73-approved/01-park-overview.png`, 1672 x 941, SHA-256 `8DD9A75CF3A3E22D20EA21AAFB575DB6A89641F80387AEC34429346EF0D15C66`.
+- Final implementation capture: `docs/evidence/homepage-fidelity-followup/homepage-1672x941.png`, captured at the same 1672 x 941 CSS viewport with device pixel ratio 1.
+- Full side-by-side evidence: `docs/evidence/homepage-fidelity-followup/homepage-side-by-side.png`.
+- Focused comparison: `docs/evidence/homepage-fidelity-followup/bottom-charts-focus.png`; this is the only focused crop retained because the follow-up acceptance concern is the bottom chart row and the full-view evidence keeps the remaining regions readable.
+
+The repair restores the reference's visual hierarchy without copying fictional business facts: a denser shared header, stronger hero statement, four compact KPI cards plus the green-operation promo, a dominant aerial campus view, balanced left/right rails, and a four-card analytics row. The generated campus, report-document, and brand-mark assets replace the previous mismatched illustration and code-drawn approximations.
+
+## Fidelity surfaces
+
+- Typography: hero, KPI values, card headings, row copy, badges, and chart labels now use the reference's stronger weight and denser scale.
+- Spacing and sizing: KPI/card heights, main three-column proportions, row padding, marker size, report-promo height, and bottom-grid density were rebalanced against the 1672 x 941 source.
+- Color and elevation: the pale-blue canvas, white card surfaces, blue/green accents, borders, and restrained shadows follow the approved visual language.
+- Imagery: the overview uses a clean aerial campus with multiple buildings and a central lake; the report promo uses a transparent document/chart asset; the shell uses a real transparent brand mark.
+- Copy: the hero headline now matches the approved source. Operational labels and values remain capability-driven rather than copied from the design.
+
+## Intentional capability-driven differences
+
+- Search, weather, live date, and a named user portrait remain absent because the current application has no reliable source for them.
+- The device-run-rate KPI remains replaced by affected-building count, matching the available backend contract.
+- The final running state showed 3,264 kWh, 3 affected buildings, 4 pending events, 0 service requests, and no current personal todo. Reference values and trend badges were not fabricated.
+- Only three verified building markers are rendered. The mock's additional buildings, map toolbar, todo rows, and latest-event density are not synthesized.
+- The energy line and donut charts use current governed data and current category availability, so their shapes and segment counts intentionally differ from the mock.
+
+## Interaction, responsive, and runtime checks
+
+- The green-operation promo navigated to the existing reports route in the browser and the overview reloaded successfully in a fresh tab.
+- Final overview console inspection returned zero warnings and zero errors.
+- 1366 x 768: `innerWidth=1366`, `scrollWidth=1351`; no horizontal overflow.
+- 820 x 900: `innerWidth=820`, `scrollWidth=805`; KPI cards and lower analytics stack without horizontal overflow.
+- Native navigation and button semantics remain intact; the empty todo state is explicit and does not masquerade as populated data.
+
+## Iteration record
+
+1. Baseline comparison found a P1 mismatch in the central campus perspective and report visual, plus P2 differences in type scale, content density, and empty-state balance.
+2. The visual assets, hero copy, grid proportions, typography, marker geometry, promo card, and empty state were repaired together instead of applying isolated cosmetic offsets.
+3. Same-size and focused side-by-side comparisons were inspected after the repair. No P0, P1, or P2 visual issue remains within the truthful-data boundary.
+4. Remaining differences are accepted P3 capability constraints listed above, not unfinished styling defects.
+5. Follow-up comparison found that the runtime returned 72 hourly points but the first chart presentation collapsed them into one unlabeled total line and omitted donut totals, making the bottom row appear data-empty. The homepage now requests the preceding 24-hour window as well, plots `近 24 小时 / 前 24 小时` from those real observations, keeps the KPI and distribution scoped to the current period, and derives donut totals and percentages from the same response. The post-fix focused evidence is `docs/evidence/homepage-fidelity-followup/bottom-charts-focus.png`.
+
+final result: passed
+
+---
+
 # Issue #69 Design QA
 
 Result: **PASSED**
