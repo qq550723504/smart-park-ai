@@ -9,9 +9,13 @@
 .energy-analysis__empty button svg { width: 15px; }
 
 .energy-analysis__tabs { display: flex; align-items: stretch; overflow-x: auto; background: #fff; border: 1px solid #e0eaf5; border-radius: 10px; box-shadow: 0 6px 18px rgba(44,83,123,.05); }
-.energy-analysis__tabs button { position: relative; min-width: 130px; padding: 14px 24px; color: #46617f; background: transparent; border: 0; border-right: 1px solid #e8eff7; cursor: pointer; }
+.energy-analysis__tabs button { position: relative; flex: 1 0 130px; min-width: 130px; padding: 14px 24px; color: #46617f; background: transparent; border: 0; border-right: 1px solid #e8eff7; cursor: pointer; }
+.energy-analysis__tabs button:last-child { border-right: 0; }
+.energy-analysis__tabs button:hover { color: #245fd5; background: #f8fbff; }
+.energy-analysis__tabs button:focus-visible { z-index: 1; outline: 3px solid rgba(47,111,242,.28); outline-offset: -3px; }
 .energy-analysis__tabs button.is-current { color: var(--customer-blue); font-weight: 700; }
 .energy-analysis__tabs button.is-current::after { content: ""; position: absolute; right: 20px; bottom: 0; left: 20px; height: 3px; background: var(--customer-blue); border-radius: 3px 3px 0 0; }
+.energy-analysis__panel { display: grid; gap: 12px; }
 
 .energy-analysis__conclusion { padding: 16px 20px; }
 .energy-analysis__conclusion > header { display: flex; justify-content: space-between; gap: 16px; }
@@ -51,7 +55,6 @@
 .energy-analysis__basis dt { color: #7188a2; }
 .energy-analysis__basis dd { margin: 0; color: #345779; }
 
-.energy-analysis__two-column { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .energy-analysis__list { padding: 14px 18px; }
 .energy-analysis__list > header { display: flex; align-items: center; gap: 9px; }
 .energy-analysis__list > header > span { display: grid; place-items: center; width: 28px; height: 28px; color: #fff; background: #f1aa42; border-radius: 8px; font-weight: 800; }
@@ -61,7 +64,7 @@
 .energy-analysis__list ol { display: grid; gap: 7px; margin: 11px 0 0; padding: 0; list-style: none; counter-reset: analysis-list; }
 .energy-analysis__list li { counter-increment: analysis-list; position: relative; min-height: 37px; padding: 9px 12px 9px 42px; color: #4f6681; background: #f7fafd; border-radius: 7px; font-size: 10px; line-height: 1.5; }
 .energy-analysis__list li::before { content: counter(analysis-list); position: absolute; top: 7px; left: 11px; display: grid; place-items: center; width: 22px; height: 22px; color: #fff; background: #4b85ef; border-radius: 50%; }
-.energy-analysis__list:last-child li::before { background: #2bbd96; }
+.energy-analysis__list.is-action-list li::before { background: #2bbd96; }
 .energy-analysis__work-order-entry { width: 100%; margin-top: 10px; padding: 10px 14px; color: #fff; border: 0; border-radius: 8px; background: #2f6ff2; box-shadow: 0 8px 18px rgba(47,111,242,.18); font-weight: 700; cursor: pointer; }
 .energy-analysis__work-order-entry:hover { background: #245fd5; }
 .energy-analysis__work-order-entry:focus-visible { outline: 3px solid rgba(47,111,242,.28); outline-offset: 2px; }
@@ -86,7 +89,6 @@
 }
 
 @media (max-width: 760px) {
-  .energy-analysis__two-column { grid-template-columns: 1fr; }
   .energy-analysis__basis dl { grid-template-columns: 1fr; }
   .energy-analysis__basis dl > div { grid-template-columns: 1fr; gap: 3px; }
   .energy-analysis__records > div { grid-template-columns: 1fr; gap: 4px; }

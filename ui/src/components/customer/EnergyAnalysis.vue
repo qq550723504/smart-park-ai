@@ -25,6 +25,14 @@ const baseline = ref<EnergyTimeSeriesResponse | null>(null)
 const evidence = ref<AnomalyEvidence | null>(null)
 const loading = ref({ actual: false, baseline: false, evidence: false })
 const errors = ref({ actual: '', baseline: '', evidence: '' })
+const analysisTabs = [
+  { id: 'analysis', label: '综合分析' },
+  { id: 'devices', label: '设备详情' },
+  { id: 'actions', label: '处理建议' },
+  { id: 'records', label: '相关记录' },
+] as const
+type AnalysisTab = (typeof analysisTabs)[number]['id']
+const activeTab = ref<AnalysisTab>('analysis')
 const analysis = useOperationsAnalysis({
   ...(props.analysisPollIntervalMs != null ? { pollIntervalMs: props.analysisPollIntervalMs } : {}),
 })
@@ -381,8 +389,22 @@ const relatedRecordsEmptyText = computed(() => {
   return '当前窗口暂无相关记录'
 })
 
-function scrollToSection(id: string): void {
-  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+function selectTab(tab: AnalysisTab): void {
+  activeTab.value = tab
+}
+
+function onTabKeydown(event: KeyboardEvent, index: number): void {
+  let nextIndex: number | null = null
+  if (event.key === 'ArrowRight') nextIndex = (index + 1) % analysisTabs.length
+  if (event.key === 'ArrowLeft') nextIndex = (index - 1 + analysisTabs.length) % analysisTabs.length
+  if (event.key === 'Home') nextIndex = 0
+  if (event.key === 'End') nextIndex = analysisTabs.length - 1
+  if (nextIndex == null) return
+
+  event.preventDefault()
+  activeTab.value = analysisTabs[nextIndex]!.id
+  const buttons = (event.currentTarget as HTMLElement).parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
+  buttons?.[nextIndex]?.focus()
 }
 
 function runAiAnalysis(): void {
@@ -430,6 +452,7 @@ watch(() => analysis.dto.value?.clarificationQuestions, (questions) => {
 })
 
 watch(analysisQueryContextKey, (contextKey) => {
+  activeTab.value = 'analysis'
   if (!contextKey) return
   if (lastAnalysisQueryContextKey && lastAnalysisQueryContextKey !== contextKey) analysis.reset()
   lastAnalysisQueryContextKey = contextKey
@@ -458,14 +481,32 @@ watch(
     </section>
 
     <template v-else>
-      <nav class="energy-analysis__tabs" aria-label="分析页内容导航">
-        <button type="button" class="is-current" @click="scrollToSection('analysis-conclusion')">综合分析</button>
-        <button type="button" @click="scrollToSection('related-devices')">设备详情</button>
-        <button type="button" @click="scrollToSection('analysis-actions')">处理建议</button>
-        <button type="button" @click="scrollToSection('related-records')">相关记录</button>
+      <nav class="energy-analysis__tabs" role="tablist" aria-label="分析页内容">
+        <button
+          v-for="(tab, index) in analysisTabs"
+          :id="`analysis-tab-${tab.id}`"
+          :key="tab.id"
+          type="button"
+          role="tab"
+          :class="{ 'is-current': activeTab === tab.id }"
+          :aria-selected="activeTab === tab.id"
+          :aria-controls="`analysis-panel-${tab.id}`"
+          :tabindex="activeTab === tab.id ? 0 : -1"
+          :data-analysis-tab="tab.id"
+          @click="selectTab(tab.id)"
+          @keydown="onTabKeydown($event, index)"
+        >{{ tab.label }}</button>
       </nav>
 
-      <section id="analysis-conclusion" class="customer-card energy-analysis__conclusion">
+      <section
+        v-show="activeTab === 'analysis'"
+        id="analysis-panel-analysis"
+        class="energy-analysis__panel"
+        role="tabpanel"
+        aria-labelledby="analysis-tab-analysis"
+        tabindex="0"
+      >
+        <section id="analysis-conclusion" class="customer-card energy-analysis__conclusion">
         <header>
           <div><span class="energy-analysis__ai">AI</span><h2>{{ analysisSummary ? 'AI 分析结论' : '运营观察' }}</h2></div>
           <button
@@ -522,12 +563,45 @@ watch(
         </details>
       </section>
 
-      <section class="energy-analysis__two-column">
         <article class="customer-card energy-analysis__list">
           <header><span class="is-amber">?</span><h2>可能原因</h2><small>线索，不是故障定论</small></header>
           <ol><li v-for="cause in causes" :key="cause">{{ cause }}</li></ol>
         </article>
-        <article id="analysis-actions" class="customer-card energy-analysis__list">
+      </section>
+
+      <section
+        v-show="activeTab === 'devices'"
+        id="analysis-panel-devices"
+        class="energy-analysis__panel"
+        role="tabpanel"
+        aria-labelledby="analysis-tab-devices"
+        tabindex="0"
+      >
+        <section id="related-devices" class="customer-card energy-analysis__table-card">
+          <header><div><h2>相关设备与计量点</h2><p>{{ context.buildingId }} · {{ context.buildingName }} · 合法关联来自告警、设备快照与能耗证据</p></div></header>
+          <div v-if="errors.evidence" class="energy-analysis__inline-error">{{ errors.evidence }} <button type="button" :disabled="evidenceLoading" @click="refresh"><Refresh aria-hidden="true" /> 重试</button></div>
+          <ul v-if="evidenceNotices.length" class="energy-analysis__availability" data-evidence-availability role="status">
+            <li v-for="notice in evidenceNotices" :key="notice">{{ notice }}</li>
+          </ul>
+          <div class="energy-analysis__table-wrap">
+            <table v-if="relatedDevices.length">
+              <thead><tr><th>设备/计量点</th><th>类型</th><th>位置</th><th>状态</th><th>可用读数/关联</th><th>观测时间</th></tr></thead>
+              <tbody><tr v-for="item in relatedDevices" :key="item.id"><td>{{ item.id }}</td><td>{{ item.kind }}</td><td>{{ context.buildingName }}</td><td>{{ item.status }}</td><td>{{ item.reading }}</td><td>{{ formatTime(item.observedAt) }}</td></tr></tbody>
+            </table>
+            <p v-else class="customer-state">{{ evidenceLoading ? '正在读取相关设备…' : relatedDevicesEmptyText }}</p>
+          </div>
+        </section>
+      </section>
+
+      <section
+        v-show="activeTab === 'actions'"
+        id="analysis-panel-actions"
+        class="energy-analysis__panel"
+        role="tabpanel"
+        aria-labelledby="analysis-tab-actions"
+        tabindex="0"
+      >
+        <article id="analysis-actions" class="customer-card energy-analysis__list is-action-list">
           <header><span class="is-green"><Checked aria-hidden="true" /></span><h2>建议处理措施</h2><small>需人工确认</small></header>
           <ol><li v-for="suggestion in suggestions" :key="suggestion">{{ suggestion }}</li></ol>
           <button type="button" class="energy-analysis__work-order-entry" data-open-work-orders @click="emit('open-work-orders', context)">
@@ -536,25 +610,19 @@ watch(
         </article>
       </section>
 
-      <section id="related-devices" class="customer-card energy-analysis__table-card">
-        <header><div><h2>相关设备与计量点</h2><p>{{ context.buildingId }} · {{ context.buildingName }} · 合法关联来自告警、设备快照与能耗证据</p></div></header>
-        <div v-if="errors.evidence" class="energy-analysis__inline-error">{{ errors.evidence }} <button type="button" :disabled="evidenceLoading" @click="refresh"><Refresh aria-hidden="true" /> 重试</button></div>
-        <ul v-if="evidenceNotices.length" class="energy-analysis__availability" data-evidence-availability role="status">
-          <li v-for="notice in evidenceNotices" :key="notice">{{ notice }}</li>
-        </ul>
-        <div class="energy-analysis__table-wrap">
-          <table v-if="relatedDevices.length">
-            <thead><tr><th>设备/计量点</th><th>类型</th><th>位置</th><th>状态</th><th>可用读数/关联</th><th>观测时间</th></tr></thead>
-            <tbody><tr v-for="item in relatedDevices" :key="item.id"><td>{{ item.id }}</td><td>{{ item.kind }}</td><td>{{ context.buildingName }}</td><td>{{ item.status }}</td><td>{{ item.reading }}</td><td>{{ formatTime(item.observedAt) }}</td></tr></tbody>
-          </table>
-          <p v-else class="customer-state">{{ evidenceLoading ? '正在读取相关设备…' : relatedDevicesEmptyText }}</p>
-        </div>
-      </section>
-
-      <section id="related-records" class="customer-card energy-analysis__records">
-        <header><div><h2>相关记录</h2><p>仅展示客户可读的业务依据，不展示内部技术执行细节。</p></div></header>
-        <div v-for="record in relatedRecords" :key="`${record.id}:${record.at}`"><strong>{{ record.id }}</strong><span>{{ record.label }}</span><time>{{ formatTime(record.at) }}</time></div>
-        <p v-if="!evidenceLoading && !relatedRecords.length" class="customer-state is-compact">{{ relatedRecordsEmptyText }}</p>
+      <section
+        v-show="activeTab === 'records'"
+        id="analysis-panel-records"
+        class="energy-analysis__panel"
+        role="tabpanel"
+        aria-labelledby="analysis-tab-records"
+        tabindex="0"
+      >
+        <section id="related-records" class="customer-card energy-analysis__records">
+          <header><div><h2>相关记录</h2><p>仅展示客户可读的业务依据，不展示内部技术执行细节。</p></div></header>
+          <div v-for="record in relatedRecords" :key="`${record.id}:${record.at}`"><strong>{{ record.id }}</strong><span>{{ record.label }}</span><time>{{ formatTime(record.at) }}</time></div>
+          <p v-if="!evidenceLoading && !relatedRecords.length" class="customer-state is-compact">{{ relatedRecordsEmptyText }}</p>
+        </section>
       </section>
     </template>
   </main>
