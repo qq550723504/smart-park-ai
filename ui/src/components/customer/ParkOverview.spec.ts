@@ -95,6 +95,7 @@ const chartStub = defineComponent({
   setup(props) {
     return () => h('div', {
       'data-chart-kind': props.kind,
+      'data-chart-names': JSON.stringify(props.data.map((item) => item.name)),
       'data-chart-values': JSON.stringify(props.data.map((item) => item.value)),
     })
   },
@@ -227,6 +228,14 @@ describe('ParkOverview', () => {
       granularity: 'HOUR',
     })
     expect(listCollaborationWorkItems).toHaveBeenCalledWith('CUSTOMER_AGENT', { limit: 50, sort: 'sla' })
+  })
+
+  it('renders event distribution category names in Chinese', async () => {
+    const wrapper = await mountLoaded()
+    const eventChart = wrapper.findAll('[data-chart-kind="donut"]')
+      .find((chart) => chart.attributes('data-chart-values') === '[2,1]')
+
+    expect(eventChart?.attributes('data-chart-names')).toBe('["能耗","门禁"]')
   })
 
   it('queries the complete current park catalog even when no building is affected', async () => {

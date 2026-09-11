@@ -56,7 +56,7 @@ spring:
           mcp-endpoint: /mcp
 smartpark:
   reporting:
-    # Structured snapshots and embedded Markdown artifacts. The whole bounded
+    # Structured snapshots and embedded PDF artifacts. The whole bounded
     # state is atomically replaced; historical reads never query analytics.
     state-file: ${SMARTPARK_REPORT_STATE_FILE:./data/reports/reports.json}
     max-retained-reports: ${SMARTPARK_REPORT_MAX_RETAINED_REPORTS:200}

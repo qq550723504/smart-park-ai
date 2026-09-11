@@ -24,7 +24,7 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 
-/** Bounded atomic file store for structured report snapshots and embedded Markdown artifacts. */
+/** Bounded atomic file store for structured report snapshots and embedded PDF artifacts. */
 public final class OperationsDailyReportStore {
     private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(
             OperationsDailyReportStore.class);
@@ -362,7 +362,7 @@ public final class OperationsDailyReportStore {
 
     private void validateReportSize(OperationsDailyReport report) {
         if (report.artifact() != null) {
-            byte[] content = report.artifact().content().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            byte[] content = report.artifact().content();
             if (content.length > maxArtifactBytes) {
                 throw new OperationsReportCapacityException("operations report artifact exceeds configured byte limit");
             }
@@ -383,7 +383,7 @@ public final class OperationsDailyReportStore {
 
     private static void validateReportIntegrity(OperationsDailyReport report) {
         if (report.artifact() != null) {
-            byte[] content = report.artifact().content().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            byte[] content = report.artifact().content();
             if (report.artifact().size() != content.length || !report.artifact().checksum().equals(sha256(content))) {
                 throw new IllegalStateException("operations report artifact metadata is inconsistent");
             }

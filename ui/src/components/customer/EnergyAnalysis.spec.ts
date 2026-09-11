@@ -125,6 +125,34 @@ beforeEach(() => {
 afterEach(() => vi.resetAllMocks())
 
 describe('EnergyAnalysis', () => {
+  it('switches between accessible analysis tabs and supports arrow-key navigation', async () => {
+    const wrapper = await mountLoaded()
+    const tabs = wrapper.findAll('[role="tab"]')
+
+    expect(tabs).toHaveLength(4)
+    expect(tabs[0]?.attributes('aria-selected')).toBe('true')
+    expect(tabs[0]?.attributes('aria-controls')).toBe('analysis-panel-analysis')
+    expect(wrapper.get('#analysis-panel-analysis').isVisible()).toBe(true)
+    expect(wrapper.get('#analysis-panel-devices').isVisible()).toBe(false)
+
+    await wrapper.get('[data-analysis-tab="devices"]').trigger('click')
+    expect(wrapper.get('[data-analysis-tab="devices"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('#analysis-panel-analysis').attributes('style')).toContain('display: none')
+    expect(wrapper.get('#analysis-panel-devices').attributes('style') ?? '').not.toContain('display: none')
+
+    await wrapper.get('[data-analysis-tab="devices"]').trigger('keydown', { key: 'ArrowRight' })
+    expect(wrapper.get('[data-analysis-tab="actions"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('#analysis-panel-actions').attributes('style') ?? '').not.toContain('display: none')
+
+    await wrapper.get('[data-analysis-tab="actions"]').trigger('keydown', { key: 'End' })
+    expect(wrapper.get('[data-analysis-tab="records"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('#analysis-panel-records').attributes('style') ?? '').not.toContain('display: none')
+
+    await wrapper.setProps({ context: { ...context, buildingId: 'B2', buildingName: '研发大厦' } })
+    await flushPromises()
+    expect(wrapper.get('[data-analysis-tab="analysis"]').attributes('aria-selected')).toBe('true')
+  })
+
   it('reads one building with the inherited hourly window and keeps the anomaly window separate', async () => {
     const wrapper = await mountLoaded()
 

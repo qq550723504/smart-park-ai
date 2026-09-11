@@ -51,7 +51,7 @@ export async function downloadOperationsDailyReport(reportId: string, role: Demo
   const disposition = response.headers.get('Content-Disposition') ?? ''
   const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1]
   const quoted = /filename="([^"]+)"/i.exec(disposition)?.[1]
-  const fileName = encoded ? decodeURIComponent(encoded) : quoted ?? 'smart-park-operations-report.md'
+  const fileName = encoded ? decodeURIComponent(encoded) : quoted ?? 'smart-park-operations-report.pdf'
   const url = URL.createObjectURL(blob)
   try {
     const link = document.createElement('a')

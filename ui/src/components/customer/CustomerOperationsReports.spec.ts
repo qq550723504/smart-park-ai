@@ -7,13 +7,13 @@ const summary = {
   createdAt: '2026-09-09T01:00:00Z', completedAt: '2026-09-09T01:01:00Z',
   timeWindow: { fromInclusive: '2026-09-04T01:00:00Z', toExclusive: '2026-09-09T01:00:00Z' },
   timezone: 'Asia/Shanghai', asOf: '2026-09-09T01:00:00Z', runId: 'run-1', traceId: 'run-1', downloadAvailable: true,
-  artifact: { artifactId: 'artifact-1', format: 'MARKDOWN', fileName: 'operations-report-report-1.md', contentType: 'text/markdown', size: 1024, createdAt: '2026-09-09T01:01:00Z', checksum: 'abc', rendererVersion: 'v1' },
+  artifact: { artifactId: 'artifact-1', format: 'PDF', fileName: 'operations-report-report-1.pdf', contentType: 'application/pdf', size: 1024, createdAt: '2026-09-09T01:01:00Z', checksum: 'abc', rendererVersion: 'pdfbox-v1' },
 } as const
 
 const detail = {
   ...summary,
   requestedBy: 'demo-role:OPERATOR', role: 'OPERATOR', startedAt: summary.createdAt,
-  summary: '本次快照显示能耗基线偏差需要持续核查。', schemaVersion: 1, generationVersion: 'operations-daily-v2',
+  summary: '本次快照显示能耗基线偏差需要持续核查。', schemaVersion: 2, generationVersion: 'operations-daily-v3',
   sections: [
     {
       sectionId: 'ENERGY_BASELINE', title: '能耗基线偏差', question: '报告窗口内各楼宇能耗基线偏差', status: 'COMPLETED',
@@ -70,7 +70,7 @@ describe('CustomerOperationsReports', () => {
     expect(wrapper.get('[data-testid="report-preview"]').text()).toContain('本次快照显示能耗基线偏差需要持续核查')
     expect(wrapper.get('[data-report-chart]').text()).toContain('"name":"B1","value":12')
     expect(wrapper.get('.customer-reports__conclusions').text()).toContain('创新中心偏差为 12%')
-    expect(wrapper.get('[data-download-current]').text()).toContain('Markdown')
+    expect(wrapper.get('[data-download-current]').text()).toContain('PDF')
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
   })
 
@@ -87,7 +87,7 @@ describe('CustomerOperationsReports', () => {
         return Promise.resolve(new Response(JSON.stringify({ reportId: 'report-1', runId: 'run-1', statusUrl: '/api/operations-reports/report-1' }), { status: 202 }))
       }
       if (url.endsWith('/download')) {
-        return Promise.resolve(new Response('# report-1', { status: 200, headers: { 'Content-Disposition': 'attachment; filename="operations-report-report-1.md"' } }))
+        return Promise.resolve(new Response('%PDF-report-1', { status: 200, headers: { 'Content-Disposition': 'attachment; filename="operations-report-report-1.pdf"', 'Content-Type': 'application/pdf' } }))
       }
       if (url.includes('?')) {
         historyReads += 1

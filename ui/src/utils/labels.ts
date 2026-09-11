@@ -47,6 +47,16 @@ const customerIntentLabels: Record<string, string> = {
   GENERAL: '一般咨询',
 }
 
+const alertCategoryLabels: Record<string, string> = {
+  TEMPERATURE: '温度',
+  POWER: '电力',
+  ENERGY: '能耗',
+  ACCESS: '门禁',
+  PUMP: '水泵',
+  HUMIDITY: '湿度',
+  UNKNOWN: '未知类别',
+}
+
 const customerTicketStatusLabels: Record<string, string> = {
   WAITING_AGENT: '等待客服接入',
   ASSIGNED: '已分配客服',
@@ -97,6 +107,10 @@ export function toolLabel(value: string) {
 
 export function customerIntentLabel(value: string) {
   return customerIntentLabels[value] ?? value
+}
+
+export function alertCategoryLabel(value: string) {
+  return alertCategoryLabels[value.toUpperCase()] ?? value
 }
 
 export function customerTicketStatusLabel(value: string) {

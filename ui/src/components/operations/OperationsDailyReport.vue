@@ -98,7 +98,7 @@ watch(() => props.active, (active) => {
         <span v-for="evidence in state.report.value.evidence" :key="`${evidence.metric}-${evidence.runReference}`">{{ evidence.sourceSystem }} · {{ evidence.metric }} · {{ evidence.entity }} · {{ format(evidence.observationTime, state.report.value.timezone) }} · run {{ evidence.runReference }} · {{ evidence.summary }}</span>
         <span v-for="source in state.report.value.sourceReferences" :key="`${source.sourceSystem}-${source.metric}`">{{ source.sourceSystem }} · {{ source.metric }} · {{ source.unit }} · {{ source.status }} · as of {{ format(source.asOf, state.report.value.timezone) }}</span>
       </div>
-      <button v-if="state.report.value.downloadAvailable" type="button" data-download-current @click="download(state.report.value.reportId)">下载 Markdown 快照</button>
+      <button v-if="state.report.value.downloadAvailable" type="button" data-download-current @click="download(state.report.value.reportId)">下载 PDF 报告</button>
     </div>
   </section>
 </template>

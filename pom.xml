@@ -22,6 +22,8 @@
         <spring-ai.version>2.0.0-M1</spring-ai.version>
         <spring-ai-alibaba.version>2.0.0-M1.1</spring-ai-alibaba.version>
         <jsqlparser.version>5.1</jsqlparser.version>
+        <pdfbox.version>3.0.8</pdfbox.version>
+        <commons-logging.version>1.4.0</commons-logging.version>
     </properties>
 
     <dependencyManagement>
@@ -45,6 +47,11 @@
                 <groupId>io.swagger.core.v3</groupId>
                 <artifactId>swagger-annotations-jakarta</artifactId>
                 <version>2.2.38</version>
+            </dependency>
+            <dependency>
+                <groupId>commons-logging</groupId>
+                <artifactId>commons-logging</artifactId>
+                <version>${commons-logging.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.alibaba.cloud.ai</groupId>
@@ -127,6 +134,11 @@
             <groupId>com.github.jsqlparser</groupId>
             <artifactId>jsqlparser</artifactId>
             <version>${jsqlparser.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>${pdfbox.version}</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

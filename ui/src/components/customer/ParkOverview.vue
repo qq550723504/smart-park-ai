@@ -22,6 +22,7 @@ import {
 import type { EnergyTimeSeriesResponse } from '../../types/energyTimeSeries'
 import type { AnomalyBuildingSummary, AnomalyEvidence, AnomalyOverview } from '../../types/operationsAnomaly'
 import type { OperationsMetrics } from '../../types/workflow'
+import { alertCategoryLabel } from '../../utils/labels'
 import CustomerOverviewChart, { type CustomerChartDatum } from './CustomerOverviewChart.vue'
 
 const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true })
@@ -365,7 +366,7 @@ const energyDistribution = computed<CustomerChartDatum[]>(() => energy.value?.se
   value: series.points.reduce((sum, point) => sum + point.value, 0),
 })) ?? [])
 const eventDistribution = computed<CustomerChartDatum[]>(() => domainUsable('alerts')
-  ? (overview.value?.breakdowns.categories ?? []).map((item) => ({ name: item.key, value: item.count }))
+  ? (overview.value?.breakdowns.categories ?? []).map((item) => ({ name: alertCategoryLabel(item.key), value: item.count }))
   : [])
 const latestEvents = computed(() => [
   ...(evidence.value?.alerts ?? []),

@@ -300,13 +300,13 @@ watch(() => state.reports.value, (reports) => {
           </section>
 
           <section class="customer-card customer-reports__download">
-            <header><Download aria-hidden="true" /><div><h2>下载报告</h2><p>下载当前所选报告的服务器 Markdown 快照</p></div></header>
+            <header><Download aria-hidden="true" /><div><h2>下载报告</h2><p>下载当前所选报告的服务器 PDF 快照</p></div></header>
             <button
               type="button"
               data-download-current
               :disabled="!report?.downloadAvailable || Boolean(state.downloadingId.value)"
               @click="report && download(report.reportId)"
-            ><Download aria-hidden="true" />{{ state.downloadingId.value ? '正在下载…' : '下载报告（Markdown）' }}</button>
+            ><Download aria-hidden="true" />{{ state.downloadingId.value ? '正在下载…' : '下载报告（PDF）' }}</button>
             <p v-if="report?.artifact">{{ report.artifact.fileName }} · {{ Math.ceil(report.artifact.size / 1024) }} KB</p>
             <p v-else>{{ report ? '当前快照没有可下载产物。部分完成或失败不会冒充可下载成功。' : '请先选择一份报告。' }}</p>
             <small>查看、刷新、离开返回和下载都不会重新生成报告；未提供服务端 PDF、分享或发送能力。</small>

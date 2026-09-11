@@ -58,12 +58,12 @@ class OperationsDailyReportStoreTest {
         OperationsDailyReportStore store = store(temp.resolve("reports.json"), 2, 1, 16 * 1024, 1024);
         OperationsDailyReport created = store.createOrGet("key-1", "fingerprint-1",
                 () -> report("key-1", "fingerprint-1", OperationsReportStatus.REQUESTED)).report();
-        String content = "x".repeat(1025);
+        byte[] content = "x".repeat(1025).getBytes(java.nio.charset.StandardCharsets.UTF_8);
 
         assertThatThrownBy(() -> store.update(created.reportId(), report -> report.copy(
                 OperationsReportStatus.COMPLETED, NOW, NOW, NOW, "done", report.sections(), List.of(), List.of(),
-                new OperationsDailyReport.Artifact(UUID.randomUUID(), "MARKDOWN", "safe.md",
-                        "text/markdown", content.length(), NOW, "checksum", "v1", content), List.of())))
+                new OperationsDailyReport.Artifact(UUID.randomUUID(), "PDF", "safe.pdf",
+                        "application/pdf", content.length, NOW, "checksum", "v1", content), List.of())))
                 .isInstanceOf(OperationsReportCapacityException.class);
         assertThat(store.find(created.reportId()).orElseThrow().status()).isEqualTo(OperationsReportStatus.REQUESTED);
     }
@@ -247,7 +247,7 @@ class OperationsDailyReportStoreTest {
 
         assertThat(mapper.readTree(state.toFile())).hasSize(2);
         assertThat(mapper.readTree(state.toFile()).findValuesAsText("generationVersion"))
-                .contains("future-v1", "v1");
+                .contains("future-v1", OperationsDailyReport.CURRENT_GENERATION_VERSION);
     }
 
     @Test
@@ -298,15 +298,15 @@ class OperationsDailyReportStoreTest {
         OperationsDailyReportStore first = store(state, 2, 1, 16 * 1024, 4 * 1024);
         first.createOrGet("key-1", "fingerprint-1",
                 () -> report("key-1", "fingerprint-1", OperationsReportStatus.COMPLETED));
-        String content = "a".repeat(1500);
+        byte[] content = "a".repeat(1500).getBytes(java.nio.charset.StandardCharsets.UTF_8);
         String checksum = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
-                .digest(content.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+                .digest(content));
         OperationsDailyReport newest = first.createOrGet("key-2", "fingerprint-2", () -> {
             OperationsDailyReport base = report("key-2", "fingerprint-2", OperationsReportStatus.COMPLETED);
             return base.copy(base.status(), base.startedAt(), base.completedAt(), base.asOf(), "x".repeat(5000),
                     base.sections(), base.evidence(), base.sourceReferences(),
-                    new OperationsDailyReport.Artifact(UUID.randomUUID(), "MARKDOWN", "historic.md",
-                            "text/markdown", content.length(), NOW, checksum, "v1", content),
+                    new OperationsDailyReport.Artifact(UUID.randomUUID(), "PDF", "historic.pdf",
+                            "application/pdf", content.length, NOW, checksum, "v1", content),
                     base.traceEvents());
         }).report();
 
@@ -335,6 +335,8 @@ class OperationsDailyReportStoreTest {
                 status.isTerminal() ? NOW : null,
                 new OperationsReportRequest.TimeWindow(NOW.minusSeconds(3600), NOW), "Asia/Shanghai",
                 status.isTerminal() ? NOW : null, "snapshot", List.of(), List.of(), List.of(), runId, runId,
-                1, "v1", null, key, fingerprint, 0, List.of());
+                OperationsDailyReport.CURRENT_SCHEMA_VERSION,
+                OperationsDailyReport.CURRENT_GENERATION_VERSION,
+                null, key, fingerprint, 0, List.of());
     }
 }
