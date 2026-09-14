@@ -406,3 +406,11 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 58 | `model/security/SecurityEventIdentity.decodeLocation` | P2 | `decodeLocation` 对「有意支持的无位置形式」与「损坏的后缀」都返回 `null`，于是一段被截断的 park/building 会被静默当作无位置引用，`SecurityEventCatalog` 可能在恰好唯一的位置上错误命中。现只有三段身份后**精确结束**才算无位置形式；若后续材料以长度前缀（`:` + 数字 + `#`）开头却无法解出完整的 park 与 building，则视为畸形：`canonicalQualifiedReference`/`parseQualifiedReference` 返回 `null`，`fromReference` 直接拒绝而不再回退到告警位置 |
 
 对应独立提交：`11e4de3`（#57）、`5302bb0`（#58）。
+
+第二十九轮（对 `27cf3ac`）补 1 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 59 | `securityincident/SecurityIncidentService.normalizedKey` | P2 | 上一轮归一化保留了五段 token 自带的位置，但索引键的 park/building 仍用告警自身的位置；`alertsReferencing` 按被引用事件的位置查询，工作流也按 token 内嵌位置解析，于是跨位置告警虽能解析、其 id 与风险却被丢弃。现 `normalizedKey` 直接返回完整键：token 带位置时引用与键字段都用内嵌位置，无位置 token 用告警位置补全，legacy/畸形 token 原样保留 |
+
+对应提交：`<pending>`（#59）。
