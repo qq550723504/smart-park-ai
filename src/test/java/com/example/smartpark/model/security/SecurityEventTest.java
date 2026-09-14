@@ -152,6 +152,17 @@ class SecurityEventTest {
     }
 
     @Test
+    void acceptsDomainTerminologyThatMerelyContainsCredentialWords() {
+        SecurityEvent event = newEvent("ACCESS_TOKEN_REJECTED", "PARK-A", "A1",
+                "INVALID_CREDENTIAL", "REDACTED: 摘要");
+
+        assertThat(event.eventId()).isEqualTo("ACCESS_TOKEN_REJECTED");
+        assertThat(event.rawEventType()).isEqualTo("INVALID_CREDENTIAL");
+        assertThat(ingestedEvent("credential-audit", "CREDENTIAL_REVIEWED").ingestVersion())
+                .isEqualTo("CREDENTIAL_REVIEWED");
+    }
+
+    @Test
     void rejectsPrivacyMetadataClaimingPersonalDataOrStoredMedia() {
         assertThatThrownBy(() -> new SecurityPrivacyMetadata(
                 SecurityPrivacyMetadata.RedactionPolicy.REDACTED_ONLY, true, false))
