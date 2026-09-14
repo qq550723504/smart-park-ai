@@ -361,3 +361,12 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 48 | `tool/security/SecurityQueryTool.lookupSecurityEvent()` | P1 | 两个源复用同一 event id 时目录返回歧义错误并提示「use a source-qualified reference」，但工具始终把入参转发给裸 id 重载：`SecurityEventIdentity.reference()` 产出的 `security-event:source:...` token 与 `event.eventId()` 不相等，于是返回 "Unknown security event"，诊断与安全专家消费方都无法取回任一冲突事件。现 `SecurityEventIdentity` 新增 `isQualifiedReference()`，resolver 新增 `getEventByReference()`（qualified token 精确解析到该源，legacy token 保持裸 id 别名语义，跨位置匹配仍判为歧义），工具对引用 token 走该路径、裸 id 维持原查找 |
 
 对应独立提交：`d54ff32`（#48）。
+
+第二十四轮（对 `69de66f`）补 2 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 49 | `model/security/SecurityEvent` 紧凑构造器 | P1 | `rawEventType` 仅 trim，而 `SecurityIncidentDtos.evidence()` 与 `SecurityQueryTool.SecurityEventSummary` 会原样序列化它；生产适配器若把 URL 或带凭据的标签放进 vendor code，就会绕过 source/location/ingest 标识所施加的安全策略，泄露给有权限的 UI 用户与 AI 工具消费方。现 `rawEventType` 走 `SecurityIdentifierPolicy.requireSafe`：无害的未知 vendor code（如 `VENDOR_PRIVATE_CODE_42`）仍原样保留，URL/凭据在入库时即被拒 |
+| 50 | `collaboration/CollaborationRuntimeConfiguration.collectPrimaryEvidence()` | P2 | 该提取器只匹配 `\bSEC-[A-Z0-9-]+\b` 并大写裸子串，合作问题中的 source-qualified 引用被截成裸 id，目录随即以歧义拒绝复用 id，确定性的服务端安全证据丢失。现安全模式同时匹配完整的 `security-event:` 引用，`SecurityEventIdentity.canonicalQualifiedReference` 重新编码（容忍句尾标点），归一化保留大小写敏感的材料而非大写；裸 id 与 legacy 引用维持原有大写查找 |
+
+对应独立提交：`dab4974`（#49）、`4cc5b6a`（#50）。
