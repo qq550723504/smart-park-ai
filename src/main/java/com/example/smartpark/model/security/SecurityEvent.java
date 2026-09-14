@@ -35,7 +35,10 @@ public record SecurityEvent(
         parkId = requireText(parkId, "parkId");
         buildingId = requireText(buildingId, "buildingId");
         eventType = Objects.requireNonNull(eventType, "eventType");
-        rawEventType = requireText(rawEventType, "rawEventType");
+        // rawEventType is projected to the UI and the AI tool verbatim, so it must obey
+        // the same credential/URL safety policy as the other identifiers instead of only
+        // being trimmed. A vendor code that carries a URL or token is rejected at ingestion.
+        rawEventType = SecurityIdentifierPolicy.requireSafe(rawEventType, "rawEventType");
         source = source == null ? SecuritySourceRef.unknown() : source;
         location = location == null ? SecurityEventLocation.empty() : location;
         observedAt = Objects.requireNonNull(observedAt, "observedAt");

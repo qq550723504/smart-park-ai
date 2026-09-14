@@ -127,6 +127,15 @@ class SecurityEventTest {
     }
 
     @Test
+    void rejectsRawEventTypeContainingCredentialsOrUrls() {
+        Stream.of("rtsp://user:pass@cam-1", "https://internal.example/cam", "token=abc", "password:secret")
+                .forEach(rawEventType -> assertThatThrownBy(() ->
+                        newEvent("SEC-RAW", "PARK-A", "A1", rawEventType, "REDACTED: 摘要"))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("rawEventType"));
+    }
+
+    @Test
     void rejectsPrivacyMetadataClaimingPersonalDataOrStoredMedia() {
         assertThatThrownBy(() -> new SecurityPrivacyMetadata(
                 SecurityPrivacyMetadata.RedactionPolicy.REDACTED_ONLY, true, false))
