@@ -1,12 +1,19 @@
 package com.example.smartpark.tool;
 
 import com.example.smartpark.adapter.mock.MockParkFixture;
+import com.example.smartpark.model.security.SecurityDispositionRecord;
 import com.example.smartpark.model.security.SecurityEvent;
+import com.example.smartpark.model.security.SecurityEventLocation;
+import com.example.smartpark.model.security.SecurityEventSeverity;
 import com.example.smartpark.model.security.SecurityEventType;
+import com.example.smartpark.model.security.SecurityPrivacyMetadata;
+import com.example.smartpark.model.security.SecuritySourceRef;
+import com.example.smartpark.model.security.SecuritySourceType;
 import com.example.smartpark.port.security.SecurityEventReader;
 import com.example.smartpark.tool.security.SecurityQueryTool;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.NoSuchElementException;
 
@@ -56,5 +63,40 @@ class SecurityQueryToolTest {
 
         assertThat(result.error()).isNull();
         assertThat(result.event().eventType()).isEqualTo(SecurityEventType.ACCESS_ANOMALY);
+    }
+
+    @Test
+    void rejectsAnAmbiguousBareEventIdInsteadOfGuessingASource() {
+        SecurityEvent access = sourcedEvent("SEC-DUAL", SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityEvent camera = sourcedEvent("SEC-DUAL", SecuritySourceType.CAMERA_ANALYTICS, "camera-1");
+        SecurityQueryTool tool = new SecurityQueryTool(reader(access, camera), List.of());
+
+        SecurityQueryTool.SecurityLookupResult result = tool.lookupSecurityEvent("SEC-DUAL");
+
+        assertThat(result.event()).isNull();
+        assertThat(result.error()).contains("ambiguous");
+    }
+
+    private static SecurityEvent sourcedEvent(String eventId, SecuritySourceType type, String sourceId) {
+        return new SecurityEvent(eventId, "PARK-A", "A1", SecurityEventType.ACCESS_ANOMALY, "ACCESS",
+                new SecuritySourceRef(type, sourceId), SecurityEventLocation.empty(),
+                Instant.parse("2026-09-14T08:00:00Z"), Instant.parse("2026-09-14T08:00:00Z"),
+                SecurityEventSeverity.UNKNOWN, null, SecurityPrivacyMetadata.redactedOnly(),
+                SecurityDispositionRecord.unreviewed(), "test", null, "REDACTED: safe event summary");
+    }
+
+    private static SecurityEventReader reader(SecurityEvent... events) {
+        List<SecurityEvent> all = List.of(events);
+        return new SecurityEventReader() {
+            @Override
+            public SecurityEvent getEvent(String eventId) {
+                return all.stream().filter(event -> event.eventId().equals(eventId)).findFirst().orElseThrow();
+            }
+
+            @Override
+            public List<SecurityEvent> listEvents() {
+                return all;
+            }
+        };
     }
 }

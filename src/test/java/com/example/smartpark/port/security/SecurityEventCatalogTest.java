@@ -82,6 +82,37 @@ class SecurityEventCatalogTest {
     }
 
     @Test
+    void rejectsAnAmbiguousBareIdSharedByTwoSources() {
+        SecurityEvent access = event("SEC-DUAL", access("access-1"), BASE);
+        SecurityEvent camera = event("SEC-DUAL", new SecuritySourceRef(SecuritySourceType.CAMERA_ANALYTICS, "camera-1"),
+                BASE.plusSeconds(60));
+        SecurityEventCatalog catalog = new SecurityEventCatalog(reader(), List.of(adapter(access), adapter(camera)));
+        SecurityEventIdentity sourceLess = new SecurityEventIdentity(SecuritySourceRef.unknown(), "SEC-DUAL", PARK,
+                BUILDING);
+
+        assertThatThrownBy(() -> catalog.getEvent("SEC-DUAL"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ambiguous");
+        assertThatThrownBy(() -> catalog.getEvent(sourceLess))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ambiguous");
+    }
+
+    @Test
+    void rejectsAnAmbiguousBareIdThatCollidesAcrossBuildings() {
+        SecurityEvent here = event("SEC-SPREAD", access("access-1"), BASE);
+        SecurityEvent elsewhere = new SecurityEvent("SEC-SPREAD", PARK, "A2", SecurityEventType.ACCESS_ANOMALY,
+                "ACCESS", access("access-1"), SecurityEventLocation.empty(), BASE, BASE.plusSeconds(30),
+                SecurityEventSeverity.UNKNOWN, null, SecurityPrivacyMetadata.redactedOnly(),
+                SecurityDispositionRecord.unreviewed(), "test", null, "REDACTED: safe event summary");
+        SecurityEventCatalog catalog = new SecurityEventCatalog(reader(here), List.of(adapter(elsewhere)));
+
+        assertThatThrownBy(() -> catalog.getEvent("SEC-SPREAD"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ambiguous");
+    }
+
+    @Test
     void failsWhenNoEventMatches() {
         SecurityEventCatalog catalog = new SecurityEventCatalog(reader(), List.of());
 

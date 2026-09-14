@@ -5,9 +5,11 @@ import com.example.smartpark.model.security.SecurityEventIdentity;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Source-aware aggregate over every registered ingestion path: the legacy
@@ -43,19 +45,17 @@ public final class SecurityEventCatalog implements SecurityEventResolver, Securi
     @Override
     public SecurityEvent getEvent(String eventId) {
         Objects.requireNonNull(eventId, "eventId");
-        return events().stream()
+        return select(events().stream()
                 .filter(event -> event.eventId().equals(eventId))
-                .max(PREFERRED)
-                .orElseThrow(() -> new NoSuchElementException("security event not found: " + eventId));
+                .toList(), eventId);
     }
 
     @Override
     public SecurityEvent getEvent(SecurityEventIdentity identity) {
         Objects.requireNonNull(identity, "identity");
-        return events().stream()
+        return select(events().stream()
                 .filter(event -> SecurityEventIdentity.of(event).matches(identity))
-                .max(PREFERRED)
-                .orElseThrow(() -> new NoSuchElementException("security event not found: " + identity.eventId()));
+                .toList(), identity.eventId());
     }
 
     /** Every event currently exposed by the legacy reader and the registered adapters. */
@@ -67,5 +67,54 @@ public final class SecurityEventCatalog implements SecurityEventResolver, Securi
         List<SecurityEvent> events = new ArrayList<>(reader.listEvents());
         adapters.forEach(adapter -> events.addAll(adapter.readEvents()));
         return events;
+    }
+
+    /**
+     * Returns the single logical event the candidates represent. A bare id (or a
+     * source-less reference) can match copies of the same id belonging to several
+     * concrete sources, parks, or buildings; returning the freshest would silently
+     * ground the caller in the wrong event, so an ambiguous lookup fails loudly and
+     * asks for a source-qualified reference instead. Copies of one logical event
+     * (a concrete source plus its source-less aliases, or the same source read
+     * twice) still collapse.
+     */
+    private static SecurityEvent select(List<SecurityEvent> candidates, String eventId) {
+        if (candidates.isEmpty()) {
+            throw new NoSuchElementException("security event not found: " + eventId);
+        }
+        if (distinctSources(candidates) > 1) {
+            throw new IllegalArgumentException("ambiguous security event id: " + eventId
+                    + "; use a source-qualified reference");
+        }
+        return candidates.stream().max(PREFERRED).orElseThrow();
+    }
+
+    /**
+     * Counts the logical events the candidates belong to: one per concrete source,
+     * plus one per location that only has source-less aliases (which cannot be
+     * attributed to a concrete source).
+     */
+    private static int distinctSources(List<SecurityEvent> events) {
+        Set<SecurityEventIdentity> concrete = new LinkedHashSet<>();
+        Set<String> concreteLocations = new LinkedHashSet<>();
+        for (SecurityEvent event : events) {
+            SecurityEventIdentity identity = SecurityEventIdentity.of(event);
+            if (!identity.isSourceLess()) {
+                concrete.add(identity);
+                concreteLocations.add(location(identity));
+            }
+        }
+        Set<String> orphanLocations = new LinkedHashSet<>();
+        for (SecurityEvent event : events) {
+            SecurityEventIdentity identity = SecurityEventIdentity.of(event);
+            if (identity.isSourceLess() && !concreteLocations.contains(location(identity))) {
+                orphanLocations.add(location(identity));
+            }
+        }
+        return concrete.size() + orphanLocations.size();
+    }
+
+    private static String location(SecurityEventIdentity identity) {
+        return identity.parkId() + '\u0000' + identity.buildingId();
     }
 }
