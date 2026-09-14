@@ -129,3 +129,39 @@ export function eventSummaryLabel(value: string) {
   if (started) return `${workflowNodeLabel(started[1])}已开始`
   return toolLabel(value)
 }
+
+const securityEventTypeLabels: Record<string, string> = {
+  FIRE_SMOKE: '烟火',
+  PERIMETER_INTRUSION: '周界入侵',
+  CROWDING: '人群聚集',
+  POST_ABSENCE: '岗位离岗',
+  ACCESS_ANOMALY: '门禁异常',
+  UNKNOWN: '未分类事件',
+}
+
+const securityDispositionLabels: Record<string, string> = {
+  UNREVIEWED: '未复核',
+  CONFIRMED_INCIDENT: '确认事件',
+  FALSE_POSITIVE: '误报（人工复核结论）',
+  INCONCLUSIVE: '无法判定',
+  DUPLICATE: '重复事件',
+}
+
+const securitySourceTypeLabels: Record<string, string> = {
+  CAMERA_ANALYTICS: '视频分析',
+  ACCESS_CONTROL: '门禁系统',
+  EXISTING_FEED: '既有数据源',
+  UNKNOWN: '未知来源',
+}
+
+export function securityEventTypeLabel(value: string) {
+  return securityEventTypeLabels[value] ?? value
+}
+
+export function securityDispositionLabel(value: string) {
+  return securityDispositionLabels[value] ?? value
+}
+
+export function securitySourceTypeLabel(value: string) {
+  return securitySourceTypeLabels[value.toUpperCase()] ?? value
+}

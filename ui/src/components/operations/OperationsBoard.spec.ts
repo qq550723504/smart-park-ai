@@ -67,6 +67,36 @@ describe('OperationsBoard', () => {
     expect(wrapper.get('[data-start-orchestration]').attributes('disabled')).toBeUndefined()
   })
 
+  it('keeps security event types NOT_READY unless a production source is connected', () => {
+    const wrapper = mount(OperationsBoard, {
+      props: {
+        role: 'ADMIN',
+        analyticsAvailable: true,
+        securityEventCapabilities: [
+          { eventType: 'ACCESS_ANOMALY', modelSupported: true, sourceConnected: true, productionSource: false, state: 'ADAPTED' },
+          { eventType: 'FIRE_SMOKE', modelSupported: true, sourceConnected: false, productionSource: false, state: 'NOT_READY' },
+        ],
+        securityDispositionEnabled: false,
+      },
+    })
+
+    expect(wrapper.get('[data-security-capability="ACCESS_ANOMALY"]').attributes('data-feature-state')).toBe('ADAPTED')
+    expect(wrapper.get('[data-security-capability="ACCESS_ANOMALY"]').text()).toContain('非生产适配数据')
+    expect(wrapper.get('[data-security-capability="FIRE_SMOKE"]').attributes('data-feature-state')).toBe('NOT_READY')
+    expect(wrapper.get('[data-security-capability="FIRE_SMOKE"]').text()).toContain('未接入数据源')
+    expect(wrapper.get('[data-security-disposition]').attributes('data-feature-state')).toBe('NOT_READY')
+    expect(wrapper.get('[data-security-disposition]').text()).toContain('误报数不可统计')
+    expect(wrapper.find('[data-security-capabilities-empty]').exists()).toBe(false)
+  })
+
+  it('never claims security availability when the deployment reports no capabilities', () => {
+    const wrapper = mount(OperationsBoard, { props: { role: 'ADMIN', analyticsAvailable: true } })
+
+    expect(wrapper.get('[data-security-capabilities-empty]').text()).toContain('NOT_READY')
+    expect(wrapper.get('[data-security-disposition]').attributes('data-feature-state')).toBe('NOT_READY')
+    expect(wrapper.find('[data-security-capability]').exists()).toBe(false)
+  })
+
   it('routes only available Agent entries to existing workbench views', async () => {
     const wrapper = mount(OperationsBoard, {
       props: { role: 'ADMIN', analyticsAvailable: true, collaborationAvailable: true, securityIncidentAvailable: false },

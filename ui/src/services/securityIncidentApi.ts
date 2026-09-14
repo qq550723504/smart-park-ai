@@ -1,5 +1,10 @@
 import type { DemoRole } from '../types/workflow'
-import type { SecurityIncident, SecurityIncidentPage, SecurityIncidentStatus } from '../types/securityIncident'
+import type {
+  SecurityDisposition,
+  SecurityIncident,
+  SecurityIncidentPage,
+  SecurityIncidentStatus,
+} from '../types/securityIncident'
 
 async function parse<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -31,8 +36,18 @@ export async function getSecurityIncident(role: DemoRole, incidentId: string): P
   return parse(await fetch(`/api/security/incidents/${encodeURIComponent(incidentId)}`, { headers: headers(role) }))
 }
 
-export async function reviewSecurityIncident(role: DemoRole, incidentId: string): Promise<SecurityIncident> {
-  return parse(await fetch(`/api/security/incidents/${encodeURIComponent(incidentId)}/review`, { method: 'POST', headers: headers(role) }))
+export async function reviewSecurityIncident(
+  role: DemoRole,
+  incidentId: string,
+  disposition?: SecurityDisposition,
+): Promise<SecurityIncident> {
+  const requestHeaders: Record<string, string> = { 'X-Demo-Role': role }
+  const init: RequestInit = { method: 'POST', headers: requestHeaders }
+  if (disposition) {
+    requestHeaders['Content-Type'] = 'application/json'
+    init.body = JSON.stringify({ disposition })
+  }
+  return parse(await fetch(`/api/security/incidents/${encodeURIComponent(incidentId)}/review`, init))
 }
 
 export async function handoffSecurityIncident(role: DemoRole, incidentId: string): Promise<SecurityIncident> {

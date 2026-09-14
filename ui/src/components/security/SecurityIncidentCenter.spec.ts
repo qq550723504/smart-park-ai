@@ -7,7 +7,7 @@ function response(body: unknown, status = 200): Response {
 }
 
 const summary = {
-  incidentId: 'INC-1', parkId: 'PARK-A', buildingId: 'A1', eventType: 'UNAUTHORIZED_ACCESS_ATTEMPT',
+  incidentId: 'INC-1', parkId: 'PARK-A', buildingId: 'A1', eventType: 'ACCESS_ANOMALY',
   riskLevel: 'HIGH', status: 'OPEN', openedAt: '2026-09-02T08:00:00Z', lastOccurredAt: '2026-09-02T08:09:00Z',
   eventCount: 2, alertCount: 1, summary: 'REDACTED:安全事件摘要',
 }
@@ -178,6 +178,84 @@ describe('SecurityIncidentCenter', () => {
     expect(wrapper.emitted('open-collaboration')).toEqual([[
       { incidentId: 'INC-1', workItemId: 'SECURITY_INCIDENT:INC-1' },
     ]])
+  })
+
+  it('records a human false-positive disposition instead of fabricating review data', async () => {
+    const bodies: Array<string | undefined> = []
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input)
+      if (url.includes('/api/security/incidents?')) {
+        return response({ items: [{ ...summary, disposition: 'UNREVIEWED' }], total: 1 })
+      }
+      if (url.endsWith('/review')) {
+        bodies.push(init?.body as string | undefined)
+        return response({
+          ...detail,
+          status: 'REVIEWED',
+          disposition: 'FALSE_POSITIVE',
+          dispositionSource: 'HUMAN_REVIEW',
+          dispositionDecidedAt: '2026-09-02T10:00:00Z',
+        })
+      }
+      return response({ ...detail, disposition: 'UNREVIEWED' })
+    }) as typeof fetch
+
+    const wrapper = mount(SecurityIncidentCenter, { props: { role: 'APPROVER' } })
+    await flushPromises()
+    expect(wrapper.get('[data-security-false-positive]').text()).toContain('暂无复核结论')
+
+    await wrapper.get('[data-security-action="review-false-positive"]').trigger('click')
+    await flushPromises()
+
+    expect(bodies).toEqual([JSON.stringify({ disposition: 'FALSE_POSITIVE' })])
+    expect(wrapper.get('[data-security-disposition]').text()).toContain('误报（人工复核结论）')
+    expect(wrapper.get('[data-security-false-positive]').text()).toContain('1')
+  })
+
+  it('labels event type and source metadata without exposing raw media', async () => {
+    const enriched = {
+      ...detail,
+      disposition: 'UNREVIEWED',
+      evidence: [{
+        ...detail.evidence[0],
+        rawEventType: 'UNAUTHORIZED_ACCESS_ATTEMPT',
+        sourceType: 'ACCESS_CONTROL',
+        eventSourceId: 'demo-access',
+        severity: 'MEDIUM',
+        confidence: 0.6,
+      }],
+    }
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      return url.includes('/api/security/incidents?')
+        ? response({ items: [{ ...summary, disposition: 'UNREVIEWED' }], total: 1 })
+        : response(enriched)
+    }) as typeof fetch
+
+    const wrapper = mount(SecurityIncidentCenter, { props: { role: 'ADMIN' } })
+    await flushPromises()
+
+    expect(wrapper.get('[data-security-event-type]').text()).toContain('门禁异常')
+    expect(wrapper.get('[data-security-evidence-source]').text()).toContain('UNAUTHORIZED_ACCESS_ATTEMPT')
+    expect(wrapper.get('[data-security-evidence-source]').text()).toContain('门禁系统')
+    expect(wrapper.get('[data-security-confidence]').text()).toBe('60%')
+    expect(wrapper.text()).not.toContain('data:image')
+  })
+
+  it('disables every disposition action once the incident is reviewed', async () => {
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      return url.includes('/api/security/incidents?')
+        ? response({ items: [{ ...summary, status: 'REVIEWED', disposition: 'CONFIRMED_INCIDENT' }], total: 1 })
+        : response({ ...detail, status: 'REVIEWED', disposition: 'CONFIRMED_INCIDENT', dispositionSource: 'HUMAN_REVIEW' })
+    }) as typeof fetch
+
+    const wrapper = mount(SecurityIncidentCenter, { props: { role: 'ADMIN' } })
+    await flushPromises()
+
+    for (const action of ['review', 'review-false-positive', 'review-inconclusive', 'review-duplicate']) {
+      expect(wrapper.get(`[data-security-action="${action}"]`).attributes('disabled')).toBeDefined()
+    }
   })
 
   it('ignores a late handoff response after selecting another incident', async () => {
