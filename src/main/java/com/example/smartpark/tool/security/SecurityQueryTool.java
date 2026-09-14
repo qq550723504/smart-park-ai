@@ -14,8 +14,12 @@ import com.example.smartpark.port.security.SecurityEventCatalog;
 import com.example.smartpark.port.security.SecurityEventLookupException;
 import com.example.smartpark.port.security.SecurityEventReader;
 import com.example.smartpark.port.security.SecurityEventResolver;
+import com.example.smartpark.port.security.SecurityPort;
+import com.example.smartpark.port.security.SecurityPortReader;
 import com.example.smartpark.port.security.SecuritySourceAdapter;
 import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -50,6 +54,33 @@ public class SecurityQueryTool {
                 Objects.requireNonNull(securityEventReader, "securityEventReader"),
                 securitySourceAdapters == null ? List.of() : securitySourceAdapters);
     }
+
+    /**
+     * Spring wiring that keeps the legacy {@link SecurityPort}-only contract working. This
+     * tool is enabled by default, so a deployment that registered the original get-only
+     * port (before {@link SecurityEventReader} existed) must still start: a registered
+     * reader is preferred, otherwise the port is adapted to the reader contract the catalog
+     * aggregates. Adapter beans contribute their events either way.
+     */
+    @Autowired
+    SecurityQueryTool(ObjectProvider<SecurityPort> securityPorts,
+                      List<SecuritySourceAdapter> securitySourceAdapters) {
+        this(resolveReader(securityPorts), securitySourceAdapters);
+    }
+
+    private static SecurityEventReader resolveReader(ObjectProvider<SecurityPort> securityPorts) {
+        SecurityEventReader reader = securityPorts.orderedStream()
+                .filter(SecurityEventReader.class::isInstance)
+                .map(SecurityEventReader.class::cast)
+                .findFirst().orElse(null);
+        if (reader != null) return reader;
+        SecurityPort port = securityPorts.orderedStream().findFirst().orElse(null);
+        return port == null ? EMPTY_READER : new SecurityPortReader(port);
+    }
+
+    private static final SecurityEventReader EMPTY_READER = new SecurityPortReader(eventId -> {
+        throw new NoSuchElementException("security event not found: " + eventId);
+    });
 
     @Tool(name = "lookupSecurityEvent", description = "Look up a redacted security event summary by event ID. Returns no raw video, image, biometric, identity, or access-control payload. Never invent security evidence.")
     public SecurityLookupResult lookupSecurityEvent(String eventId) {

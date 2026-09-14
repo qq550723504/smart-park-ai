@@ -13,10 +13,12 @@ import com.example.smartpark.model.security.SecurityPrivacyMetadata;
 import com.example.smartpark.model.security.SecuritySourceRef;
 import com.example.smartpark.model.security.SecuritySourceType;
 import com.example.smartpark.port.security.SecurityEventReader;
+import com.example.smartpark.port.security.SecurityPort;
 import com.example.smartpark.port.security.SecuritySourceAdapter;
 import com.example.smartpark.port.security.SecuritySourceDescriptor;
 import com.example.smartpark.tool.security.SecurityQueryTool;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import java.time.Instant;
 import java.util.List;
@@ -165,6 +167,46 @@ class SecurityQueryToolTest {
         assertThat(result.event()).isNull();
         assertThat(result.error()).isEqualTo("Security event lookup is temporarily unavailable");
         assertThat(result.error()).doesNotContain("jdbc", "secret", "token", "db.internal", "postgresql");
+    }
+
+    @Test
+    void startsAgainstALegacySecurityPortThatIsNotAReader() {
+        SecurityEvent legacy = sourcedEvent("SEC-LEGACY-PORT", SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityPort legacyPort = eventId -> {
+            if (!eventId.equals(legacy.eventId())) {
+                throw new NoSuchElementException("security event not found: " + eventId);
+            }
+            return legacy;
+        };
+
+        new ApplicationContextRunner()
+                .withUserConfiguration(SecurityQueryTool.class)
+                .withBean(SecurityPort.class, () -> legacyPort)
+                .run(context -> {
+                    assertThat(context).hasNotFailed().hasSingleBean(SecurityQueryTool.class);
+                    SecurityQueryTool.SecurityLookupResult result = context.getBean(SecurityQueryTool.class)
+                            .lookupSecurityEvent("SEC-LEGACY-PORT");
+                    assertThat(result.error()).isNull();
+                    assertThat(result.event().eventId()).isEqualTo("SEC-LEGACY-PORT");
+                });
+    }
+
+    @Test
+    void prefersAReaderOverALegacyPortWhenBothAreRegistered() {
+        SecurityEvent readerEvent = sourcedEvent("SEC-READER-WINS", SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityPort unusedLegacyPort = eventId -> {
+            throw new AssertionError("legacy port must not be queried when a reader is registered");
+        };
+
+        new ApplicationContextRunner()
+                .withUserConfiguration(SecurityQueryTool.class)
+                .withBean(SecurityPort.class, () -> unusedLegacyPort)
+                .withBean(SecurityEventReader.class, () -> reader(readerEvent))
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context.getBean(SecurityQueryTool.class).lookupSecurityEvent("SEC-READER-WINS").event())
+                            .isNotNull();
+                });
     }
 
     private static SecurityEvent sourcedEvent(String eventId, SecuritySourceType type, String sourceId) {

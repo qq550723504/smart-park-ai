@@ -48,9 +48,13 @@ public final class SecurityEventCatalog implements SecurityEventResolver, Securi
     @Override
     public SecurityEvent getEvent(String eventId) {
         Objects.requireNonNull(eventId, "eventId");
-        return select(events().stream()
+        List<SecurityEvent> matches = events().stream()
                 .filter(event -> event.eventId().equals(eventId))
-                .toList(), eventId);
+                .toList();
+        // A get-only legacy port cannot enumerate its events, so consult its direct
+        // lookup when the aggregated stream has no match. An empty reader still fails here.
+        if (matches.isEmpty() && reader instanceof SecurityPortReader) return reader.getEvent(eventId);
+        return select(matches, eventId);
     }
 
     @Override
