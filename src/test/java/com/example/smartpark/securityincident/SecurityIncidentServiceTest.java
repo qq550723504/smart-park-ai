@@ -702,6 +702,35 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void retainsTheHumanDecisionForEachSplitOfAMultiEventIncident() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-A", "A1", "ACCESS", BASE),
+                event("SEC-B", "A1", "ACCESS", BASE.plusSeconds(120))));
+        SecurityIncidentService service = service(events, List.of(), 20);
+        SecurityIncident multiEvent = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.eventIds().size() == 2).findFirst().orElseThrow();
+        SecurityIncident reviewed = service.review(multiEvent.incidentId(), SecurityDisposition.CONFIRMED_INCIDENT,
+                "APPROVER");
+
+        // Adapter enrichment replaces the source-less copies with concrete ones whose corrected
+        // occurrence times split the two events into separate windows; each window uniquely
+        // aliases one stored identity and must retain the finalized human state.
+        events.clear();
+        events.add(withSource(event("SEC-A", "A1", "ACCESS", BASE), SecuritySourceType.ACCESS_CONTROL, "access-a"));
+        events.add(withSource(event("SEC-B", "A1", "ACCESS", BASE.plusSeconds(30 * 60)),
+                SecuritySourceType.ACCESS_CONTROL, "access-b"));
+
+        List<SecurityIncident> restored = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        assertThat(restored).hasSize(2);
+        assertThat(restored).allSatisfy(incident -> {
+            assertThat(incident.status()).isEqualTo(SecurityIncidentStatus.REVIEWED);
+            assertThat(incident.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+            assertThat(incident.dispositionRecord()).isEqualTo(reviewed.dispositionRecord());
+        });
+    }
+
+    @Test
     void removesSupersededStatesBeforeSavingNewIncidents() {
         List<SecurityEvent> events = new ArrayList<>(List.of(
                 event("SEC-A-1", "A1", "ACCESS", BASE),
