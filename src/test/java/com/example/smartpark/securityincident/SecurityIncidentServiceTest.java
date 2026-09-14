@@ -104,6 +104,73 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void upgradesAStoredUnreviewedIncidentWhenTheSourceLaterSuppliesADisposition() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-UPGRADE", "A1", "ACCESS", BASE)));
+        SecurityIncidentService service = service(events, List.of(), 50);
+        SecurityIncident initial = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        assertThat(initial.status()).isEqualTo(SecurityIncidentStatus.OPEN);
+        assertThat(initial.disposition()).isEqualTo(SecurityDisposition.UNREVIEWED);
+
+        SecurityDispositionRecord model = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(300));
+        events.set(0, eventWithDisposition(event("SEC-UPGRADE", "A1", "ACCESS", BASE), model));
+
+        SecurityIncident upgraded = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(upgraded.incidentId()).isEqualTo(initial.incidentId());
+        assertThat(upgraded.status()).isEqualTo(SecurityIncidentStatus.REVIEWED);
+        assertThat(upgraded.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+        assertThat(upgraded.dispositionRecord()).isEqualTo(model);
+        assertThat(upgraded.reviewedAt()).isEqualTo(BASE.plusSeconds(300));
+    }
+
+    @Test
+    void keepsAStoredHumanDecisionWhenTheSourceLaterSuppliesANewerModelDecision() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-HUMAN", "A1", "ACCESS", BASE)));
+        SecurityIncidentService service = service(events, List.of(), 50);
+        SecurityIncident initial = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        SecurityIncident reviewed = service.review(initial.incidentId(), SecurityDisposition.CONFIRMED_INCIDENT,
+                "APPROVER");
+
+        SecurityDispositionRecord newerModel = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-2", "2026.10", "evt-2",
+                BASE.plusSeconds(600));
+        events.set(0, eventWithDisposition(event("SEC-HUMAN", "A1", "ACCESS", BASE), newerModel));
+
+        SecurityIncident restored = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(restored.status()).isEqualTo(SecurityIncidentStatus.REVIEWED);
+        assertThat(restored.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+        assertThat(restored.dispositionRecord()).isEqualTo(reviewed.dispositionRecord());
+        assertThat(restored.dispositionRecord().source()).isEqualTo(SecurityDispositionSource.HUMAN_REVIEW);
+        assertThat(restored.reviewedAt()).isEqualTo(reviewed.reviewedAt());
+    }
+
+    @Test
+    void replacesAnOlderStoredSourceDecisionWithANewerOne() {
+        SecurityDispositionRecord older = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(60));
+        List<SecurityEvent> events = new ArrayList<>(List.of(eventWithDisposition(
+                event("SEC-MODEL-CORRECTION", "A1", "ACCESS", BASE), older)));
+        SecurityIncidentService service = service(events, List.of(), 50);
+        service.list(new SecurityIncidentQuery(null, 20));
+
+        SecurityDispositionRecord newer = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-2", "2026.10", "evt-2",
+                BASE.plusSeconds(600));
+        events.set(0, eventWithDisposition(event("SEC-MODEL-CORRECTION", "A1", "ACCESS", BASE), newer));
+
+        SecurityIncident corrected = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(corrected.status()).isEqualTo(SecurityIncidentStatus.REVIEWED);
+        assertThat(corrected.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+        assertThat(corrected.dispositionRecord()).isEqualTo(newer);
+        assertThat(corrected.reviewedAt()).isEqualTo(BASE.plusSeconds(600));
+    }
+
+    @Test
     void removesSupersededStatesBeforeSavingNewIncidents() {
         List<SecurityEvent> events = new ArrayList<>(List.of(
                 event("SEC-A-1", "A1", "ACCESS", BASE),

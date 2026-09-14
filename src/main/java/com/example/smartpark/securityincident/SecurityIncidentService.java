@@ -361,14 +361,46 @@ public final class SecurityIncidentService {
         String handoffWorkItemId = state.handoffWorkItemId();
         if (handoffWorkItemId == null && !handoffIds.isEmpty()) handoffWorkItemId = handoffIds.get(0);
         String incidentId = retainStoredIdentity ? canonical.incidentId() : fresh.incidentId();
-        SecurityIncident dispositionSource = candidates.stream()
-                .filter(candidate -> candidate.disposition() != SecurityDisposition.UNREVIEWED)
-                .max(Comparator.comparing(SecurityIncident::reviewedAt,
-                                Comparator.nullsFirst(Comparator.naturalOrder()))
-                        .thenComparing(SecurityIncident::incidentId))
-                .orElse(state);
-        return withStoredState(fresh, incidentId, state.status(), reviewedAt, handoffWorkItemId, fresh.riskLevel(),
-                dispositionSource.disposition(), dispositionSource.dispositionRecord());
+        SecurityDispositionRecord dispositionRecord = effectiveDisposition(fresh, candidates);
+        Instant effectiveReviewedAt = dispositionRecord.disposition() != SecurityDisposition.UNREVIEWED
+                ? dispositionRecord.decidedAt()
+                : latestReviewedAt(reviewedAt, fresh.reviewedAt());
+        return withStoredState(fresh, incidentId, higherStatus(state.status(), fresh.status()), effectiveReviewedAt,
+                handoffWorkItemId, fresh.riskLevel(), dispositionRecord.disposition(), dispositionRecord);
+    }
+
+    /**
+     * Resolves the disposition to keep when fresh evidence overlaps stored state.
+     * A stored human review stays authoritative and is never replaced by a later
+     * source decision; otherwise the newest decided record — including the freshly
+     * correlated one — wins, so a source can correct an earlier decision and a
+     * first poll that only returned {@code UNREVIEWED} can still be upgraded.
+     */
+    private static SecurityDispositionRecord effectiveDisposition(SecurityIncident fresh,
+                                                                  List<SecurityIncident> candidates) {
+        SecurityDispositionRecord storedHumanReview = candidates.stream()
+                .map(SecurityIncident::dispositionRecord)
+                .filter(record -> record.source() == SecurityDispositionSource.HUMAN_REVIEW)
+                .min(Comparator.comparing(SecurityDispositionRecord::decidedAt))
+                .orElse(null);
+        if (storedHumanReview != null) return storedHumanReview;
+        List<SecurityDispositionRecord> decided = new ArrayList<>();
+        candidates.forEach(candidate -> decided.add(candidate.dispositionRecord()));
+        decided.add(fresh.dispositionRecord());
+        return decided.stream()
+                .filter(record -> record.disposition() != SecurityDisposition.UNREVIEWED)
+                .max(Comparator.comparing(SecurityDispositionRecord::decidedAt))
+                .orElse(SecurityDispositionRecord.unreviewed());
+    }
+
+    private static Instant latestReviewedAt(Instant storedReviewedAt, Instant freshReviewedAt) {
+        if (storedReviewedAt == null) return freshReviewedAt;
+        if (freshReviewedAt == null) return storedReviewedAt;
+        return freshReviewedAt.isAfter(storedReviewedAt) ? freshReviewedAt : storedReviewedAt;
+    }
+
+    private static SecurityIncidentStatus higherStatus(SecurityIncidentStatus left, SecurityIncidentStatus right) {
+        return statusRank(left) >= statusRank(right) ? left : right;
     }
 
     private static boolean overlaps(SecurityIncident left, SecurityIncident right) {
