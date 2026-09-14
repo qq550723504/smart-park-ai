@@ -331,8 +331,7 @@ public final class SecurityIncidentService {
         alerts.listActive().forEach(alert -> alert.evidence().stream()
                 .filter(SecurityEventIdentity::isReference)
                 .forEach(reference -> result.computeIfAbsent(
-                        new AlertReferenceKey(normalizeReference(reference, alert.parkId(), alert.buildingId()),
-                                alert.parkId(), alert.buildingId()),
+                        normalizedKey(reference, alert.parkId(), alert.buildingId()),
                         ignored -> new ArrayList<>()).add(alert)));
         return result;
     }
@@ -355,21 +354,21 @@ public final class SecurityIncidentService {
     }
 
     /**
-     * Normalizes an alert's evidence reference to the same form {@link #alertsReferencing}
-     * looks up. A source-qualified token that omits the location (the previously emitted
-     * three-part form) is completed from the owning alert's location, so the alert still
-     * links to its incident instead of being dropped as an unknown key; a malformed or
-     * unknown-source token is left unchanged and simply matches nothing.
+     * Builds the index key for an alert's evidence reference, matching what
+     * {@link #alertsReferencing} looks up. The reference is completed from the alert when
+     * it omits the location, while a fully qualified token keeps the location it encodes -
+     * the workflow also honors that embedded location, so the key must use it too. A legacy
+     * or malformed token stays unchanged and simply matches nothing.
      */
-    private static String normalizeReference(String reference, String parkId, String buildingId) {
+    private static AlertReferenceKey normalizedKey(String reference, String parkId, String buildingId) {
         SecurityEventIdentity.QualifiedReference qualified =
                 SecurityEventIdentity.parseQualifiedReference(reference);
-        if (qualified == null) return reference;
-        return new SecurityEventIdentity(
-                qualified.source(),
-                qualified.eventId(),
-                qualified.hasLocation() ? qualified.parkId() : parkId,
-                qualified.hasLocation() ? qualified.buildingId() : buildingId).reference();
+        if (qualified == null) return new AlertReferenceKey(reference, parkId, buildingId);
+        String keyParkId = qualified.hasLocation() ? qualified.parkId() : parkId;
+        String keyBuildingId = qualified.hasLocation() ? qualified.buildingId() : buildingId;
+        String keyReference = new SecurityEventIdentity(
+                qualified.source(), qualified.eventId(), keyParkId, keyBuildingId).reference();
+        return new AlertReferenceKey(keyReference, keyParkId, keyBuildingId);
     }
 
     private List<SecurityIncident> restoreStates(List<SecurityIncident> freshIncidents) {

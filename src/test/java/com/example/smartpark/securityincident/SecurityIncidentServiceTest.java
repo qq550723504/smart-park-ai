@@ -1016,6 +1016,24 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void linksAlertsByTheLocationEncodedInAQualifiedReference() {
+        SecurityEvent foreign = withSource(event("SEC-FOREIGN-REF", "PARK-B", "B1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        Alert alert = new Alert("ALT-FOREIGN-REF", "PARK-A", "A1", "DEV-1", AlertClassification.ACCESS,
+                RiskLevel.HIGH, "REDACTED: cross-location alert", BASE,
+                List.of(SecurityEventIdentity.of(foreign).reference()));
+        SecurityIncidentService service = service(List.of(foreign), List.of(alert));
+
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        // The token names PARK-B/B1 and the workflow resolves it there, so the key must use
+        // the encoded location rather than the alert's own PARK-A/A1.
+        assertThat(incident.parkId()).isEqualTo("PARK-B");
+        assertThat(incident.alertIds()).containsExactly("ALT-FOREIGN-REF");
+        assertThat(incident.riskLevel()).isEqualTo(SecurityIncidentRisk.HIGH);
+    }
+
+    @Test
     void keepsLegacyAlertReferencesAsAnExplicitAlias() {
         SecurityEvent access = withSource(event("SEC-LEGACY-REF", "A1", "ACCESS", BASE),
                 SecuritySourceType.ACCESS_CONTROL, "access-1");
