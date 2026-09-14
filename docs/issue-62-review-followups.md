@@ -397,3 +397,12 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 56 | `collaboration/CollaborationRuntimeConfiguration.collectPrimaryEvidence` | P2 | 提取出的安全引用被直接拼进 `{"eventId":"..."}` 而未做 JSON 转义；长度前缀解析会保留合法 source/event/park/building 标识中的引号或反斜杠，导致回调收到畸形/被篡改的参数，异常被吞后确定性证据被静默丢弃。现用 Jackson 序列化工具参数对象，策略允许的任意标识都能原样往返 |
 
 对应独立提交：`a8bc77c`（#55）、`f3a9b8a`（#56）。
+
+第二十八轮（对 `4aa3935`）补 2 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 57 | `securityincident/SecurityIncidentService.alertsByReference` | P2 | 索引按告警证据里的**原始** token 建键，而 `alertsReferencing` 只查当前五段 `identity.reference()` 与 legacy 裸引用，因此以早前合法的三段（无位置）source-qualified token 持久化的告警永远匹配不上：事件在工作流里能解析，告警 id 与风险却被丢弃，HIGH 事件退化成未关联的 MEDIUM。现于建键前归一化引用——无位置 token 用告警自身的 park/building 补全，带位置 token 保留自身位置，legacy/畸形 token 原样保留（自然匹配不到） |
+| 58 | `model/security/SecurityEventIdentity.decodeLocation` | P2 | `decodeLocation` 对「有意支持的无位置形式」与「损坏的后缀」都返回 `null`，于是一段被截断的 park/building 会被静默当作无位置引用，`SecurityEventCatalog` 可能在恰好唯一的位置上错误命中。现只有三段身份后**精确结束**才算无位置形式；若后续材料以长度前缀（`:` + 数字 + `#`）开头却无法解出完整的 park 与 building，则视为畸形：`canonicalQualifiedReference`/`parseQualifiedReference` 返回 `null`，`fromReference` 直接拒绝而不再回退到告警位置 |
+
+对应独立提交：`11e4de3`（#57）、`5302bb0`（#58）。
