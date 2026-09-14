@@ -264,3 +264,11 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 28 | `port/security/SecurityEventCatalog.getEvent(String)` / `getEvent(SecurityEventIdentity)` | P1 | 两个 adapter 复用同一 source-local event id 时，裸 id 重载会匹配两者的全部副本并静默返回 `receivedAt` 最新的具体事件（可能属于另一源/园区/楼栋）。`SecurityQueryTool.lookupSecurityEvent()` 与只提取裸 `SEC-*` 的协作取证器都走这条路径，诊断/专家结论可能锚定错误事件。现按候选背后「具体源 + 仅无源别名的位置」计数逻辑事件，>1 时抛 `ambiguous security event id ...; use a source-qualified reference` 而非猜测；同一逻辑事件的多份表示（具体源 + 无源别名、同源重复读取）仍会折叠，source-qualified identity 仍可无歧义解析 |
 
 对应独立提交：`62242c6`（#28）。
+
+第十三轮（对 `a2daf31`）补 1 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 29 | `securityincident/SecurityIncidentService.preferredAliasClaimants()` | P1 | 无源已复核 incident 被有界 incident store 淘汰、但其 handoff 仍保留时，别名首选认领者 map 只由 `stored` 构建（`reservedForAnotherClaimant` 用 `handoff.incidentId()` 查 map 落空），于是遍历顺序第一个复用该 id 的具体源会继承保留的人工 disposition，即使另一条才匹配。现把 incident 的 occurrence time 投影到 `SecurityIncidentHandoff`（`SecurityIncidentHandoffStore` 传 `incident.lastOccurredAt()`），并让不在 `stored` 中的 retained-only handoff 用同一「fact + 距离」规则预计算首选认领者 |
+
+对应独立提交：`cce05d3`（#29）。
