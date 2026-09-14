@@ -418,7 +418,8 @@ class SecurityIncidentServiceTest {
         SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
         SecurityIncidentService service = service(events, List.of(), 1, handoffs);
         SecurityIncident initial = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
-        SecurityIncident reviewed = service.review(initial.incidentId());
+        SecurityIncident reviewed = service.review(initial.incidentId(), SecurityDisposition.FALSE_POSITIVE,
+                "APPROVER");
         service.handoff(initial.incidentId());
         events.add(event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(16 * 60)));
         service.list(new SecurityIncidentQuery(null, 20));
@@ -427,6 +428,30 @@ class SecurityIncidentServiceTest {
 
         assertThat(restored.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
         assertThat(restored.reviewedAt()).isEqualTo(reviewed.reviewedAt());
+        assertThat(restored.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+        assertThat(restored.dispositionRecord().source()).isEqualTo(SecurityDispositionSource.HUMAN_REVIEW);
+    }
+
+    @Test
+    void keepsAHumanDispositionWhenTheEventStoreEvictsAHandedOffIncident() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 1, handoffs);
+        SecurityIncident initial = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(initial.incidentId(), SecurityDisposition.FALSE_POSITIVE, "APPROVER");
+        service.handoff(initial.incidentId());
+        events.add(event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(16 * 60)));
+        service.list(new SecurityIncidentQuery(null, 20));
+
+        SecurityIncident restored = service.get(initial.incidentId());
+
+        assertThat(restored.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(restored.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+        assertThat(restored.dispositionRecord().source()).isEqualTo(SecurityDispositionSource.HUMAN_REVIEW);
+        assertThat(restored.dispositionRecord().actor()).isEqualTo("APPROVER");
+        assertThat(handoffs.list()).singleElement()
+                .satisfies(handoff -> assertThat(handoff.dispositionRecord().disposition())
+                        .isEqualTo(SecurityDisposition.FALSE_POSITIVE));
     }
 
     @Test
@@ -686,7 +711,8 @@ class SecurityIncidentServiceTest {
             @Override
             public SecurityIncidentHandoff createOrGet(SecurityIncident incident, Instant now) {
                 SecurityIncidentHandoff handoff = new SecurityIncidentHandoff("WI:" + incident.incidentId(), incident.incidentId(), incident.parkId(),
-                        incident.buildingId(), incident.riskLevel(), incident.summary(), now);
+                        incident.buildingId(), incident.riskLevel(), incident.summary(), now, null, now,
+                        null, List.of(), incident.dispositionRecord());
                 created.removeIf(existing -> existing.workItemId().equals(handoff.workItemId()));
                 created.add(handoff);
                 return handoff;
@@ -700,7 +726,8 @@ class SecurityIncidentServiceTest {
                 if (existing == null) return createOrGet(incident, now);
                 SecurityIncidentHandoff refreshed = new SecurityIncidentHandoff(existing.workItemId(), incident.incidentId(),
                         incident.parkId(), incident.buildingId(), incident.riskLevel(), incident.summary(),
-                        existing.createdAt(), existing.reviewedAt(), now, incident.eventType(), incident.eventIds());
+                        existing.createdAt(), existing.reviewedAt(), now, incident.eventType(), incident.eventIds(),
+                        incident.dispositionRecord());
                 created.removeIf(handoff -> handoff.workItemId().equals(existing.workItemId()));
                 created.add(refreshed);
                 return refreshed;

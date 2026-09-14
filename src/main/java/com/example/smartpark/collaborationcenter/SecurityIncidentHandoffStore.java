@@ -1,5 +1,7 @@
 package com.example.smartpark.collaborationcenter;
 
+import com.example.smartpark.model.security.SecurityDisposition;
+import com.example.smartpark.model.security.SecurityDispositionRecord;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoff;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoffPort;
 import com.example.smartpark.securityincident.SecurityIncident;
@@ -33,11 +35,12 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
         SecurityIncidentHandoff handoff = existing == null
                 ? new SecurityIncidentHandoff("SECURITY_INCIDENT:" + incident.incidentId(), incident.incidentId(),
                         incident.parkId(), incident.buildingId(), incident.riskLevel(), incident.summary(), now,
-                        incident.reviewedAt(), now, incident.eventType(), incident.eventIds())
+                        incident.reviewedAt(), now, incident.eventType(), incident.eventIds(),
+                        projectedDispositionRecord(null, incident))
                 : new SecurityIncidentHandoff(existing.workItemId(), existing.incidentId(), existing.parkId(),
                         existing.buildingId(), projectedRisk, projectedSummary, existing.createdAt(),
                         existing.reviewedAt() != null ? existing.reviewedAt() : incident.reviewedAt(), updatedAt,
-                        incident.eventType(), incident.eventIds());
+                        incident.eventType(), incident.eventIds(), projectedDispositionRecord(existing, incident));
         handoffs.put(incident.incidentId(), handoff);
         trimToCapacity();
         return handoff;
@@ -63,7 +66,7 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
                         incident.incidentId(), incident.parkId(), incident.buildingId(),
                         projectedRisk, projectedSummary, existing.createdAt(),
                         existing.reviewedAt() != null ? existing.reviewedAt() : incident.reviewedAt(), updatedAt,
-                        incident.eventType(), incident.eventIds());
+                        incident.eventType(), incident.eventIds(), projectedDispositionRecord(existing, incident));
                 handoffs.put(incident.incidentId(), migrated);
                 trimToCapacity();
                 return migrated;
@@ -71,7 +74,8 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
             if (!handoffs.containsKey(incident.incidentId())) {
                 SecurityIncidentHandoff restored = new SecurityIncidentHandoff(incident.handoffWorkItemId(),
                         incident.incidentId(), incident.parkId(), incident.buildingId(), incident.riskLevel(),
-                        incident.summary(), now, incident.reviewedAt(), now, incident.eventType(), incident.eventIds());
+                        incident.summary(), now, incident.reviewedAt(), now, incident.eventType(), incident.eventIds(),
+                        projectedDispositionRecord(null, incident));
                 handoffs.put(incident.incidentId(), restored);
                 trimToCapacity();
                 return restored;
@@ -107,6 +111,14 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
             case MEDIUM -> 1;
             case LOW -> 0;
         };
+    }
+
+    private static SecurityDispositionRecord projectedDispositionRecord(SecurityIncidentHandoff existing,
+                                                                         SecurityIncident incident) {
+        if (incident.dispositionRecord().disposition() != SecurityDisposition.UNREVIEWED) {
+            return incident.dispositionRecord();
+        }
+        return existing == null ? SecurityDispositionRecord.unreviewed() : existing.dispositionRecord();
     }
 
     private static boolean projectedFieldsChanged(SecurityIncidentHandoff existing, String incidentId,

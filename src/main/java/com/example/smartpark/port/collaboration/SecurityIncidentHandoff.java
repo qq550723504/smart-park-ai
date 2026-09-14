@@ -5,29 +5,38 @@ import java.util.List;
 import java.util.Objects;
 
 import com.example.smartpark.model.security.RedactedEvidencePolicy;
+import com.example.smartpark.model.security.SecurityDispositionRecord;
 import com.example.smartpark.securityincident.SecurityIncidentRisk;
 
 public record SecurityIncidentHandoff(String workItemId, String incidentId, String parkId, String buildingId,
                                       SecurityIncidentRisk riskLevel, String safeSummary, Instant createdAt,
-                                      Instant reviewedAt, Instant updatedAt, String eventType, List<String> eventIds) {
+                                      Instant reviewedAt, Instant updatedAt, String eventType, List<String> eventIds,
+                                      SecurityDispositionRecord dispositionRecord) {
     public SecurityIncidentHandoff(String workItemId, String incidentId, String parkId, String buildingId,
                                    SecurityIncidentRisk riskLevel, String safeSummary, Instant createdAt) {
         this(workItemId, incidentId, parkId, buildingId, riskLevel, safeSummary, createdAt, null, createdAt,
-                null, List.of());
+                null, List.of(), SecurityDispositionRecord.unreviewed());
     }
 
     public SecurityIncidentHandoff(String workItemId, String incidentId, String parkId, String buildingId,
                                    SecurityIncidentRisk riskLevel, String safeSummary, Instant createdAt,
                                    Instant reviewedAt) {
         this(workItemId, incidentId, parkId, buildingId, riskLevel, safeSummary, createdAt, reviewedAt, createdAt,
-                null, List.of());
+                null, List.of(), SecurityDispositionRecord.unreviewed());
     }
 
     public SecurityIncidentHandoff(String workItemId, String incidentId, String parkId, String buildingId,
                                    SecurityIncidentRisk riskLevel, String safeSummary, Instant createdAt,
                                    Instant reviewedAt, Instant updatedAt) {
         this(workItemId, incidentId, parkId, buildingId, riskLevel, safeSummary, createdAt, reviewedAt, updatedAt,
-                null, List.of());
+                null, List.of(), SecurityDispositionRecord.unreviewed());
+    }
+
+    public SecurityIncidentHandoff(String workItemId, String incidentId, String parkId, String buildingId,
+                                   SecurityIncidentRisk riskLevel, String safeSummary, Instant createdAt,
+                                   Instant reviewedAt, Instant updatedAt, String eventType, List<String> eventIds) {
+        this(workItemId, incidentId, parkId, buildingId, riskLevel, safeSummary, createdAt, reviewedAt, updatedAt,
+                eventType, eventIds, SecurityDispositionRecord.unreviewed());
     }
 
     public SecurityIncidentHandoff {
@@ -39,6 +48,7 @@ public record SecurityIncidentHandoff(String workItemId, String incidentId, Stri
         safeSummary = RedactedEvidencePolicy.require(safeSummary, "safeSummary");
         createdAt = Objects.requireNonNull(createdAt, "createdAt");
         updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
+        dispositionRecord = dispositionRecord == null ? SecurityDispositionRecord.unreviewed() : dispositionRecord;
         eventType = eventType == null || eventType.isBlank() ? null : eventType.trim();
         eventIds = eventIds == null ? List.of() : List.copyOf(eventIds);
     }

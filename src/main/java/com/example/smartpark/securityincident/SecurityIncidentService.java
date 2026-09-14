@@ -276,7 +276,8 @@ public final class SecurityIncidentService {
                 .orElse(null);
         if (handoff == null) return restored;
         return withStoredState(fresh, fresh.incidentId(), SecurityIncidentStatus.HANDOFF, handoff.reviewedAt(),
-                handoff.workItemId());
+                handoff.workItemId(), fresh.riskLevel(), handoff.dispositionRecord().disposition(),
+                handoff.dispositionRecord());
     }
 
     private static SecurityIncident restoreRiskProjection(SecurityIncident restored,
