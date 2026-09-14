@@ -423,3 +423,12 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 61 | `model/security/SecurityEventIdentity` 空分量 | P1 | `decodeParts` 会接受零长度分量：长度为 0 但语法合法的 source/event/park/building 会让解析抛异常，或产生随后构造身份时失败的 `QualifiedReference`。由于 `alertsByReference` 会归一化**每条**活跃告警，一个这样的 token 就能让所有 incident list/get/review 失败。现校验所有解码分量：空分量令 `canonicalQualifiedReference`/`parseQualifiedReference` 返回 `null`，`fromReference` 拒绝该 token，单次查找失败而不再拖垮事件读取 |
 
 对应独立提交：`28e920e`（#60）、`b5f61b7`（#61）。
+
+第三十一轮（对 `582d644`）补 2 条（均 P1）：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 62 | `AlertWorkflowController` 的 `alertWorkflow` bean 依赖 | P1 | 默认启用的 `alertWorkflow` bean 仍要求 `SecurityEventReader`；`SecurityIncidentConfiguration` 只在已存在 reader 或 source adapter 时才合成 reader，救不了「只注册旧 get-only `SecurityPort`」的部署。抽出共享 helper `support/SecurityEventReaders`（优先 reader，否则把第一个 `SecurityPort` 包成 `SecurityPortReader`），`alertWorkflow` bean 与 `AlertPreflightWorkflowFactory` 都改注入 `ObjectProvider<SecurityPort>` 再解析；`SecurityQueryTool` 复用同一 helper |
+| 63 | `port/security/SecurityEventCatalog` 候选集 | P1 | 混部（get-only 旧端口 + 可枚举 adapter）下，adapter 让候选非空，旧端口的直接答案永不被查询：两个源共享的裸 id 会静默返回 adapter 副本而非报歧义，指向具体旧端口事件的 qualified reference 也不可达。现把旧端口的直接答案加入候选（`candidates(eventId)`），再统一做来源/位置消歧 |
+
+对应独立提交：`e44ec31`（#62）、`e338acd`（#63）。
