@@ -335,3 +335,13 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 43 | `model/security/SecurityEventIdentity.reference()` / `fromReference()` | P2 | 无源事件的 id 若本身形如合法 qualified payload（如 `source:14#ACCESS_CONTROL:4#feed:3#evt`），`reference()` 输出的 `security-event:` + 裸 id 会被 `fromReference()` 重新解码为具体源 `ACCESS_CONTROL/feed` + 事件 `evt`，工作流因此查找错误的身份或 404。现于模型边界拒绝「会被解码为 qualified reference」的 event id（`SecurityEventIdentity` 与 `SecurityEvent` 共同校验），使裸 legacy reference 不再有歧义；仅以 `source:` 开头但无法解码的 id 仍按 legacy 处理 |
 
 对应独立提交：`e43e3da`（#43）。
+
+第二十一轮（对 `d9409f5`）补 3 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 44 | `securityincident/SecurityIncidentService.aliasPreference()` | P1 | 第十四轮的 raw-type 判别只覆盖了 correlation 分桶，别名首选认领者的比较器仍按标准化 `eventType` 判定「同类型」，于是无源事件与多个具体源事件复用同一 id、且其未知 vendor code 都归一为 `UNKNOWN` 时全部并列，退化为按时间戳就近选择：无关的具体事件（不同 `rawEventType`）可能先吸收 legacy 事件及其 disposition。现套用同一 `correlationType()` 判别（`UNKNOWN` 时包含 `rawEventType`）比较候选 |
+| 45 | `tool/security/SecurityQueryTool.SecurityLookupResult` | P1 | 返回完整 `SecurityEvent` 会把 adapter 提供的人工/模型处置所带的嵌套 `actor`、`modelId`、`modelVersion`、`evidenceRef` 序列化给 AI 工具消费方，尽管工具契约明确承诺不含身份记录、HTTP DTO 也刻意省略这些 provenance 字段。现改为白名单脱敏投影 `SecurityEventSummary`：保留处置状态、来源与决策时间，丢弃 actor 及注册模型标识，并出于同样原因省略 adapter ingest 元数据 |
+| 46 | `securityincident/SecurityIncidentService.preferredRepresentation()` | P2 | 表示选择按「丰富度」（severity/confidence/ingest 加分）偏向较旧快照，于是同一具体源的两个快照都带已决处置、较新快照有意清空错误的 severity/confidence/ingest-version 时，仍选较旧更丰富者，incident 保留陈旧元数据。现只保留「具体源 vs 无源 legacy」的丰富度优先级，同一具体源的副本按 `receivedAt` 取最新，删除 `enrichmentScore()` |
+
+每个修复对应独立提交：`55771a0`（#44）、`e42e564`（#45）、`36685c0`（#46）。
