@@ -198,15 +198,24 @@ public final class SecurityIncidentService {
     /**
      * Picks the authoritative representation of a logically identical event that
      * arrives through multiple ingestion paths (legacy reader and/or registered
-     * adapters). A decided disposition always wins so a source's classification is
-     * not dropped when another path reports the same event as {@code UNREVIEWED};
-     * otherwise the freshest representation by {@code receivedAt} wins, favouring
-     * an adapter's enriched view over a staler copy.
+     * adapters). The representation that carries the reconciled decision is
+     * authoritative, so a correction with a later {@code decidedAt} is never dropped
+     * just because its event receipt time is older. When neither path is decided,
+     * the freshest representation by {@code receivedAt} wins (favouring an adapter's
+     * enriched view, with source concreteness as a tie-breaker). The reconciliation
+     * rule is the same one used by the restore paths: a stored human review stays
+     * authoritative, otherwise the newest decision wins.
      */
     private static SecurityEvent authoritativeEvent(SecurityEvent left, SecurityEvent right) {
-        boolean leftDecided = left.disposition().disposition() != SecurityDisposition.UNREVIEWED;
-        boolean rightDecided = right.disposition().disposition() != SecurityDisposition.UNREVIEWED;
-        if (leftDecided != rightDecided) return rightDecided ? right : left;
+        SecurityDispositionRecord reconciled = reconcileDisposition(right.disposition(), List.of(left.disposition()));
+        if (reconciled.disposition() != SecurityDisposition.UNREVIEWED) {
+            return reconciled.equals(left.disposition()) ? left : right;
+        }
+        return fresherEvent(left, right);
+    }
+
+    /** Freshest representation by {@code receivedAt}, preferring the concrete adapter view on a tie. */
+    private static SecurityEvent fresherEvent(SecurityEvent left, SecurityEvent right) {
         int freshness = right.receivedAt().compareTo(left.receivedAt());
         if (freshness != 0) return freshness > 0 ? right : left;
         // Timestamps tie when an adapter enriches a legacy event without

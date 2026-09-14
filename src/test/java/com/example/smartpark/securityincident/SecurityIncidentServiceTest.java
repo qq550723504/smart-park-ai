@@ -97,6 +97,33 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void prefersTheNewestDecisionWhenBothIngestionPathsDeliverDecidedRecords() {
+        SecurityDispositionRecord stale = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(10));
+        SecurityDispositionRecord correction = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-2", "2026.10", "evt-2",
+                BASE.plusSeconds(60));
+        SecurityEvent readerCopy = eventWithDisposition(
+                enrichedEvent(event("SEC-CORRECT", "A1", "ACCESS", BASE), stale, BASE.plusSeconds(120),
+                        SecurityEventSeverity.HIGH),
+                stale);
+        SecurityEvent adapterCopy = withSource(
+                enrichedEvent(event("SEC-CORRECT", "A1", "ACCESS", BASE), correction, BASE,
+                        SecurityEventSeverity.HIGH),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityIncidentService service = service(List.of(readerCopy), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterReturning(adapterCopy)));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).singleElement().satisfies(incident -> {
+            assertThat(incident.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+            assertThat(incident.dispositionRecord()).isEqualTo(correction);
+        });
+    }
+
+    @Test
     void prefersTheFreshestRepresentationWhenNoDispositionIsAvailable() {
         SecurityEvent readerCopy = event("SEC-FRESH", "A1", "ACCESS", BASE);
         SecurityEvent adapterCopy = enrichedEvent(readerCopy, SecurityDispositionRecord.unreviewed(),
