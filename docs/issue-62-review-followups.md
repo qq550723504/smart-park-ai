@@ -449,3 +449,11 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 66 | `model/security/SecurityEventIdentity` 解析时的来源校验 | P1 | `parseQualifiedReference` 解码后直接把 source id 交给 `SecuritySourceRef`，标识符策略拒绝 URL/凭据片段时会抛异常；`SecurityIncidentService.alertsByReference()` 不隔离单条失败地解析每条活跃告警，于是**一个**这样的 token 就让所有 incident list/get/review 抛错，而不是像 `normalizedKey` 承诺的那样「匹配不到」。现解码出的 source id 走同一策略校验，不通过时解析器返回 `null`（`fromReference` 仍拒绝），畸形引用被忽略而不外溢 |
 
 对应提交：`484e9ea`。
+
+第三十四轮（对 `a1df485`）补 1 条（P2）：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 67 | `ui/src/components/security/SecurityIncidentCenter.vue` 误报指标 | P2 | 误报指标此前只要队列里出现任一已决 disposition 就显示：运营在默认 demo 适配器上人工复核一条事件后，hero 就会给出「误报」计数，而 `securityDispositionEnabled` 仍为 false（缺少生产误报评估数据源），与 fail-closed 能力契约相悖。现组件新增 `securityDispositionEnabled`（默认 false），只在能力开启**且**存在已决条目时才统计误报，否则显示「误报数不可统计」；`OperationsWorkbench` 透传该能力 |
+
+对应提交：`85aeea0`。
