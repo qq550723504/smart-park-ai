@@ -82,16 +82,19 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
 
     /**
      * Extracts the source-local event id from a reference token, accepting both the
-     * legacy bare form and the source-qualified form. Returns {@code null} when the
-     * token is not a valid security event reference.
+     * legacy bare form and the source-qualified form. A token that looks qualified
+     * but does not decode is treated as a legacy bare event id, so ids that merely
+     * begin with {@code source:} keep resolving.
      */
     public static String eventIdOfReference(String token) {
         if (!isReference(token)) return null;
         String body = token.substring(REFERENCE_PREFIX.length()).trim();
         if (body.isEmpty()) return null;
-        if (!body.startsWith(SOURCE_REFERENCE_PREFIX)) return body;
-        List<String> parts = decodeMaterial(body.substring(SOURCE_REFERENCE_PREFIX.length()));
-        return parts == null ? null : parts.get(2);
+        if (body.startsWith(SOURCE_REFERENCE_PREFIX)) {
+            List<String> parts = decodeMaterial(body.substring(SOURCE_REFERENCE_PREFIX.length()));
+            if (parts != null) return parts.get(2);
+        }
+        return body;
     }
 
     private static List<String> decodeMaterial(String material) {

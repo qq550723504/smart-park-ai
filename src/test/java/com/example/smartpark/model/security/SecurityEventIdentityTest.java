@@ -68,6 +68,8 @@ class SecurityEventIdentityTest {
         assertThat(legacy).isEqualTo("security-event:E:1");
         assertThat(SecurityEventIdentity.eventIdOfReference(legacy)).isEqualTo("E:1");
         assertThat(SecurityEventIdentity.eventIdOfReference("device-health:PARK-1:HEALTHY")).isNull();
-        assertThat(SecurityEventIdentity.eventIdOfReference("security-event:source:not-encoded")).isNull();
+        // A token that merely begins with `source:` keeps resolving as a legacy event id.
+        assertThat(SecurityEventIdentity.eventIdOfReference("security-event:source:not-encoded"))
+                .isEqualTo("source:not-encoded");
     }
 }
