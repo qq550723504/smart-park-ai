@@ -1,6 +1,8 @@
 package com.example.smartpark.port.security;
 
+import com.example.smartpark.model.security.SecurityDisposition;
 import com.example.smartpark.model.security.SecurityDispositionRecord;
+import com.example.smartpark.model.security.SecurityDispositionSource;
 import com.example.smartpark.model.security.SecurityEvent;
 import com.example.smartpark.model.security.SecurityEventIdentity;
 import com.example.smartpark.model.security.SecurityEventLocation;
@@ -147,6 +149,43 @@ class SecurityEventCatalogTest {
         assertThatThrownBy(() -> catalog.getEvent(
                 new SecurityEventIdentity(SecuritySourceRef.unknown(), "SEC-MISSING", PARK, BUILDING)))
                 .isInstanceOf(NoSuchElementException.class);
+    }
+
+    @Test
+    void attachesTheReconciledDecisionToThePreferredCatalogCopy() {
+        SecurityDispositionRecord corrected = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-2", "2026.10", "evt-2",
+                BASE.plusSeconds(300));
+        SecurityEvent legacy = event("SEC-DECISION", SecuritySourceRef.unknown(), BASE)
+                .withDisposition(corrected);
+        SecurityEvent stale = event("SEC-DECISION", access("access-1"), BASE.plusSeconds(600));
+        SecurityEventCatalog catalog = new SecurityEventCatalog(reader(legacy), List.of(adapter(stale)));
+
+        SecurityEvent resolved = catalog.getEvent("SEC-DECISION");
+
+        // The concrete, receipt-fresher copy wins representation, but the corrected decision
+        // carried by the older legacy snapshot must not be lost.
+        assertThat(resolved.source()).isEqualTo(access("access-1"));
+        assertThat(resolved.receivedAt()).isEqualTo(BASE.plusSeconds(600));
+        assertThat(resolved.disposition().disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+        assertThat(resolved.disposition()).isEqualTo(corrected);
+    }
+
+    @Test
+    void attachesTheLatestDecisionWhenQualifiedCatalogCopiesDisagree() {
+        SecurityDispositionRecord corrected = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-3", "2026.11", "evt-3",
+                BASE.plusSeconds(120));
+        SecurityEvent olderDecision = event("SEC-QUAL", access("access-1"), BASE).withDisposition(corrected);
+        SecurityEvent newerUnreviewed = event("SEC-QUAL", access("access-1"), BASE.plusSeconds(600));
+        SecurityEventCatalog catalog = new SecurityEventCatalog(reader(olderDecision),
+                List.of(adapter(newerUnreviewed)));
+
+        SecurityEvent resolved = catalog.getEvent(
+                new SecurityEventIdentity(access("access-1"), "SEC-QUAL", PARK, BUILDING));
+
+        assertThat(resolved.receivedAt()).isEqualTo(BASE.plusSeconds(600));
+        assertThat(resolved.disposition()).isEqualTo(corrected);
     }
 
     private static SecurityEventIdentity accessIdentity() {

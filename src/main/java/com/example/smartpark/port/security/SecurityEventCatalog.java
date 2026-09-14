@@ -1,5 +1,8 @@
 package com.example.smartpark.port.security;
 
+import com.example.smartpark.model.security.SecurityDisposition;
+import com.example.smartpark.model.security.SecurityDispositionRecord;
+import com.example.smartpark.model.security.SecurityDispositionSource;
 import com.example.smartpark.model.security.SecurityEvent;
 import com.example.smartpark.model.security.SecurityEventIdentity;
 
@@ -62,11 +65,13 @@ public final class SecurityEventCatalog implements SecurityEventResolver, Securi
         // A source-qualified reference must resolve to that exact source. Falling back to a
         // source-less legacy alias — or to a different source that merely reused the id —
         // would ground the caller in an event never attributed to the requested source.
-        return events.stream()
+        List<SecurityEvent> matches = events.stream()
                 .filter(event -> SecurityEventIdentity.of(event).equals(identity))
-                .max(PREFERRED)
-                .orElseThrow(() -> new NoSuchElementException(
-                        "security event not found for source: " + identity.reference()));
+                .toList();
+        if (matches.isEmpty()) {
+            throw new NoSuchElementException("security event not found for source: " + identity.reference());
+        }
+        return preferred(matches);
     }
 
     /** Every event currently exposed by the legacy reader and the registered adapters. */
@@ -97,7 +102,42 @@ public final class SecurityEventCatalog implements SecurityEventResolver, Securi
             throw new IllegalArgumentException("ambiguous security event id: " + eventId
                     + "; use a source-qualified reference");
         }
-        return candidates.stream().max(PREFERRED).orElseThrow();
+        return preferred(candidates);
+    }
+
+    /**
+     * Picks the freshest preferred copy of one logical event and attaches the disposition
+     * the copies jointly agree on. Copies can disagree when a source corrects a decision
+     * without advancing {@code receivedAt}; selecting only by source concreteness and
+     * receipt freshness would then hand a stale or {@code UNREVIEWED} disposition to
+     * callers such as {@code SecurityQueryTool}.
+     */
+    private static SecurityEvent preferred(List<SecurityEvent> candidates) {
+        SecurityEvent preferred = candidates.stream().max(PREFERRED).orElseThrow();
+        SecurityDispositionRecord reconciled = reconcileDisposition(candidates);
+        return reconciled == null || reconciled.equals(preferred.disposition())
+                ? preferred
+                : preferred.withDisposition(reconciled);
+    }
+
+    /**
+     * Reconciles the disposition records of one logical event's copies. A human review
+     * stays authoritative; otherwise the latest decision wins, matching the incident
+     * service so query consumers see the same disposition. Returns {@code null} when no
+     * copy carries a decision, leaving the preferred copy untouched.
+     */
+    private static SecurityDispositionRecord reconcileDisposition(List<SecurityEvent> candidates) {
+        SecurityDispositionRecord humanReview = candidates.stream()
+                .map(SecurityEvent::disposition)
+                .filter(record -> record.source() == SecurityDispositionSource.HUMAN_REVIEW)
+                .min(Comparator.comparing(SecurityDispositionRecord::decidedAt))
+                .orElse(null);
+        if (humanReview != null) return humanReview;
+        return candidates.stream()
+                .map(SecurityEvent::disposition)
+                .filter(record -> record.disposition() != SecurityDisposition.UNREVIEWED)
+                .max(Comparator.comparing(SecurityDispositionRecord::decidedAt))
+                .orElse(null);
     }
 
     /**
