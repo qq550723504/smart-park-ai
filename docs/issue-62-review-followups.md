@@ -432,3 +432,12 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 63 | `port/security/SecurityEventCatalog` 候选集 | P1 | 混部（get-only 旧端口 + 可枚举 adapter）下，adapter 让候选非空，旧端口的直接答案永不被查询：两个源共享的裸 id 会静默返回 adapter 副本而非报歧义，指向具体旧端口事件的 qualified reference 也不可达。现把旧端口的直接答案加入候选（`candidates(eventId)`），再统一做来源/位置消歧 |
 
 对应独立提交：`e44ec31`（#62）、`e338acd`（#63）。
+
+第三十二轮（对 `910c609`）补 2 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 64 | `port/security/SecurityEventCatalog` 端口回退异常 | P1 | get-only 端口的直接查询把 `IllegalArgumentException` 也当成「未找到」：后端/配置故障时，混部里同 id 的 adapter 副本会被当成成功结果返回，无 adapter 时又误报未知事件。现只吞端口显式 `NoSuchElementException`（未找到），其余异常向上传播到既有的脱敏 unavailable 路径 |
+| 65 | `model/security/SecurityEventIdentity` 损坏的位置后缀 | P2 | 位置长度首位被改成非数字（如 `:x#PARK-A:2#B1`）时 `startsWithLengthPrefix()` 返回 false，整个后缀被当作「无位置」兼容形式，查找可能落到另一个位置的事件。现只要身份后以 `:` 继续，就必须解码成完整位置；精确解析器（`parseQualifiedReference`/`fromReference`）要求消费完整 token，尾随内容一律拒绝；只有赋值提取器用的 `canonicalQualifiedReference` 仍容忍普通散文 |
+
+对应独立提交：`6fd1124`（#64）、`a5ccfd0`（#65）。
