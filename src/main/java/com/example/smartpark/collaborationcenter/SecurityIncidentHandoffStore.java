@@ -32,7 +32,7 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
         SecurityDispositionRecord projectedDisposition = projectedDispositionRecord(existing, incident);
         Instant updatedAt = existing == null || projectedFieldsChanged(existing, incident.incidentId(),
                 existing.parkId(), existing.buildingId(), projectedRisk, projectedSummary,
-                incident.eventType(), incident.eventIdentities(), projectedDisposition)
+                incident.eventType(), incident.eventIdentities(), projectedDisposition, incident.lastOccurredAt())
                 ? now : existing.updatedAt();
         SecurityIncidentHandoff handoff = existing == null
                 ? new SecurityIncidentHandoff("SECURITY_INCIDENT:" + incident.incidentId(), incident.incidentId(),
@@ -65,7 +65,8 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
                 SecurityDispositionRecord projectedDisposition = projectedDispositionRecord(existing, incident);
                 Instant updatedAt = projectedFieldsChanged(existing, incident.incidentId(), incident.parkId(),
                         incident.buildingId(), projectedRisk, projectedSummary, incident.eventType(),
-                        incident.eventIdentities(), projectedDisposition) ? now : existing.updatedAt();
+                        incident.eventIdentities(), projectedDisposition, incident.lastOccurredAt())
+                        ? now : existing.updatedAt();
                 SecurityIncidentHandoff migrated = new SecurityIncidentHandoff(existing.workItemId(),
                         incident.incidentId(), incident.parkId(), incident.buildingId(),
                         projectedRisk, projectedSummary, existing.createdAt(),
@@ -131,7 +132,8 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
                                                   String parkId, String buildingId, SecurityIncidentRisk riskLevel,
                                                   String safeSummary, String eventType,
                                                   List<SecurityEventIdentity> eventIdentities,
-                                                  SecurityDispositionRecord dispositionRecord) {
+                                                  SecurityDispositionRecord dispositionRecord,
+                                                  Instant lastOccurredAt) {
         return !existing.incidentId().equals(incidentId)
                 || !existing.parkId().equals(parkId)
                 || !existing.buildingId().equals(buildingId)
@@ -139,7 +141,8 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
                 || !existing.safeSummary().equals(safeSummary)
                 || !java.util.Objects.equals(existing.eventType(), eventType)
                 || !existing.eventIdentities().equals(eventIdentities)
-                || !existing.dispositionRecord().equals(dispositionRecord);
+                || !existing.dispositionRecord().equals(dispositionRecord)
+                || !java.util.Objects.equals(existing.lastOccurredAt(), lastOccurredAt);
     }
 
     @Override
