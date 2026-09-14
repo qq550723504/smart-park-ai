@@ -199,3 +199,10 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 9 | `web/SecurityIncidentController.review()` | P1 | 新增 `SecurityIncidentService.ReviewOutcome`/`applyReview()`，审计 outcome 记为 `SUCCESS:<disposition>` 或 `NO_CHANGE:<persisted disposition>`，可区分幂等 no-op 并重建已持久化结论 |
 | 10 | `collaborationcenter/SecurityIncidentHandoffStore` | P2 | `projectedFieldsChanged()` 纳入 `dispositionRecord`，仅 disposition 变化时也推进 `updatedAt` |
 
+第六轮（对 `f733805`）补 2 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 11 | `securityincident/SecurityIncidentService.mergeEvent()` | P1 | 身份键改为 source-aware（含 `SecuritySourceRef`）；无源的 legacy 表示可别名具体源的同一事件，避免不同 adapter 复用同一 source-local id 时丢事件 |
+| 12 | `securityincident/SecurityIncidentConfiguration` | P2 | 仅有 `SecuritySourceAdapter`（无 legacy reader）时也注册 service/controller；未配置 reader 时安装 `EmptySecurityEventReader` |
+
