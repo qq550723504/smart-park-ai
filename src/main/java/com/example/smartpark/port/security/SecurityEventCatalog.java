@@ -53,9 +53,20 @@ public final class SecurityEventCatalog implements SecurityEventResolver, Securi
     @Override
     public SecurityEvent getEvent(SecurityEventIdentity identity) {
         Objects.requireNonNull(identity, "identity");
-        return select(events().stream()
-                .filter(event -> SecurityEventIdentity.of(event).matches(identity))
-                .toList(), identity.eventId());
+        List<SecurityEvent> events = events();
+        if (identity.isSourceLess()) {
+            return select(events.stream()
+                    .filter(event -> SecurityEventIdentity.of(event).matches(identity))
+                    .toList(), identity.eventId());
+        }
+        // A source-qualified reference must resolve to that exact source. Falling back to a
+        // source-less legacy alias — or to a different source that merely reused the id —
+        // would ground the caller in an event never attributed to the requested source.
+        return events.stream()
+                .filter(event -> SecurityEventIdentity.of(event).equals(identity))
+                .max(PREFERRED)
+                .orElseThrow(() -> new NoSuchElementException(
+                        "security event not found for source: " + identity.reference()));
     }
 
     /** Every event currently exposed by the legacy reader and the registered adapters. */

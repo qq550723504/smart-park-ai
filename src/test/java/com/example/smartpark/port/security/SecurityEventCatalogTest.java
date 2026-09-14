@@ -82,6 +82,33 @@ class SecurityEventCatalogTest {
     }
 
     @Test
+    void requiresAnExactSourceForASourceQualifiedReference() {
+        SecurityEvent legacy = event("SEC-QUALIFIED", SecuritySourceRef.unknown(), BASE);
+        SecurityEventCatalog catalog = new SecurityEventCatalog(reader(legacy), List.of());
+
+        // The requested source never produced this id; the source-less legacy copy is only
+        // an alias and must not be handed back as the requested source's event.
+        assertThatThrownBy(() -> catalog.getEvent(
+                new SecurityEventIdentity(access("access-1"), "SEC-QUALIFIED", PARK, BUILDING)))
+                .isInstanceOf(NoSuchElementException.class);
+    }
+
+    @Test
+    void doesNotSatisfyASourceQualifiedReferenceWithAnotherSourcesCopy() {
+        SecurityEvent legacy = event("SEC-QUALIFIED", SecuritySourceRef.unknown(), BASE);
+        SecurityEvent camera = event("SEC-QUALIFIED",
+                new SecuritySourceRef(SecuritySourceType.CAMERA_ANALYTICS, "camera-1"), BASE.plusSeconds(60));
+        SecurityEventCatalog catalog = new SecurityEventCatalog(reader(legacy), List.of(adapter(camera)));
+
+        assertThatThrownBy(() -> catalog.getEvent(
+                new SecurityEventIdentity(access("access-1"), "SEC-QUALIFIED", PARK, BUILDING)))
+                .isInstanceOf(NoSuchElementException.class);
+        assertThat(catalog.getEvent(new SecurityEventIdentity(
+                new SecuritySourceRef(SecuritySourceType.CAMERA_ANALYTICS, "camera-1"), "SEC-QUALIFIED", PARK, BUILDING)))
+                .isEqualTo(camera);
+    }
+
+    @Test
     void rejectsAnAmbiguousBareIdSharedByTwoSources() {
         SecurityEvent access = event("SEC-DUAL", access("access-1"), BASE);
         SecurityEvent camera = event("SEC-DUAL", new SecuritySourceRef(SecuritySourceType.CAMERA_ANALYTICS, "camera-1"),
