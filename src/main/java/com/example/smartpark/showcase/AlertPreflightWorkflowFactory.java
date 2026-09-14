@@ -8,10 +8,14 @@ import com.example.smartpark.port.energy.EnergyPort;
 import com.example.smartpark.port.knowledge.KnowledgePort;
 import com.example.smartpark.port.security.SecurityEventCatalog;
 import com.example.smartpark.port.security.SecurityEventReader;
+import com.example.smartpark.port.security.SecurityPort;
 import com.example.smartpark.port.security.SecuritySourceAdapter;
+import com.example.smartpark.support.SecurityEventReaders;
 import com.example.smartpark.workflow.AlertWorkflow;
 import com.example.smartpark.workflow.WorkflowEventPublisher;
 import com.example.smartpark.workflow.WorkflowExecutionStore;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Component;
 
@@ -29,6 +33,20 @@ public final class AlertPreflightWorkflowFactory {
     private final EnergyPort energyPort;
     private final SecurityEventReader securityEventReader;
     private final List<SecuritySourceAdapter> securitySourceAdapters;
+
+    @Autowired
+    public AlertPreflightWorkflowFactory(
+            AlertTriageAgent triageAgent,
+            AlertDiagnosisAgent diagnosisAgent,
+            DevicePort devicePort,
+            AlertPort alertPort,
+            KnowledgePort knowledgePort,
+            EnergyPort energyPort,
+            ObjectProvider<SecurityPort> securityPorts,
+            List<SecuritySourceAdapter> securitySourceAdapters) {
+        this(triageAgent, diagnosisAgent, devicePort, alertPort, knowledgePort, energyPort,
+                SecurityEventReaders.resolve(securityPorts), securitySourceAdapters);
+    }
 
     public AlertPreflightWorkflowFactory(
             AlertTriageAgent triageAgent,

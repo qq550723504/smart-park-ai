@@ -7,11 +7,14 @@ import com.example.smartpark.port.device.DevicePort;
 import com.example.smartpark.port.knowledge.KnowledgePort;
 import com.example.smartpark.port.security.SecurityEventCatalog;
 import com.example.smartpark.port.security.SecurityEventReader;
+import com.example.smartpark.port.security.SecurityPort;
 import com.example.smartpark.port.security.SecuritySourceAdapter;
 import com.example.smartpark.port.workorder.WorkOrderPort;
+import com.example.smartpark.support.SecurityEventReaders;
 import com.example.smartpark.workflow.AlertWorkflow;
 import com.example.smartpark.workflow.WorkflowEventPublisher;
 import com.example.smartpark.workflow.WorkflowExecutionStore;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -94,12 +97,15 @@ class AlertWorkflowRuntimeConfiguration {
             WorkOrderPort workOrderPort,
             KnowledgePort knowledgePort,
             com.example.smartpark.port.energy.EnergyPort energyPort,
-            SecurityEventReader securityEventReader,
+            ObjectProvider<SecurityPort> securityPorts,
             List<SecuritySourceAdapter> securitySourceAdapters,
             WorkflowExecutionStore executionStore,
             WorkflowEventPublisher eventPublisher) {
         // Resolve security events through a source-aware aggregate so a source-qualified
         // alert reference is never reduced to a bare id that another source could reuse.
+        // The port contract keeps a deployment that only registered the legacy get-only
+        // port working, since this workflow bean is enabled by default.
+        SecurityEventReader securityEventReader = SecurityEventReaders.resolve(securityPorts);
         SecurityEventReader securityEvents = SecurityEventCatalog.aggregating(securityEventReader, securitySourceAdapters);
         return new AlertWorkflow(
                 triageAgent,
