@@ -1,6 +1,9 @@
 package com.example.smartpark.collaborationcenter;
 
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoff;
+import com.example.smartpark.model.security.SecurityDisposition;
+import com.example.smartpark.model.security.SecurityDispositionRecord;
+import com.example.smartpark.model.security.SecurityDispositionSource;
 import com.example.smartpark.securityincident.SecurityIncident;
 import com.example.smartpark.securityincident.SecurityIncidentEvidence;
 import com.example.smartpark.securityincident.SecurityIncidentRisk;
@@ -113,6 +116,38 @@ class SecurityIncidentHandoffStoreTest {
                 .containsExactly(newer.workItemId(), latest.workItemId());
     }
 
+    @Test
+    void advancesProjectionUpdateTimeWhenOnlyTheDispositionChanges() {
+        SecurityIncidentHandoffStore store = new SecurityIncidentHandoffStore(10);
+        Instant now = Instant.parse("2026-09-02T10:00:00Z");
+        SecurityDispositionRecord confirmed = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1", now);
+        SecurityDispositionRecord corrected = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-2", "2026.10", "evt-2",
+                now.plusSeconds(120));
+
+        SecurityIncidentHandoff first = store.createOrGet(reviewedIncident("INC-1", confirmed), now);
+        SecurityIncidentHandoff changed = store.createOrGet(reviewedIncident("INC-1", corrected), now.plusSeconds(60));
+
+        assertThat(first.dispositionRecord()).isEqualTo(confirmed);
+        assertThat(changed.dispositionRecord()).isEqualTo(corrected);
+        assertThat(changed.updatedAt()).isEqualTo(now.plusSeconds(60));
+        assertThat(changed.createdAt()).isEqualTo(first.createdAt());
+    }
+
+    @Test
+    void keepsProjectionUpdateTimeWhenARedundantSourceDispositionRepeats() {
+        SecurityIncidentHandoffStore store = new SecurityIncidentHandoffStore(10);
+        Instant now = Instant.parse("2026-09-02T10:00:00Z");
+        SecurityDispositionRecord confirmed = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1", now);
+
+        SecurityIncidentHandoff first = store.createOrGet(reviewedIncident("INC-1", confirmed), now);
+        SecurityIncidentHandoff repeated = store.createOrGet(reviewedIncident("INC-1", confirmed), now.plusSeconds(60));
+
+        assertThat(repeated.updatedAt()).isEqualTo(first.updatedAt());
+    }
+
     private static SecurityIncident incident() {
         return incident("INC-1");
     }
@@ -127,5 +162,13 @@ class SecurityIncidentHandoffStoreTest {
                 SecurityIncidentStatus.OPEN, at, at, List.of("SEC-1"), List.of("ALT-1"),
                 List.of(new SecurityIncidentEvidence("SEC-1", at, summary)), List.of(),
                 List.of("核对安全处置手册。"), null, null);
+    }
+
+    private static SecurityIncident reviewedIncident(String incidentId, SecurityDispositionRecord record) {
+        Instant at = Instant.parse("2026-09-02T08:00:00Z");
+        return new SecurityIncident(incidentId, "PARK-A", "A1", "ACCESS", SecurityIncidentRisk.HIGH,
+                SecurityIncidentStatus.REVIEWED, at, at, List.of("SEC-1"), List.of("ALT-1"),
+                List.of(new SecurityIncidentEvidence("SEC-1", at, "REDACTED: safe")), List.of(),
+                List.of("核对安全处置手册。"), record.decidedAt(), null, record.disposition(), record);
     }
 }

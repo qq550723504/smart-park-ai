@@ -28,19 +28,20 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
         SecurityIncidentRisk projectedRisk = existing == null
                 ? incident.riskLevel() : higherRisk(existing.riskLevel(), incident.riskLevel());
         String projectedSummary = incident.summary();
+        SecurityDispositionRecord projectedDisposition = projectedDispositionRecord(existing, incident);
         Instant updatedAt = existing == null || projectedFieldsChanged(existing, incident.incidentId(),
                 existing.parkId(), existing.buildingId(), projectedRisk, projectedSummary,
-                incident.eventType(), incident.eventIds())
+                incident.eventType(), incident.eventIds(), projectedDisposition)
                 ? now : existing.updatedAt();
         SecurityIncidentHandoff handoff = existing == null
                 ? new SecurityIncidentHandoff("SECURITY_INCIDENT:" + incident.incidentId(), incident.incidentId(),
                         incident.parkId(), incident.buildingId(), incident.riskLevel(), incident.summary(), now,
                         incident.reviewedAt(), now, incident.eventType(), incident.eventIds(),
-                        projectedDispositionRecord(null, incident))
+                        projectedDisposition)
                 : new SecurityIncidentHandoff(existing.workItemId(), existing.incidentId(), existing.parkId(),
                         existing.buildingId(), projectedRisk, projectedSummary, existing.createdAt(),
                         existing.reviewedAt() != null ? existing.reviewedAt() : incident.reviewedAt(), updatedAt,
-                        incident.eventType(), incident.eventIds(), projectedDispositionRecord(existing, incident));
+                        incident.eventType(), incident.eventIds(), projectedDisposition);
         handoffs.put(incident.incidentId(), handoff);
         trimToCapacity();
         return handoff;
@@ -59,14 +60,15 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
                 SecurityIncidentHandoff existing = handoffs.remove(existingIncidentId);
                 SecurityIncidentRisk projectedRisk = higherRisk(existing.riskLevel(), incident.riskLevel());
                 String projectedSummary = incident.summary();
+                SecurityDispositionRecord projectedDisposition = projectedDispositionRecord(existing, incident);
                 Instant updatedAt = projectedFieldsChanged(existing, incident.incidentId(), incident.parkId(),
                         incident.buildingId(), projectedRisk, projectedSummary, incident.eventType(),
-                        incident.eventIds()) ? now : existing.updatedAt();
+                        incident.eventIds(), projectedDisposition) ? now : existing.updatedAt();
                 SecurityIncidentHandoff migrated = new SecurityIncidentHandoff(existing.workItemId(),
                         incident.incidentId(), incident.parkId(), incident.buildingId(),
                         projectedRisk, projectedSummary, existing.createdAt(),
                         existing.reviewedAt() != null ? existing.reviewedAt() : incident.reviewedAt(), updatedAt,
-                        incident.eventType(), incident.eventIds(), projectedDispositionRecord(existing, incident));
+                        incident.eventType(), incident.eventIds(), projectedDisposition);
                 handoffs.put(incident.incidentId(), migrated);
                 trimToCapacity();
                 return migrated;
@@ -123,14 +125,16 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
 
     private static boolean projectedFieldsChanged(SecurityIncidentHandoff existing, String incidentId,
                                                   String parkId, String buildingId, SecurityIncidentRisk riskLevel,
-                                                  String safeSummary, String eventType, List<String> eventIds) {
+                                                  String safeSummary, String eventType, List<String> eventIds,
+                                                  SecurityDispositionRecord dispositionRecord) {
         return !existing.incidentId().equals(incidentId)
                 || !existing.parkId().equals(parkId)
                 || !existing.buildingId().equals(buildingId)
                 || existing.riskLevel() != riskLevel
                 || !existing.safeSummary().equals(safeSummary)
                 || !java.util.Objects.equals(existing.eventType(), eventType)
-                || !existing.eventIds().equals(eventIds);
+                || !existing.eventIds().equals(eventIds)
+                || !existing.dispositionRecord().equals(dispositionRecord);
     }
 
     @Override
