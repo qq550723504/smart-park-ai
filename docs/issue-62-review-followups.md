@@ -206,3 +206,13 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 11 | `securityincident/SecurityIncidentService.mergeEvent()` | P1 | 身份键改为 source-aware（含 `SecuritySourceRef`）；无源的 legacy 表示可别名具体源的同一事件，避免不同 adapter 复用同一 source-local id 时丢事件 |
 | 12 | `securityincident/SecurityIncidentConfiguration` | P2 | 仅有 `SecuritySourceAdapter`（无 legacy reader）时也注册 service/controller；未配置 reader 时安装 `EmptySecurityEventReader` |
 
+第七轮（对 `c8fa834`）补 3 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 13 | `securityincident/SecurityIncidentService.overlaps()` | P1 | 去重时的 source-aware 键此前未进入持久化投影：`build()` 只投影裸 `eventId`，`overlaps()`/`matchesCorrelation()` 便按裸 id 匹配，导致 A 源的已复核/已交接结论被恢复到复用同一 id 的 B 源。现引入一等模型 `SecurityEventIdentity`（`matches`/`material`），`SecurityIncident` 与 `SecurityIncidentHandoff` 各自显式携带 `eventIdentities` 投影；去重、`incidentId` 派生、`overlaps()`、handoff 关联全部走同一身份类型，`UNKNOWN` 源作为显式 legacy 别名保留 |
+| 14 | `securityincident/SecurityIncidentService.authoritativeEvent()` | P2 | adapter 在未推进 `receivedAt` 的情况下丰富 legacy 事件时时间戳相同，原实现恒取左侧（reader 的 legacy 副本）。现增加显式 tie-breaker，优先具体源（非 `UNKNOWN`）的丰富表示 |
+| 15 | `adapter/mock/MockSecurityAdapter` | P2 | 默认部署下 `MockParkDataStore` 通过兼容构造器播种事件，source 为 `UNKNOWN`，与适配器声明的 `ACCESS_CONTROL/mock-access-control-feed` 不符。现 `getEvent()`/`listEvents()` 将事件映射为适配器声明的源，能力上报、事件证据与去重身份一致 |
+
+每个修复对应独立提交：`6ffb2ab`（#15）、`831b7b9`（#14）、`58ccf6d`（#13）。
+
