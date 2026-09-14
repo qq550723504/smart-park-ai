@@ -388,3 +388,12 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 54 | `model/security/SecurityEventIdentity.reference()` | P2 | 引用只编码 source type、source id、event id，未含位置；同一源在两个 park/building 复用本地 id 时两个身份产生同一引用，`SecurityEventCatalog.getEventByReference()` 以歧义拒绝，而 `SecurityQueryTool` 没有 park/building 参数，导致两个事件都无法经推荐路径取回。现 `reference()` 追加长度前缀编码的 park/building，`canonicalQualifiedReference` 保留它们，`fromReference` 优先使用 token 自带位置、仅对 legacy token 回退到告警位置 |
 
 对应独立提交：`f513707`（#53）、`ae2de8a`（#54）。
+
+第二十七轮（对 `c2e6bae`）补 2 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 55 | `port/security/SecurityEventCatalog.getEventByReference` | P2 | `reference()` 现在总带 park/building，而 `getEventByReference` 用整串精确比较；调用方传入此前合法的三段（无位置）source-qualified token 时永远匹配不到，`SecurityQueryTool` 会把本可唯一确定的事件报成 unknown。现先把 token 解析为「source + eventId + 可选 location」（新增 `SecurityEventIdentity.parseQualifiedReference` / `QualifiedReference`），按该身份匹配：无位置 token 在源内唯一时解析，仅当候选跨 park/building 分歧时报歧义；命名未知 source type 的 token 仍拒绝，不降级为裸 id 查找 |
+| 56 | `collaboration/CollaborationRuntimeConfiguration.collectPrimaryEvidence` | P2 | 提取出的安全引用被直接拼进 `{"eventId":"..."}` 而未做 JSON 转义；长度前缀解析会保留合法 source/event/park/building 标识中的引号或反斜杠，导致回调收到畸形/被篡改的参数，异常被吞后确定性证据被静默丢弃。现用 Jackson 序列化工具参数对象，策略允许的任意标识都能原样往返 |
+
+对应独立提交：`a8bc77c`（#55）、`f3a9b8a`（#56）。
