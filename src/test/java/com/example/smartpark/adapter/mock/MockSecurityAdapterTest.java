@@ -1,7 +1,10 @@
 package com.example.smartpark.adapter.mock;
 
 import com.example.smartpark.model.security.SecurityEvent;
+import com.example.smartpark.model.security.SecurityEventType;
+import com.example.smartpark.model.security.SecuritySourceType;
 import com.example.smartpark.port.security.SecurityEventReader;
+import com.example.smartpark.port.security.SecuritySourceDescriptor;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -19,5 +22,17 @@ class MockSecurityAdapterTest {
 
         assertThat(events).extracting(SecurityEvent::eventId).containsExactly("SEC-ACCESS-001");
         assertThatThrownBy(() -> events.clear()).isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    void declaresOnlyAccessAnomalyAsANonProductionDemoSource() {
+        MockSecurityAdapter adapter = new MockSecurityAdapter(new MockParkDataStore());
+
+        SecuritySourceDescriptor descriptor = adapter.descriptor();
+
+        assertThat(descriptor.sourceType()).isEqualTo(SecuritySourceType.ACCESS_CONTROL);
+        assertThat(descriptor.connectedEventTypes()).containsExactly(SecurityEventType.ACCESS_ANOMALY);
+        assertThat(descriptor.productionSource()).isFalse();
+        assertThat(adapter.readEvents()).extracting(SecurityEvent::eventId).containsExactly("SEC-ACCESS-001");
     }
 }
