@@ -96,6 +96,18 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
     }
 
     /**
+     * True when {@code token} is a source-qualified reference. A token that only looks
+     * qualified but does not decode is a legacy bare event id, matching
+     * {@link #eventIdOfReference(String)}.
+     */
+    public static boolean isQualifiedReference(String token) {
+        if (!isReference(token)) return false;
+        String body = token.substring(REFERENCE_PREFIX.length()).trim();
+        return body.startsWith(SOURCE_REFERENCE_PREFIX)
+                && decodeMaterial(body.substring(SOURCE_REFERENCE_PREFIX.length())) != null;
+    }
+
+    /**
      * Rebuilds the identity encoded in a reference token. The location comes from
      * the owning alert, since the token only carries the event identity. A legacy
      * bare token resolves to the source-less alias, which matches any source.

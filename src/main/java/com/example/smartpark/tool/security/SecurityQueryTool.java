@@ -5,6 +5,7 @@ import com.example.smartpark.model.security.SecurityDispositionRecord;
 import com.example.smartpark.model.security.SecurityDispositionSource;
 import com.example.smartpark.model.security.SecurityEvent;
 import com.example.smartpark.model.security.SecurityEventLocation;
+import com.example.smartpark.model.security.SecurityEventIdentity;
 import com.example.smartpark.model.security.SecurityEventSeverity;
 import com.example.smartpark.model.security.SecurityEventType;
 import com.example.smartpark.model.security.SecurityPrivacyMetadata;
@@ -12,6 +13,7 @@ import com.example.smartpark.model.security.SecuritySourceRef;
 import com.example.smartpark.port.security.SecurityEventCatalog;
 import com.example.smartpark.port.security.SecurityEventLookupException;
 import com.example.smartpark.port.security.SecurityEventReader;
+import com.example.smartpark.port.security.SecurityEventResolver;
 import com.example.smartpark.port.security.SecuritySourceAdapter;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -35,7 +37,7 @@ public class SecurityQueryTool {
      */
     private static final String LOOKUP_UNAVAILABLE = "Security event lookup is temporarily unavailable";
 
-    private final SecurityEventReader securityEvents;
+    private final SecurityEventResolver securityEvents;
 
     /**
      * Aggregates the legacy reader with every registered adapter, so a lookup sees
@@ -56,7 +58,10 @@ public class SecurityQueryTool {
             return SecurityLookupResult.error(normalizedEventId, "eventId must not be blank");
         }
         try {
-            return SecurityLookupResult.success(normalizedEventId, securityEvents.getEvent(normalizedEventId));
+            SecurityEvent event = SecurityEventIdentity.isReference(normalizedEventId)
+                    ? securityEvents.getEventByReference(normalizedEventId)
+                    : securityEvents.getEvent(normalizedEventId);
+            return SecurityLookupResult.success(normalizedEventId, event);
         }
         catch (NoSuchElementException ex) {
             return SecurityLookupResult.error(normalizedEventId, "Unknown security event: " + normalizedEventId);

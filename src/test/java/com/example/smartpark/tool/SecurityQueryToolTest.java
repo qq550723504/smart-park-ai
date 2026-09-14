@@ -5,6 +5,7 @@ import com.example.smartpark.model.security.SecurityDisposition;
 import com.example.smartpark.model.security.SecurityDispositionRecord;
 import com.example.smartpark.model.security.SecurityDispositionSource;
 import com.example.smartpark.model.security.SecurityEvent;
+import com.example.smartpark.model.security.SecurityEventIdentity;
 import com.example.smartpark.model.security.SecurityEventLocation;
 import com.example.smartpark.model.security.SecurityEventSeverity;
 import com.example.smartpark.model.security.SecurityEventType;
@@ -122,6 +123,24 @@ class SecurityQueryToolTest {
         // id/version/evidence reference (the HTTP DTO omits these provenance fields too).
         assertThat(result.event().toString()).contains("CONFIRMED_INCIDENT", "REGISTERED_MODEL");
         assertThat(result.event().toString()).doesNotContain("model-9", "evt-secret");
+    }
+
+    @Test
+    void resolvesASourceQualifiedReferenceInsteadOfGuessingASource() {
+        SecurityEvent access = sourcedEvent("SEC-DUAL", SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityEvent camera = sourcedEvent("SEC-DUAL", SecuritySourceType.CAMERA_ANALYTICS, "camera-1");
+        SecurityQueryTool tool = new SecurityQueryTool(reader(access, camera), List.of());
+
+        SecurityQueryTool.SecurityLookupResult ambiguous = tool.lookupSecurityEvent("SEC-DUAL");
+        assertThat(ambiguous.event()).isNull();
+        assertThat(ambiguous.error()).contains("ambiguous");
+
+        SecurityQueryTool.SecurityLookupResult resolved =
+                tool.lookupSecurityEvent(SecurityEventIdentity.of(access).reference());
+
+        assertThat(resolved.error()).isNull();
+        assertThat(resolved.event().source())
+                .isEqualTo(new SecuritySourceRef(SecuritySourceType.ACCESS_CONTROL, "access-1"));
     }
 
     @Test
