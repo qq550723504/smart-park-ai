@@ -227,3 +227,13 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 19 | `ui/src/components/security/SecurityIncidentCenter.vue` | P2 | 多源复用同一 event id 时证据行/时间线出现重复 Vue key。现证据行按 `sourceType-eventSourceId-sourceId`、时间线按 `reference` 兜底 `sourceType-sourceId` 生成 key |
 
 每个修复对应独立提交：`2830022`（#16）、`7d8d56c`（#17）、`3a04113`（#18）、`a7ae629`（#19）。
+
+第九轮（对 `ea09ea9` / `3037531`）补 3 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 20 | `securityincident/SecurityIncidentService.restoreHandoffProjection()` | P1 | 被驱逐的已交接事件（含 model disposition）与仍存储的人工复核事件合并时，`restoreState()` 已在 `restored` 中选出 `HUMAN_REVIEW`，但原 reconciliation 只看 fresh 源记录 + 保留 handoff，会用 model 决策覆盖权威人工决策。现 `reconcileDisposition()` 同时纳入 `restored.dispositionRecord()`，人工复核继续 first-wins |
+| 21 | `workflow/AlertWorkflowNodes.securityReview()` + `port/security/SecurityEventCatalog` | P1 | 安全评审此前把 source-qualified 引用降级为裸 event id 再查 `SecurityPort`，两个 adapter 复用同一 id 时会评审错误源；且仅 adapter 部署下注入的是 `EmptySecurityEventReader`，adapter 事件完全取不到。现引入 `SecurityEventResolver`/`SecurityEventCatalog` 聚合并优先具体源，`AlertWorkflowNodes`（及 showcase `AlertPreflightWorkflowFactory`）从引用 token 重建 `SecurityEventIdentity` 后解析 |
+| 22 | `securityincident/SecurityIncidentService.authoritativeEvent()` | P2 | legacy reader 与 adapter 返回同一逻辑事件且携带相同已决记录时，`reconciled.equals(left.disposition())` 恒真而丢弃 enriched 表示。现两侧都承载 reconciled 决策时回退 `fresherEvent()`，保留 adapter 的具体源、severity、confidence |
+
+每个修复对应独立提交：`e778fac`（#21）、`2a0d546`（#20）、`43f4abc`（#22）。
