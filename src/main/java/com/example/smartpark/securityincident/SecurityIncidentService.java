@@ -6,7 +6,7 @@ import com.example.smartpark.model.security.SecurityDisposition;
 import com.example.smartpark.model.security.SecurityDispositionRecord;
 import com.example.smartpark.model.security.SecurityDispositionSource;
 import com.example.smartpark.model.security.SecurityEvent;
-import com.example.smartpark.model.security.SecuritySourceRef;
+import com.example.smartpark.model.security.SecurityEventIdentity;
 import com.example.smartpark.model.security.SecuritySourceType;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoff;
@@ -161,7 +161,7 @@ public final class SecurityIncidentService {
     }
 
     private List<SecurityIncident> correlate() {
-        Map<EventIdentity, SecurityEvent> deduplicated = new LinkedHashMap<>();
+        Map<SecurityEventIdentity, SecurityEvent> deduplicated = new LinkedHashMap<>();
         security.listEvents().forEach(event -> mergeEvent(deduplicated, event));
         sourceAdapters.forEach(adapter -> adapter.readEvents()
                 .forEach(event -> mergeEvent(deduplicated, event)));
@@ -182,10 +182,10 @@ public final class SecurityIncidentService {
      * carries no source ({@code UNKNOWN}) aliases the concrete-source copy of
      * the same event so the reader/adapter pair is still collapsed.
      */
-    private static void mergeEvent(Map<EventIdentity, SecurityEvent> target, SecurityEvent event) {
-        EventIdentity identity = EventIdentity.of(event);
-        EventIdentity alias = target.keySet().stream()
-                .filter(candidate -> candidate.aliases(identity))
+    private static void mergeEvent(Map<SecurityEventIdentity, SecurityEvent> target, SecurityEvent event) {
+        SecurityEventIdentity identity = SecurityEventIdentity.of(event);
+        SecurityEventIdentity alias = target.keySet().stream()
+                .filter(candidate -> candidate.matches(identity))
                 .findFirst().orElse(null);
         if (alias != null) {
             SecurityEvent existing = target.remove(alias);
@@ -238,6 +238,7 @@ public final class SecurityIncidentService {
                         new AlertEventKey(event.eventId(), event.parkId(), event.buildingId()), List.of()).stream())
                 .distinct().sorted(Comparator.comparing(Alert::occurredAt).thenComparing(Alert::id)).toList();
         List<String> eventIds = events.stream().map(SecurityEvent::eventId).toList();
+        List<SecurityEventIdentity> eventIdentities = events.stream().map(SecurityEventIdentity::of).toList();
         List<String> alertIds = linkedAlerts.stream().map(Alert::id).toList();
         List<SecurityIncidentEvidence> evidence = events.stream()
                 .map(SecurityIncidentService::evidenceFor).toList();
@@ -261,7 +262,7 @@ public final class SecurityIncidentService {
                 events.get(0).occurredAt(), events.get(events.size() - 1).occurredAt(), eventIds, alertIds,
                 evidence, timeline, recommendationsFor(risk),
                 sourceDecided ? sourceDisposition.decidedAt() : null, null,
-                sourceDisposition.disposition(), sourceDisposition);
+                sourceDisposition.disposition(), sourceDisposition, eventIdentities);
     }
 
     private static SecurityIncidentEvidence evidenceFor(SecurityEvent event) {
@@ -388,11 +389,14 @@ public final class SecurityIncidentService {
     }
 
     private static boolean matchesCorrelation(SecurityIncidentHandoff handoff, SecurityIncident incident) {
-        return Objects.equals(handoff.eventType(), incident.eventType())
-                && handoff.parkId().equals(incident.parkId())
-                && handoff.buildingId().equals(incident.buildingId())
-                && !handoff.eventIds().isEmpty()
-                && handoff.eventIds().stream().anyMatch(incident.eventIds()::contains);
+        if (!Objects.equals(handoff.eventType(), incident.eventType())
+                || !handoff.parkId().equals(incident.parkId())
+                || !handoff.buildingId().equals(incident.buildingId())) {
+            return false;
+        }
+        if (incident.eventIdentities().isEmpty() || handoff.eventIdentities().isEmpty()) return false;
+        return incident.eventIdentities().stream()
+                .anyMatch(identity -> handoff.eventIdentities().stream().anyMatch(identity::matches));
     }
 
     private SecurityIncident restoreState(SecurityIncident fresh, List<SecurityIncident> candidates,
@@ -475,6 +479,10 @@ public final class SecurityIncidentService {
     }
 
     private static boolean overlaps(SecurityIncident left, SecurityIncident right) {
+        if (!left.eventIdentities().isEmpty() && !right.eventIdentities().isEmpty()) {
+            return left.eventIdentities().stream()
+                    .anyMatch(one -> right.eventIdentities().stream().anyMatch(one::matches));
+        }
         return left.eventIds().stream().anyMatch(right.eventIds()::contains);
     }
 
@@ -499,7 +507,7 @@ public final class SecurityIncidentService {
                 riskLevel, status, fresh.openedAt(), fresh.lastOccurredAt(), fresh.eventIds(), fresh.alertIds(),
                 fresh.evidence(), fresh.timeline(), status == SecurityIncidentStatus.HANDOFF
                         ? recommendationsFor(riskLevel) : fresh.recommendations(), reviewedAt, handoffWorkItemId,
-                disposition, dispositionRecord);
+                disposition, dispositionRecord, fresh.eventIdentities());
     }
 
     private static List<String> recommendationsFor(SecurityIncidentRisk risk) {
@@ -533,7 +541,7 @@ public final class SecurityIncidentService {
     private static String incidentId(SecurityEvent event) {
         CorrelationKey key = bucketKey(event);
         String material = encode(key.parkId()) + ":" + encode(key.buildingId()) + ":"
-                + encode(key.eventType()) + ":" + encode(event.eventId());
+                + encode(key.eventType()) + ":" + SecurityEventIdentity.of(event).material();
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
                     .digest(material.getBytes(StandardCharsets.UTF_8));
@@ -559,22 +567,6 @@ public final class SecurityIncidentService {
     public record ReviewOutcome(SecurityIncident incident, boolean applied) {
         public ReviewOutcome {
             Objects.requireNonNull(incident, "incident");
-        }
-    }
-
-    private record EventIdentity(SecuritySourceType sourceType, String sourceId, String eventId, String parkId,
-                                 String buildingId) {
-        static EventIdentity of(SecurityEvent event) {
-            SecuritySourceRef source = event.source();
-            boolean unknown = source.sourceType() == SecuritySourceType.UNKNOWN;
-            return new EventIdentity(unknown ? null : source.sourceType(), unknown ? null : source.sourceId(),
-                    event.eventId(), event.parkId(), event.buildingId());
-        }
-
-        /** A source-less (legacy) representation aliases the concrete-source copy of the same event. */
-        boolean aliases(EventIdentity other) {
-            return eventId.equals(other.eventId) && parkId.equals(other.parkId) && buildingId.equals(other.buildingId)
-                    && (sourceId == null || other.sourceId == null);
         }
     }
 

@@ -153,6 +153,32 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void keepsDispositionsOfDifferentSourcesThatReuseTheSameEventIdApart() {
+        SecurityEvent access = withSource(event("SEC-DUAL-POLL", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityEvent camera = withSource(event("SEC-DUAL-POLL", "A1", "ACCESS", BASE),
+                SecuritySourceType.CAMERA_ANALYTICS, "camera-1");
+        List<SecurityEvent> polled = new java.util.ArrayList<>(List.of(access));
+        SecurityIncidentService service = service(List.of(), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterBackedBy(polled)));
+
+        SecurityIncident reviewed = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(reviewed.incidentId(), SecurityDisposition.FALSE_POSITIVE, "APPROVER");
+        service.handoff(reviewed.incidentId());
+
+        polled.clear();
+        polled.add(camera);
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).singleElement().satisfies(incident -> {
+            assertThat(incident.incidentId()).isNotEqualTo(reviewed.incidentId());
+            assertThat(incident.disposition()).isEqualTo(SecurityDisposition.UNREVIEWED);
+            assertThat(incident.status()).isEqualTo(SecurityIncidentStatus.OPEN);
+            assertThat(incident.handoffWorkItemId()).isNull();
+        });
+    }
+
+    @Test
     void aliasesALegacyEventWithItsEnrichedAdapterCopy() {
         SecurityEvent legacy = event("SEC-ALIAS", "A1", "ACCESS", BASE);
         SecurityDispositionRecord registered = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
@@ -1007,7 +1033,7 @@ class SecurityIncidentServiceTest {
             public SecurityIncidentHandoff createOrGet(SecurityIncident incident, Instant now) {
                 SecurityIncidentHandoff handoff = new SecurityIncidentHandoff("WI:" + incident.incidentId(), incident.incidentId(), incident.parkId(),
                         incident.buildingId(), incident.riskLevel(), incident.summary(), now, null, now,
-                        null, List.of(), incident.dispositionRecord());
+                        incident.eventType(), incident.eventIdentities(), incident.dispositionRecord());
                 created.removeIf(existing -> existing.workItemId().equals(handoff.workItemId()));
                 created.add(handoff);
                 return handoff;
@@ -1021,7 +1047,7 @@ class SecurityIncidentServiceTest {
                 if (existing == null) return createOrGet(incident, now);
                 SecurityIncidentHandoff refreshed = new SecurityIncidentHandoff(existing.workItemId(), incident.incidentId(),
                         incident.parkId(), incident.buildingId(), incident.riskLevel(), incident.summary(),
-                        existing.createdAt(), existing.reviewedAt(), now, incident.eventType(), incident.eventIds(),
+                        existing.createdAt(), existing.reviewedAt(), now, incident.eventType(), incident.eventIdentities(),
                         incident.dispositionRecord());
                 created.removeIf(handoff -> handoff.workItemId().equals(existing.workItemId()));
                 created.add(refreshed);
@@ -1090,6 +1116,21 @@ class SecurityIncidentServiceTest {
             @Override
             public List<SecurityEvent> readEvents() {
                 return List.of(events);
+            }
+        };
+    }
+
+    private static SecuritySourceAdapter adapterBackedBy(List<SecurityEvent> events) {
+        return new SecuritySourceAdapter() {
+            @Override
+            public SecuritySourceDescriptor descriptor() {
+                return new SecuritySourceDescriptor("test-adapter-feed", SecuritySourceType.ACCESS_CONTROL,
+                        Set.of(SecurityEventType.ACCESS_ANOMALY), true);
+            }
+
+            @Override
+            public List<SecurityEvent> readEvents() {
+                return List.copyOf(events);
             }
         };
     }

@@ -2,6 +2,7 @@ package com.example.smartpark.securityincident;
 
 import com.example.smartpark.model.security.SecurityDisposition;
 import com.example.smartpark.model.security.SecurityDispositionRecord;
+import com.example.smartpark.model.security.SecurityEventIdentity;
 import com.example.smartpark.model.security.SecurityEventType;
 
 import java.time.Instant;
@@ -25,7 +26,23 @@ public record SecurityIncident(
         Instant reviewedAt,
         String handoffWorkItemId,
         SecurityDisposition disposition,
-        SecurityDispositionRecord dispositionRecord) {
+        SecurityDispositionRecord dispositionRecord,
+        List<SecurityEventIdentity> eventIdentities) {
+
+    /**
+     * Compatibility overload for incidents that do not carry a source-qualified
+     * identity projection (legacy fixtures and callers that only know bare ids).
+     */
+    public SecurityIncident(String incidentId, String parkId, String buildingId, String eventType,
+                            SecurityIncidentRisk riskLevel, SecurityIncidentStatus status, Instant openedAt,
+                            Instant lastOccurredAt, List<String> eventIds, List<String> alertIds,
+                            List<SecurityIncidentEvidence> evidence, List<SecurityIncidentTimelineEntry> timeline,
+                            List<String> recommendations, Instant reviewedAt, String handoffWorkItemId,
+                            SecurityDisposition disposition, SecurityDispositionRecord dispositionRecord) {
+        this(incidentId, parkId, buildingId, eventType, riskLevel, status, openedAt, lastOccurredAt, eventIds,
+                alertIds, evidence, timeline, recommendations, reviewedAt, handoffWorkItemId, disposition,
+                dispositionRecord, List.of());
+    }
 
     public SecurityIncident(String incidentId, String parkId, String buildingId, String eventType,
                             SecurityIncidentRisk riskLevel, SecurityIncidentStatus status, Instant openedAt,
@@ -51,6 +68,7 @@ public record SecurityIncident(
         evidence = List.copyOf(evidence);
         timeline = List.copyOf(timeline);
         recommendations = List.copyOf(recommendations);
+        eventIdentities = eventIdentities == null ? List.of() : List.copyOf(eventIdentities);
         disposition = Objects.requireNonNull(disposition, "disposition");
         dispositionRecord = Objects.requireNonNull(dispositionRecord, "dispositionRecord");
         if (eventIds.isEmpty()) throw new IllegalArgumentException("eventIds must not be empty");
@@ -102,7 +120,7 @@ public record SecurityIncident(
                                   SecurityDispositionRecord nextDispositionRecord) {
         return new SecurityIncident(incidentId, parkId, buildingId, eventType, riskLevel, nextStatus, openedAt,
                 lastOccurredAt, eventIds, alertIds, evidence, timeline, recommendations, nextReviewedAt,
-                nextHandoffId, nextDisposition, nextDispositionRecord);
+                nextHandoffId, nextDisposition, nextDispositionRecord, eventIdentities);
     }
 
     private static String requireText(String value, String field) {

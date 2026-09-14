@@ -6,11 +6,18 @@ import java.util.Objects;
 
 import com.example.smartpark.model.security.RedactedEvidencePolicy;
 import com.example.smartpark.model.security.SecurityDispositionRecord;
+import com.example.smartpark.model.security.SecurityEventIdentity;
 import com.example.smartpark.securityincident.SecurityIncidentRisk;
 
+/**
+ * Projection of a handed-off security incident. The event identity list is
+ * source-qualified so a retained handoff can be correlated against fresh
+ * evidence without conflating two sources that reuse the same local event id.
+ */
 public record SecurityIncidentHandoff(String workItemId, String incidentId, String parkId, String buildingId,
                                       SecurityIncidentRisk riskLevel, String safeSummary, Instant createdAt,
-                                      Instant reviewedAt, Instant updatedAt, String eventType, List<String> eventIds,
+                                      Instant reviewedAt, Instant updatedAt, String eventType,
+                                      List<SecurityEventIdentity> eventIdentities,
                                       SecurityDispositionRecord dispositionRecord) {
     public SecurityIncidentHandoff(String workItemId, String incidentId, String parkId, String buildingId,
                                    SecurityIncidentRisk riskLevel, String safeSummary, Instant createdAt) {
@@ -32,13 +39,6 @@ public record SecurityIncidentHandoff(String workItemId, String incidentId, Stri
                 null, List.of(), SecurityDispositionRecord.unreviewed());
     }
 
-    public SecurityIncidentHandoff(String workItemId, String incidentId, String parkId, String buildingId,
-                                   SecurityIncidentRisk riskLevel, String safeSummary, Instant createdAt,
-                                   Instant reviewedAt, Instant updatedAt, String eventType, List<String> eventIds) {
-        this(workItemId, incidentId, parkId, buildingId, riskLevel, safeSummary, createdAt, reviewedAt, updatedAt,
-                eventType, eventIds, SecurityDispositionRecord.unreviewed());
-    }
-
     public SecurityIncidentHandoff {
         workItemId = requireText(workItemId, "workItemId");
         incidentId = requireText(incidentId, "incidentId");
@@ -50,7 +50,7 @@ public record SecurityIncidentHandoff(String workItemId, String incidentId, Stri
         updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
         dispositionRecord = dispositionRecord == null ? SecurityDispositionRecord.unreviewed() : dispositionRecord;
         eventType = eventType == null || eventType.isBlank() ? null : eventType.trim();
-        eventIds = eventIds == null ? List.of() : List.copyOf(eventIds);
+        eventIdentities = eventIdentities == null ? List.of() : List.copyOf(eventIdentities);
     }
 
     private static String requireText(String value, String field) {

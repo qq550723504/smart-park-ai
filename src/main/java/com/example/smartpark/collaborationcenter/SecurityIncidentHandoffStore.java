@@ -2,6 +2,7 @@ package com.example.smartpark.collaborationcenter;
 
 import com.example.smartpark.model.security.SecurityDisposition;
 import com.example.smartpark.model.security.SecurityDispositionRecord;
+import com.example.smartpark.model.security.SecurityEventIdentity;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoff;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoffPort;
 import com.example.smartpark.securityincident.SecurityIncident;
@@ -31,17 +32,17 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
         SecurityDispositionRecord projectedDisposition = projectedDispositionRecord(existing, incident);
         Instant updatedAt = existing == null || projectedFieldsChanged(existing, incident.incidentId(),
                 existing.parkId(), existing.buildingId(), projectedRisk, projectedSummary,
-                incident.eventType(), incident.eventIds(), projectedDisposition)
+                incident.eventType(), incident.eventIdentities(), projectedDisposition)
                 ? now : existing.updatedAt();
         SecurityIncidentHandoff handoff = existing == null
                 ? new SecurityIncidentHandoff("SECURITY_INCIDENT:" + incident.incidentId(), incident.incidentId(),
                         incident.parkId(), incident.buildingId(), incident.riskLevel(), incident.summary(), now,
-                        incident.reviewedAt(), now, incident.eventType(), incident.eventIds(),
+                        incident.reviewedAt(), now, incident.eventType(), incident.eventIdentities(),
                         projectedDisposition)
                 : new SecurityIncidentHandoff(existing.workItemId(), existing.incidentId(), existing.parkId(),
                         existing.buildingId(), projectedRisk, projectedSummary, existing.createdAt(),
                         existing.reviewedAt() != null ? existing.reviewedAt() : incident.reviewedAt(), updatedAt,
-                        incident.eventType(), incident.eventIds(), projectedDisposition);
+                        incident.eventType(), incident.eventIdentities(), projectedDisposition);
         handoffs.put(incident.incidentId(), handoff);
         trimToCapacity();
         return handoff;
@@ -63,12 +64,12 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
                 SecurityDispositionRecord projectedDisposition = projectedDispositionRecord(existing, incident);
                 Instant updatedAt = projectedFieldsChanged(existing, incident.incidentId(), incident.parkId(),
                         incident.buildingId(), projectedRisk, projectedSummary, incident.eventType(),
-                        incident.eventIds(), projectedDisposition) ? now : existing.updatedAt();
+                        incident.eventIdentities(), projectedDisposition) ? now : existing.updatedAt();
                 SecurityIncidentHandoff migrated = new SecurityIncidentHandoff(existing.workItemId(),
                         incident.incidentId(), incident.parkId(), incident.buildingId(),
                         projectedRisk, projectedSummary, existing.createdAt(),
                         existing.reviewedAt() != null ? existing.reviewedAt() : incident.reviewedAt(), updatedAt,
-                        incident.eventType(), incident.eventIds(), projectedDisposition);
+                        incident.eventType(), incident.eventIdentities(), projectedDisposition);
                 handoffs.put(incident.incidentId(), migrated);
                 trimToCapacity();
                 return migrated;
@@ -76,8 +77,8 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
             if (!handoffs.containsKey(incident.incidentId())) {
                 SecurityIncidentHandoff restored = new SecurityIncidentHandoff(incident.handoffWorkItemId(),
                         incident.incidentId(), incident.parkId(), incident.buildingId(), incident.riskLevel(),
-                        incident.summary(), now, incident.reviewedAt(), now, incident.eventType(), incident.eventIds(),
-                        projectedDispositionRecord(null, incident));
+                        incident.summary(), now, incident.reviewedAt(), now, incident.eventType(),
+                        incident.eventIdentities(), projectedDispositionRecord(null, incident));
                 handoffs.put(incident.incidentId(), restored);
                 trimToCapacity();
                 return restored;
@@ -125,7 +126,8 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
 
     private static boolean projectedFieldsChanged(SecurityIncidentHandoff existing, String incidentId,
                                                   String parkId, String buildingId, SecurityIncidentRisk riskLevel,
-                                                  String safeSummary, String eventType, List<String> eventIds,
+                                                  String safeSummary, String eventType,
+                                                  List<SecurityEventIdentity> eventIdentities,
                                                   SecurityDispositionRecord dispositionRecord) {
         return !existing.incidentId().equals(incidentId)
                 || !existing.parkId().equals(parkId)
@@ -133,7 +135,7 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
                 || existing.riskLevel() != riskLevel
                 || !existing.safeSummary().equals(safeSummary)
                 || !java.util.Objects.equals(existing.eventType(), eventType)
-                || !existing.eventIds().equals(eventIds)
+                || !existing.eventIdentities().equals(eventIdentities)
                 || !existing.dispositionRecord().equals(dispositionRecord);
     }
 
