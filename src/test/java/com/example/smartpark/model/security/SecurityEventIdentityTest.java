@@ -2,6 +2,8 @@ package com.example.smartpark.model.security;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -162,6 +164,20 @@ class SecurityEventIdentityTest {
         assertThatThrownBy(() -> SecurityEventIdentity.fromReference(truncated, "PARK-A", "A1"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("location");
+    }
+
+    @Test
+    void rejectsQualifiedReferencesWithBlankComponents() {
+        String blankEvent = "security-event:source:14#ACCESS_CONTROL:8#access-1:0#";
+        String blankSource = "security-event:source:14#ACCESS_CONTROL:0#:1#E";
+        String blankLocation = "security-event:source:14#ACCESS_CONTROL:8#access-1:1#E:0#:2#A1";
+
+        for (String token : List.of(blankEvent, blankSource, blankLocation)) {
+            assertThat(SecurityEventIdentity.parseQualifiedReference(token)).isNull();
+            assertThat(SecurityEventIdentity.canonicalQualifiedReference(token)).isNull();
+            assertThatThrownBy(() -> SecurityEventIdentity.fromReference(token, "PARK-A", "A1"))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
     }
 
     @Test

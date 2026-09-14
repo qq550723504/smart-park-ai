@@ -127,6 +127,10 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
             DecodedMaterial decoded = decodeParts(material, IDENTITY_PARTS);
             if (decoded != null) {
                 List<String> parts = decoded.parts();
+                if (hasBlankPart(parts)) {
+                    throw new IllegalArgumentException(
+                            "security event reference has a blank component: " + token);
+                }
                 SecuritySourceType type = SecuritySourceType.fromName(parts.get(0));
                 // reference() never encodes a source-less (UNKNOWN) source, so a qualified
                 // token that names an unknown or misspelled type is malformed. Reject it
@@ -141,6 +145,10 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
                             "security event reference has a malformed location: " + token);
                 }
                 DecodedMaterial location = decodeLocation(material, decoded.consumed());
+                if (location != null && hasBlankPart(location.parts())) {
+                    throw new IllegalArgumentException(
+                            "security event reference has a blank location component: " + token);
+                }
                 return new SecurityEventIdentity(
                         new SecuritySourceRef(type, parts.get(1)),
                         parts.get(2),
@@ -191,11 +199,15 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
         if (decoded == null) return null;
         List<String> parts = decoded.parts();
         SecuritySourceType type = SecuritySourceType.fromName(parts.get(0));
+        // A zero-length component decodes syntactically but cannot be a real identifier, so
+        // the token is malformed and must not become a resolvable reference.
+        if (hasBlankPart(parts)) return null;
         // reference() never encodes a source-less source, so an unknown or misspelled type
         // is malformed and must not be resolved as a wildcard.
         if (type == SecuritySourceType.UNKNOWN) return null;
         if (hasMalformedLocation(material, decoded.consumed())) return null;
         DecodedMaterial location = decodeLocation(material, decoded.consumed());
+        if (location != null && hasBlankPart(location.parts())) return null;
         return new QualifiedReference(
                 new SecuritySourceRef(type, parts.get(1)),
                 parts.get(2),
@@ -220,6 +232,9 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
         DecodedMaterial decoded = decodeParts(material, IDENTITY_PARTS);
         if (decoded == null) return null;
         List<String> parts = decoded.parts();
+        // A zero-length component is not a real identifier; normalizing it would emit a
+        // token that later fails construction, so treat the whole reference as malformed.
+        if (hasBlankPart(parts)) return null;
         // reference() never encodes a source-less source, so an unknown or misspelled
         // type is malformed and must not be normalized into a resolvable token.
         if (SecuritySourceType.fromName(parts.get(0)) == SecuritySourceType.UNKNOWN) return null;
@@ -230,10 +245,15 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
                 .append(encode(parts.get(2)));
         DecodedMaterial location = decodeLocation(material, decoded.consumed());
         if (location != null) {
+            if (hasBlankPart(location.parts())) return null;
             canonical.append(':').append(encode(location.parts().get(0)))
                     .append(':').append(encode(location.parts().get(1)));
         }
         return canonical.toString();
+    }
+
+    private static boolean hasBlankPart(List<String> parts) {
+        return parts.stream().anyMatch(part -> part == null || part.isBlank());
     }
 
     /**
