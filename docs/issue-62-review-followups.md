@@ -246,3 +246,13 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 24 | `securityincident/SecurityIncidentService.restoreStates()` | P1 | 无源事件被两个复用同一 id 的具体源事件替换时，别名只由遍历顺序第一个 fresh 事件认领：一个更早发生但无关的 camera 事件会继承人工处置，而匹配的 access 事件保持 OPEN。现按 `lastOccurredAt` 距离预计算每个被别名遮蔽的存储事件的「首选认领者」，仅该 fresh 事件可认领其 incident 与 handoff |
 
 每个修复对应独立提交：`c11e15a`（#23）、`3168da3`（#24）。
+
+第十一轮（对 `e1a3d5a`）补 3 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 25 | `securityincident/SecurityIncidentService.deduplicate()` | P1 | 单次 correlation pass 中，无源 legacy 事件会被折叠进**第一个**复用其 event id 的具体 adapter（不看 eventType 或 occurrence time），于是无关源会吞掉 legacy 表示（或其元数据），后续 `restoreStates` 的首选认领者逻辑也无法补救。现改为两阶段去重：先按 source-aware identity 归并具体源副本，再把每个无源别名折叠进**最佳**具体候选（具体源优先 → eventType 相同 → `occurredAt` 距离最小），仅当没有任何具体候选时才与另一别名合并 |
+| 26 | `tool/security/SecurityQueryTool` | P1 | 混合部署（legacy `SecurityEventReader` + 独立 `SecuritySourceAdapter`）下 early return 让注入的 `SecurityPort` 仍是 legacy reader，诊断/安全专家工具查不到事件中心已展示的 adapter 事件。现工具用 `SecurityEventCatalog.aggregating(reader, adapters)` 在消费侧聚合（`aggregating` 幂等，adapter-only 部署复用配置安装的聚合，mock 部署仍只有单一 `SecurityPort` bean）；`getEvent` 的 `NoSuchElementException` 映射为安全的 `Unknown security event` 结果 |
+| 27 | `model/security/SecurityEventIdentity.decodeMaterial()` | P2 | 畸形 qualified 引用（如 `security-event:source:2147483647#x`）的 `start + length` 会溢出为负数，越界检查被绕过、`substring` 抛 `StringIndexOutOfBoundsException`，使外部告警中断安全流程。现先校验 `length < 0 \|\| length > material.length() - start` 再计算 `end`，令牌按 malformed 回退为 legacy 引用 |
+
+每个修复对应独立提交：`437075e`（#25）、`4aae553`（#26）、`563e5d7`（#27）。
