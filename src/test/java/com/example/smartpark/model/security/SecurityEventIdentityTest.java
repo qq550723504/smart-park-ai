@@ -210,6 +210,16 @@ class SecurityEventIdentityTest {
     }
 
     @Test
+    void rejectsQualifiedReferencesWhoseSourceIdViolatesTheIdentifierPolicy() {
+        // A token that decodes cleanly but carries a credential fragment cannot become a
+        // SecuritySourceRef; the parsers must report it as malformed instead of throwing.
+        String unsafe = "security-event:source:14#ACCESS_CONTROL:11#token=value:1#E";
+
+        assertThat(SecurityEventIdentity.parseQualifiedReference(unsafe)).isNull();
+        assertThat(SecurityEventIdentity.canonicalQualifiedReference(unsafe)).isNull();
+    }
+
+    @Test
     void keepsSourcePrefixedEventIdsThatDoNotDecodeAsQualifiedReferences() {
         SecurityEventIdentity identity = identity(SecuritySourceRef.unknown(), "source:not-encoded");
 

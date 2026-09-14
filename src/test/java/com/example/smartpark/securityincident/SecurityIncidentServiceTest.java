@@ -1016,6 +1016,25 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void ignoresAnAlertReferenceWhoseSourceIdViolatesTheIdentifierPolicy() {
+        SecurityEvent access = withSource(event("SEC-UNSAFE-REF", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        Alert unsafeAlert = new Alert("ALT-UNSAFE", "PARK-A", "A1", "DEV-1", AlertClassification.ACCESS,
+                RiskLevel.HIGH, "REDACTED: unsafe alert", BASE,
+                List.of(locationLessReference("ACCESS_CONTROL", "token=value", "SEC-UNSAFE-REF")));
+        SecurityIncidentService service = service(List.of(access), List.of(unsafeAlert));
+
+        List<SecurityIncident> incidents = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        // A malformed reference on one active alert must match nothing rather than abort
+        // every incident list/get/review call while the index is being built.
+        assertThat(incidents).singleElement().satisfies(incident -> {
+            assertThat(incident.alertIds()).isEmpty();
+            assertThat(incident.riskLevel()).isEqualTo(SecurityIncidentRisk.MEDIUM);
+        });
+    }
+
+    @Test
     void linksAlertsByTheLocationEncodedInAQualifiedReference() {
         SecurityEvent foreign = withSource(event("SEC-FOREIGN-REF", "PARK-B", "B1", "ACCESS", BASE),
                 SecuritySourceType.ACCESS_CONTROL, "access-1");

@@ -219,6 +219,11 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
         // reference() never encodes a source-less source, so an unknown or misspelled type
         // is malformed and must not be resolved as a wildcard.
         if (type == SecuritySourceType.UNKNOWN) return null;
+        // A decoded source id must satisfy the identifier policy too: a URL or credential
+        // fragment would make SecuritySourceRef construction throw, and callers that parse
+        // every active alert (SecurityIncidentService.alertsByReference) must see a plain
+        // non-match instead of an exception.
+        if (!isSafeSourceId(parts.get(1))) return null;
         if (hasMalformedLocation(material, decoded.consumed())) return null;
         DecodedMaterial location = decodeLocation(material, decoded.consumed());
         if (location == null) {
@@ -263,6 +268,7 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
         // reference() never encodes a source-less source, so an unknown or misspelled
         // type is malformed and must not be normalized into a resolvable token.
         if (SecuritySourceType.fromName(parts.get(0)) == SecuritySourceType.UNKNOWN) return null;
+        if (!isSafeSourceId(parts.get(1))) return null;
         if (hasMalformedLocation(material, decoded.consumed())) return null;
         StringBuilder canonical = new StringBuilder(REFERENCE_PREFIX).append(SOURCE_REFERENCE_PREFIX)
                 .append(encode(parts.get(0))).append(':')
@@ -279,6 +285,21 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
 
     private static boolean hasBlankPart(List<String> parts) {
         return parts.stream().anyMatch(part -> part == null || part.isBlank());
+    }
+
+    /**
+     * True when a decoded source id passes the shared identifier policy. A token whose
+     * source id carries a URL or credentials is malformed, so the parsers reject it
+     * instead of letting {@link SecuritySourceRef} throw deep inside a caller that
+     * parses many alerts.
+     */
+    private static boolean isSafeSourceId(String sourceId) {
+        try {
+            SecurityIdentifierPolicy.requireSafe(sourceId, "sourceId");
+            return true;
+        } catch (IllegalArgumentException unsafe) {
+            return false;
+        }
     }
 
     /**
