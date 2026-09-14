@@ -6,11 +6,14 @@ import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.device.DevicePort;
 import com.example.smartpark.port.energy.EnergyPort;
 import com.example.smartpark.port.knowledge.KnowledgePort;
-import com.example.smartpark.port.security.SecurityPort;
+import com.example.smartpark.port.security.SecurityEventReader;
+import com.example.smartpark.port.security.SecuritySourceAdapter;
 import com.example.smartpark.workflow.AlertWorkflow;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.ConditionContext;
 import org.springframework.mock.env.MockEnvironment;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -27,7 +30,7 @@ class AlertPreflightWorkflowFactoryTest {
         AlertPort alertPort = mock(AlertPort.class);
         KnowledgePort knowledgePort = mock(KnowledgePort.class);
         EnergyPort energyPort = mock(EnergyPort.class);
-        SecurityPort securityPort = mock(SecurityPort.class);
+        SecurityEventReader securityEventReader = mock(SecurityEventReader.class);
         AlertPreflightWorkflowFactory factory = new AlertPreflightWorkflowFactory(
                 triageAgent,
                 diagnosisAgent,
@@ -35,7 +38,8 @@ class AlertPreflightWorkflowFactoryTest {
                 alertPort,
                 knowledgePort,
                 energyPort,
-                securityPort);
+                securityEventReader,
+                List.<SecuritySourceAdapter>of());
 
         AlertWorkflow first = factory.create();
         AlertWorkflow second = factory.create();
@@ -48,7 +52,7 @@ class AlertPreflightWorkflowFactoryTest {
                 alertPort,
                 knowledgePort,
                 energyPort,
-                securityPort);
+                securityEventReader);
     }
 
     @Test

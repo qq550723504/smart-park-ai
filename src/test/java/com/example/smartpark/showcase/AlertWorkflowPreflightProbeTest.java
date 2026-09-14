@@ -64,7 +64,8 @@ class AlertWorkflowPreflightProbeTest {
                 park.alerts(),
                 park.knowledge(),
                 park.energy(),
-                park.security());
+                park.security(),
+                List.<com.example.smartpark.port.security.SecuritySourceAdapter>of());
 
         WorkflowSnapshot snapshot = factory.create().start("ALT-POWER-001");
 

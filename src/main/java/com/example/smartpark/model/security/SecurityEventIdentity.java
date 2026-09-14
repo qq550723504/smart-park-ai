@@ -81,6 +81,28 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
     }
 
     /**
+     * Rebuilds the identity encoded in a reference token. The location comes from
+     * the owning alert, since the token only carries the event identity. A legacy
+     * bare token resolves to the source-less alias, which matches any source.
+     */
+    public static SecurityEventIdentity fromReference(String token, String parkId, String buildingId) {
+        if (!isReference(token)) throw new IllegalArgumentException("not a security event reference: " + token);
+        String body = token.substring(REFERENCE_PREFIX.length()).trim();
+        if (body.isEmpty()) throw new IllegalArgumentException("security event reference must not be blank");
+        if (body.startsWith(SOURCE_REFERENCE_PREFIX)) {
+            List<String> parts = decodeMaterial(body.substring(SOURCE_REFERENCE_PREFIX.length()));
+            if (parts != null) {
+                SecuritySourceType type = SecuritySourceType.fromName(parts.get(0));
+                SecuritySourceRef source = type == SecuritySourceType.UNKNOWN
+                        ? SecuritySourceRef.unknown()
+                        : new SecuritySourceRef(type, parts.get(1));
+                return new SecurityEventIdentity(source, parts.get(2), parkId, buildingId);
+            }
+        }
+        return new SecurityEventIdentity(SecuritySourceRef.unknown(), body, parkId, buildingId);
+    }
+
+    /**
      * Extracts the source-local event id from a reference token, accepting both the
      * legacy bare form and the source-qualified form. A token that looks qualified
      * but does not decode is treated as a legacy bare event id, so ids that merely

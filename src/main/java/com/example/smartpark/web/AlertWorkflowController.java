@@ -5,6 +5,9 @@ import com.example.smartpark.agent.AlertTriageAgent;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.device.DevicePort;
 import com.example.smartpark.port.knowledge.KnowledgePort;
+import com.example.smartpark.port.security.SecurityEventCatalog;
+import com.example.smartpark.port.security.SecurityEventReader;
+import com.example.smartpark.port.security.SecuritySourceAdapter;
 import com.example.smartpark.port.workorder.WorkOrderPort;
 import com.example.smartpark.workflow.AlertWorkflow;
 import com.example.smartpark.workflow.WorkflowEventPublisher;
@@ -20,6 +23,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 
@@ -90,9 +94,13 @@ class AlertWorkflowRuntimeConfiguration {
             WorkOrderPort workOrderPort,
             KnowledgePort knowledgePort,
             com.example.smartpark.port.energy.EnergyPort energyPort,
-            com.example.smartpark.port.security.SecurityPort securityPort,
+            SecurityEventReader securityEventReader,
+            List<SecuritySourceAdapter> securitySourceAdapters,
             WorkflowExecutionStore executionStore,
             WorkflowEventPublisher eventPublisher) {
+        // Resolve security events through a source-aware aggregate so a source-qualified
+        // alert reference is never reduced to a bare id that another source could reuse.
+        SecurityEventCatalog securityEvents = new SecurityEventCatalog(securityEventReader, securitySourceAdapters);
         return new AlertWorkflow(
                 triageAgent,
                 diagnosisAgent,
@@ -103,6 +111,6 @@ class AlertWorkflowRuntimeConfiguration {
                 executionStore,
                 eventPublisher,
                 energyPort,
-                securityPort);
+                securityEvents);
     }
 }
