@@ -124,6 +124,30 @@ class SecurityQueryToolTest {
         assertThat(result.event().toString()).doesNotContain("model-9", "evt-secret");
     }
 
+    @Test
+    void replacesAdapterFailuresWithAFixedPublicError() {
+        SecuritySourceAdapter failing = new SecuritySourceAdapter() {
+            @Override
+            public SecuritySourceDescriptor descriptor() {
+                return new SecuritySourceDescriptor("access-prod", SecuritySourceType.ACCESS_CONTROL,
+                        Set.of(SecurityEventType.ACCESS_ANOMALY), true);
+            }
+
+            @Override
+            public List<SecurityEvent> readEvents() {
+                throw new IllegalArgumentException(
+                        "failed to connect jdbc:postgresql://vendor:secret@db.internal:5432/feed?token=abc");
+            }
+        };
+        SecurityQueryTool tool = new SecurityQueryTool(reader(), List.of(failing));
+
+        SecurityQueryTool.SecurityLookupResult result = tool.lookupSecurityEvent("SEC-ACCESS-001");
+
+        assertThat(result.event()).isNull();
+        assertThat(result.error()).isEqualTo("Security event lookup is temporarily unavailable");
+        assertThat(result.error()).doesNotContain("jdbc", "secret", "token", "db.internal", "postgresql");
+    }
+
     private static SecurityEvent sourcedEvent(String eventId, SecuritySourceType type, String sourceId) {
         return new SecurityEvent(eventId, "PARK-A", "A1", SecurityEventType.ACCESS_ANOMALY, "ACCESS",
                 new SecuritySourceRef(type, sourceId), SecurityEventLocation.empty(),

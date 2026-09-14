@@ -99,7 +99,7 @@ public final class SecurityEventCatalog implements SecurityEventResolver, Securi
             throw new NoSuchElementException("security event not found: " + eventId);
         }
         if (distinctSources(candidates) > 1) {
-            throw new IllegalArgumentException("ambiguous security event id: " + eventId
+            throw new SecurityEventLookupException("ambiguous security event id: " + eventId
                     + "; use a source-qualified reference");
         }
         return preferred(candidates);

@@ -10,6 +10,7 @@ import com.example.smartpark.model.security.SecurityEventType;
 import com.example.smartpark.model.security.SecurityPrivacyMetadata;
 import com.example.smartpark.model.security.SecuritySourceRef;
 import com.example.smartpark.port.security.SecurityEventCatalog;
+import com.example.smartpark.port.security.SecurityEventLookupException;
 import com.example.smartpark.port.security.SecurityEventReader;
 import com.example.smartpark.port.security.SecuritySourceAdapter;
 import org.springframework.ai.tool.annotation.Tool;
@@ -26,6 +27,13 @@ import java.util.Objects;
 public class SecurityQueryTool {
 
     private static final String REDACTED_NOTICE = "Redacted security data only. No raw media, identity record, or device control is available.";
+
+    /**
+     * Fixed public error for failures that are not a user-safe lookup problem. Adapter
+     * exceptions can carry connection URLs or credential-bearing configuration labels,
+     * so their messages are never echoed to the AI tool consumer.
+     */
+    private static final String LOOKUP_UNAVAILABLE = "Security event lookup is temporarily unavailable";
 
     private final SecurityEventReader securityEvents;
 
@@ -53,8 +61,11 @@ public class SecurityQueryTool {
         catch (NoSuchElementException ex) {
             return SecurityLookupResult.error(normalizedEventId, "Unknown security event: " + normalizedEventId);
         }
-        catch (IllegalArgumentException ex) {
+        catch (SecurityEventLookupException ex) {
             return SecurityLookupResult.error(normalizedEventId, ex.getMessage());
+        }
+        catch (RuntimeException ex) {
+            return SecurityLookupResult.error(normalizedEventId, LOOKUP_UNAVAILABLE);
         }
     }
 
