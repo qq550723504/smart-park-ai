@@ -1,7 +1,10 @@
 package com.example.smartpark;
 
 import com.example.smartpark.adapter.mock.MockParkConfiguration;
+import com.example.smartpark.port.security.SecurityEventCapabilityRegistry;
+import com.example.smartpark.securityincident.SecurityIncidentService;
 import com.example.smartpark.web.CustomerServiceController;
+import com.example.smartpark.web.SecurityIncidentController;
 import com.example.smartpark.workflow.CustomerServiceWorkflow;
 import com.example.smartpark.agent.AlertDiagnosisAgent;
 import com.example.smartpark.agent.AlertTriageAgent;
@@ -51,6 +54,13 @@ class SmartParkApplicationTest {
         assertThat(applicationContext.getBeansOfType(MockParkConfiguration.class)).hasSize(1);
         assertThat(applicationContext.getBeansOfType(CustomerServiceWorkflow.class)).hasSize(1);
         assertThat(applicationContext.getBeansOfType(CustomerServiceController.class)).hasSize(1);
+    }
+
+    @Test
+    void registersTheSecurityIncidentRuntimeWhenCapabilityPortsArePresent() {
+        assertThat(applicationContext.getBeansOfType(SecurityIncidentService.class)).hasSize(1);
+        assertThat(applicationContext.getBeansOfType(SecurityIncidentController.class)).hasSize(1);
+        assertThat(applicationContext.getBeansOfType(SecurityEventCapabilityRegistry.class)).hasSize(1);
     }
 
     @Test

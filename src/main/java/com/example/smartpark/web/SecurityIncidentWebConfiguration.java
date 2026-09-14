@@ -62,11 +62,26 @@ public class SecurityIncidentWebConfiguration {
     }
 
     private static String beanNameFor(BeanDefinitionRegistry registry, Class<?> type) {
+        ConfigurableListableBeanFactory beanFactory = registry instanceof ConfigurableListableBeanFactory factory
+                ? factory : null;
         for (String name : registry.getBeanDefinitionNames()) {
-            BeanDefinition definition = registry.getBeanDefinition(name);
-            if (definition.getResolvableType() != org.springframework.core.ResolvableType.NONE
-                    && type.isAssignableFrom(definition.getResolvableType().toClass())) return name;
+            Class<?> candidate = resolveType(registry, beanFactory, name);
+            if (candidate != null && type.isAssignableFrom(candidate)) return name;
         }
         return null;
+    }
+
+    /**
+     * Bean definitions declared by {@code @Bean} methods carry no resolvable type
+     * before instantiation, so fall back to the bean factory's ability to predict
+     * the factory-method return type.
+     */
+    private static Class<?> resolveType(BeanDefinitionRegistry registry,
+                                        ConfigurableListableBeanFactory beanFactory, String name) {
+        BeanDefinition definition = registry.getBeanDefinition(name);
+        if (definition.getResolvableType() != org.springframework.core.ResolvableType.NONE) {
+            return definition.getResolvableType().toClass();
+        }
+        return beanFactory == null ? null : beanFactory.getType(name, false);
     }
 }
