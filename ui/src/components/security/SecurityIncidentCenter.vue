@@ -7,8 +7,9 @@ import type { DemoRole } from '../../types/workflow'
 import { securityDispositionLabel, securityEventTypeLabel, securitySourceTypeLabel } from '../../utils/labels'
 import './security-incident-center.css'
 
-const props = withDefaults(defineProps<{ role: DemoRole; focusIncidentId?: string | null; active?: boolean }>(), {
+const props = withDefaults(defineProps<{ role: DemoRole; focusIncidentId?: string | null; active?: boolean; securityDispositionEnabled?: boolean }>(), {
   active: true,
+  securityDispositionEnabled: false,
 })
 const emit = defineEmits<{ 'open-collaboration': [payload: { incidentId: string; workItemId: string }] }>()
 
@@ -23,6 +24,9 @@ const highRiskCount = computed(() => items.value.filter(item => item.riskLevel =
 const openCount = computed(() => items.value.filter(item => item.status === 'OPEN').length)
 const handoffCount = computed(() => items.value.filter(item => item.status === 'HANDOFF').length)
 const hasDispositionData = computed(() => items.value.some(item => item.disposition && item.disposition !== 'UNREVIEWED'))
+// A queue-wide false-positive count is only a real statistic when a production disposition
+// feed exists; a manual review of a demo incident must not make the metric look available.
+const falsePositiveAvailable = computed(() => props.securityDispositionEnabled && hasDispositionData.value)
 const falsePositiveCount = computed(() => items.value.filter(item => item.disposition === 'FALSE_POSITIVE').length)
 const primaryEvidence = computed(() => selected.value?.evidence[0])
 
@@ -132,8 +136,9 @@ function openExistingHandoff() {
           <div><strong>{{ loading ? '—' : highRiskCount }}</strong><span>高风险</span></div>
           <div><strong>{{ loading ? '—' : handoffCount }}</strong><span>已转协同</span></div>
           <div data-security-false-positive>
-            <strong v-if="hasDispositionData">{{ falsePositiveCount }}</strong>
-            <span v-if="hasDispositionData">误报</span>
+            <strong v-if="falsePositiveAvailable">{{ falsePositiveCount }}</strong>
+            <span v-if="falsePositiveAvailable">误报</span>
+            <span v-else-if="!props.securityDispositionEnabled">误报数不可统计</span>
             <span v-else>暂无复核结论</span>
           </div>
         </div>

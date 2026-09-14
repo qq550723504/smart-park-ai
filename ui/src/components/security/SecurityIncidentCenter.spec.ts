@@ -204,7 +204,7 @@ describe('SecurityIncidentCenter', () => {
       return response({ ...detail, disposition: 'UNREVIEWED' })
     }) as typeof fetch
 
-    const wrapper = mount(SecurityIncidentCenter, { props: { role: 'APPROVER' } })
+    const wrapper = mount(SecurityIncidentCenter, { props: { role: 'APPROVER', securityDispositionEnabled: true } })
     await flushPromises()
     expect(wrapper.get('[data-security-false-positive]').text()).toContain('暂无复核结论')
 
@@ -214,6 +214,24 @@ describe('SecurityIncidentCenter', () => {
     expect(bodies).toEqual([JSON.stringify({ disposition: 'FALSE_POSITIVE' })])
     expect(wrapper.get('[data-security-disposition]').text()).toContain('误报（人工复核结论）')
     expect(wrapper.get('[data-security-false-positive]').text()).toContain('1')
+  })
+
+  it('keeps the false-positive metric unavailable without the production disposition capability', async () => {
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      const decided = { ...summary, status: 'REVIEWED', disposition: 'FALSE_POSITIVE', dispositionSource: 'HUMAN_REVIEW' }
+      if (url.includes('/api/security/incidents?')) return response({ items: [decided], total: 1 })
+      return response({ ...detail, ...decided })
+    }) as typeof fetch
+
+    // The default demo adapter can record manual dispositions, but without a production
+    // disposition feed there is no queue-wide false-positive statistic to promise.
+    const wrapper = mount(SecurityIncidentCenter, { props: { role: 'APPROVER' } })
+    await flushPromises()
+
+    const metric = wrapper.get('[data-security-false-positive]')
+    expect(metric.text()).toContain('误报数不可统计')
+    expect(metric.text()).not.toContain('1')
   })
 
   it('reports the persisted disposition when the review request is a no-op', async () => {

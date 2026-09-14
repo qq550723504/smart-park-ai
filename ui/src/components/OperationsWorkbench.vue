@@ -448,6 +448,7 @@ function confidence(value?: number) {
       :role="role"
       :active="props.active && activeView === 'security-incidents'"
       :focus-incident-id="securityIncidentTargetId"
+      :security-disposition-enabled="capabilities?.securityDispositionEnabled === true"
       @open-collaboration="openCollaborationFromIncident"
     />
 
