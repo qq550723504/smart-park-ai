@@ -7,6 +7,7 @@ import com.example.smartpark.model.security.SecurityDispositionRecord;
 import com.example.smartpark.model.security.SecurityDispositionSource;
 import com.example.smartpark.model.security.SecurityEvent;
 import com.example.smartpark.model.security.SecurityEventIdentity;
+import com.example.smartpark.model.security.SecurityEventSeverity;
 import com.example.smartpark.model.security.SecurityEventType;
 import com.example.smartpark.model.security.SecuritySourceType;
 import com.example.smartpark.port.alert.AlertPort;
@@ -226,27 +227,43 @@ public final class SecurityIncidentService {
     }
 
     /**
-     * Picks the authoritative representation of a logically identical event that
-     * arrives through multiple ingestion paths (legacy reader and/or registered
-     * adapters). The representation that carries the reconciled decision is
-     * authoritative, so a correction with a later {@code decidedAt} is never dropped
-     * just because its event receipt time is older. When neither path is decided,
-     * the freshest representation by {@code receivedAt} wins (favouring an adapter's
-     * enriched view, with source concreteness as a tie-breaker). The reconciliation
-     * rule is the same one used by the restore paths: a stored human review stays
+     * Picks the representation of a logically identical event that arrives through
+     * multiple ingestion paths (legacy reader and/or registered adapters). The
+     * reconciled decision is always preserved, but it is attached to the enriched
+     * representation rather than forcing the copy that happens to carry it: a
+     * concrete adapter view keeps its source, severity, confidence and ingest
+     * metadata even when a source-less reader copy is the one that decided. When
+     * neither path is decided, the freshest representation by {@code receivedAt}
+     * wins (favouring a concrete adapter view on a tie). The reconciliation rule is
+     * the same one used by the restore paths: a stored human review stays
      * authoritative, otherwise the newest decision wins.
      */
     private static SecurityEvent authoritativeEvent(SecurityEvent left, SecurityEvent right) {
         SecurityDispositionRecord reconciled = reconcileDisposition(right.disposition(), List.of(left.disposition()));
-        if (reconciled.disposition() != SecurityDisposition.UNREVIEWED) {
-            boolean leftCarries = reconciled.equals(left.disposition());
-            boolean rightCarries = reconciled.equals(right.disposition());
-            // Both copies carry the same decision: keep the reconciled decision but
-            // still prefer the enriched/freshest representation over ingestion order.
-            if (leftCarries && rightCarries) return fresherEvent(left, right);
-            return leftCarries ? left : right;
-        }
+        if (reconciled.disposition() == SecurityDisposition.UNREVIEWED) return fresherEvent(left, right);
+        return preferredRepresentation(left, right).withDisposition(reconciled);
+    }
+
+    /**
+     * Chooses which copy's metadata survives a merge. A concrete adapter view is
+     * richer than a legacy view, and an event classified with a severity,
+     * confidence and adapter ingest metadata is richer than a bare reader copy, so
+     * richness wins even when the richer copy's receipt time is older; copies of
+     * equal richness fall back to freshness.
+     */
+    private static SecurityEvent preferredRepresentation(SecurityEvent left, SecurityEvent right) {
+        int richness = Integer.compare(enrichmentScore(right), enrichmentScore(left));
+        if (richness != 0) return richness > 0 ? right : left;
         return fresherEvent(left, right);
+    }
+
+    private static int enrichmentScore(SecurityEvent event) {
+        int score = 0;
+        if (event.source().sourceType() != SecuritySourceType.UNKNOWN) score += 8;
+        if (event.severity() != SecurityEventSeverity.UNKNOWN) score += 4;
+        if (event.confidence() != null) score += 2;
+        if (!"unspecified".equals(event.ingestedBy()) || event.ingestVersion() != null) score += 1;
+        return score;
     }
 
     /** Freshest representation by {@code receivedAt}, preferring the concrete adapter view on a tie. */

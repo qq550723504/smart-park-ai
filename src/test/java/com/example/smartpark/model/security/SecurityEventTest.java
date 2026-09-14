@@ -148,6 +148,19 @@ class SecurityEventTest {
         return newEvent(eventId, parkId, buildingId, rawEventType, evidenceSummary);
     }
 
+    @Test
+    void replacesOnlyTheDispositionWhenCopyingAnEvent() {
+        SecurityEvent event = newEvent("REDACTED: 门禁异常摘要");
+        SecurityDispositionRecord decision = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                Instant.parse("2026-08-23T02:00:00Z"));
+
+        SecurityEvent copy = event.withDisposition(decision);
+
+        assertThat(copy.disposition()).isSameAs(decision);
+        assertThat(copy).usingRecursiveComparison().ignoringFields("disposition").isEqualTo(event);
+    }
+
     private SecurityEvent newEvent(String evidenceSummary) {
         return newEvent("SEC-001", "PARK-A", "A1", "UNAUTHORIZED_ACCESS", evidenceSummary);
     }

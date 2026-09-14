@@ -65,6 +65,16 @@ public record SecurityEvent(
         return observedAt;
     }
 
+    /**
+     * Returns a copy carrying {@code replacement}. Used when reconciliation selects a
+     * decision that arrived through another ingestion path, so the enriched
+     * representation can keep its source, severity, confidence and ingest metadata.
+     */
+    public SecurityEvent withDisposition(SecurityDispositionRecord replacement) {
+        return new SecurityEvent(eventId, parkId, buildingId, eventType, rawEventType, source, location, observedAt,
+                receivedAt, severity, confidence, privacy, replacement, ingestedBy, ingestVersion, evidenceSummary);
+    }
+
     private static String requireText(String value, String fieldName) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(fieldName + " must not be blank");

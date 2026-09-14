@@ -130,6 +130,30 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void keepsTheEnrichedAdapterCopyWhenALegacyReaderCopyCarriesTheDecision() {
+        SecurityDispositionRecord selected = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(5));
+        SecurityEvent readerCopy = enrichedEvent(event("SEC-ONE-SIDED", "A1", "ACCESS", BASE), selected, BASE,
+                SecurityEventSeverity.LOW);
+        SecurityEvent adapterCopy = withSource(
+                enrichedEvent(event("SEC-ONE-SIDED", "A1", "ACCESS", BASE), SecurityDispositionRecord.unreviewed(),
+                        BASE.plusSeconds(30), SecurityEventSeverity.HIGH),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityIncidentService service = service(List.of(readerCopy), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterReturning(adapterCopy)));
+
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(incident.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+        assertThat(incident.dispositionRecord()).isEqualTo(selected);
+        assertThat(incident.evidence()).singleElement().satisfies(evidence -> {
+            assertThat(evidence.severity()).isEqualTo("HIGH");
+            assertThat(evidence.eventSourceId()).isEqualTo("access-1");
+        });
+    }
+
+    @Test
     void prefersTheNewestDecisionWhenBothIngestionPathsDeliverDecidedRecords() {
         SecurityDispositionRecord stale = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
                 SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
