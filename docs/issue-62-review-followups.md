@@ -317,3 +317,13 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 39 | `model/security/SecurityEventIdentity.fromReference()` | P2 | alert 携带语法合法、但 source type 未知或拼错的 source-qualified reference 时，`fromName()` 返回 `UNKNOWN`，原实现把它降级为 source-less wildcard 并仅保留解码出的 event id。`SecurityEventCatalog.getEvent(identity)` 于是走 legacy-alias 分支，可能解析到同 id/位置的另一源事件，绕过安全流程依赖的 exact-source 保证。由于 `reference()` 从不输出编码的 `UNKNOWN` source，现直接以 `IllegalArgumentException` 拒绝此类 qualified token，而非降级 |
 
 每个修复对应独立提交：`46fb10f`（#38）、`0b7d93e`（#39）。
+
+第十九轮（对 `4136c0b`）补 3 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 40 | `model/security/SecurityEventIdentity.isSourceLess()` | P1 | `isSourceLess()` 只按 `sourceType == UNKNOWN` 判定，于是 adapter 回退到 `UNKNOWN` 却带不同逻辑 id（如 `UNKNOWN/vendor-a` 与 `UNKNOWN/vendor-b`）时，两者都被当作 source-less；同 event id 与 location 的事件被折叠成 legacy 别名，其 reference 丢弃 source id，污染 incident evidence 与处置。由于 `reference()` 从不编码 `UNKNOWN`、且 canonical source-less 表示只能有一个，现于 `SecuritySourceRef`（`SecuritySourceDescriptor` 经其校验）拒绝 `UNKNOWN` 搭配非 `"unknown"` 的 source id，与 Fix #39 的拒绝策略一致 |
+| 41 | `model/security/SecurityEvent` 的 ingestion provenance | P1 | adapter 把 connection URL、凭据型 label 或 token 写进 `ingestedBy`/`ingestVersion` 时，原实现只做 trim 便原样接受，而其余安全标识符都走 `SecurityIdentifierPolicy`；`SecurityQueryTool.SecurityLookupResult` 会返回完整 `SecurityEvent`，把这些 provenance 暴露给模型/工具消费方。现两个字段都走 `SecurityIdentifierPolicy.optionalSafe`，复用与其它标识符相同的凭据/URL 拒绝规则，并保留空值默认 `unspecified`/`null` |
+| 42 | `tool/security/SecurityQueryTool.SecurityLookupResult` | P2 | notice 硬编码为 “Mock redacted security data only”，但该工具已聚合 legacy reader 与全部 `SecuritySourceAdapter`；`productionSource=true` 的新增 adapter 的结果仍被标为 mock data。现改用在 mock 与生产源下都准确的文案（说明数据已脱敏，不声称是 mock），避免误导模型/工具消费方 |
+
+每个修复对应独立提交：`73932f3`（#40）、`a00c859`（#41）、`39a11a0`（#42）。
