@@ -308,3 +308,12 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 37 | `securityincident/SecurityIncidentService.preferredAliasClaimants()` 及别名认领集合 | P1 | 一个已复核的 source-less incident 可含多个不同 event id；adapter enrichment 加 occurrence time 修正后这些事件被拆进不同窗口，每个窗口都唯一别名匹配其中一个 stored 身份。但首选认领者 reservation 与 `claimAliasOnly*` 认领集合都以「整个 stored incident」为键、只选一个 fresh incident，另一个窗口在 restore 时被排除，丢失人工 disposition 或 handoff。现两者的键都改为「stored incident + stored event identity」：仅在某个身份被多个窗口争用时才 reservation，且只有当 fresh 窗口共享的**全部**别名身份都已被认领时才排除它，因此每个唯一匹配的拆分窗口都能保留 finalized state；单身份别名（无关源仅排序靠前）行为不变 |
 
 每个修复对应独立提交：`9f9202d`（#36）、`9b58e60`（#37）。
+
+第十八轮（对 `7c57870`）补 2 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 38 | `securityincident/SecurityIncidentService.preferredAliasClaimants()` | P1 | reservation 的键虽已按 stored event identity 细分，但排序仍以整条 incident/handoff 的 `lastOccurredAt` 为基准，而非该身份自身的 occurrence time。当较早的 event id 随后被多个具体源在不同窗口暴露时，距 incident 末尾事件最近的无关副本仍会被 reserved 并继承人工 disposition/handoff，真正的 enrichment 反而丢失。现从 stored incident 的 evidence 派生每个身份的发生时间，并把 per-identity occurrence time 投影到 `SecurityIncidentHandoff`（`identityOccurredAt` map，`SecurityIncidentHandoffStore` 从 incident evidence 构建并按投影字段参与 `projectedFieldsChanged`），使被淘汰、仅存 handoff 的 incident 也能按身份时间排序；fresh 侧同样以匹配身份的自身时间计算距离 |
+| 39 | `model/security/SecurityEventIdentity.fromReference()` | P2 | alert 携带语法合法、但 source type 未知或拼错的 source-qualified reference 时，`fromName()` 返回 `UNKNOWN`，原实现把它降级为 source-less wildcard 并仅保留解码出的 event id。`SecurityEventCatalog.getEvent(identity)` 于是走 legacy-alias 分支，可能解析到同 id/位置的另一源事件，绕过安全流程依赖的 exact-source 保证。由于 `reference()` 从不输出编码的 `UNKNOWN` source，现直接以 `IllegalArgumentException` 拒绝此类 qualified token，而非降级 |
+
+每个修复对应独立提交：`46fb10f`（#38）、`0b7d93e`（#39）。
