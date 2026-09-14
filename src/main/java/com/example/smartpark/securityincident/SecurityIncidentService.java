@@ -536,9 +536,11 @@ public final class SecurityIncidentService {
      * source that happens to reuse the id and sort earlier would inherit the stored state
      * or the retained human disposition. Reservations are keyed per stored event identity,
      * so a multi-event incident that later splits into several uniquely matched windows can
-     * hand its finalized state to each split. A handoff whose incident is still stored is
-     * covered by the incident reservation, and a handoff without a projected occurrence time
-     * cannot disambiguate aliases at all.
+     * hand its finalized state to each split. Each identity is ranked by its own occurrence
+     * time rather than the incident-wide latest event, so an unrelated copy near the window's
+     * final event cannot win. A handoff whose incident is still stored is covered by the
+     * incident reservation, and a handoff without a projected occurrence time cannot
+     * disambiguate aliases at all.
      */
     private static Map<String, Map<SecurityEventIdentity, String>> preferredAliasClaimants(
             List<SecurityIncident> stored, List<SecurityIncidentHandoff> retainedHandoffs,
@@ -557,7 +559,8 @@ public final class SecurityIncidentService {
                 continue;
             }
             for (SecurityEventIdentity identity : existing.eventIdentities()) {
-                reservePreferredClaimant(preferred, existing.incidentId(), identity, existing.lastOccurredAt(),
+                reservePreferredClaimant(preferred, existing.incidentId(), identity,
+                        identityOccurredAt(existing, identity),
                         freshIncidents.stream()
                                 .filter(fresh -> sameCorrelation(existing, fresh))
                                 .filter(fresh -> aliases(fresh, identity))
@@ -567,7 +570,8 @@ public final class SecurityIncidentService {
         for (SecurityIncidentHandoff handoff : retainedHandoffs) {
             if (storedIncidentIds.contains(handoff.incidentId())) continue;
             for (SecurityEventIdentity identity : handoff.eventIdentities()) {
-                reservePreferredClaimant(preferred, handoff.incidentId(), identity, handoff.lastOccurredAt(),
+                reservePreferredClaimant(preferred, handoff.incidentId(), identity,
+                        identityOccurredAt(handoff, identity),
                         freshIncidents.stream()
                                 .filter(fresh -> matchesCorrelation(handoff, fresh))
                                 .filter(fresh -> aliases(fresh, identity))
@@ -575,6 +579,27 @@ public final class SecurityIncidentService {
             }
         }
         return preferred;
+    }
+
+    /**
+     * The occurrence time recorded for {@code identity} within {@code incident}. A correlation
+     * window can hold events at different times, so ranking an identity's alias copies against
+     * the incident-wide {@code lastOccurredAt} can prefer an unrelated copy near the window's
+     * final event over the genuine enrichment. Evidence that does not carry the identity falls
+     * back to the incident-wide time so legacy projections still rank deterministically.
+     */
+    private static Instant identityOccurredAt(SecurityIncident incident, SecurityEventIdentity identity) {
+        return incident.evidence().stream()
+                .filter(evidence -> identity.matches(evidence.eventIdentity(incident.parkId(), incident.buildingId())))
+                .map(evidence -> evidence.occurredAt())
+                .max(Comparator.naturalOrder())
+                .orElse(incident.lastOccurredAt());
+    }
+
+    /** A handoff without a projected time for {@code identity} falls back to its latest event. */
+    private static Instant identityOccurredAt(SecurityIncidentHandoff handoff, SecurityEventIdentity identity) {
+        Instant projected = handoff.identityOccurredAt().get(identity);
+        return projected != null ? projected : handoff.lastOccurredAt();
     }
 
     /** True when {@code fresh} reuses {@code identity} through a different or source-less copy. */
@@ -630,15 +655,18 @@ public final class SecurityIncidentService {
                                                  List<SecurityIncident> aliasClaimants) {
         if (occurredAt == null || aliasClaimants.size() <= 1) return;
         aliasClaimants.stream()
-                .min(Comparator.comparingLong((SecurityIncident fresh) -> aliasDistanceMillis(occurredAt, fresh))
+                .min(Comparator.comparingLong((SecurityIncident fresh) ->
+                                aliasDistanceMillis(occurredAt, fresh, identity))
                         .thenComparing(SecurityIncident::incidentId))
                 .ifPresent(fresh -> preferred
                         .computeIfAbsent(incidentId, ignored -> new HashMap<>())
                         .put(identity, fresh.incidentId()));
     }
 
-    private static long aliasDistanceMillis(Instant storedOccurredAt, SecurityIncident fresh) {
-        return Math.abs(Duration.between(fresh.lastOccurredAt(), storedOccurredAt).toMillis());
+    private static long aliasDistanceMillis(Instant storedOccurredAt, SecurityIncident fresh,
+                                            SecurityEventIdentity identity) {
+        Instant freshOccurredAt = identity == null ? fresh.lastOccurredAt() : identityOccurredAt(fresh, identity);
+        return Math.abs(Duration.between(freshOccurredAt, storedOccurredAt).toMillis());
     }
 
     private static boolean reservedForAnotherClaimant(Map<String, Map<SecurityEventIdentity, String>> preferred,

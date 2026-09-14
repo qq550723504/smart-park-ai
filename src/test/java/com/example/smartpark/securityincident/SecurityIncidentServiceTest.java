@@ -731,6 +731,78 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void ranksAliasCopiesByTheStoredIdentitysOwnOccurrenceTime() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-A", "A1", "ACCESS", BASE),
+                event("SEC-B", "A1", "ACCESS", BASE.plusSeconds(10 * 60))));
+        SecurityIncidentService service = service(events, List.of(), 20);
+        SecurityIncident multiEvent = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.eventIds().size() == 2).findFirst().orElseThrow();
+        SecurityIncident reviewed = service.review(multiEvent.incidentId(), SecurityDisposition.CONFIRMED_INCIDENT,
+                "APPROVER");
+
+        // Two concrete sources expose SEC-A in separate windows: one near SEC-A's own time and
+        // one near the incident's final event (SEC-B). Only the first is the genuine enrichment,
+        // but ranking against the incident-wide lastOccurredAt would reserve the second.
+        events.clear();
+        events.add(withSource(event("SEC-A", "A1", "ACCESS", BASE.minusSeconds(8 * 60)),
+                SecuritySourceType.ACCESS_CONTROL, "access-a"));
+        events.add(withSource(event("SEC-A", "A1", "ACCESS", BASE.plusSeconds(12 * 60)),
+                SecuritySourceType.CAMERA_ANALYTICS, "camera-a"));
+
+        List<SecurityIncident> restored = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        assertThat(restored).filteredOn(incident -> hasEventSource(incident, "access-a")).singleElement()
+                .satisfies(incident -> {
+                    assertThat(incident.status()).isEqualTo(SecurityIncidentStatus.REVIEWED);
+                    assertThat(incident.dispositionRecord()).isEqualTo(reviewed.dispositionRecord());
+                });
+        assertThat(restored).filteredOn(incident -> hasEventSource(incident, "camera-a")).singleElement()
+                .satisfies(incident -> {
+                    assertThat(incident.status()).isEqualTo(SecurityIncidentStatus.OPEN);
+                    assertThat(incident.disposition()).isEqualTo(SecurityDisposition.UNREVIEWED);
+                });
+    }
+
+    @Test
+    void ranksRetainedHandoffAliasCopiesByTheIdentitysOwnOccurrenceTime() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-A", "A1", "ACCESS", BASE),
+                event("SEC-B", "A1", "ACCESS", BASE.plusSeconds(10 * 60))));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 2, handoffs);
+        SecurityIncident multiEvent = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        SecurityIncident reviewed = service.review(multiEvent.incidentId(), SecurityDisposition.CONFIRMED_INCIDENT,
+                "APPROVER");
+        service.handoff(multiEvent.incidentId());
+
+        // Two newer windows evict the reviewed incident from the bounded store, so only the
+        // handoff projection retains the human decision and the per-identity occurrence times.
+        events.add(event("SEC-EVICT-1", "A1", "ACCESS", BASE.plusSeconds(60 * 60)));
+        events.add(event("SEC-EVICT-2", "A1", "ACCESS", BASE.plusSeconds(120 * 60)));
+        service.list(new SecurityIncidentQuery(null, 20));
+        events.clear();
+
+        events.add(withSource(event("SEC-A", "A1", "ACCESS", BASE.minusSeconds(8 * 60)),
+                SecuritySourceType.ACCESS_CONTROL, "access-a"));
+        events.add(withSource(event("SEC-A", "A1", "ACCESS", BASE.plusSeconds(12 * 60)),
+                SecuritySourceType.CAMERA_ANALYTICS, "camera-a"));
+
+        List<SecurityIncident> restored = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        assertThat(restored).filteredOn(incident -> hasEventSource(incident, "access-a")).singleElement()
+                .satisfies(incident -> {
+                    assertThat(incident.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+                    assertThat(incident.dispositionRecord()).isEqualTo(reviewed.dispositionRecord());
+                });
+        assertThat(restored).filteredOn(incident -> hasEventSource(incident, "camera-a")).singleElement()
+                .satisfies(incident -> {
+                    assertThat(incident.status()).isEqualTo(SecurityIncidentStatus.OPEN);
+                    assertThat(incident.disposition()).isEqualTo(SecurityDisposition.UNREVIEWED);
+                });
+    }
+
+    @Test
     void removesSupersededStatesBeforeSavingNewIncidents() {
         List<SecurityEvent> events = new ArrayList<>(List.of(
                 event("SEC-A-1", "A1", "ACCESS", BASE),
