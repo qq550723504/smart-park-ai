@@ -1,6 +1,9 @@
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import SecurityIncidentCenter from './SecurityIncidentCenter.vue'
+
+const messageSpies = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
+vi.mock('element-plus', () => ({ ElMessage: messageSpies }))
 
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -22,6 +25,7 @@ describe('SecurityIncidentCenter', () => {
   const originalFetch = globalThis.fetch
   enableAutoUnmount(afterEach)
   afterEach(() => { globalThis.fetch = originalFetch })
+  beforeEach(() => { messageSpies.success.mockClear(); messageSpies.error.mockClear() })
 
   it('renders a safe incident and allows review and handoff for approver', async () => {
     const requests: Array<{ url: string; method: string }> = []
@@ -210,6 +214,32 @@ describe('SecurityIncidentCenter', () => {
     expect(bodies).toEqual([JSON.stringify({ disposition: 'FALSE_POSITIVE' })])
     expect(wrapper.get('[data-security-disposition]').text()).toContain('误报（人工复核结论）')
     expect(wrapper.get('[data-security-false-positive]').text()).toContain('1')
+  })
+
+  it('reports the persisted disposition when the review request is a no-op', async () => {
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      if (url.includes('/api/security/incidents?')) {
+        return response({ items: [{ ...summary, disposition: 'UNREVIEWED' }], total: 1 })
+      }
+      if (url.endsWith('/review')) {
+        return response({
+          ...detail,
+          status: 'REVIEWED',
+          disposition: 'CONFIRMED_INCIDENT',
+          dispositionSource: 'HUMAN_REVIEW',
+        })
+      }
+      return response({ ...detail, disposition: 'UNREVIEWED' })
+    }) as typeof fetch
+
+    const wrapper = mount(SecurityIncidentCenter, { props: { role: 'APPROVER' } })
+    await flushPromises()
+
+    await wrapper.get('[data-security-action="review-false-positive"]').trigger('click')
+    await flushPromises()
+
+    expect(messageSpies.success).toHaveBeenCalledWith('事件已记录研判：确认事件')
   })
 
   it('labels event type and source metadata without exposing raw media', async () => {

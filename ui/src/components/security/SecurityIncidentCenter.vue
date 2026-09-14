@@ -89,7 +89,7 @@ async function action(kind: 'review' | 'handoff', disposition?: SecurityDisposit
       emit('open-collaboration', { incidentId, workItemId: selected.value.handoffWorkItemId })
     }
     ElMessage.success(kind === 'review'
-      ? `事件已记录研判：${securityDispositionLabel(disposition ?? 'CONFIRMED_INCIDENT')}`
+      ? `事件已记录研判：${securityDispositionLabel(next.disposition)}`
       : '事件已转为协同工作项')
   } catch (cause) {
     ElMessage.error(cause instanceof Error ? cause.message : '安全事件动作失败')
