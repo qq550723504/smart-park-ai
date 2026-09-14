@@ -38,11 +38,12 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
                 ? new SecurityIncidentHandoff("SECURITY_INCIDENT:" + incident.incidentId(), incident.incidentId(),
                         incident.parkId(), incident.buildingId(), incident.riskLevel(), incident.summary(), now,
                         incident.reviewedAt(), now, incident.eventType(), incident.eventIdentities(),
-                        projectedDisposition)
+                        projectedDisposition, incident.lastOccurredAt())
                 : new SecurityIncidentHandoff(existing.workItemId(), existing.incidentId(), existing.parkId(),
                         existing.buildingId(), projectedRisk, projectedSummary, existing.createdAt(),
                         existing.reviewedAt() != null ? existing.reviewedAt() : incident.reviewedAt(), updatedAt,
-                        incident.eventType(), incident.eventIdentities(), projectedDisposition);
+                        incident.eventType(), incident.eventIdentities(), projectedDisposition,
+                        incident.lastOccurredAt());
         handoffs.put(incident.incidentId(), handoff);
         trimToCapacity();
         return handoff;
@@ -69,7 +70,8 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
                         incident.incidentId(), incident.parkId(), incident.buildingId(),
                         projectedRisk, projectedSummary, existing.createdAt(),
                         existing.reviewedAt() != null ? existing.reviewedAt() : incident.reviewedAt(), updatedAt,
-                        incident.eventType(), incident.eventIdentities(), projectedDisposition);
+                        incident.eventType(), incident.eventIdentities(), projectedDisposition,
+                        incident.lastOccurredAt());
                 handoffs.put(incident.incidentId(), migrated);
                 trimToCapacity();
                 return migrated;
@@ -78,7 +80,8 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
                 SecurityIncidentHandoff restored = new SecurityIncidentHandoff(incident.handoffWorkItemId(),
                         incident.incidentId(), incident.parkId(), incident.buildingId(), incident.riskLevel(),
                         incident.summary(), now, incident.reviewedAt(), now, incident.eventType(),
-                        incident.eventIdentities(), projectedDispositionRecord(null, incident));
+                        incident.eventIdentities(), projectedDispositionRecord(null, incident),
+                        incident.lastOccurredAt());
                 handoffs.put(incident.incidentId(), restored);
                 trimToCapacity();
                 return restored;

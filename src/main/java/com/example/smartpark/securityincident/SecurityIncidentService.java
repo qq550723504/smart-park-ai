@@ -356,7 +356,8 @@ public final class SecurityIncidentService {
         // reuse its id. The genuine enrichment is the copy whose occurrence time
         // matches the stored event, so reserve the alias for it before any fresh
         // incident — including an unrelated source that merely sorts first — claims it.
-        Map<String, String> preferredAliasClaimantIds = preferredAliasClaimants(stored, freshIncidents);
+        Map<String, String> preferredAliasClaimantIds = preferredAliasClaimants(stored, retainedHandoffs,
+                freshIncidents);
         Set<String> correlatedRetainedHandoffWorkItemIds = new HashSet<>();
         List<SecurityIncident> candidatesForRetirement = new ArrayList<>();
         List<SecurityIncidentHandoff> retainedHandoffsForRetirement = new ArrayList<>();
@@ -484,30 +485,49 @@ public final class SecurityIncidentService {
     }
 
     /**
-     * Maps each stored incident that several source-qualified copies alias to onto the
-     * copy whose occurrence time matches it. Without this, an unrelated source that
-     * happens to reuse the id and sort earlier would inherit the stored state.
+     * Maps each stored incident or retained-only handoff that several source-qualified
+     * copies alias to onto the copy whose occurrence time matches it. Without this, an
+     * unrelated source that happens to reuse the id and sort earlier would inherit the
+     * stored state or the retained human disposition. A handoff whose incident is still
+     * stored is covered by the incident reservation, and a handoff without a projected
+     * occurrence time cannot disambiguate aliases at all.
      */
     private static Map<String, String> preferredAliasClaimants(List<SecurityIncident> stored,
+                                                               List<SecurityIncidentHandoff> retainedHandoffs,
                                                                List<SecurityIncident> freshIncidents) {
         Map<String, String> preferred = new HashMap<>();
+        Set<String> storedIncidentIds = new HashSet<>();
         for (SecurityIncident existing : stored) {
+            storedIncidentIds.add(existing.incidentId());
             List<SecurityIncident> aliasClaimants = freshIncidents.stream()
                     .filter(fresh -> sameCorrelation(existing, fresh))
                     .filter(fresh -> overlaps(existing, fresh))
                     .filter(fresh -> !sharesExactIdentity(existing, fresh))
                     .toList();
-            if (aliasClaimants.size() <= 1) continue;
-            aliasClaimants.stream()
-                    .min(Comparator.comparingLong((SecurityIncident fresh) -> aliasDistanceMillis(existing, fresh))
-                            .thenComparing(SecurityIncident::incidentId))
-                    .ifPresent(fresh -> preferred.put(existing.incidentId(), fresh.incidentId()));
+            reservePreferredClaimant(preferred, existing.incidentId(), existing.lastOccurredAt(), aliasClaimants);
+        }
+        for (SecurityIncidentHandoff handoff : retainedHandoffs) {
+            if (storedIncidentIds.contains(handoff.incidentId())) continue;
+            List<SecurityIncident> aliasClaimants = freshIncidents.stream()
+                    .filter(fresh -> matchesCorrelation(handoff, fresh))
+                    .filter(fresh -> !sharesExactIdentity(handoff, fresh))
+                    .toList();
+            reservePreferredClaimant(preferred, handoff.incidentId(), handoff.lastOccurredAt(), aliasClaimants);
         }
         return preferred;
     }
 
-    private static long aliasDistanceMillis(SecurityIncident stored, SecurityIncident fresh) {
-        return Math.abs(Duration.between(fresh.lastOccurredAt(), stored.lastOccurredAt()).toMillis());
+    private static void reservePreferredClaimant(Map<String, String> preferred, String incidentId, Instant occurredAt,
+                                                 List<SecurityIncident> aliasClaimants) {
+        if (occurredAt == null || aliasClaimants.size() <= 1) return;
+        aliasClaimants.stream()
+                .min(Comparator.comparingLong((SecurityIncident fresh) -> aliasDistanceMillis(occurredAt, fresh))
+                        .thenComparing(SecurityIncident::incidentId))
+                .ifPresent(fresh -> preferred.put(incidentId, fresh.incidentId()));
+    }
+
+    private static long aliasDistanceMillis(Instant storedOccurredAt, SecurityIncident fresh) {
+        return Math.abs(Duration.between(fresh.lastOccurredAt(), storedOccurredAt).toMillis());
     }
 
     private static boolean reservedForAnotherClaimant(Map<String, String> preferredAliasClaimantIds,

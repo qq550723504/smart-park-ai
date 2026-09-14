@@ -474,6 +474,41 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void reservesARetainedHandoffForTheSourceWhoseOccurrenceTimeMatches() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-ALIAS-EVICT", "A1", "ACCESS", BASE)));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 1, handoffs);
+        SecurityIncident initial = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(initial.incidentId(), SecurityDisposition.FALSE_POSITIVE, "APPROVER");
+        SecurityIncident handedOff = service.handoff(initial.incidentId());
+
+        // A later event evicts the source-less incident from the bounded incident store
+        // while its human-reviewed handoff survives.
+        events.add(event("SEC-EVICT", "A1", "ACCESS", BASE.plusSeconds(16 * 60)));
+        service.list(new SecurityIncidentQuery(null, 20));
+
+        // Two concrete sources now reuse the evicted event id: an unrelated camera copy
+        // 20 minutes earlier and the access copy matching the handed-off occurrence.
+        events.remove(0);
+        events.add(withSource(event("SEC-ALIAS-EVICT", "A1", "ACCESS", BASE.minusSeconds(20 * 60)),
+                SecuritySourceType.CAMERA_ANALYTICS, "camera-1"));
+        events.add(withSource(event("SEC-ALIAS-EVICT", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1"));
+
+        SecurityIncident restored = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.status() == SecurityIncidentStatus.HANDOFF)
+                .findFirst().orElseThrow();
+
+        assertThat(restored.handoffWorkItemId()).isEqualTo(handedOff.handoffWorkItemId());
+        assertThat(restored.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+        assertThat(hasEventSource(restored, "access-1")).isTrue();
+        assertThat(hasEventSource(restored, "camera-1")).isFalse();
+        assertThat(handoffs.list()).singleElement()
+                .satisfies(handoff -> assertThat(handoff.eventIdentities())
+                        .anyMatch(identity -> identity.source().sourceId().equals("access-1")));
+    }
+
+    @Test
     void keepsAStoredHumanHandoffDispositionWhenTheSourceLaterSuppliesANewerModelDecision() {
         List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-HANDOFF-HUMAN", "A1", "ACCESS", BASE)));
         SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
@@ -1246,7 +1281,8 @@ class SecurityIncidentServiceTest {
             public SecurityIncidentHandoff createOrGet(SecurityIncident incident, Instant now) {
                 SecurityIncidentHandoff handoff = new SecurityIncidentHandoff("WI:" + incident.incidentId(), incident.incidentId(), incident.parkId(),
                         incident.buildingId(), incident.riskLevel(), incident.summary(), now, null, now,
-                        incident.eventType(), incident.eventIdentities(), incident.dispositionRecord());
+                        incident.eventType(), incident.eventIdentities(), incident.dispositionRecord(),
+                        incident.lastOccurredAt());
                 created.removeIf(existing -> existing.workItemId().equals(handoff.workItemId()));
                 created.add(handoff);
                 return handoff;
@@ -1261,7 +1297,7 @@ class SecurityIncidentServiceTest {
                 SecurityIncidentHandoff refreshed = new SecurityIncidentHandoff(existing.workItemId(), incident.incidentId(),
                         incident.parkId(), incident.buildingId(), incident.riskLevel(), incident.summary(),
                         existing.createdAt(), existing.reviewedAt(), now, incident.eventType(), incident.eventIdentities(),
-                        incident.dispositionRecord());
+                        incident.dispositionRecord(), incident.lastOccurredAt());
                 created.removeIf(handoff -> handoff.workItemId().equals(existing.workItemId()));
                 created.add(refreshed);
                 return refreshed;

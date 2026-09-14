@@ -12,31 +12,45 @@ import com.example.smartpark.securityincident.SecurityIncidentRisk;
 /**
  * Projection of a handed-off security incident. The event identity list is
  * source-qualified so a retained handoff can be correlated against fresh
- * evidence without conflating two sources that reuse the same local event id.
+ * evidence without conflating two sources that reuse the same local event id,
+ * and the projected occurrence time lets a retained-only handoff (whose incident
+ * was evicted from the bounded incident store) still reserve a legacy alias for
+ * the concrete source whose event time matches it.
  */
 public record SecurityIncidentHandoff(String workItemId, String incidentId, String parkId, String buildingId,
                                       SecurityIncidentRisk riskLevel, String safeSummary, Instant createdAt,
                                       Instant reviewedAt, Instant updatedAt, String eventType,
                                       List<SecurityEventIdentity> eventIdentities,
-                                      SecurityDispositionRecord dispositionRecord) {
+                                      SecurityDispositionRecord dispositionRecord,
+                                      Instant lastOccurredAt) {
     public SecurityIncidentHandoff(String workItemId, String incidentId, String parkId, String buildingId,
                                    SecurityIncidentRisk riskLevel, String safeSummary, Instant createdAt) {
         this(workItemId, incidentId, parkId, buildingId, riskLevel, safeSummary, createdAt, null, createdAt,
-                null, List.of(), SecurityDispositionRecord.unreviewed());
+                null, List.of(), SecurityDispositionRecord.unreviewed(), null);
     }
 
     public SecurityIncidentHandoff(String workItemId, String incidentId, String parkId, String buildingId,
                                    SecurityIncidentRisk riskLevel, String safeSummary, Instant createdAt,
                                    Instant reviewedAt) {
         this(workItemId, incidentId, parkId, buildingId, riskLevel, safeSummary, createdAt, reviewedAt, createdAt,
-                null, List.of(), SecurityDispositionRecord.unreviewed());
+                null, List.of(), SecurityDispositionRecord.unreviewed(), null);
     }
 
     public SecurityIncidentHandoff(String workItemId, String incidentId, String parkId, String buildingId,
                                    SecurityIncidentRisk riskLevel, String safeSummary, Instant createdAt,
                                    Instant reviewedAt, Instant updatedAt) {
         this(workItemId, incidentId, parkId, buildingId, riskLevel, safeSummary, createdAt, reviewedAt, updatedAt,
-                null, List.of(), SecurityDispositionRecord.unreviewed());
+                null, List.of(), SecurityDispositionRecord.unreviewed(), null);
+    }
+
+    /** Compatibility projection without the occurrence time; such a handoff cannot reserve an alias. */
+    public SecurityIncidentHandoff(String workItemId, String incidentId, String parkId, String buildingId,
+                                   SecurityIncidentRisk riskLevel, String safeSummary, Instant createdAt,
+                                   Instant reviewedAt, Instant updatedAt, String eventType,
+                                   List<SecurityEventIdentity> eventIdentities,
+                                   SecurityDispositionRecord dispositionRecord) {
+        this(workItemId, incidentId, parkId, buildingId, riskLevel, safeSummary, createdAt, reviewedAt, updatedAt,
+                eventType, eventIdentities, dispositionRecord, null);
     }
 
     public SecurityIncidentHandoff {
