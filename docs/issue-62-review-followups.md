@@ -345,3 +345,11 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 46 | `securityincident/SecurityIncidentService.preferredRepresentation()` | P2 | 表示选择按「丰富度」（severity/confidence/ingest 加分）偏向较旧快照，于是同一具体源的两个快照都带已决处置、较新快照有意清空错误的 severity/confidence/ingest-version 时，仍选较旧更丰富者，incident 保留陈旧元数据。现只保留「具体源 vs 无源 legacy」的丰富度优先级，同一具体源的副本按 `receivedAt` 取最新，删除 `enrichmentScore()` |
 
 每个修复对应独立提交：`55771a0`（#44）、`e42e564`（#45）、`36685c0`（#46）。
+
+第二十二轮（对 `bee8bc7`）补 1 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 47 | `tool/security/SecurityQueryTool.lookupSecurityEvent()` | P1 | 工具把任意 `IllegalArgumentException` 的 message 回填进 `SecurityLookupResult.error`，而该结果既交给 AI 工具消费方、又进入公开的 expert findings。生产 adapter 在 `SecurityEventCatalog.readEvents()` 抛出的错误可能含连接 URL 或带凭据的配置 label，于是恰好泄露脱敏契约要隐藏的厂商私有细节。现新增用户安全的专用异常 `SecurityEventLookupException`（裸 id 歧义仍带可操作提示），其它失败一律返回固定的公开错误，adapter 异常 message 不再外泄 |
+
+对应独立提交：`b85fb97`（#47）。
