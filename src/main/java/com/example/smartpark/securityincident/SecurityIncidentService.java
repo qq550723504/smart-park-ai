@@ -450,20 +450,31 @@ public final class SecurityIncidentService {
 
     private static SecurityIncident restoreHandoffProjection(SecurityIncident fresh, SecurityIncident restored,
                                                              List<SecurityIncidentHandoff> retainedHandoffs) {
-        if (restored.handoffWorkItemId() != null) return restored;
-        SecurityIncidentHandoff handoff = retainedHandoffs.stream()
-                .min(Comparator.comparing(SecurityIncidentHandoff::createdAt)
-                        .thenComparing(SecurityIncidentHandoff::workItemId))
-                .orElse(null);
-        if (handoff == null) return restored;
+        SecurityIncidentHandoff handoff = restored.handoffWorkItemId() != null
+                ? null
+                : retainedHandoffs.stream()
+                        .min(Comparator.comparing(SecurityIncidentHandoff::createdAt)
+                                .thenComparing(SecurityIncidentHandoff::workItemId))
+                        .orElse(null);
+        if (restored.handoffWorkItemId() == null && handoff == null) return restored;
         // Several evicted handoffs can merge back together through a bridge event. Only a
         // single work item survives, but every matching handoff's decision must still be
-        // reconciled so a human review carried by the handoff that is not selected is not
-        // silently retired along with the duplicate work item.
+        // reconciled so a human review carried by a handoff that is not selected — or by an
+        // evicted handoff while a model-decided handoff stays in the store — is not silently
+        // retired with the duplicate work item.
         List<SecurityDispositionRecord> decisions = new ArrayList<>(retainedHandoffs.size() + 1);
         decisions.add(restored.dispositionRecord());
         retainedHandoffs.forEach(each -> decisions.add(each.dispositionRecord()));
         SecurityDispositionRecord dispositionRecord = reconcileDisposition(fresh.dispositionRecord(), decisions);
+        if (restored.handoffWorkItemId() != null) {
+            if (dispositionRecord.equals(restored.dispositionRecord())) return restored;
+            Instant reviewedAt = dispositionRecord.disposition() != SecurityDisposition.UNREVIEWED
+                    ? dispositionRecord.decidedAt()
+                    : restored.reviewedAt();
+            return withStoredState(fresh, restored.incidentId(), restored.status(), reviewedAt,
+                    restored.handoffWorkItemId(), fresh.riskLevel(), dispositionRecord.disposition(),
+                    dispositionRecord);
+        }
         Instant reviewedAt = dispositionRecord.disposition() != SecurityDisposition.UNREVIEWED
                 ? dispositionRecord.decidedAt()
                 : handoff.reviewedAt();

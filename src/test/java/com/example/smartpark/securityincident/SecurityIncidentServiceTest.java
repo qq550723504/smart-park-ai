@@ -664,6 +664,44 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void keepsARetainedHumanDecisionWhenAStoredModelHandoffSurvives() {
+        SecurityDispositionRecord model = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(16 * 60));
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-HUMAN", "A1", "ACCESS", BASE)));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 2, handoffs);
+        SecurityIncident humanIncident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        SecurityIncident reviewed = service.review(humanIncident.incidentId(), SecurityDisposition.CONFIRMED_INCIDENT,
+                "APPROVER");
+        service.handoff(humanIncident.incidentId());
+
+        events.add(eventWithDisposition(event("SEC-MODEL", "A1", "ACCESS", BASE.plusSeconds(16 * 60)), model));
+        SecurityIncident modelIncident = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.disposition() == SecurityDisposition.FALSE_POSITIVE).findFirst()
+                .orElseThrow();
+        SecurityIncident handedOff = service.handoff(modelIncident.incidentId());
+
+        // A newer unrelated window evicts the human-reviewed incident while the model-decided
+        // handoff stays in the bounded store.
+        events.add(event("SEC-EVICT", "A1", "ACCESS", BASE.plusSeconds(90 * 60)));
+        service.list(new SecurityIncidentQuery(null, 20));
+
+        // A bridge event merges the fresh evidence back together; the stored handoff keeps the
+        // work item, but the retained human review must not be silently retired with it.
+        events.add(event("SEC-BRIDGE", "A1", "ACCESS", BASE.plusSeconds(8 * 60)));
+        SecurityIncident merged = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.status() == SecurityIncidentStatus.HANDOFF).findFirst().orElseThrow();
+
+        assertThat(merged.handoffWorkItemId()).isEqualTo(handedOff.handoffWorkItemId());
+        assertThat(merged.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+        assertThat(merged.dispositionRecord()).isEqualTo(reviewed.dispositionRecord());
+        assertThat(handoffs.list()).singleElement()
+                .satisfies(handoff -> assertThat(handoff.dispositionRecord())
+                        .isEqualTo(reviewed.dispositionRecord()));
+    }
+
+    @Test
     void removesSupersededStatesBeforeSavingNewIncidents() {
         List<SecurityEvent> events = new ArrayList<>(List.of(
                 event("SEC-A-1", "A1", "ACCESS", BASE),
