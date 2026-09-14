@@ -194,10 +194,19 @@ public final class SecurityIncidentService {
                 ? SecurityIncidentRisk.MEDIUM
                 : linkedAlerts.stream().anyMatch(alert -> alert.riskHint() == RiskLevel.HIGH)
                     ? SecurityIncidentRisk.HIGH : SecurityIncidentRisk.LOW;
+        SecurityDispositionRecord sourceDisposition = events.stream()
+                .map(SecurityEvent::disposition)
+                .filter(record -> record.disposition() != SecurityDisposition.UNREVIEWED)
+                .max(Comparator.comparing(SecurityDispositionRecord::decidedAt))
+                .orElse(SecurityDispositionRecord.unreviewed());
+        boolean sourceDecided = sourceDisposition.disposition() != SecurityDisposition.UNREVIEWED;
         return new SecurityIncident(incidentId(first), first.parkId(), first.buildingId(),
-                first.eventType().name(), risk, SecurityIncidentStatus.OPEN, events.get(0).occurredAt(),
-                events.get(events.size() - 1).occurredAt(), eventIds, alertIds, evidence, timeline,
-                recommendationsFor(risk), null, null);
+                first.eventType().name(), risk,
+                sourceDecided ? SecurityIncidentStatus.REVIEWED : SecurityIncidentStatus.OPEN,
+                events.get(0).occurredAt(), events.get(events.size() - 1).occurredAt(), eventIds, alertIds,
+                evidence, timeline, recommendationsFor(risk),
+                sourceDecided ? sourceDisposition.decidedAt() : null, null,
+                sourceDisposition.disposition(), sourceDisposition);
     }
 
     private static SecurityIncidentEvidence evidenceFor(SecurityEvent event) {

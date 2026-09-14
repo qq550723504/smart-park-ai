@@ -4,6 +4,7 @@ import com.example.smartpark.model.alert.Alert;
 import com.example.smartpark.model.alert.AlertClassification;
 import com.example.smartpark.model.common.RiskLevel;
 import com.example.smartpark.model.security.SecurityDisposition;
+import com.example.smartpark.model.security.SecurityDispositionRecord;
 import com.example.smartpark.model.security.SecurityDispositionSource;
 import com.example.smartpark.model.security.SecurityEvent;
 import com.example.smartpark.port.alert.AlertPort;
@@ -67,6 +68,39 @@ class SecurityIncidentServiceTest {
 
         assertThat(page.items()).singleElement()
                 .satisfies(incident -> assertThat(incident.eventIds()).containsExactly("SEC-SHARED"));
+    }
+
+    @Test
+    void carriesARegisteredModelDispositionIntoTheBuiltIncident() {
+        SecurityDispositionRecord registered = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1", BASE);
+        SecurityEvent classified = eventWithDisposition(event("SEC-MODEL", "A1", "ACCESS", BASE), registered);
+
+        SecurityIncidentService service = service(List.of(classified));
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(incident.status()).isEqualTo(SecurityIncidentStatus.REVIEWED);
+        assertThat(incident.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+        assertThat(incident.dispositionRecord()).isEqualTo(registered);
+        assertThat(incident.reviewedAt()).isEqualTo(BASE);
+    }
+
+    @Test
+    void keepsTheLatestDecidedSourceDispositionWhenEventsDisagree() {
+        SecurityDispositionRecord earlier = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
+                SecurityDispositionSource.HUMAN_REVIEW, "analyst-1", null, null, null, BASE);
+        SecurityDispositionRecord later = new SecurityDispositionRecord(SecurityDisposition.INCONCLUSIVE,
+                SecurityDispositionSource.HUMAN_REVIEW, "analyst-2", null, null, null, BASE.plusSeconds(60));
+        SecurityEvent firstEvent = eventWithDisposition(event("SEC-D1", "A1", "ACCESS", BASE), earlier);
+        SecurityEvent secondEvent = eventWithDisposition(event("SEC-D2", "A1", "ACCESS", BASE.plusSeconds(60)), later);
+
+        SecurityIncidentService service = service(List.of(firstEvent, secondEvent));
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(incident.status()).isEqualTo(SecurityIncidentStatus.REVIEWED);
+        assertThat(incident.disposition()).isEqualTo(SecurityDisposition.INCONCLUSIVE);
+        assertThat(incident.dispositionRecord()).isEqualTo(later);
+        assertThat(incident.reviewedAt()).isEqualTo(BASE.plusSeconds(60));
     }
 
     @Test
@@ -843,5 +877,12 @@ class SecurityIncidentServiceTest {
     private static SecurityEvent event(String id, String parkId, String buildingId, String type, Instant occurredAt,
                                        String summary) {
         return new SecurityEvent(id, parkId, buildingId, type, occurredAt, summary);
+    }
+
+    private static SecurityEvent eventWithDisposition(SecurityEvent base, SecurityDispositionRecord disposition) {
+        return new SecurityEvent(base.eventId(), base.parkId(), base.buildingId(), base.eventType(),
+                base.rawEventType(), base.source(), base.location(), base.observedAt(), base.receivedAt(),
+                base.severity(), base.confidence(), base.privacy(), disposition, base.ingestedBy(),
+                base.ingestVersion(), base.evidenceSummary());
     }
 }
