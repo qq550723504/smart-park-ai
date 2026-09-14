@@ -999,6 +999,23 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void linksAlertsByALocationLessSourceQualifiedReference() {
+        SecurityEvent access = withSource(event("SEC-OLD-REF", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        Alert accessAlert = new Alert("ALT-OLD-REF", "PARK-A", "A1", "DEV-1", AlertClassification.ACCESS,
+                RiskLevel.HIGH, "REDACTED: access alert", BASE,
+                List.of(locationLessReference("ACCESS_CONTROL", "access-1", "SEC-OLD-REF")));
+        SecurityIncidentService service = service(List.of(access), List.of(accessAlert));
+
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        // A previously emitted three-part token has no location, so it is completed from the
+        // alert's location and still links the HIGH alert to its incident.
+        assertThat(incident.alertIds()).containsExactly("ALT-OLD-REF");
+        assertThat(incident.riskLevel()).isEqualTo(SecurityIncidentRisk.HIGH);
+    }
+
+    @Test
     void keepsLegacyAlertReferencesAsAnExplicitAlias() {
         SecurityEvent access = withSource(event("SEC-LEGACY-REF", "A1", "ACCESS", BASE),
                 SecuritySourceType.ACCESS_CONTROL, "access-1");
@@ -1553,6 +1570,13 @@ class SecurityIncidentServiceTest {
 
     private static SecurityIncidentService service(List<SecurityEvent> events, List<Alert> alerts) {
         return service(events, alerts, 50);
+    }
+
+    private static String locationLessReference(String sourceType, String sourceId, String eventId) {
+        return SecurityEventIdentity.REFERENCE_PREFIX + "source:"
+                + sourceType.length() + "#" + sourceType + ":"
+                + sourceId.length() + "#" + sourceId + ":"
+                + eventId.length() + "#" + eventId;
     }
 
     private static SecurityIncidentService service(List<SecurityEvent> events, List<Alert> alerts, int capacity) {

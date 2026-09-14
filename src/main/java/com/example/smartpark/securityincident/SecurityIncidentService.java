@@ -331,7 +331,8 @@ public final class SecurityIncidentService {
         alerts.listActive().forEach(alert -> alert.evidence().stream()
                 .filter(SecurityEventIdentity::isReference)
                 .forEach(reference -> result.computeIfAbsent(
-                        new AlertReferenceKey(reference, alert.parkId(), alert.buildingId()),
+                        new AlertReferenceKey(normalizeReference(reference, alert.parkId(), alert.buildingId()),
+                                alert.parkId(), alert.buildingId()),
                         ignored -> new ArrayList<>()).add(alert)));
         return result;
     }
@@ -351,6 +352,24 @@ public final class SecurityIncidentService {
         List<Alert> matched = new ArrayList<>(alertsByReference.getOrDefault(qualified, List.of()));
         matched.addAll(alertsByReference.getOrDefault(legacy, List.of()));
         return matched;
+    }
+
+    /**
+     * Normalizes an alert's evidence reference to the same form {@link #alertsReferencing}
+     * looks up. A source-qualified token that omits the location (the previously emitted
+     * three-part form) is completed from the owning alert's location, so the alert still
+     * links to its incident instead of being dropped as an unknown key; a malformed or
+     * unknown-source token is left unchanged and simply matches nothing.
+     */
+    private static String normalizeReference(String reference, String parkId, String buildingId) {
+        SecurityEventIdentity.QualifiedReference qualified =
+                SecurityEventIdentity.parseQualifiedReference(reference);
+        if (qualified == null) return reference;
+        return new SecurityEventIdentity(
+                qualified.source(),
+                qualified.eventId(),
+                qualified.hasLocation() ? qualified.parkId() : parkId,
+                qualified.hasLocation() ? qualified.buildingId() : buildingId).reference();
     }
 
     private List<SecurityIncident> restoreStates(List<SecurityIncident> freshIncidents) {
