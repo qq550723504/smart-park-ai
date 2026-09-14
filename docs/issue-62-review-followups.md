@@ -272,3 +272,12 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 29 | `securityincident/SecurityIncidentService.preferredAliasClaimants()` | P1 | 无源已复核 incident 被有界 incident store 淘汰、但其 handoff 仍保留时，别名首选认领者 map 只由 `stored` 构建（`reservedForAnotherClaimant` 用 `handoff.incidentId()` 查 map 落空），于是遍历顺序第一个复用该 id 的具体源会继承保留的人工 disposition，即使另一条才匹配。现把 incident 的 occurrence time 投影到 `SecurityIncidentHandoff`（`SecurityIncidentHandoffStore` 传 `incident.lastOccurredAt()`），并让不在 `stored` 中的 retained-only handoff 用同一「fact + 距离」规则预计算首选认领者 |
 
 对应独立提交：`cce05d3`（#29）。
+
+第十四轮（对 `8438865`）补 2 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 30 | `securityincident/SecurityIncidentService.bucketKey()` | P1 | 枚举映射未覆盖的 vendor 类型都标准化为 `SecurityEventType.UNKNOWN`，于是同一园区/楼栋/15 分钟窗口内两个互不相关的未知 vendor 事件会被并入同一 incident，静默合并证据、计数、处置与 handoff。现当标准类型为 `UNKNOWN` 时用 `rawEventType` 作为相关桶（及 incident identity）的额外判别维度；重复出现的同一未知 vendor 类型仍归为同一 incident |
+| 31 | `securityincident/SecurityIncidentService.authoritativeEvent()` | P2 | 无源 reader 副本承载选中处置、其匹配的具体 adapter 副本未复核时，该分支整体返回无源记录，丢弃 adapter 的 source、severity、confidence 与 ingest 元数据并把事件投影为 `UNKNOWN`。现把 reconciled 处置附加到「最丰富」的表示上（具体源优先，其次 severity/confidence/adapter ingest 元数据，再次 freshness），而非选择恰好承载决策的副本；`SecurityEvent` 新增 `withDisposition()` |
+
+每个修复对应独立提交：`ed99287`（#30）、`fe92d5a`（#31）。
