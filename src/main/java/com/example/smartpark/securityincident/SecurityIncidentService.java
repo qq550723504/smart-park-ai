@@ -456,8 +456,14 @@ public final class SecurityIncidentService {
                         .thenComparing(SecurityIncidentHandoff::workItemId))
                 .orElse(null);
         if (handoff == null) return restored;
-        SecurityDispositionRecord dispositionRecord = reconcileDisposition(fresh.dispositionRecord(),
-                List.of(restored.dispositionRecord(), handoff.dispositionRecord()));
+        // Several evicted handoffs can merge back together through a bridge event. Only a
+        // single work item survives, but every matching handoff's decision must still be
+        // reconciled so a human review carried by the handoff that is not selected is not
+        // silently retired along with the duplicate work item.
+        List<SecurityDispositionRecord> decisions = new ArrayList<>(retainedHandoffs.size() + 1);
+        decisions.add(restored.dispositionRecord());
+        retainedHandoffs.forEach(each -> decisions.add(each.dispositionRecord()));
+        SecurityDispositionRecord dispositionRecord = reconcileDisposition(fresh.dispositionRecord(), decisions);
         Instant reviewedAt = dispositionRecord.disposition() != SecurityDisposition.UNREVIEWED
                 ? dispositionRecord.decidedAt()
                 : handoff.reviewedAt();

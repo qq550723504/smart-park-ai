@@ -626,6 +626,44 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void reconcilesEveryRetainedHandoffDecisionWhenTwoEvictedWindowsMerge() {
+        SecurityDispositionRecord model = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(60));
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                eventWithDisposition(event("SEC-A-MODEL", "A1", "ACCESS", BASE), model)));
+        List<SecurityIncidentHandoff> handoffs = new ArrayList<>();
+        SecurityIncidentService service = service(events, List.of(), 1, orderedHandoffs(handoffs));
+
+        SecurityIncident modelIncident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.handoff(modelIncident.incidentId());
+
+        events.add(event("SEC-B-HUMAN", "A1", "ACCESS", BASE.plusSeconds(30 * 60)));
+        SecurityIncident humanIncident = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.disposition() == SecurityDisposition.UNREVIEWED).findFirst().orElseThrow();
+        SecurityIncident reviewed = service.review(humanIncident.incidentId(), SecurityDisposition.CONFIRMED_INCIDENT,
+                "APPROVER");
+        service.handoff(humanIncident.incidentId());
+
+        // A newer event evicts the second handed-off incident too; only the handoffs survive.
+        events.add(event("SEC-EVICT", "A1", "ACCESS", BASE.plusSeconds(90 * 60)));
+        service.list(new SecurityIncidentQuery(null, 20));
+
+        // A bridge event merges the two evicted windows back into one incident. Folding only
+        // the earliest handoff would bury the human review and then retire it with the
+        // duplicate work item.
+        events.add(event("SEC-BRIDGE", "A1", "ACCESS", BASE.plusSeconds(15 * 60)));
+        SecurityIncident merged = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.status() == SecurityIncidentStatus.HANDOFF).findFirst().orElseThrow();
+
+        assertThat(merged.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+        assertThat(merged.dispositionRecord()).isEqualTo(reviewed.dispositionRecord());
+        assertThat(handoffs).singleElement()
+                .satisfies(handoff -> assertThat(handoff.dispositionRecord().source())
+                        .isEqualTo(SecurityDispositionSource.HUMAN_REVIEW));
+    }
+
+    @Test
     void removesSupersededStatesBeforeSavingNewIncidents() {
         List<SecurityEvent> events = new ArrayList<>(List.of(
                 event("SEC-A-1", "A1", "ACCESS", BASE),
@@ -1374,6 +1412,53 @@ class SecurityIncidentServiceTest {
     private static SecurityIncidentService service(List<SecurityEvent> events, List<Alert> alerts, int capacity,
                                                     SecurityIncidentHandoffPort handoffs) {
         return service(events, alerts, capacity, handoffs, List.of());
+    }
+
+    /**
+     * Retains handoffs like the in-memory store, but stamps each new handoff with a
+     * strictly increasing {@code createdAt} so a test can deterministically select
+     * the earliest work item. The fixed test clock otherwise ties every handoff.
+     */
+    private static SecurityIncidentHandoffPort orderedHandoffs(List<SecurityIncidentHandoff> created) {
+        return new SecurityIncidentHandoffPort() {
+            private int createdCount;
+
+            @Override
+            public SecurityIncidentHandoff createOrGet(SecurityIncident incident, Instant now) {
+                SecurityIncidentHandoff handoff = new SecurityIncidentHandoff("WI:" + incident.incidentId(),
+                        incident.incidentId(), incident.parkId(), incident.buildingId(), incident.riskLevel(),
+                        incident.summary(), now.plusSeconds(createdCount++), null, now, incident.eventType(),
+                        incident.eventIdentities(), incident.dispositionRecord(), incident.lastOccurredAt());
+                created.removeIf(existing -> existing.workItemId().equals(handoff.workItemId()));
+                created.add(handoff);
+                return handoff;
+            }
+
+            @Override
+            public SecurityIncidentHandoff refresh(SecurityIncident incident, Instant now) {
+                SecurityIncidentHandoff existing = created.stream()
+                        .filter(handoff -> handoff.workItemId().equals(incident.handoffWorkItemId()))
+                        .findFirst().orElse(null);
+                if (existing == null) return createOrGet(incident, now);
+                SecurityIncidentHandoff refreshed = new SecurityIncidentHandoff(existing.workItemId(),
+                        incident.incidentId(), incident.parkId(), incident.buildingId(), incident.riskLevel(),
+                        incident.summary(), existing.createdAt(), existing.reviewedAt(), now, incident.eventType(),
+                        incident.eventIdentities(), incident.dispositionRecord(), incident.lastOccurredAt());
+                created.removeIf(handoff -> handoff.workItemId().equals(existing.workItemId()));
+                created.add(refreshed);
+                return refreshed;
+            }
+
+            @Override
+            public List<SecurityIncidentHandoff> list() {
+                return List.copyOf(created);
+            }
+
+            @Override
+            public void retire(String incidentId) {
+                created.removeIf(handoff -> handoff.incidentId().equals(incidentId));
+            }
+        };
     }
 
     private static SecurityIncidentService service(List<SecurityEvent> events, List<Alert> alerts, int capacity,
