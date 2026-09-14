@@ -1,7 +1,9 @@
 package com.example.smartpark.tool;
 
 import com.example.smartpark.adapter.mock.MockParkFixture;
+import com.example.smartpark.model.security.SecurityDisposition;
 import com.example.smartpark.model.security.SecurityDispositionRecord;
+import com.example.smartpark.model.security.SecurityDispositionSource;
 import com.example.smartpark.model.security.SecurityEvent;
 import com.example.smartpark.model.security.SecurityEventLocation;
 import com.example.smartpark.model.security.SecurityEventSeverity;
@@ -102,6 +104,24 @@ class SecurityQueryToolTest {
         assertThat(result.error()).isNull();
         assertThat(result.notice()).doesNotContainIgnoringCase("mock");
         assertThat(result.notice()).contains("No raw media");
+    }
+
+    @Test
+    void redactsDispositionProvenanceFromTheToolResult() {
+        SecurityDispositionRecord registered = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-9", "2026.09", "evt-secret",
+                Instant.parse("2026-09-14T08:05:00Z"));
+        SecurityEvent decided = sourcedEvent("SEC-REDACT", SecuritySourceType.ACCESS_CONTROL, "access-1")
+                .withDisposition(registered);
+        SecurityQueryTool tool = new SecurityQueryTool(reader(decided), List.of());
+
+        SecurityQueryTool.SecurityLookupResult result = tool.lookupSecurityEvent("SEC-REDACT");
+
+        assertThat(result.error()).isNull();
+        // The redacted projection keeps the decision status/source but not the registered-model
+        // id/version/evidence reference (the HTTP DTO omits these provenance fields too).
+        assertThat(result.event().toString()).contains("CONFIRMED_INCIDENT", "REGISTERED_MODEL");
+        assertThat(result.event().toString()).doesNotContain("model-9", "evt-secret");
     }
 
     private static SecurityEvent sourcedEvent(String eventId, SecuritySourceType type, String sourceId) {
