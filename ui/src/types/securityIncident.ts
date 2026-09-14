@@ -71,6 +71,8 @@ export interface SecurityIncidentTimelineEntry {
   sourceId: string
   occurredAt: string
   label: string
+  /** Source-qualified security event reference, present for security event entries. */
+  reference?: string
 }
 
 export interface SecurityIncident extends SecurityIncidentSummary {

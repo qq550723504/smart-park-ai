@@ -272,6 +272,33 @@ describe('SecurityIncidentCenter', () => {
     expect(wrapper.text()).not.toContain('data:image')
   })
 
+  it('keeps duplicate event ids from different sources as distinct list entries', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const duplicated = {
+      ...detail,
+      evidence: [
+        { sourceId: 'SEC-DUP', occurredAt: summary.openedAt, summary: 'REDACTED:门禁', sourceType: 'ACCESS_CONTROL', eventSourceId: 'demo-access' },
+        { sourceId: 'SEC-DUP', occurredAt: summary.openedAt, summary: 'REDACTED:摄像机', sourceType: 'CAMERA_ANALYTICS', eventSourceId: 'demo-camera' },
+      ],
+      timeline: [
+        { sourceType: 'SECURITY_EVENT', sourceId: 'SEC-DUP', occurredAt: summary.openedAt, label: '安全事件', reference: 'security-event:source:1#a' },
+        { sourceType: 'SECURITY_EVENT', sourceId: 'SEC-DUP', occurredAt: summary.openedAt, label: '安全事件', reference: 'security-event:source:1#b' },
+      ],
+    }
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      return url.includes('/api/security/incidents?') ? response({ items: [summary], total: 1 }) : response(duplicated)
+    }) as typeof fetch
+
+    const wrapper = mount(SecurityIncidentCenter, { props: { role: 'ADMIN' } })
+    await flushPromises()
+
+    expect(wrapper.findAll('.security-incident-evidence li')).toHaveLength(2)
+    expect(wrapper.findAll('.security-incident-timeline li')).toHaveLength(2)
+    expect(warn.mock.calls.flat().join(' ')).not.toContain('Duplicate keys')
+    warn.mockRestore()
+  })
+
   it('disables every disposition action once the incident is reviewed', async () => {
     globalThis.fetch = (async (input) => {
       const url = String(input)

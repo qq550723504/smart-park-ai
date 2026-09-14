@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getSecurityIncident, handoffSecurityIncident, listSecurityIncidents, reviewSecurityIncident } from '../../services/securityIncidentApi'
-import type { SecurityDisposition, SecurityIncident, SecurityIncidentSummary } from '../../types/securityIncident'
+import type { SecurityDisposition, SecurityIncident, SecurityIncidentEvidence, SecurityIncidentSummary } from '../../types/securityIncident'
 import type { DemoRole } from '../../types/workflow'
 import { securityDispositionLabel, securityEventTypeLabel, securitySourceTypeLabel } from '../../utils/labels'
 import './security-incident-center.css'
@@ -25,6 +25,15 @@ const handoffCount = computed(() => items.value.filter(item => item.status === '
 const hasDispositionData = computed(() => items.value.some(item => item.disposition && item.disposition !== 'UNREVIEWED'))
 const falsePositiveCount = computed(() => items.value.filter(item => item.disposition === 'FALSE_POSITIVE').length)
 const primaryEvidence = computed(() => selected.value?.evidence[0])
+
+// Sources may reuse the same source-local event id, so list keys must include the
+// source to keep concurrent entries distinct.
+function evidenceKey(evidence: SecurityIncidentEvidence): string {
+  return `${evidence.sourceType ?? 'UNKNOWN'}-${evidence.eventSourceId ?? 'unknown'}-${evidence.sourceId}`
+}
+function timelineKey(entry: { sourceType: string; sourceId: string; reference?: string }): string {
+  return entry.reference ?? `${entry.sourceType}-${entry.sourceId}`
+}
 
 watch(() => [props.role, props.focusIncidentId, props.active], ([, , active]) => {
   if (active) void load()
@@ -167,7 +176,7 @@ function openExistingHandoff() {
               <div>
                 <h3>脱敏证据</h3>
                 <ul class="security-incident-evidence">
-                  <li v-for="evidence in selected.evidence" :key="evidence.sourceId">
+                  <li v-for="evidence in selected.evidence" :key="evidenceKey(evidence)">
                     <strong>{{ evidence.sourceId }}</strong>
                     <span>{{ evidence.summary }}</span>
                     <small v-if="evidence.rawEventType || evidence.sourceType" data-security-evidence-source>
@@ -181,7 +190,7 @@ function openExistingHandoff() {
               <div>
                 <h3>事件时间线</h3>
                 <ol class="security-incident-timeline">
-                  <li v-for="entry in selected.timeline" :key="`${entry.sourceType}-${entry.sourceId}`"><time>{{ timeLabel(entry.occurredAt) }}</time><strong>{{ entry.sourceId }}</strong><span>{{ entry.label }}</span></li>
+                  <li v-for="entry in selected.timeline" :key="timelineKey(entry)"><time>{{ timeLabel(entry.occurredAt) }}</time><strong>{{ entry.sourceId }}</strong><span>{{ entry.label }}</span></li>
                 </ol>
               </div>
             </div>
