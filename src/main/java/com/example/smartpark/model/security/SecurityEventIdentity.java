@@ -93,10 +93,16 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
             List<String> parts = decodeMaterial(body.substring(SOURCE_REFERENCE_PREFIX.length()));
             if (parts != null) {
                 SecuritySourceType type = SecuritySourceType.fromName(parts.get(0));
-                SecuritySourceRef source = type == SecuritySourceType.UNKNOWN
-                        ? SecuritySourceRef.unknown()
-                        : new SecuritySourceRef(type, parts.get(1));
-                return new SecurityEventIdentity(source, parts.get(2), parkId, buildingId);
+                // reference() never encodes a source-less (UNKNOWN) source, so a qualified
+                // token that names an unknown or misspelled type is malformed. Reject it
+                // instead of downgrading it to a source-less wildcard that would resolve an
+                // unrelated source's event through the legacy-alias branch.
+                if (type == SecuritySourceType.UNKNOWN) {
+                    throw new IllegalArgumentException(
+                            "security event reference must name a known source type: " + token);
+                }
+                return new SecurityEventIdentity(new SecuritySourceRef(type, parts.get(1)), parts.get(2), parkId,
+                        buildingId);
             }
         }
         return new SecurityEventIdentity(SecuritySourceRef.unknown(), body, parkId, buildingId);

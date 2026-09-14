@@ -3,6 +3,7 @@ package com.example.smartpark.model.security;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SecurityEventIdentityTest {
     private static final SecuritySourceRef ACCESS = new SecuritySourceRef(SecuritySourceType.ACCESS_CONTROL, "access-1");
@@ -71,6 +72,21 @@ class SecurityEventIdentityTest {
         // A token that merely begins with `source:` keeps resolving as a legacy event id.
         assertThat(SecurityEventIdentity.eventIdOfReference("security-event:source:not-encoded"))
                 .isEqualTo("source:not-encoded");
+    }
+
+    @Test
+    void rejectsAQualifiedReferenceWithAnUnknownSourceType() {
+        // source() is delimiter-encoded as `length#value`; reference() never emits an
+        // UNKNOWN source, so a token that names one (or a misspelled type) is malformed.
+        String unknownType = "security-event:source:7#UNKNOWN:3#src:1#E";
+        String misspelledType = "security-event:source:12#ACCESS_CNTRL:3#src:1#E";
+
+        assertThatThrownBy(() -> SecurityEventIdentity.fromReference(unknownType, "PARK-A", "A1"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("source type");
+        assertThatThrownBy(() -> SecurityEventIdentity.fromReference(misspelledType, "PARK-A", "A1"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("source type");
     }
 
     @Test
