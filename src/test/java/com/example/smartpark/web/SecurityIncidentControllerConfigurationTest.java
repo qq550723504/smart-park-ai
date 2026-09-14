@@ -28,6 +28,15 @@ class SecurityIncidentControllerConfigurationTest {
     }
 
     @Test
+    void backsOffWithoutAServiceInsteadOfRegisteringANullReference() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(SecurityIncidentWebConfiguration.class)
+                .run(context -> assertThat(context)
+                        .hasNotFailed()
+                        .doesNotHaveBean(SecurityIncidentController.class));
+    }
+
+    @Test
     void registersIncidentServiceWhenDependenciesAreDeclaredByALaterConfiguration() {
         new ApplicationContextRunner()
                 .withUserConfiguration(SecurityIncidentConfiguration.class, SecurityIncidentWebConfiguration.class,
