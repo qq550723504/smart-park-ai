@@ -237,3 +237,12 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 22 | `securityincident/SecurityIncidentService.authoritativeEvent()` | P2 | legacy reader 与 adapter 返回同一逻辑事件且携带相同已决记录时，`reconciled.equals(left.disposition())` 恒真而丢弃 enriched 表示。现两侧都承载 reconciled 决策时回退 `fresherEvent()`，保留 adapter 的具体源、severity、confidence |
 
 每个修复对应独立提交：`e778fac`（#21）、`2a0d546`（#20）、`43f4abc`（#22）。
+
+第十轮（对 `8ab2ab0`）补 2 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 23 | `securityincident/SecurityIncidentConfiguration` | P1 | 仅 adapter 部署时合成的 `securityEventReader` 是空的 `EmptySecurityEventReader`，于是共享的 `SecurityQueryTool`（诊断/专家工具）永远查不到事件的 adapter 事件，尽管同一事件对事件关联可见。现将聚合 `SecurityEventCatalog` 注册为可注入的 `SecurityEventReader`/`SecurityPort`（`SecurityEventCatalog` 同时实现 `SecurityEventReader`），并让工作流工厂通过 `SecurityEventCatalog.aggregating` 复用该聚合而非二次包装，避免重复读取 |
+| 24 | `securityincident/SecurityIncidentService.restoreStates()` | P1 | 无源事件被两个复用同一 id 的具体源事件替换时，别名只由遍历顺序第一个 fresh 事件认领：一个更早发生但无关的 camera 事件会继承人工处置，而匹配的 access 事件保持 OPEN。现按 `lastOccurredAt` 距离预计算每个被别名遮蔽的存储事件的「首选认领者」，仅该 fresh 事件可认领其 incident 与 handoff |
+
+每个修复对应独立提交：`c11e15a`（#23）、`3168da3`（#24）。
