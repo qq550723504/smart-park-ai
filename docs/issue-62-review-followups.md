@@ -370,3 +370,12 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 50 | `collaboration/CollaborationRuntimeConfiguration.collectPrimaryEvidence()` | P2 | 该提取器只匹配 `\bSEC-[A-Z0-9-]+\b` 并大写裸子串，合作问题中的 source-qualified 引用被截成裸 id，目录随即以歧义拒绝复用 id，确定性的服务端安全证据丢失。现安全模式同时匹配完整的 `security-event:` 引用，`SecurityEventIdentity.canonicalQualifiedReference` 重新编码（容忍句尾标点），归一化保留大小写敏感的材料而非大写；裸 id 与 legacy 引用维持原有大写查找 |
 
 对应独立提交：`dab4974`（#49）、`4cc5b6a`（#50）。
+
+第二十五轮（对 `ae38fb0`）补 2 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 51 | `model/security/SecurityEvent` 紧凑构造器 | P1 | `eventId`/`parkId`/`buildingId` 只校验非空，生产适配器若提供含连接 URL 或凭据的 event id（如 `https://internal.example/event`、`token=abc`），该值会作为 `SecurityEventSummary.eventId` 与事件证据 `sourceId` 暴露给 AI 工具消费方与事件 API。现三个边界标识均走 `SecurityIdentifierPolicy.requireSafe`，并删除不再使用的 `requireText` |
+| 52 | `collaboration/CollaborationRuntimeConfiguration` 安全提取 | P2 | 原模式把 qualified 引用限制在 `[A-Za-z0-9_#:.\-]+`，而 `SecuritySourceRef` 接受 `access/feed` 这类 id 且 `reference()` 原样编码；模式在 `/` 处截断，残缺 token 无法解码后被转成错误的 legacy 查找，引用的证据被静默丢弃。现 `SecurityEventIdentity.canonicalQualifiedReference` 按长度前缀文法从 token 起始严格解析三段并重新编码（忽略后续散文），任何 source/event id 允许的字符都能保留；`CollaborationRuntimeConfiguration` 扫描 `security-event:` 前缀并据此解析，仅在不属于任何 qualified 引用时报告裸 id |
+
+对应独立提交：`7101c79`（#51）、`1e1c35c`（#52）。
