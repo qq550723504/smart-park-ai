@@ -306,6 +306,38 @@ class CollaborationRuntimeConfigurationTest {
     }
 
     @Test
+    void jsonEncodesExtractedSecurityReferencesBeforeCallingTheTool() {
+        EvidenceLedger ledger = new EvidenceLedger();
+        List<String> inputs = new java.util.ArrayList<>();
+        ToolCallback callback = namedCallback("lookupSecurityEvent", arguments -> {
+            inputs.add(arguments);
+            return "{\"eventId\":\"SEC-QUOTED\",\"rawEventType\":\"UNAUTHORIZED_ACCESS\"}";
+        });
+        // A quote or backslash is allowed by the identifier policy and preserved by the
+        // length-prefixed reference parser, so the tool argument must be JSON-encoded
+        // instead of concatenated, or the callback receives malformed arguments.
+        String reference = new SecurityEventIdentity(
+                new SecuritySourceRef(SecuritySourceType.ACCESS_CONTROL, "feed\"one"),
+                "SEC-QUOTED", "PARK-A", "A1").reference();
+
+        CollaborationRuntimeConfiguration.collectPrimaryEvidence(
+                ExpertDomain.SECURITY,
+                "investigate " + reference,
+                new ToolCallback[]{CollaborationRuntimeConfiguration.audited(
+                        callback, ledger, new InMemoryExecutionEventPublisher(), UUID.randomUUID())});
+
+        assertThat(inputs).singleElement().satisfies(input -> {
+            try {
+                com.fasterxml.jackson.databind.JsonNode node =
+                        new com.fasterxml.jackson.databind.ObjectMapper().readTree(input);
+                assertThat(node.get("eventId").asText()).isEqualTo(reference);
+            } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
+                throw new AssertionError("tool argument must be valid JSON: " + input, exception);
+            }
+        });
+    }
+
+    @Test
     void bindsServerOwnedPrimaryReferenceInsteadOfTrustingModelMarkerCopying() {
         EvidenceLedger ledger = new EvidenceLedger();
         ledger.record("tool:lookupDeviceStatus#abc",

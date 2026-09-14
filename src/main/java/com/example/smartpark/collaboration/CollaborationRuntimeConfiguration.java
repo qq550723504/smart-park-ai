@@ -51,6 +51,9 @@ public class CollaborationRuntimeConfiguration {
 
     private static final Logger LOG = LoggerFactory.getLogger(CollaborationRuntimeConfiguration.class);
 
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
 
     @Bean
     SupervisorPlanner supervisorPlanner() {
@@ -175,13 +178,26 @@ public class CollaborationRuntimeConfiguration {
         java.util.List<String> evidence = new java.util.ArrayList<>();
         for (String entityId : entityIds) {
             try {
-                String result = callback.call("{\"" + spec.argumentName() + "\":\"" + entityId + "\"}");
+                String result = callback.call(toolArguments(spec.argumentName(), entityId));
                 if (result != null && !result.isBlank()) evidence.add(result);
             } catch (RuntimeException toolFailure) {
                 LOG.warn("PRIMARY_EVIDENCE_COLLECTION_FAILED");
             }
         }
         return String.join("\n", evidence);
+    }
+
+    /**
+     * Serializes a tool argument as JSON so an identifier that contains a quote or
+     * backslash (allowed by the identifier policy and preserved by the length-prefixed
+     * reference parser) cannot corrupt the callback payload.
+     */
+    private static String toolArguments(String argumentName, String value) {
+        try {
+            return JSON.writeValueAsString(Map.of(argumentName, value));
+        } catch (com.fasterxml.jackson.core.JsonProcessingException impossible) {
+            throw new IllegalStateException(impossible);
+        }
     }
 
     /**
