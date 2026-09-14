@@ -353,3 +353,11 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 47 | `tool/security/SecurityQueryTool.lookupSecurityEvent()` | P1 | 工具把任意 `IllegalArgumentException` 的 message 回填进 `SecurityLookupResult.error`，而该结果既交给 AI 工具消费方、又进入公开的 expert findings。生产 adapter 在 `SecurityEventCatalog.readEvents()` 抛出的错误可能含连接 URL 或带凭据的配置 label，于是恰好泄露脱敏契约要隐藏的厂商私有细节。现新增用户安全的专用异常 `SecurityEventLookupException`（裸 id 歧义仍带可操作提示），其它失败一律返回固定的公开错误，adapter 异常 message 不再外泄 |
 
 对应独立提交：`b85fb97`（#47）。
+
+第二十三轮（对 `8afa4b3`）补 1 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 48 | `tool/security/SecurityQueryTool.lookupSecurityEvent()` | P1 | 两个源复用同一 event id 时目录返回歧义错误并提示「use a source-qualified reference」，但工具始终把入参转发给裸 id 重载：`SecurityEventIdentity.reference()` 产出的 `security-event:source:...` token 与 `event.eventId()` 不相等，于是返回 "Unknown security event"，诊断与安全专家消费方都无法取回任一冲突事件。现 `SecurityEventIdentity` 新增 `isQualifiedReference()`，resolver 新增 `getEventByReference()`（qualified token 精确解析到该源，legacy token 保持裸 id 别名语义，跨位置匹配仍判为歧义），工具对引用 token 走该路径、裸 id 维持原查找 |
+
+对应独立提交：`d54ff32`（#48）。
