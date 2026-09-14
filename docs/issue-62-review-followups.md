@@ -290,3 +290,12 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 33 | `port/security/SecurityEventCatalog.getEvent(SecurityEventIdentity)` | P1 | source-qualified 身份此前用对称的 `matches()` 别名谓词过滤：当所请求的源不存在、只存在同 id/位置的 source-less legacy 副本（或另一个复用同一 id 的具体源）时，`select()` 只看到一个候选事件并返回，工作流便以一个从未归属到所请求源的事件继续。现具体源请求要求精确身份相等（无精确匹配则 `NoSuchElementException`），仅 source-less legacy 请求继续使用别名谓词与歧义检查 |
 
 每个修复对应独立提交：`102e4b5`（#32）、`5afeda2`（#33）。
+
+第十六轮（对 `d306e92`）补 2 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 34 | `port/security/SecurityEventCatalog` 的 `select()` / `getEvent(SecurityEventIdentity)` | P2 | reader 与 adapter 暴露同一逻辑事件的不同快照时，处置修正可能 `decidedAt` 更晚、但 `receivedAt` 不变或更旧；原 `PREFERRED` 只按「具体源优先 → receivedAt 最新」选副本，于是把陈旧或 `UNREVIEWED` 的副本返回给 `SecurityQueryTool` 等消费方，与 incident service 的 reconciliation 结果不一致。现对同一逻辑事件的副本 reconciling 处置记录（`HUMAN_REVIEW` first-wins，否则 `max(decidedAt)`），并把胜出决策附加到首选表示上（`SecurityEvent.withDisposition`）；两侧（裸 id 的 `select()` 与 source-qualified 查找）都适用 |
+| 35 | `collaborationcenter/SecurityIncidentHandoffStore.projectedFieldsChanged()` | P2 | 已交接事件的 occurrence time 被 adapter 修正、而身份/风险/摘要/类型/处置都不变时，替换后的 handoff 虽带新的 `lastOccurredAt`，但 `projectedFieldsChanged()` 未比较该字段而返回 false，保留了旧 `updatedAt`；协同中心按 `updatedAt` 排序安全工单，修正后的投影继续显示为陈旧。现把 `lastOccurredAt` 作为又一个投影字段参与比较 |
+
+每个修复对应独立提交：`bbcade5`（#34）、`a787698`（#35）。
