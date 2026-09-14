@@ -207,7 +207,15 @@ public final class SecurityIncidentService {
         boolean leftDecided = left.disposition().disposition() != SecurityDisposition.UNREVIEWED;
         boolean rightDecided = right.disposition().disposition() != SecurityDisposition.UNREVIEWED;
         if (leftDecided != rightDecided) return rightDecided ? right : left;
-        return right.receivedAt().isAfter(left.receivedAt()) ? right : left;
+        int freshness = right.receivedAt().compareTo(left.receivedAt());
+        if (freshness != 0) return freshness > 0 ? right : left;
+        // Timestamps tie when an adapter enriches a legacy event without
+        // advancing receivedAt; prefer the concrete/enriched representation.
+        return sourceConcreteness(right) > sourceConcreteness(left) ? right : left;
+    }
+
+    private static int sourceConcreteness(SecurityEvent event) {
+        return event.source().sourceType() == SecuritySourceType.UNKNOWN ? 0 : 1;
     }
 
     private void splitBucket(List<SecurityEvent> events, Map<AlertEventKey, List<Alert>> alertsByEvent,

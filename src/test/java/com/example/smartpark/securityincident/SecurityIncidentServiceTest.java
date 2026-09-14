@@ -134,6 +134,25 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void prefersTheEnrichedAdapterCopyWhenTimestampsTie() {
+        SecurityEvent readerCopy = event("SEC-TIE", "A1", "ACCESS", BASE);
+        SecurityEvent adapterCopy = withSource(
+                enrichedEvent(readerCopy, SecurityDispositionRecord.unreviewed(), BASE, SecurityEventSeverity.HIGH),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityIncidentService service = service(List.of(readerCopy), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterReturning(adapterCopy)));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).singleElement()
+                .satisfies(incident -> assertThat(incident.evidence()).singleElement()
+                        .satisfies(evidence -> {
+                            assertThat(evidence.severity()).isEqualTo("HIGH");
+                            assertThat(evidence.eventSourceId()).isEqualTo("access-1");
+                        }));
+    }
+
+    @Test
     void aliasesALegacyEventWithItsEnrichedAdapterCopy() {
         SecurityEvent legacy = event("SEC-ALIAS", "A1", "ACCESS", BASE);
         SecurityDispositionRecord registered = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
