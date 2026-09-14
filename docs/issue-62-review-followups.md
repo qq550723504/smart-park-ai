@@ -216,3 +216,14 @@ cd ui && npx vue-tsc -b && npx vitest run
 
 每个修复对应独立提交：`6ffb2ab`（#15）、`831b7b9`（#14）、`58ccf6d`（#13）。
 
+
+第八轮（对 `bf1c13f`）补 4 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 16 | `securityincident/SecurityIncidentService.authoritativeEvent()` | P1 | 两条 ingestion 路径都给出已决记录时，原实现只看 `receivedAt`，可能丢掉 `decidedAt` 更晚的修正。现复用 `reconcileDisposition()`：存储的 `HUMAN_REVIEW` 仍权威，否则最新 `decidedAt` 胜出，仅在都未决时才回退 `fresherEvent()` |
+| 17 | `securityincident/SecurityIncidentService.restoreStates()` | P1 | `overlaps()` 的 legacy 无源别名此前是无限制通配符，会把同一份存储状态/状态位/handoff 恢复到多个具体源。现用 `sharesExactIdentity()` 区分“身份相等”与“仅别名”，仅别名匹配由单条 fresh 认领（`claimedAliasOnlyIncidentIds` / `claimedAliasOnlyHandoffWorkItemIds`），精确匹配仍可跨 correlation resplit 传播 |
+| 18 | `securityincident/SecurityIncidentService.alertsByReference()` + `orchestration/OrchestrationConfiguration` + `workflow/AlertWorkflowNodes` | P1 | 告警证据 token 只带裸 event id，无法区分复用同一 id 的源，A 源告警会抬高 B 源风险。现 `SecurityEventIdentity` 拥有 source-qualified token（`reference()`/`legacyReference()`/`eventIdOfReference()`），告警按 `AlertReferenceKey(reference, parkId, buildingId)` 关联并兼容 legacy 别名；时间线投影 `reference` |
+| 19 | `ui/src/components/security/SecurityIncidentCenter.vue` | P2 | 多源复用同一 event id 时证据行/时间线出现重复 Vue key。现证据行按 `sourceType-eventSourceId-sourceId`、时间线按 `reference` 兜底 `sourceType-sourceId` 生成 key |
+
+每个修复对应独立提交：`2830022`（#16）、`7d8d56c`（#17）、`3a04113`（#18）、`a7ae629`（#19）。
