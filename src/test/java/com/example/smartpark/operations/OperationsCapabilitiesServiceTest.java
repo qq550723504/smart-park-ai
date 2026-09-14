@@ -96,7 +96,7 @@ class OperationsCapabilitiesServiceTest {
 
     private static SecuritySourceAdapter productionAdapter(SecurityEventType... types) {
         SecuritySourceDescriptor descriptor = new SecuritySourceDescriptor(
-                "prod-camera-analytics", SecuritySourceType.CAMERA_ANALYTICS, Set.of(types), true);
+                "prod-camera-analytics", SecuritySourceType.CAMERA_ANALYTICS, Set.of(types), true, true);
         return new SecuritySourceAdapter() {
             @Override
             public SecuritySourceDescriptor descriptor() {

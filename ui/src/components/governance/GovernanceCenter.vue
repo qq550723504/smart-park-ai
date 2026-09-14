@@ -100,7 +100,7 @@ watch([() => props.active, () => props.role], ([active]) => {
               data-governance-security-disposition
               :data-feature-state="overview.capabilities.securityDispositionEnabled ? 'AVAILABLE' : 'NOT_READY'"
             >{{ overview.capabilities.securityDispositionEnabled ? 'AVAILABLE' : 'NOT_READY' }}</dd>
-            <small>{{ overview.capabilities.securityDispositionEnabled ? '存在生产数据源与已登记复核记录' : '缺少生产数据源，误报数不可统计' }}</small>
+            <small>{{ overview.capabilities.securityDispositionEnabled ? '存在生产数据源与误报评估数据源' : '缺少可用的误报评估数据源，误报数不可统计' }}</small>
           </div>
           <ul v-if="overview.capabilities.securityEventCapabilities?.length" class="governance-security-types">
             <li

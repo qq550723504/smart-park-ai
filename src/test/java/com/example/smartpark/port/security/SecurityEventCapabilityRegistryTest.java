@@ -78,10 +78,11 @@ class SecurityEventCapabilityRegistryTest {
     }
 
     @Test
-    void disablesDispositionWithoutAProductionSource() {
+    void enablesDispositionOnlyWithAnExplicitProductionDispositionFeed() {
         assertThat(registry(demoAdapter(SecurityEventType.ACCESS_ANOMALY)).dispositionEnabled()).isFalse();
         assertThat(registry().dispositionEnabled()).isFalse();
-        assertThat(registry(productionAdapter(SecurityEventType.FIRE_SMOKE)).dispositionEnabled()).isTrue();
+        assertThat(registry(productionAdapter(SecurityEventType.FIRE_SMOKE)).dispositionEnabled()).isFalse();
+        assertThat(registry(productionDispositionAdapter(SecurityEventType.FIRE_SMOKE)).dispositionEnabled()).isTrue();
     }
 
     @Test
@@ -119,13 +120,23 @@ class SecurityEventCapabilityRegistryTest {
     }
 
     private static SecuritySourceAdapter productionAdapter(SecurityEventType... types) {
-        return adapter("prod-camera-analytics", SecuritySourceType.CAMERA_ANALYTICS, true, types);
+        return adapter("prod-camera-analytics", SecuritySourceType.CAMERA_ANALYTICS, true, false, types);
+    }
+
+    private static SecuritySourceAdapter productionDispositionAdapter(SecurityEventType... types) {
+        return adapter("prod-disposition-feed", SecuritySourceType.CAMERA_ANALYTICS, true, true, types);
     }
 
     private static SecuritySourceAdapter adapter(String sourceId, SecuritySourceType sourceType,
                                                  boolean production, SecurityEventType... types) {
+        return adapter(sourceId, sourceType, production, false, types);
+    }
+
+    private static SecuritySourceAdapter adapter(String sourceId, SecuritySourceType sourceType,
+                                                 boolean production, boolean dispositionFeed,
+                                                 SecurityEventType... types) {
         SecuritySourceDescriptor descriptor = new SecuritySourceDescriptor(
-                sourceId, sourceType, Set.of(types), production);
+                sourceId, sourceType, Set.of(types), production, dispositionFeed);
         return new SecuritySourceAdapter() {
             @Override
             public SecuritySourceDescriptor descriptor() {

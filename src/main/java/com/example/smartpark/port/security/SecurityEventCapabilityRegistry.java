@@ -43,11 +43,14 @@ public final class SecurityEventCapabilityRegistry {
     }
 
     /**
-     * Disposition/false-positive statistics require a real disposition feed, so
-     * they stay disabled until a production source is connected.
+     * Disposition/false-positive statistics require a source that explicitly
+     * declares a disposition feed; a connected event feed alone only proves
+     * events arrive, not that review outcomes can be produced.
      */
     public boolean dispositionEnabled() {
-        return adapters.stream().anyMatch(adapter -> adapter.descriptor().productionSource()
-                && !adapter.descriptor().connectedEventTypes().isEmpty());
+        return adapters.stream().anyMatch(adapter -> {
+            SecuritySourceDescriptor descriptor = adapter.descriptor();
+            return descriptor.productionSource() && descriptor.dispositionFeed();
+        });
     }
 }

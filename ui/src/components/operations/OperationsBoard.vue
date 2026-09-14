@@ -124,7 +124,7 @@ watch(() => props.active, (active) => {
       <article data-security-disposition :data-feature-state="props.securityDispositionEnabled ? 'AVAILABLE' : 'NOT_READY'">
         <span>误报统计</span>
         <strong>{{ props.securityDispositionEnabled ? 'AVAILABLE' : 'NOT_READY' }}</strong>
-        <small>{{ props.securityDispositionEnabled ? '存在生产数据源与已登记复核记录' : '缺少生产数据源，误报数不可统计' }}</small>
+        <small>{{ props.securityDispositionEnabled ? '存在生产数据源与误报评估数据源' : '缺少可用的误报评估数据源，误报数不可统计' }}</small>
       </article>
       <p v-if="!(props.securityEventCapabilities ?? []).length" class="operations-board__security-capabilities-empty" data-security-capabilities-empty>安全事件类型能力尚未上报，暂按 NOT_READY 处理。</p>
     </section>

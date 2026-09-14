@@ -49,12 +49,22 @@ class SecurityCapabilityControllerTest {
 
     @Test
     void reportsAProductionSourceAsAvailableAndEnablesDisposition() throws Exception {
-        MockMvc mockMvc = mockMvc(registry(adapter(true, SecurityEventType.FIRE_SMOKE)));
+        MockMvc mockMvc = mockMvc(registry(adapter(true, true, SecurityEventType.FIRE_SMOKE)));
 
         mockMvc.perform(get("/api/security/capabilities").header("X-Demo-Role", "ADMIN"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.types[0].state").value("AVAILABLE"))
                 .andExpect(jsonPath("$.dispositionEnabled").value(true));
+    }
+
+    @Test
+    void keepsDispositionDisabledForAProductionSourceWithoutADispositionFeed() throws Exception {
+        MockMvc mockMvc = mockMvc(registry(adapter(true, false, SecurityEventType.FIRE_SMOKE)));
+
+        mockMvc.perform(get("/api/security/capabilities").header("X-Demo-Role", "ADMIN"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.types[0].state").value("AVAILABLE"))
+                .andExpect(jsonPath("$.dispositionEnabled").value(false));
     }
 
     @Test
@@ -75,10 +85,15 @@ class SecurityCapabilityControllerTest {
     }
 
     private static SecuritySourceAdapter adapter(boolean production, SecurityEventType... types) {
+        return adapter(production, false, types);
+    }
+
+    private static SecuritySourceAdapter adapter(boolean production, boolean dispositionFeed,
+                                                 SecurityEventType... types) {
         SecuritySourceDescriptor descriptor = new SecuritySourceDescriptor(
                 production ? "prod-camera-analytics" : "demo-access-feed",
                 production ? SecuritySourceType.CAMERA_ANALYTICS : SecuritySourceType.ACCESS_CONTROL,
-                Set.of(types), production);
+                Set.of(types), production, dispositionFeed);
         return new SecuritySourceAdapter() {
             @Override
             public SecuritySourceDescriptor descriptor() {

@@ -105,7 +105,7 @@ describe('GovernanceCenter', () => {
     expect(wrapper.get('[data-governance-security-capability="FIRE_SMOKE"]').attributes('data-feature-state')).toBe('NOT_READY')
     expect(wrapper.get('[data-governance-security-disposition]').attributes('data-feature-state')).toBe('NOT_READY')
     expect(wrapper.get('[data-governance-security-disposition]').text()).toBe('NOT_READY')
-    expect(wrapper.text()).toContain('缺少生产数据源，误报数不可统计')
+    expect(wrapper.text()).toContain('缺少可用的误报评估数据源，误报数不可统计')
   })
 
   it('fails closed when the governance overview reports no security capabilities', async () => {
