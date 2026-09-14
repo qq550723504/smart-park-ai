@@ -212,15 +212,18 @@ public final class SecurityIncidentService {
 
     /**
      * Ranks the concrete copies a source-less alias may fold into: a concrete source
-     * is preferred over another alias, then the same event type, then the nearest
-     * occurrence time, with the identity material as a stable final tie-breaker.
+     * is preferred over another alias, then the same correlation type (which, for an
+     * unsupported vendor code, includes the raw type so two distinct UNKNOWN codes do
+     * not tie), then the nearest occurrence time, with the identity material as a
+     * stable final tie-breaker.
      */
     private static Comparator<Map.Entry<SecurityEventIdentity, SecurityEvent>> aliasPreference(
             SecurityEvent alias) {
         return Comparator
                 .comparingInt((Map.Entry<SecurityEventIdentity, SecurityEvent> entry) ->
                         entry.getKey().isSourceLess() ? 1 : 0)
-                .thenComparingInt(entry -> entry.getValue().eventType() == alias.eventType() ? 0 : 1)
+                .thenComparingInt(entry ->
+                        correlationType(entry.getValue()).equals(correlationType(alias)) ? 0 : 1)
                 .thenComparingLong(entry -> Math.abs(
                         Duration.between(entry.getValue().occurredAt(), alias.occurredAt()).toMillis()))
                 .thenComparing(entry -> entry.getKey().material());

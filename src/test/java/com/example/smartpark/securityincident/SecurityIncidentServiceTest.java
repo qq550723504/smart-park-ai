@@ -375,6 +375,32 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void matchesUnsupportedVendorAliasesByRawTypeNotOnlyTimestamp() {
+        SecurityDispositionRecord registered = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1", BASE);
+        SecurityEvent legacy = eventWithDisposition(event("SEC-LEGACY-VENDOR", "A1", "DOOR_FORCED", BASE),
+                registered);
+        SecurityEvent unrelatedCamera = withSource(
+                event("SEC-LEGACY-VENDOR", "A1", "TURNSTILE_TAMPER", BASE.plusSeconds(5)),
+                SecuritySourceType.CAMERA_ANALYTICS, "camera-1");
+        SecurityEvent matchingAccess = withSource(
+                event("SEC-LEGACY-VENDOR", "A1", "DOOR_FORCED", BASE.plusSeconds(30)),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityIncidentService service = service(List.of(legacy), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterReturning(unrelatedCamera, matchingAccess)));
+
+        List<SecurityIncident> incidents = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        assertThat(incidents).hasSize(2);
+        assertThat(incidents).filteredOn(incident -> hasEventSource(incident, "camera-1"))
+                .singleElement().satisfies(incident ->
+                        assertThat(incident.disposition()).isEqualTo(SecurityDisposition.UNREVIEWED));
+        assertThat(incidents).filteredOn(incident -> hasEventSource(incident, "access-1"))
+                .singleElement().satisfies(incident ->
+                        assertThat(incident.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT));
+    }
+
+    @Test
     void aliasesALegacyEventWithItsEnrichedAdapterCopy() {
         SecurityEvent legacy = event("SEC-ALIAS", "A1", "ACCESS", BASE);
         SecurityDispositionRecord registered = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
