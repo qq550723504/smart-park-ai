@@ -3,6 +3,8 @@ package com.example.smartpark.securityincident;
 import com.example.smartpark.model.alert.Alert;
 import com.example.smartpark.model.alert.AlertClassification;
 import com.example.smartpark.model.common.RiskLevel;
+import com.example.smartpark.model.security.SecurityDisposition;
+import com.example.smartpark.model.security.SecurityDispositionSource;
 import com.example.smartpark.model.security.SecurityEvent;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoff;
@@ -603,6 +605,71 @@ class SecurityIncidentServiceTest {
         assertThat(handoffs.list()).singleElement()
                 .extracting(SecurityIncidentHandoff::workItemId)
                 .isEqualTo(merged.handoffWorkItemId());
+    }
+
+    @Test
+    void recordsAHumanDispositionWhenReviewingAnIncident() {
+        SecurityIncidentService service = service(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        String incidentId = service.list(new SecurityIncidentQuery(null, 20)).items().get(0).incidentId();
+
+        SecurityIncident reviewed = service.review(incidentId, SecurityDisposition.FALSE_POSITIVE, "APPROVER");
+
+        assertThat(reviewed.status()).isEqualTo(SecurityIncidentStatus.REVIEWED);
+        assertThat(reviewed.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+        assertThat(reviewed.reviewedAt()).isEqualTo(BASE.plusSeconds(3600));
+        assertThat(reviewed.dispositionRecord().source()).isEqualTo(SecurityDispositionSource.HUMAN_REVIEW);
+        assertThat(reviewed.dispositionRecord().actor()).isEqualTo("APPROVER");
+        assertThat(reviewed.dispositionRecord().evidenceRef()).isEqualTo("human-review:" + incidentId);
+        assertThat(reviewed.dispositionRecord().decidedAt()).isEqualTo(BASE.plusSeconds(3600));
+    }
+
+    @Test
+    void defaultsToConfirmedIncidentForTheLegacyReviewEntryPoint() {
+        SecurityIncidentService service = service(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        String incidentId = service.list(new SecurityIncidentQuery(null, 20)).items().get(0).incidentId();
+
+        SecurityIncident reviewed = service.review(incidentId);
+
+        assertThat(reviewed.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+        assertThat(reviewed.dispositionRecord().source()).isEqualTo(SecurityDispositionSource.HUMAN_REVIEW);
+    }
+
+    @Test
+    void keepsTheFirstDispositionOnIdempotentReview() {
+        SecurityIncidentService service = service(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        String incidentId = service.list(new SecurityIncidentQuery(null, 20)).items().get(0).incidentId();
+
+        service.review(incidentId, SecurityDisposition.CONFIRMED_INCIDENT, "APPROVER");
+        SecurityIncident second = service.review(incidentId, SecurityDisposition.FALSE_POSITIVE, "ADMIN");
+
+        assertThat(second.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+        assertThat(second.dispositionRecord().actor()).isEqualTo("APPROVER");
+    }
+
+    @Test
+    void rejectsAnUnreviewedDispositionDecision() {
+        SecurityIncidentService service = service(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        String incidentId = service.list(new SecurityIncidentQuery(null, 20)).items().get(0).incidentId();
+
+        assertThatThrownBy(() -> service.review(incidentId, SecurityDisposition.UNREVIEWED, "APPROVER"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("decided disposition");
+    }
+
+    @Test
+    void retainsAStoredDispositionWhenNewEventsArrive() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        SecurityIncidentService service = service(events);
+        String incidentId = service.list(new SecurityIncidentQuery(null, 20)).items().get(0).incidentId();
+        service.review(incidentId, SecurityDisposition.FALSE_POSITIVE, "APPROVER");
+
+        events.add(event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(60)));
+
+        SecurityIncident restored = service.get(incidentId);
+        assertThat(restored.status()).isEqualTo(SecurityIncidentStatus.REVIEWED);
+        assertThat(restored.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+        assertThat(restored.dispositionRecord().source()).isEqualTo(SecurityDispositionSource.HUMAN_REVIEW);
+        assertThat(restored.dispositionRecord().actor()).isEqualTo("APPROVER");
     }
 
     private static SecurityIncidentService service(List<SecurityEvent> events) {

@@ -2,6 +2,9 @@ package com.example.smartpark.securityincident;
 
 import com.example.smartpark.model.alert.Alert;
 import com.example.smartpark.model.common.RiskLevel;
+import com.example.smartpark.model.security.SecurityDisposition;
+import com.example.smartpark.model.security.SecurityDispositionRecord;
+import com.example.smartpark.model.security.SecurityDispositionSource;
 import com.example.smartpark.model.security.SecurityEvent;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoff;
@@ -99,10 +102,26 @@ public final class SecurityIncidentService {
     }
 
     public synchronized SecurityIncident review(String incidentId) {
+        return review(incidentId, SecurityDisposition.CONFIRMED_INCIDENT, "APPROVER");
+    }
+
+    public synchronized SecurityIncident review(String incidentId, SecurityDisposition disposition, String actor) {
+        Objects.requireNonNull(disposition, "disposition");
         SecurityIncident current = get(incidentId);
-        SecurityIncident reviewed = current.review(clock.instant());
+        if (current.status() != SecurityIncidentStatus.OPEN) return current;
+        if (disposition == SecurityDisposition.UNREVIEWED) {
+            throw new IllegalArgumentException("review requires a decided disposition");
+        }
+        Instant now = clock.instant();
+        SecurityDispositionRecord record = new SecurityDispositionRecord(disposition,
+                SecurityDispositionSource.HUMAN_REVIEW, actor, null, null, evidenceRefFor(incidentId), now);
+        SecurityIncident reviewed = current.review(record, now);
         store.save(reviewed);
         return reviewed;
+    }
+
+    private static String evidenceRefFor(String incidentId) {
+        return "human-review:" + incidentId;
     }
 
     public synchronized SecurityIncident handoff(String incidentId) {
@@ -313,7 +332,14 @@ public final class SecurityIncidentService {
         String handoffWorkItemId = state.handoffWorkItemId();
         if (handoffWorkItemId == null && !handoffIds.isEmpty()) handoffWorkItemId = handoffIds.get(0);
         String incidentId = retainStoredIdentity ? canonical.incidentId() : fresh.incidentId();
-        return withStoredState(fresh, incidentId, state.status(), reviewedAt, handoffWorkItemId);
+        SecurityIncident dispositionSource = candidates.stream()
+                .filter(candidate -> candidate.disposition() != SecurityDisposition.UNREVIEWED)
+                .max(Comparator.comparing(SecurityIncident::reviewedAt,
+                                Comparator.nullsFirst(Comparator.naturalOrder()))
+                        .thenComparing(SecurityIncident::incidentId))
+                .orElse(state);
+        return withStoredState(fresh, incidentId, state.status(), reviewedAt, handoffWorkItemId, fresh.riskLevel(),
+                dispositionSource.disposition(), dispositionSource.dispositionRecord());
     }
 
     private static boolean overlaps(SecurityIncident left, SecurityIncident right) {
@@ -328,10 +354,20 @@ public final class SecurityIncidentService {
     private static SecurityIncident withStoredState(SecurityIncident fresh, String incidentId, SecurityIncidentStatus status,
                                                     Instant reviewedAt, String handoffWorkItemId,
                                                     SecurityIncidentRisk riskLevel) {
+        return withStoredState(fresh, incidentId, status, reviewedAt, handoffWorkItemId, riskLevel,
+                fresh.disposition(), fresh.dispositionRecord());
+    }
+
+    private static SecurityIncident withStoredState(SecurityIncident fresh, String incidentId, SecurityIncidentStatus status,
+                                                    Instant reviewedAt, String handoffWorkItemId,
+                                                    SecurityIncidentRisk riskLevel,
+                                                    SecurityDisposition disposition,
+                                                    SecurityDispositionRecord dispositionRecord) {
         return new SecurityIncident(incidentId, fresh.parkId(), fresh.buildingId(), fresh.eventType(),
                 riskLevel, status, fresh.openedAt(), fresh.lastOccurredAt(), fresh.eventIds(), fresh.alertIds(),
                 fresh.evidence(), fresh.timeline(), status == SecurityIncidentStatus.HANDOFF
-                        ? recommendationsFor(riskLevel) : fresh.recommendations(), reviewedAt, handoffWorkItemId);
+                        ? recommendationsFor(riskLevel) : fresh.recommendations(), reviewedAt, handoffWorkItemId,
+                disposition, dispositionRecord);
     }
 
     private static List<String> recommendationsFor(SecurityIncidentRisk risk) {
