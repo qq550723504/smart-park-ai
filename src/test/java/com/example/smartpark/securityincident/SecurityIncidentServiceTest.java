@@ -125,6 +125,32 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void prefersTheEnrichedRepresentationWhenBothIngestionPathsAgreeOnTheDecision() {
+        SecurityDispositionRecord shared = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(5));
+        SecurityEvent readerCopy = eventWithDisposition(
+                enrichedEvent(event("SEC-AGREE", "A1", "ACCESS", BASE), shared, BASE,
+                        SecurityEventSeverity.LOW),
+                shared);
+        SecurityEvent adapterCopy = withSource(
+                enrichedEvent(event("SEC-AGREE", "A1", "ACCESS", BASE), shared, BASE,
+                        SecurityEventSeverity.HIGH),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityIncidentService service = service(List.of(readerCopy), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterReturning(adapterCopy)));
+
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(incident.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+        assertThat(incident.dispositionRecord()).isEqualTo(shared);
+        assertThat(incident.evidence()).singleElement().satisfies(evidence -> {
+            assertThat(evidence.severity()).isEqualTo("HIGH");
+            assertThat(evidence.eventSourceId()).isEqualTo("access-1");
+        });
+    }
+
+    @Test
     void prefersTheFreshestRepresentationWhenNoDispositionIsAvailable() {
         SecurityEvent readerCopy = event("SEC-FRESH", "A1", "ACCESS", BASE);
         SecurityEvent adapterCopy = enrichedEvent(readerCopy, SecurityDispositionRecord.unreviewed(),

@@ -208,7 +208,12 @@ public final class SecurityIncidentService {
     private static SecurityEvent authoritativeEvent(SecurityEvent left, SecurityEvent right) {
         SecurityDispositionRecord reconciled = reconcileDisposition(right.disposition(), List.of(left.disposition()));
         if (reconciled.disposition() != SecurityDisposition.UNREVIEWED) {
-            return reconciled.equals(left.disposition()) ? left : right;
+            boolean leftCarries = reconciled.equals(left.disposition());
+            boolean rightCarries = reconciled.equals(right.disposition());
+            // Both copies carry the same decision: keep the reconciled decision but
+            // still prefer the enriched/freshest representation over ingestion order.
+            if (leftCarries && rightCarries) return fresherEvent(left, right);
+            return leftCarries ? left : right;
         }
         return fresherEvent(left, right);
     }
