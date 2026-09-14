@@ -57,9 +57,10 @@ public class SecurityIncidentController {
                                       @RequestBody(required = false) SecurityIncidentDtos.ReviewRequest body) {
         DemoRole.require(role, DemoRole.APPROVER, DemoRole.ADMIN);
         String actor = DemoRole.parse(role).name();
-        Map<String, Object> response = SecurityIncidentDtos.detail(
-                service.review(incidentId, parseDisposition(body), actor));
-        auditTrail.record(actor, "REVIEW_SECURITY_INCIDENT", incidentId, "SUCCESS");
+        SecurityIncidentService.ReviewOutcome outcome = service.applyReview(incidentId, parseDisposition(body), actor);
+        Map<String, Object> response = SecurityIncidentDtos.detail(outcome.incident());
+        auditTrail.record(actor, "REVIEW_SECURITY_INCIDENT", incidentId,
+                (outcome.applied() ? "SUCCESS" : "NO_CHANGE") + ":" + outcome.incident().disposition().name());
         return response;
     }
 

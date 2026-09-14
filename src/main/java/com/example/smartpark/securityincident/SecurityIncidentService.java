@@ -115,9 +115,19 @@ public final class SecurityIncidentService {
     }
 
     public synchronized SecurityIncident review(String incidentId, SecurityDisposition disposition, String actor) {
+        return applyReview(incidentId, disposition, actor).incident();
+    }
+
+    /**
+     * Applies a human review and reports whether this call actually persisted a
+     * new decision. A stale or concurrent request against an already-reviewed
+     * incident returns the stored incident with {@code applied == false} so the
+     * caller can audit the idempotent no-op and the disposition that was kept.
+     */
+    public synchronized ReviewOutcome applyReview(String incidentId, SecurityDisposition disposition, String actor) {
         Objects.requireNonNull(disposition, "disposition");
         SecurityIncident current = get(incidentId);
-        if (current.status() != SecurityIncidentStatus.OPEN) return current;
+        if (current.status() != SecurityIncidentStatus.OPEN) return new ReviewOutcome(current, false);
         if (disposition == SecurityDisposition.UNREVIEWED) {
             throw new IllegalArgumentException("review requires a decided disposition");
         }
@@ -126,7 +136,7 @@ public final class SecurityIncidentService {
                 SecurityDispositionSource.HUMAN_REVIEW, actor, null, null, evidenceRefFor(incidentId), now);
         SecurityIncident reviewed = current.review(record, now);
         store.save(reviewed);
-        return reviewed;
+        return new ReviewOutcome(reviewed, true);
     }
 
     private static String evidenceRefFor(String incidentId) {
@@ -518,6 +528,13 @@ public final class SecurityIncidentService {
             case MEDIUM -> 1;
             case LOW -> 0;
         };
+    }
+
+    /** Result of a review request: the persisted incident and whether it changed. */
+    public record ReviewOutcome(SecurityIncident incident, boolean applied) {
+        public ReviewOutcome {
+            Objects.requireNonNull(incident, "incident");
+        }
     }
 
     private record CorrelationKey(String parkId, String buildingId, String eventType) {

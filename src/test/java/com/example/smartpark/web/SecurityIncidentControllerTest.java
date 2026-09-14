@@ -57,8 +57,8 @@ class SecurityIncidentControllerTest {
     void validatesFiltersAndSupportsReviewAndHandoff() throws Exception {
         when(service.list(any())).thenReturn(new SecurityIncidentPage(List.of(incident()), 1));
         when(service.get("INC-1")).thenReturn(incident());
-        when(service.review(eq("INC-1"), eq(SecurityDisposition.CONFIRMED_INCIDENT), eq("ADMIN")))
-                .thenReturn(incident());
+        when(service.applyReview(eq("INC-1"), eq(SecurityDisposition.CONFIRMED_INCIDENT), eq("ADMIN")))
+                .thenReturn(new SecurityIncidentService.ReviewOutcome(reviewedIncident(), true));
         when(service.handoff("INC-1")).thenReturn(incident());
 
         mockMvc.perform(get("/api/security/incidents?limit=101").header("X-Demo-Role", "ADMIN"))
@@ -72,14 +72,32 @@ class SecurityIncidentControllerTest {
         mockMvc.perform(post("/api/security/incidents/INC-1/handoff").header("X-Demo-Role", "ADMIN"))
                 .andExpect(status().isOk());
 
-        assertThat(auditTrail.entries()).extracting(entry -> entry.action())
-                .containsExactly("REVIEW_SECURITY_INCIDENT", "HANDOFF_SECURITY_INCIDENT");
+        assertThat(auditTrail.entries()).extracting(entry -> entry.action() + "=" + entry.outcome())
+                .containsExactly("REVIEW_SECURITY_INCIDENT=SUCCESS:FALSE_POSITIVE",
+                        "HANDOFF_SECURITY_INCIDENT=SUCCESS");
+    }
+
+    @Test
+    void auditsAnIdempotentReviewAsANoChangeWithThePersistedDisposition() throws Exception {
+        when(service.applyReview(eq("INC-1"), eq(SecurityDisposition.CONFIRMED_INCIDENT), eq("APPROVER")))
+                .thenReturn(new SecurityIncidentService.ReviewOutcome(reviewedIncident(), false));
+
+        mockMvc.perform(post("/api/security/incidents/INC-1/review").header("X-Demo-Role", "APPROVER"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.disposition").value("FALSE_POSITIVE"));
+
+        assertThat(auditTrail.entries()).singleElement()
+                .satisfies(entry -> {
+                    assertThat(entry.actorRole()).isEqualTo("APPROVER");
+                    assertThat(entry.action()).isEqualTo("REVIEW_SECURITY_INCIDENT");
+                    assertThat(entry.outcome()).isEqualTo("NO_CHANGE:FALSE_POSITIVE");
+                });
     }
 
     @Test
     void forwardsAnExplicitHumanDispositionFromTheReviewBody() throws Exception {
-        when(service.review(eq("INC-1"), eq(SecurityDisposition.FALSE_POSITIVE), eq("APPROVER")))
-                .thenReturn(reviewedIncident());
+        when(service.applyReview(eq("INC-1"), eq(SecurityDisposition.FALSE_POSITIVE), eq("APPROVER")))
+                .thenReturn(new SecurityIncidentService.ReviewOutcome(reviewedIncident(), true));
 
         mockMvc.perform(post("/api/security/incidents/INC-1/review")
                         .header("X-Demo-Role", "APPROVER")
