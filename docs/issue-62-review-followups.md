@@ -179,3 +179,9 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 4 | `port/security/SecurityEventCapabilityRegistry.dispositionEnabled()` | P2 | `da75aa3`：Require 显式 `dispositionFeed` + 生产源，并收敛前后端文案 |
 | 5 | `ui/.../SecurityIncidentCenter.vue` toast | P2 | `6e2916f`：改用接口返回的已持久化 disposition |
 
+第三轮（对 `b209ea0`）补 1 条 P1：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 6 | `securityincident/SecurityIncidentService.restoreState()` | P1 | `2` 号修复未覆盖 restore 路径：存量的 `OPEN`/`UNREVIEWED` 候选会覆盖新一轮已带 disposition 的 fresh。现 `effectiveDisposition()` 将 fresh 记录纳入优先级，并保留人工复核的 first-wins |
+
