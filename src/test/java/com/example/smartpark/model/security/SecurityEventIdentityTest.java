@@ -141,6 +141,17 @@ class SecurityEventIdentityTest {
     }
 
     @Test
+    void qualifiesTheReferenceWithTheEventLocation() {
+        SecurityEventIdentity here = identity(ACCESS, "E");
+        SecurityEventIdentity elsewhere = new SecurityEventIdentity(ACCESS, "E", "PARK-A", "A2");
+
+        assertThat(here.reference()).isNotEqualTo(elsewhere.reference());
+        // The token carries its own location, so it round-trips even when the owning
+        // alert is attributed to a different park or building.
+        assertThat(SecurityEventIdentity.fromReference(here.reference(), "OTHER-PARK", "B9")).isEqualTo(here);
+    }
+
+    @Test
     void keepsSourcePrefixedEventIdsThatDoNotDecodeAsQualifiedReferences() {
         SecurityEventIdentity identity = identity(SecuritySourceRef.unknown(), "source:not-encoded");
 

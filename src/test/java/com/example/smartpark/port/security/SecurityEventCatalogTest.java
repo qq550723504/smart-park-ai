@@ -142,6 +142,25 @@ class SecurityEventCatalogTest {
     }
 
     @Test
+    void resolvesLocationQualifiedReferencesWhenASourceReusesAnIdAcrossBuildings() {
+        SecurityEvent here = event("SEC-SPREAD", access("access-1"), BASE);
+        SecurityEvent elsewhere = new SecurityEvent("SEC-SPREAD", PARK, "A2", SecurityEventType.ACCESS_ANOMALY,
+                "ACCESS", access("access-1"), SecurityEventLocation.empty(), BASE, BASE.plusSeconds(30),
+                SecurityEventSeverity.UNKNOWN, null, SecurityPrivacyMetadata.redactedOnly(),
+                SecurityDispositionRecord.unreviewed(), "test", null, "REDACTED: safe event summary");
+        SecurityEventCatalog catalog = new SecurityEventCatalog(reader(here), List.of(adapter(elsewhere)));
+
+        String hereReference = SecurityEventIdentity.of(here).reference();
+        String elsewhereReference = SecurityEventIdentity.of(elsewhere).reference();
+
+        // The source reuses SEC-SPREAD across buildings, so the reference must carry the
+        // location or both copies collapse into one ambiguous token that resolves neither.
+        assertThat(hereReference).isNotEqualTo(elsewhereReference);
+        assertThat(catalog.getEventByReference(hereReference)).isEqualTo(here);
+        assertThat(catalog.getEventByReference(elsewhereReference)).isEqualTo(elsewhere);
+    }
+
+    @Test
     void failsWhenNoEventMatches() {
         SecurityEventCatalog catalog = new SecurityEventCatalog(reader(), List.of());
 

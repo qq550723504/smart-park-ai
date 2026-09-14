@@ -79,8 +79,8 @@ public final class SecurityEventCatalog implements SecurityEventResolver, Securi
      * source-qualified token matches only events of that exact source, so it recovers a
      * colliding bare id that {@link #getEvent(String)} rejects as ambiguous; a legacy bare
      * token aliases any source of the same event id, like the bare-id lookup. The token
-     * carries the source but not the location, so a match spanning several locations stays
-     * ambiguous rather than silently grounding the caller in one park.
+     * carries the source and the location, so a source that reuses a local id across parks
+     * or buildings still resolves to the exact event instead of staying ambiguous.
      */
     @Override
     public SecurityEvent getEventByReference(String reference) {

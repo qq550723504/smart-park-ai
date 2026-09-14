@@ -16,6 +16,10 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
     /** Namespace shared by alert evidence and incident projections that reference a security event. */
     public static final String REFERENCE_PREFIX = "security-event:";
     private static final String SOURCE_REFERENCE_PREFIX = "source:";
+    /** Number of length-prefixed parts in {@link #material()} (type, source id, event id). */
+    private static final int IDENTITY_PARTS = 3;
+    /** Number of length-prefixed parts {@link #reference()} adds for the event location. */
+    private static final int LOCATION_PARTS = 2;
 
     public SecurityEventIdentity {
         source = source == null ? SecuritySourceRef.unknown() : source;
@@ -36,7 +40,7 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
      */
     static boolean mimicsQualifiedReference(String eventId) {
         if (eventId == null || !eventId.startsWith(SOURCE_REFERENCE_PREFIX)) return false;
-        return decodeMaterial(eventId.substring(SOURCE_REFERENCE_PREFIX.length())) != null;
+        return decodeParts(eventId.substring(SOURCE_REFERENCE_PREFIX.length()), IDENTITY_PARTS) != null;
     }
 
     public static SecurityEventIdentity of(SecurityEvent event) {
@@ -76,13 +80,14 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
 
     /**
      * Alert-evidence reference to this logical event. A concrete source is encoded
-     * with the delimiter-safe material so the reference survives any characters in
-     * the source id or event id; a source-less identity keeps the legacy bare form.
+     * with the delimiter-safe material plus the event location so a source that
+     * reuses a local id across parks or buildings still has a unique reference; a
+     * source-less identity keeps the legacy bare form.
      */
     public String reference() {
-        return isSourceLess()
-                ? legacyReference(eventId)
-                : REFERENCE_PREFIX + SOURCE_REFERENCE_PREFIX + material();
+        if (isSourceLess()) return legacyReference(eventId);
+        return REFERENCE_PREFIX + SOURCE_REFERENCE_PREFIX + material()
+                + ":" + encode(parkId) + ":" + encode(buildingId);
     }
 
     /** The source-less legacy reference, which aliases any source of the same event. */
@@ -104,21 +109,24 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
         if (!isReference(token)) return false;
         String body = token.substring(REFERENCE_PREFIX.length()).trim();
         return body.startsWith(SOURCE_REFERENCE_PREFIX)
-                && decodeMaterial(body.substring(SOURCE_REFERENCE_PREFIX.length())) != null;
+                && decodeParts(body.substring(SOURCE_REFERENCE_PREFIX.length()), IDENTITY_PARTS) != null;
     }
 
     /**
-     * Rebuilds the identity encoded in a reference token. The location comes from
-     * the owning alert, since the token only carries the event identity. A legacy
-     * bare token resolves to the source-less alias, which matches any source.
+     * Rebuilds the identity encoded in a reference token. A location-qualified token
+     * carries its own park and building, which win over the values supplied by the
+     * owning alert; a legacy token that omits them falls back to those arguments. A
+     * legacy bare token resolves to the source-less alias, which matches any source.
      */
     public static SecurityEventIdentity fromReference(String token, String parkId, String buildingId) {
         if (!isReference(token)) throw new IllegalArgumentException("not a security event reference: " + token);
         String body = token.substring(REFERENCE_PREFIX.length()).trim();
         if (body.isEmpty()) throw new IllegalArgumentException("security event reference must not be blank");
         if (body.startsWith(SOURCE_REFERENCE_PREFIX)) {
-            List<String> parts = decodeMaterial(body.substring(SOURCE_REFERENCE_PREFIX.length()));
-            if (parts != null) {
+            String material = body.substring(SOURCE_REFERENCE_PREFIX.length());
+            DecodedMaterial decoded = decodeParts(material, IDENTITY_PARTS);
+            if (decoded != null) {
+                List<String> parts = decoded.parts();
                 SecuritySourceType type = SecuritySourceType.fromName(parts.get(0));
                 // reference() never encodes a source-less (UNKNOWN) source, so a qualified
                 // token that names an unknown or misspelled type is malformed. Reject it
@@ -128,8 +136,12 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
                     throw new IllegalArgumentException(
                             "security event reference must name a known source type: " + token);
                 }
-                return new SecurityEventIdentity(new SecuritySourceRef(type, parts.get(1)), parts.get(2), parkId,
-                        buildingId);
+                DecodedMaterial location = decodeLocation(material, decoded.consumed());
+                return new SecurityEventIdentity(
+                        new SecuritySourceRef(type, parts.get(1)),
+                        parts.get(2),
+                        location == null ? parkId : location.parts().get(0),
+                        location == null ? buildingId : location.parts().get(1));
             }
         }
         return new SecurityEventIdentity(SecuritySourceRef.unknown(), body, parkId, buildingId);
@@ -137,7 +149,8 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
 
     /**
      * Canonical source-qualified reference for the prefix of {@code token} that obeys the
-     * {@code source:length#value:length#value:length#value} grammar. Only the encoded
+     * {@code source:length#value:length#value:length#value} grammar, including the optional
+     * trailing {@code :length#park:length#building} location when present. Only the encoded
      * prefix is consumed, so trailing prose (a sentence period, a comma, another bare id)
      * is ignored, and a source or event id may contain any character such as {@code /}.
      * Returns {@code null} when {@code token} is not a decodable source-qualified reference;
@@ -147,44 +160,23 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
         if (!isReference(token)) return null;
         String body = token.substring(REFERENCE_PREFIX.length()).trim();
         if (!body.startsWith(SOURCE_REFERENCE_PREFIX)) return null;
-        List<String> parts = decodeMaterialPrefix(body.substring(SOURCE_REFERENCE_PREFIX.length()));
-        if (parts == null) return null;
+        String material = body.substring(SOURCE_REFERENCE_PREFIX.length());
+        DecodedMaterial decoded = decodeParts(material, IDENTITY_PARTS);
+        if (decoded == null) return null;
+        List<String> parts = decoded.parts();
         // reference() never encodes a source-less source, so an unknown or misspelled
         // type is malformed and must not be normalized into a resolvable token.
         if (SecuritySourceType.fromName(parts.get(0)) == SecuritySourceType.UNKNOWN) return null;
-        return REFERENCE_PREFIX + SOURCE_REFERENCE_PREFIX
-                + encode(parts.get(0)) + ":" + encode(parts.get(1)) + ":" + encode(parts.get(2));
-    }
-
-    /**
-     * Decodes exactly three length-prefixed parts from the start of {@code material} and
-     * ignores anything that follows, unlike {@link #decodeMaterial(String)} which requires
-     * the whole string to be consumed. This is what makes a token with trailing prose
-     * resolvable without guessing where a value ends.
-     */
-    private static List<String> decodeMaterialPrefix(String material) {
-        List<String> parts = new ArrayList<>(3);
-        int index = 0;
-        while (parts.size() < 3) {
-            int delimiter = material.indexOf('#', index);
-            if (delimiter <= index) return null;
-            int length;
-            try {
-                length = Integer.parseInt(material.substring(index, delimiter));
-            } catch (NumberFormatException exception) {
-                return null;
-            }
-            int start = delimiter + 1;
-            if (length < 0 || length > material.length() - start) return null;
-            int end = start + length;
-            parts.add(material.substring(start, end));
-            index = end;
-            if (parts.size() < 3) {
-                if (index >= material.length() || material.charAt(index) != ':') return null;
-                index++;
-            }
+        StringBuilder canonical = new StringBuilder(REFERENCE_PREFIX).append(SOURCE_REFERENCE_PREFIX)
+                .append(encode(parts.get(0))).append(':')
+                .append(encode(parts.get(1))).append(':')
+                .append(encode(parts.get(2)));
+        DecodedMaterial location = decodeLocation(material, decoded.consumed());
+        if (location != null) {
+            canonical.append(':').append(encode(location.parts().get(0)))
+                    .append(':').append(encode(location.parts().get(1)));
         }
-        return parts;
+        return canonical.toString();
     }
 
     /**
@@ -198,16 +190,33 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
         String body = token.substring(REFERENCE_PREFIX.length()).trim();
         if (body.isEmpty()) return null;
         if (body.startsWith(SOURCE_REFERENCE_PREFIX)) {
-            List<String> parts = decodeMaterial(body.substring(SOURCE_REFERENCE_PREFIX.length()));
-            if (parts != null) return parts.get(2);
+            DecodedMaterial decoded = decodeParts(body.substring(SOURCE_REFERENCE_PREFIX.length()), IDENTITY_PARTS);
+            if (decoded != null) return decoded.parts().get(2);
         }
         return body;
     }
 
-    private static List<String> decodeMaterial(String material) {
-        List<String> parts = new ArrayList<>(3);
+    /**
+     * Decodes the location that {@link #reference()} appends after the identity parts.
+     * Returns {@code null} when {@code consumed} is not followed by a complete
+     * {@code :length#park:length#building} suffix, which is the normal case for a
+     * legacy token or trailing prose.
+     */
+    private static DecodedMaterial decodeLocation(String material, int consumed) {
+        if (consumed >= material.length() || material.charAt(consumed) != ':') return null;
+        return decodeParts(material.substring(consumed + 1), LOCATION_PARTS);
+    }
+
+    /**
+     * Decodes exactly {@code count} length-prefixed parts from the start of
+     * {@code material} and ignores anything that follows. Consuming only the encoded
+     * prefix is what makes a token with trailing prose resolvable without guessing
+     * where a value ends.
+     */
+    private static DecodedMaterial decodeParts(String material, int count) {
+        List<String> parts = new ArrayList<>(count);
         int index = 0;
-        while (index < material.length()) {
+        while (parts.size() < count) {
             int delimiter = material.indexOf('#', index);
             if (delimiter <= index) return null;
             int length;
@@ -221,12 +230,15 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
             int end = start + length;
             parts.add(material.substring(start, end));
             index = end;
-            if (index < material.length()) {
-                if (material.charAt(index) != ':') return null;
+            if (parts.size() < count) {
+                if (index >= material.length() || material.charAt(index) != ':') return null;
                 index++;
             }
         }
-        return parts.size() == 3 ? parts : null;
+        return new DecodedMaterial(List.copyOf(parts), index);
+    }
+
+    private record DecodedMaterial(List<String> parts, int consumed) {
     }
 
     private static String encode(String value) {
