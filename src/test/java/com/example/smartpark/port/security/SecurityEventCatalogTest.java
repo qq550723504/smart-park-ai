@@ -279,6 +279,20 @@ class SecurityEventCatalogTest {
                 .hasMessageContaining("backend unavailable");
     }
 
+    @Test
+    void rejectsACorruptedLocationSuffixInsteadOfGroundingAnotherLocation() {
+        SecurityEvent here = event("SEC-CORRUPT", access("access-1"), BASE);
+        SecurityEventCatalog catalog = new SecurityEventCatalog(reader(here), List.of());
+        String reference = SecurityEventIdentity.of(here).reference();
+        String corrupted = reference.replace(":6#PARK-A:2#A1", ":x#PARK-A:2#A1");
+
+        assertThat(corrupted).isNotEqualTo(reference);
+        // The damaged location must fail the lookup rather than be read as location-less and
+        // ground the event at whichever location happens to be the only candidate.
+        assertThatThrownBy(() -> catalog.getEventByReference(corrupted))
+                .isInstanceOf(NoSuchElementException.class);
+    }
+
     private static SecurityPort port(SecurityEvent... events) {
         List<SecurityEvent> all = List.of(events);
         return eventId -> all.stream().filter(event -> event.eventId().equals(eventId)).findFirst()

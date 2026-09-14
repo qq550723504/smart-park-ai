@@ -122,6 +122,7 @@ class SecurityEventIdentityTest {
         assertThat(SecurityEventIdentity.canonicalQualifiedReference(reference)).isEqualTo(reference);
         assertThat(SecurityEventIdentity.canonicalQualifiedReference(reference + ",")).isEqualTo(reference);
         assertThat(SecurityEventIdentity.canonicalQualifiedReference(reference + ".")).isEqualTo(reference);
+        // Canonicalization (the assignment extractor) ignores prose after a complete location.
         assertThat(SecurityEventIdentity.canonicalQualifiedReference(reference + ":")).isEqualTo(reference);
         assertThat(SecurityEventIdentity.canonicalQualifiedReference(SecurityEventIdentity.legacyReference("E")))
                 .isNull();
@@ -178,6 +179,34 @@ class SecurityEventIdentityTest {
             assertThatThrownBy(() -> SecurityEventIdentity.fromReference(token, "PARK-A", "A1"))
                     .isInstanceOf(IllegalArgumentException.class);
         }
+    }
+
+    @Test
+    void rejectsACorruptedLocationSuffixInsteadOfTreatingItAsLocationLess() {
+        // The location length is corrupted to a non-digit, so the suffix is damaged. It must
+        // not pass as the supported location-less token and let the lookup ground a different
+        // location's event.
+        String corrupted = "security-event:source:14#ACCESS_CONTROL:8#access-1:1#E:x#PARK-A:2#A1";
+
+        assertThat(SecurityEventIdentity.canonicalQualifiedReference(corrupted)).isNull();
+        assertThat(SecurityEventIdentity.parseQualifiedReference(corrupted)).isNull();
+        assertThatThrownBy(() -> SecurityEventIdentity.fromReference(corrupted, "PARK-A", "A1"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("location");
+    }
+
+    @Test
+    void exactParsersRejectTrailingContentWhileTheExtractorToleratesProse() {
+        String reference = identity(ACCESS, "E").reference();
+        String withProse = reference + ", and SEC-ACCESS-001";
+
+        // Exact parsers must consume the whole token so a corrupted suffix cannot be ignored;
+        // only canonicalization (used by the assignment extractor) skips trailing prose.
+        assertThat(SecurityEventIdentity.parseQualifiedReference(withProse)).isNull();
+        assertThatThrownBy(() -> SecurityEventIdentity.fromReference(withProse, "PARK-A", "A1"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("trailing");
+        assertThat(SecurityEventIdentity.canonicalQualifiedReference(withProse)).isEqualTo(reference);
     }
 
     @Test

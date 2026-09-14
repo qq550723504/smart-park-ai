@@ -145,9 +145,23 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
                             "security event reference has a malformed location: " + token);
                 }
                 DecodedMaterial location = decodeLocation(material, decoded.consumed());
-                if (location != null && hasBlankPart(location.parts())) {
-                    throw new IllegalArgumentException(
-                            "security event reference has a blank location component: " + token);
+                if (location == null) {
+                    // An exact token ends after the identity parts; trailing content (prose or a
+                    // bare delimiter) is tolerated only by the assignment extractor, never here.
+                    if (decoded.consumed() != material.length()) {
+                        throw new IllegalArgumentException(
+                                "security event reference has trailing content: " + token);
+                    }
+                }
+                else {
+                    if (hasBlankPart(location.parts())) {
+                        throw new IllegalArgumentException(
+                                "security event reference has a blank location component: " + token);
+                    }
+                    if (decoded.consumed() + 1 + location.consumed() != material.length()) {
+                        throw new IllegalArgumentException(
+                                "security event reference has trailing content: " + token);
+                    }
                 }
                 return new SecurityEventIdentity(
                         new SecuritySourceRef(type, parts.get(1)),
@@ -207,12 +221,23 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
         if (type == SecuritySourceType.UNKNOWN) return null;
         if (hasMalformedLocation(material, decoded.consumed())) return null;
         DecodedMaterial location = decodeLocation(material, decoded.consumed());
-        if (location != null && hasBlankPart(location.parts())) return null;
+        if (location == null) {
+            // Exact parsing requires the whole material to be consumed; only
+            // canonicalization (used by the assignment extractor) accepts trailing prose.
+            if (decoded.consumed() != material.length()) return null;
+            return new QualifiedReference(
+                    new SecuritySourceRef(type, parts.get(1)),
+                    parts.get(2),
+                    null,
+                    null);
+        }
+        if (hasBlankPart(location.parts())) return null;
+        if (decoded.consumed() + 1 + location.consumed() != material.length()) return null;
         return new QualifiedReference(
                 new SecuritySourceRef(type, parts.get(1)),
                 parts.get(2),
-                location == null ? null : location.parts().get(0),
-                location == null ? null : location.parts().get(1));
+                location.parts().get(0),
+                location.parts().get(1));
     }
 
     /**
@@ -285,25 +310,16 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
     }
 
     /**
-     * True when {@code material} continues after the identity parts with something that
-     * looks like a location suffix (a {@code :length#} prefix) but does not decode into
-     * the required park and building. A damaged or tampered reference must not silently
-     * pass as the intentionally supported location-less form, so callers reject it. Plain
-     * trailing prose is not a length prefix and is left to the trailing-text tolerance.
+     * True when {@code material} continues after the identity parts with a {@code :} that is
+     * not a complete {@code :length#park:length#building} location. A damaged or tampered
+     * reference (a truncated value, a nonnumeric length such as {@code :x#}) must not
+     * silently pass as the intentionally supported location-less form, so callers reject it.
+     * Only a continuation that is not a {@code :} at all is left to the caller's
+     * trailing-text tolerance.
      */
     private static boolean hasMalformedLocation(String material, int consumed) {
         if (consumed >= material.length() || material.charAt(consumed) != ':') return false;
-        String remainder = material.substring(consumed + 1);
-        return startsWithLengthPrefix(remainder) && decodeParts(remainder, LOCATION_PARTS) == null;
-    }
-
-    private static boolean startsWithLengthPrefix(String material) {
-        int delimiter = material.indexOf('#');
-        if (delimiter <= 0) return false;
-        for (int index = 0; index < delimiter; index++) {
-            if (!Character.isDigit(material.charAt(index))) return false;
-        }
-        return true;
+        return decodeParts(material.substring(consumed + 1), LOCATION_PARTS) == null;
     }
 
     /**
