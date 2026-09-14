@@ -136,6 +136,10 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
                     throw new IllegalArgumentException(
                             "security event reference must name a known source type: " + token);
                 }
+                if (hasMalformedLocation(material, decoded.consumed())) {
+                    throw new IllegalArgumentException(
+                            "security event reference has a malformed location: " + token);
+                }
                 DecodedMaterial location = decodeLocation(material, decoded.consumed());
                 return new SecurityEventIdentity(
                         new SecuritySourceRef(type, parts.get(1)),
@@ -190,6 +194,7 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
         // reference() never encodes a source-less source, so an unknown or misspelled type
         // is malformed and must not be resolved as a wildcard.
         if (type == SecuritySourceType.UNKNOWN) return null;
+        if (hasMalformedLocation(material, decoded.consumed())) return null;
         DecodedMaterial location = decodeLocation(material, decoded.consumed());
         return new QualifiedReference(
                 new SecuritySourceRef(type, parts.get(1)),
@@ -218,6 +223,7 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
         // reference() never encodes a source-less source, so an unknown or misspelled
         // type is malformed and must not be normalized into a resolvable token.
         if (SecuritySourceType.fromName(parts.get(0)) == SecuritySourceType.UNKNOWN) return null;
+        if (hasMalformedLocation(material, decoded.consumed())) return null;
         StringBuilder canonical = new StringBuilder(REFERENCE_PREFIX).append(SOURCE_REFERENCE_PREFIX)
                 .append(encode(parts.get(0))).append(':')
                 .append(encode(parts.get(1))).append(':')
@@ -256,6 +262,28 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
     private static DecodedMaterial decodeLocation(String material, int consumed) {
         if (consumed >= material.length() || material.charAt(consumed) != ':') return null;
         return decodeParts(material.substring(consumed + 1), LOCATION_PARTS);
+    }
+
+    /**
+     * True when {@code material} continues after the identity parts with something that
+     * looks like a location suffix (a {@code :length#} prefix) but does not decode into
+     * the required park and building. A damaged or tampered reference must not silently
+     * pass as the intentionally supported location-less form, so callers reject it. Plain
+     * trailing prose is not a length prefix and is left to the trailing-text tolerance.
+     */
+    private static boolean hasMalformedLocation(String material, int consumed) {
+        if (consumed >= material.length() || material.charAt(consumed) != ':') return false;
+        String remainder = material.substring(consumed + 1);
+        return startsWithLengthPrefix(remainder) && decodeParts(remainder, LOCATION_PARTS) == null;
+    }
+
+    private static boolean startsWithLengthPrefix(String material) {
+        int delimiter = material.indexOf('#');
+        if (delimiter <= 0) return false;
+        for (int index = 0; index < delimiter; index++) {
+            if (!Character.isDigit(material.charAt(index))) return false;
+        }
+        return true;
     }
 
     /**

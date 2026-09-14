@@ -152,6 +152,19 @@ class SecurityEventIdentityTest {
     }
 
     @Test
+    void rejectsAMalformedLocationSuffixInsteadOfTreatingItAsLocationLess() {
+        // The building declares length 2 but carries one character, so the location suffix is
+        // damaged. It must not silently pass as the supported location-less token.
+        String truncated = "security-event:source:14#ACCESS_CONTROL:8#access-1:1#E:6#PARK-A:2#A";
+
+        assertThat(SecurityEventIdentity.canonicalQualifiedReference(truncated)).isNull();
+        assertThat(SecurityEventIdentity.parseQualifiedReference(truncated)).isNull();
+        assertThatThrownBy(() -> SecurityEventIdentity.fromReference(truncated, "PARK-A", "A1"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("location");
+    }
+
+    @Test
     void keepsSourcePrefixedEventIdsThatDoNotDecodeAsQualifiedReferences() {
         SecurityEventIdentity identity = identity(SecuritySourceRef.unknown(), "source:not-encoded");
 
