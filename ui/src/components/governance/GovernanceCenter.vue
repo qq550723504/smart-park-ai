@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { getAuditEntries, getGovernanceOverview } from '../../services/workflowApi'
 import type { GovernanceOverview } from '../../services/workflowApi'
+import { securityEventTypeLabel } from '../../utils/labels'
 import type { AuditEntry, DemoRole } from '../../types/workflow'
 
 const props = withDefaults(defineProps<{ active?: boolean; role?: DemoRole }>(), { active: true, role: 'VIEWER' })
@@ -88,6 +89,35 @@ watch([() => props.active, () => props.role], ([active]) => {
           <div><dt>专家协作</dt><dd>{{ overview.capabilities.collaborationEnabled ? '已启用' : '未启用' }}</dd></div>
           <div><dt>实时语音</dt><dd>{{ overview.capabilities.voiceEnabled ? '已启用' : '未启用' }}</dd></div>
         </dl>
+        <div class="governance-security-capabilities" data-governance-security-capabilities>
+          <div class="governance-security-heading">
+            <span class="eyebrow">安全事件能力</span>
+            <p>模型是否定义类型，与当前部署是否接入真实数据源分开呈现；没有生产数据源时误报数不可统计。</p>
+          </div>
+          <div class="governance-security-disposition">
+            <dt>误报统计</dt>
+            <dd
+              data-governance-security-disposition
+              :data-feature-state="overview.capabilities.securityDispositionEnabled ? 'AVAILABLE' : 'NOT_READY'"
+            >{{ overview.capabilities.securityDispositionEnabled ? 'AVAILABLE' : 'NOT_READY' }}</dd>
+            <small>{{ overview.capabilities.securityDispositionEnabled ? '存在生产数据源与已登记复核记录' : '缺少生产数据源，误报数不可统计' }}</small>
+          </div>
+          <ul v-if="overview.capabilities.securityEventCapabilities?.length" class="governance-security-types">
+            <li
+              v-for="capability in overview.capabilities.securityEventCapabilities"
+              :key="capability.eventType"
+              :data-governance-security-capability="capability.eventType"
+              :data-feature-state="capability.state"
+            >
+              <span>{{ securityEventTypeLabel(capability.eventType) }}</span>
+              <strong>{{ capability.state }}</strong>
+              <small v-if="capability.state === 'AVAILABLE'">已接入生产数据源，可参与统计</small>
+              <small v-else-if="capability.state === 'ADAPTED'">仅有非生产适配数据，不参与统计</small>
+              <small v-else>模型已定义该类型，但当前部署未接入数据源</small>
+            </li>
+          </ul>
+          <p v-else class="governance-security-empty" data-governance-security-empty>安全事件类型能力尚未上报，暂按 NOT_READY 处理。</p>
+        </div>
       </section>
       <section class="panel governance-scenarios" aria-label="场景验证状态">
         <div class="section-heading compact"><div><span class="eyebrow">场景验证</span><h2>演示目录状态</h2></div></div>
@@ -128,6 +158,17 @@ watch([() => props.active, () => props.role], ([active]) => {
 .governance-capabilities dl div { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--showcase-border-soft); }
 .governance-capabilities dt { color: var(--showcase-muted); font-size: 0.78rem; }
 .governance-capabilities dd { margin: 0; color: var(--showcase-cyan); }
+.governance-security-capabilities { margin-top: 18px; display: grid; gap: 12px; }
+.governance-security-heading p { margin: 6px 0 0; color: var(--showcase-muted); font-size: 0.85rem; }
+.governance-security-disposition { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--showcase-border-soft); }
+.governance-security-disposition dt { color: var(--showcase-muted); font-size: 0.78rem; }
+.governance-security-disposition dd { margin: 0; color: var(--showcase-cyan); }
+.governance-security-disposition small, .governance-security-types small { color: var(--showcase-muted); }
+.governance-security-types { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.governance-security-types li { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--showcase-border-soft); }
+.governance-security-types span { color: var(--showcase-muted); font-size: 0.78rem; }
+.governance-security-types strong { color: var(--showcase-cyan); }
+.governance-security-empty { color: var(--showcase-muted); font-size: 0.85rem; }
 .scenario-counts { display: flex; flex-wrap: wrap; gap: 14px; color: var(--showcase-muted); }
 .scenario-counts strong { color: var(--showcase-cyan); font: 500 24px Georgia, serif; margin-left: 4px; }
 .governance-card { padding: 22px; display: grid; gap: 8px; }
@@ -142,5 +183,7 @@ watch([() => props.active, () => props.role], ([active]) => {
 @media (max-width: 850px) { .governance-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 500px) { .governance-grid { grid-template-columns: 1fr; } }
 @media (max-width: 650px) { .governance-capabilities dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 650px) { .governance-security-types { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 500px) { .governance-capabilities dl { grid-template-columns: 1fr; } }
+@media (max-width: 500px) { .governance-security-types { grid-template-columns: 1fr; } }
 </style>

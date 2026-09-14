@@ -97,6 +97,23 @@ describe('OperationsBoard', () => {
     expect(wrapper.find('[data-security-capability]').exists()).toBe(false)
   })
 
+  it('reports security capabilities independently of analytics availability', () => {
+    const wrapper = mount(OperationsBoard, {
+      props: {
+        role: 'ADMIN',
+        analyticsAvailable: false,
+        securityEventCapabilities: [
+          { eventType: 'FIRE_SMOKE', modelSupported: true, sourceConnected: false, productionSource: false, state: 'NOT_READY' },
+        ],
+        securityDispositionEnabled: false,
+      },
+    })
+
+    expect(wrapper.get('[data-security-capability="FIRE_SMOKE"]').attributes('data-feature-state')).toBe('NOT_READY')
+    expect(wrapper.get('[data-security-disposition]').attributes('data-feature-state')).toBe('NOT_READY')
+    expect(wrapper.find('[data-cockpit-feature]').exists()).toBe(false)
+  })
+
   it('routes only available Agent entries to existing workbench views', async () => {
     const wrapper = mount(OperationsBoard, {
       props: { role: 'ADMIN', analyticsAvailable: true, collaborationAvailable: true, securityIncidentAvailable: false },

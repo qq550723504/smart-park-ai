@@ -108,7 +108,7 @@ watch(() => props.active, (active) => {
       <article data-cockpit-feature="vibration-telemetry" data-feature-state="NOT_READY"><span>振动遥测</span><strong>NOT_READY</strong><small>当前没有振动 datasource</small></article>
     </section>
 
-    <section v-if="props.analyticsAvailable" class="operations-board__capability-strip operations-board__security-capabilities" aria-label="安全事件能力状态" data-security-capabilities>
+    <section class="operations-board__capability-strip operations-board__security-capabilities" aria-label="安全事件能力状态" data-security-capabilities>
       <article
         v-for="capability in props.securityEventCapabilities ?? []"
         :key="capability.eventType"

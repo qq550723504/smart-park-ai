@@ -84,6 +84,39 @@ describe('GovernanceCenter', () => {
     expect(wrapper.text()).toContain('3/5')
   })
 
+  it('renders per-type security capability states without claiming false-positive statistics', async () => {
+    vi.mocked(getGovernanceOverview).mockResolvedValue({
+      ...overview,
+      capabilities: {
+        ...overview.capabilities,
+        securityIncidentEnabled: true,
+        securityDispositionEnabled: false,
+        securityEventCapabilities: [
+          { eventType: 'ACCESS_ANOMALY', modelSupported: true, sourceConnected: true, productionSource: false, state: 'ADAPTED' },
+          { eventType: 'FIRE_SMOKE', modelSupported: true, sourceConnected: false, productionSource: false, state: 'NOT_READY' },
+        ],
+      },
+    })
+    const wrapper = mount(GovernanceCenter, { props: { role: 'VIEWER' } })
+    await flushPromises()
+
+    expect(wrapper.get('[data-governance-security-capability="ACCESS_ANOMALY"]').attributes('data-feature-state')).toBe('ADAPTED')
+    expect(wrapper.get('[data-governance-security-capability="ACCESS_ANOMALY"]').text()).toContain('非生产适配数据')
+    expect(wrapper.get('[data-governance-security-capability="FIRE_SMOKE"]').attributes('data-feature-state')).toBe('NOT_READY')
+    expect(wrapper.get('[data-governance-security-disposition]').attributes('data-feature-state')).toBe('NOT_READY')
+    expect(wrapper.get('[data-governance-security-disposition]').text()).toBe('NOT_READY')
+    expect(wrapper.text()).toContain('缺少生产数据源，误报数不可统计')
+  })
+
+  it('fails closed when the governance overview reports no security capabilities', async () => {
+    const wrapper = mount(GovernanceCenter, { props: { role: 'VIEWER' } })
+    await flushPromises()
+
+    expect(wrapper.get('[data-governance-security-empty]').text()).toContain('NOT_READY')
+    expect(wrapper.find('[data-governance-security-capability]').exists()).toBe(false)
+    expect(wrapper.get('[data-governance-security-disposition]').attributes('data-feature-state')).toBe('NOT_READY')
+  })
+
   it('ignores an older overview response after a newer activation load', async () => {
     const first = deferred<typeof overview>()
     const secondOverview = { ...overview, scenarios: { ...overview.scenarios, ready: 4 } }
