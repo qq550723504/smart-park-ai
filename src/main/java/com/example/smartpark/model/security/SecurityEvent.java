@@ -27,13 +27,17 @@ public record SecurityEvent(
         String evidenceSummary) {
 
     public SecurityEvent {
-        eventId = requireText(eventId, "eventId");
+        // Every boundary identifier is projected to the UI and the AI tool, so all of them
+        // obeys the credential/URL safety policy instead of only being trimmed. A vendor
+        // eventId of "https://internal.example/event" or "token=abc" must not reach
+        // SecurityEventSummary.eventId or an incident evidence sourceId.
+        eventId = SecurityIdentifierPolicy.requireSafe(eventId, "eventId");
         if (SecurityEventIdentity.mimicsQualifiedReference(eventId)) {
             throw new IllegalArgumentException(
                     "eventId must not mimic a source-qualified reference: " + eventId);
         }
-        parkId = requireText(parkId, "parkId");
-        buildingId = requireText(buildingId, "buildingId");
+        parkId = SecurityIdentifierPolicy.requireSafe(parkId, "parkId");
+        buildingId = SecurityIdentifierPolicy.requireSafe(buildingId, "buildingId");
         eventType = Objects.requireNonNull(eventType, "eventType");
         // rawEventType is projected to the UI and the AI tool verbatim, so it must obey
         // the same credential/URL safety policy as the other identifiers instead of only
@@ -81,12 +85,5 @@ public record SecurityEvent(
     public SecurityEvent withDisposition(SecurityDispositionRecord replacement) {
         return new SecurityEvent(eventId, parkId, buildingId, eventType, rawEventType, source, location, observedAt,
                 receivedAt, severity, confidence, privacy, replacement, ingestedBy, ingestVersion, evidenceSummary);
-    }
-
-    private static String requireText(String value, String fieldName) {
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException(fieldName + " must not be blank");
-        }
-        return value.trim();
     }
 }

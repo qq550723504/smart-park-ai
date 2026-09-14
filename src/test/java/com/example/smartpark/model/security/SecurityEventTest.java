@@ -127,6 +127,22 @@ class SecurityEventTest {
     }
 
     @Test
+    void rejectsBoundaryIdentifiersContainingCredentialsOrUrls() {
+        Stream.of("https://internal.example/event", "token=abc").forEach(eventId ->
+                assertThatThrownBy(() -> newEvent(eventId, "PARK-A", "A1", "UNAUTHORIZED_ACCESS", "REDACTED: 摘要"))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("eventId"));
+        Stream.of("https://internal.example/park", "secret").forEach(parkId ->
+                assertThatThrownBy(() -> newEvent("SEC-001", parkId, "A1", "UNAUTHORIZED_ACCESS", "REDACTED: 摘要"))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("parkId"));
+        Stream.of("rtsp://cam-1", "credential:v2").forEach(buildingId ->
+                assertThatThrownBy(() -> newEvent("SEC-001", "PARK-A", buildingId, "UNAUTHORIZED_ACCESS", "REDACTED: 摘要"))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("buildingId"));
+    }
+
+    @Test
     void rejectsRawEventTypeContainingCredentialsOrUrls() {
         Stream.of("rtsp://user:pass@cam-1", "https://internal.example/cam", "token=abc", "password:secret")
                 .forEach(rawEventType -> assertThatThrownBy(() ->
