@@ -256,3 +256,11 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 27 | `model/security/SecurityEventIdentity.decodeMaterial()` | P2 | 畸形 qualified 引用（如 `security-event:source:2147483647#x`）的 `start + length` 会溢出为负数，越界检查被绕过、`substring` 抛 `StringIndexOutOfBoundsException`，使外部告警中断安全流程。现先校验 `length < 0 \|\| length > material.length() - start` 再计算 `end`，令牌按 malformed 回退为 legacy 引用 |
 
 每个修复对应独立提交：`437075e`（#25）、`4aae553`（#26）、`563e5d7`（#27）。
+
+第十二轮（对 `f3f91d0`）补 1 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 28 | `port/security/SecurityEventCatalog.getEvent(String)` / `getEvent(SecurityEventIdentity)` | P1 | 两个 adapter 复用同一 source-local event id 时，裸 id 重载会匹配两者的全部副本并静默返回 `receivedAt` 最新的具体事件（可能属于另一源/园区/楼栋）。`SecurityQueryTool.lookupSecurityEvent()` 与只提取裸 `SEC-*` 的协作取证器都走这条路径，诊断/专家结论可能锚定错误事件。现按候选背后「具体源 + 仅无源别名的位置」计数逻辑事件，>1 时抛 `ambiguous security event id ...; use a source-qualified reference` 而非猜测；同一逻辑事件的多份表示（具体源 + 无源别名、同源重复读取）仍会折叠，source-qualified identity 仍可无歧义解析 |
+
+对应独立提交：`62242c6`（#28）。
