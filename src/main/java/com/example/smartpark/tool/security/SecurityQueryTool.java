@@ -16,7 +16,7 @@ import java.util.Objects;
 @ConditionalOnProperty(name = "spring.ai.dashscope.enabled", havingValue = "true", matchIfMissing = true)
 public class SecurityQueryTool {
 
-    private static final String MOCK_NOTICE = "Mock redacted security data only. No raw media, identity record, or device control is available.";
+    private static final String REDACTED_NOTICE = "Redacted security data only. No raw media, identity record, or device control is available.";
 
     private final SecurityEventReader securityEvents;
 
@@ -81,11 +81,11 @@ public class SecurityQueryTool {
         }
 
         private static SecurityLookupResult success(String eventId, SecurityEvent event) {
-            return new SecurityLookupResult(eventId, Objects.requireNonNull(event, "event"), null, MOCK_NOTICE);
+            return new SecurityLookupResult(eventId, Objects.requireNonNull(event, "event"), null, REDACTED_NOTICE);
         }
 
         private static SecurityLookupResult error(String eventId, String error) {
-            return new SecurityLookupResult(eventId, null, requireText(error, "error"), MOCK_NOTICE);
+            return new SecurityLookupResult(eventId, null, requireText(error, "error"), REDACTED_NOTICE);
         }
     }
 }

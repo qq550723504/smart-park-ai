@@ -10,12 +10,15 @@ import com.example.smartpark.model.security.SecurityPrivacyMetadata;
 import com.example.smartpark.model.security.SecuritySourceRef;
 import com.example.smartpark.model.security.SecuritySourceType;
 import com.example.smartpark.port.security.SecurityEventReader;
+import com.example.smartpark.port.security.SecuritySourceAdapter;
+import com.example.smartpark.port.security.SecuritySourceDescriptor;
 import com.example.smartpark.tool.security.SecurityQueryTool;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -75,6 +78,30 @@ class SecurityQueryToolTest {
 
         assertThat(result.event()).isNull();
         assertThat(result.error()).contains("ambiguous");
+    }
+
+    @Test
+    void doesNotLabelAdapterResolvedEventsAsMockData() {
+        SecurityEvent production = sourcedEvent("SEC-PROD", SecuritySourceType.ACCESS_CONTROL, "access-prod");
+        SecuritySourceAdapter productionAdapter = new SecuritySourceAdapter() {
+            @Override
+            public SecuritySourceDescriptor descriptor() {
+                return new SecuritySourceDescriptor("access-prod", SecuritySourceType.ACCESS_CONTROL,
+                        Set.of(SecurityEventType.ACCESS_ANOMALY), true);
+            }
+
+            @Override
+            public List<SecurityEvent> readEvents() {
+                return List.of(production);
+            }
+        };
+        SecurityQueryTool tool = new SecurityQueryTool(reader(), List.of(productionAdapter));
+
+        SecurityQueryTool.SecurityLookupResult result = tool.lookupSecurityEvent("SEC-PROD");
+
+        assertThat(result.error()).isNull();
+        assertThat(result.notice()).doesNotContainIgnoringCase("mock");
+        assertThat(result.notice()).contains("No raw media");
     }
 
     private static SecurityEvent sourcedEvent(String eventId, SecuritySourceType type, String sourceId) {
