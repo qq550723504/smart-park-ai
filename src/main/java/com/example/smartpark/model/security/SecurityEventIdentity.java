@@ -136,6 +136,36 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
     }
 
     /**
+     * Canonical source-qualified reference for {@code token}, tolerating trailing prose
+     * punctuation a caller may have picked up from the surrounding sentence. Returns
+     * {@code null} when {@code token} is not a decodable source-qualified reference; a
+     * legacy bare reference also returns {@code null} because it carries no source.
+     */
+    public static String canonicalQualifiedReference(String token) {
+        if (!isReference(token)) return null;
+        String body = token.substring(REFERENCE_PREFIX.length()).trim();
+        if (!body.startsWith(SOURCE_REFERENCE_PREFIX)) return null;
+        String material = body.substring(SOURCE_REFERENCE_PREFIX.length());
+        while (true) {
+            List<String> parts = decodeMaterial(material);
+            if (parts != null) {
+                // reference() never encodes a source-less source, so an unknown or misspelled
+                // type is malformed and must not be normalized into a resolvable token.
+                if (SecuritySourceType.fromName(parts.get(0)) == SecuritySourceType.UNKNOWN) return null;
+                return REFERENCE_PREFIX + SOURCE_REFERENCE_PREFIX
+                        + encode(parts.get(0)) + ":" + encode(parts.get(1)) + ":" + encode(parts.get(2));
+            }
+            if (material.isEmpty() || !isTrailingNoise(material.charAt(material.length() - 1))) return null;
+            material = material.substring(0, material.length() - 1);
+        }
+    }
+
+    private static boolean isTrailingNoise(char value) {
+        return value == '.' || value == ':' || value == ';' || value == ',' || value == '!'
+                || value == '?' || value == ')' || value == ']' || value == '}' || value == '"' || value == '\'';
+    }
+
+    /**
      * Extracts the source-local event id from a reference token, accepting both the
      * legacy bare form and the source-qualified form. A token that looks qualified
      * but does not decode is treated as a legacy bare event id, so ids that merely

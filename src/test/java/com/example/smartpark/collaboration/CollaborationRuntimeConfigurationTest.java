@@ -255,6 +255,30 @@ class CollaborationRuntimeConfigurationTest {
     }
 
     @Test
+    void preservesSourceQualifiedSecurityReferencesInPrimaryEvidence() {
+        EvidenceLedger ledger = new EvidenceLedger();
+        List<String> inputs = new java.util.ArrayList<>();
+        ToolCallback callback = namedCallback("lookupSecurityEvent", arguments -> {
+            inputs.add(arguments);
+            return "{\"eventId\":\"SEC-DUAL\",\"rawEventType\":\"UNAUTHORIZED_ACCESS\"}";
+        });
+        String reference = new com.example.smartpark.model.security.SecurityEventIdentity(
+                new com.example.smartpark.model.security.SecuritySourceRef(
+                        com.example.smartpark.model.security.SecuritySourceType.ACCESS_CONTROL, "access-1"),
+                "SEC-DUAL", "PARK-A", "A1").reference();
+
+        CollaborationRuntimeConfiguration.collectPrimaryEvidence(
+                ExpertDomain.SECURITY,
+                "investigate " + reference + " and SEC-ACCESS-001",
+                new ToolCallback[]{CollaborationRuntimeConfiguration.audited(
+                        callback, ledger, new InMemoryExecutionEventPublisher(), UUID.randomUUID())});
+
+        assertThat(inputs).containsExactly(
+                "{\"eventId\":\"" + reference + "\"}",
+                "{\"eventId\":\"SEC-ACCESS-001\"}");
+    }
+
+    @Test
     void bindsServerOwnedPrimaryReferenceInsteadOfTrustingModelMarkerCopying() {
         EvidenceLedger ledger = new EvidenceLedger();
         ledger.record("tool:lookupDeviceStatus#abc",

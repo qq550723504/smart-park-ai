@@ -172,7 +172,7 @@ public class CollaborationRuntimeConfiguration {
 
         java.util.Set<String> entityIds = new java.util.LinkedHashSet<>();
         while (matcher.find()) {
-            entityIds.add(matcher.group().toUpperCase(java.util.Locale.ROOT));
+            entityIds.add(normalizePrimaryEntity(matcher.group()));
         }
         java.util.List<String> evidence = new java.util.ArrayList<>();
         for (String entityId : entityIds) {
@@ -186,6 +186,28 @@ public class CollaborationRuntimeConfiguration {
         return String.join("\n", evidence);
     }
 
+    /**
+     * Normalizes a matched domain entity. Bare ids are upper-cased for a stable lookup,
+     * while a source-qualified security reference keeps its case-sensitive encoded
+     * material: upper-casing it would corrupt the source id and lose the deterministic
+     * evidence when two adapters reuse the same event id.
+     */
+    private static String normalizePrimaryEntity(String matched) {
+        if (com.example.smartpark.model.security.SecurityEventIdentity.isReference(matched)) {
+            String canonical = com.example.smartpark.model.security.SecurityEventIdentity
+                    .canonicalQualifiedReference(matched);
+            if (canonical != null) return canonical;
+            String body = matched.substring(
+                    com.example.smartpark.model.security.SecurityEventIdentity.REFERENCE_PREFIX.length()).trim();
+            while (!body.isEmpty() && ",;:.!?)]}\"'".indexOf(body.charAt(body.length() - 1)) >= 0) {
+                body = body.substring(0, body.length() - 1);
+            }
+            return com.example.smartpark.model.security.SecurityEventIdentity.legacyReference(
+                    body.toUpperCase(java.util.Locale.ROOT));
+        }
+        return matched.toUpperCase(java.util.Locale.ROOT);
+    }
+
     private static PrimaryEvidenceSpec primaryEvidenceSpec(ExpertDomain domain) {
         int insensitive = java.util.regex.Pattern.CASE_INSENSITIVE;
         return switch (domain) {
@@ -194,7 +216,8 @@ public class CollaborationRuntimeConfiguration {
             case DEVICE -> new PrimaryEvidenceSpec("lookupDeviceStatus", "deviceId",
                     java.util.regex.Pattern.compile("\\bDEV-(?!(?:ENERGY|METER)(?:-|\\b))[A-Z0-9-]+\\b", insensitive));
             case SECURITY -> new PrimaryEvidenceSpec("lookupSecurityEvent", "eventId",
-                    java.util.regex.Pattern.compile("\\bSEC-[A-Z0-9-]+\\b", insensitive));
+                    java.util.regex.Pattern.compile(
+                            "security-event:[A-Za-z0-9_#:.\\-]+|(?i:\\bSEC-[A-Z0-9-]+\\b)"));
         };
     }
 

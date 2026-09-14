@@ -114,6 +114,21 @@ class SecurityEventIdentityTest {
     }
 
     @Test
+    void canonicalizesQualifiedReferencesAndRejectsNonQualifiedTokens() {
+        String reference = identity(ACCESS, "E").reference();
+
+        assertThat(SecurityEventIdentity.canonicalQualifiedReference(reference)).isEqualTo(reference);
+        assertThat(SecurityEventIdentity.canonicalQualifiedReference(reference + ",")).isEqualTo(reference);
+        assertThat(SecurityEventIdentity.canonicalQualifiedReference(reference + ".")).isEqualTo(reference);
+        assertThat(SecurityEventIdentity.canonicalQualifiedReference(reference + ":")).isEqualTo(reference);
+        assertThat(SecurityEventIdentity.canonicalQualifiedReference(SecurityEventIdentity.legacyReference("E")))
+                .isNull();
+        assertThat(SecurityEventIdentity.canonicalQualifiedReference("SEC-1")).isNull();
+        assertThat(SecurityEventIdentity.canonicalQualifiedReference(
+                "security-event:source:7#UNKNOWN:3#src:1#E")).isNull();
+    }
+
+    @Test
     void keepsSourcePrefixedEventIdsThatDoNotDecodeAsQualifiedReferences() {
         SecurityEventIdentity identity = identity(SecuritySourceRef.unknown(), "source:not-encoded");
 
