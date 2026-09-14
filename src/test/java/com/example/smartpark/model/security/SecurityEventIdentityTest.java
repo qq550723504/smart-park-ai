@@ -72,4 +72,14 @@ class SecurityEventIdentityTest {
         assertThat(SecurityEventIdentity.eventIdOfReference("security-event:source:not-encoded"))
                 .isEqualTo("source:not-encoded");
     }
+
+    @Test
+    void treatsAnOverflowingEncodedLengthAsAMalformedLegacyReference() {
+        String malformed = "security-event:source:2147483647#x";
+
+        assertThat(SecurityEventIdentity.eventIdOfReference(malformed)).isEqualTo("source:2147483647#x");
+        SecurityEventIdentity identity = SecurityEventIdentity.fromReference(malformed, "PARK-A", "A1");
+        assertThat(identity.isSourceLess()).isTrue();
+        assertThat(identity.eventId()).isEqualTo("source:2147483647#x");
+    }
 }

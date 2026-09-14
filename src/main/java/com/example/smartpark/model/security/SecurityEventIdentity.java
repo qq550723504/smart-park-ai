@@ -132,8 +132,8 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
                 return null;
             }
             int start = delimiter + 1;
+            if (length < 0 || length > material.length() - start) return null;
             int end = start + length;
-            if (length < 0 || end > material.length()) return null;
             parts.add(material.substring(start, end));
             index = end;
             if (index < material.length()) {
