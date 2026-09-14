@@ -42,8 +42,9 @@ public record SecurityEvent(
         }
         privacy = privacy == null ? SecurityPrivacyMetadata.redactedOnly() : privacy;
         disposition = disposition == null ? SecurityDispositionRecord.unreviewed() : disposition;
-        ingestedBy = ingestedBy == null || ingestedBy.isBlank() ? "unspecified" : ingestedBy.trim();
-        ingestVersion = ingestVersion == null || ingestVersion.isBlank() ? null : ingestVersion.trim();
+        ingestedBy = SecurityIdentifierPolicy.optionalSafe(ingestedBy, "ingestedBy");
+        ingestedBy = ingestedBy == null ? "unspecified" : ingestedBy;
+        ingestVersion = SecurityIdentifierPolicy.optionalSafe(ingestVersion, "ingestVersion");
         evidenceSummary = RedactedEvidencePolicy.require(evidenceSummary, "evidenceSummary");
     }
 

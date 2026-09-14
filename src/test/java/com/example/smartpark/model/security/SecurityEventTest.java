@@ -149,6 +149,41 @@ class SecurityEventTest {
     }
 
     @Test
+    void rejectsIngestProvenanceContainingCredentialsOrUrls() {
+        Stream.of("rtsp://user:pass@cam-1", "token=abc", "https://internal.example/ingest")
+                .forEach(ingestedBy -> assertThatThrownBy(() -> ingestedEvent(ingestedBy, null))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("ingestedBy"));
+    }
+
+    @Test
+    void rejectsIngestVersionContainingCredentials() {
+        Stream.of("apikey-123", "credential:v2", "secret")
+                .forEach(ingestVersion -> assertThatThrownBy(() -> ingestedEvent("adapter-1", ingestVersion))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("ingestVersion"));
+    }
+
+    @Test
+    void normalizesSafeIngestProvenanceAndDefaultsBlankToUnspecified() {
+        SecurityEvent event = ingestedEvent("  adapter-1  ", "  2026.09  ");
+        SecurityEvent blank = ingestedEvent("   ", "   ");
+
+        assertThat(event.ingestedBy()).isEqualTo("adapter-1");
+        assertThat(event.ingestVersion()).isEqualTo("2026.09");
+        assertThat(blank.ingestedBy()).isEqualTo("unspecified");
+        assertThat(blank.ingestVersion()).isNull();
+    }
+
+    private SecurityEvent ingestedEvent(String ingestedBy, String ingestVersion) {
+        Instant observedAt = Instant.parse("2026-08-23T01:00:00Z");
+        return new SecurityEvent("SEC-INGEST", "PARK-A", "A1", SecurityEventType.ACCESS_ANOMALY, "RAW_CODE",
+                SecuritySourceRef.unknown(), SecurityEventLocation.empty(), observedAt, observedAt,
+                SecurityEventSeverity.UNKNOWN, null, SecurityPrivacyMetadata.redactedOnly(),
+                SecurityDispositionRecord.unreviewed(), ingestedBy, ingestVersion, "REDACTED: 摘要");
+    }
+
+    @Test
     void replacesOnlyTheDispositionWhenCopyingAnEvent() {
         SecurityEvent event = newEvent("REDACTED: 门禁异常摘要");
         SecurityDispositionRecord decision = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
