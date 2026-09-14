@@ -441,3 +441,11 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 65 | `model/security/SecurityEventIdentity` 损坏的位置后缀 | P2 | 位置长度首位被改成非数字（如 `:x#PARK-A:2#B1`）时 `startsWithLengthPrefix()` 返回 false，整个后缀被当作「无位置」兼容形式，查找可能落到另一个位置的事件。现只要身份后以 `:` 继续，就必须解码成完整位置；精确解析器（`parseQualifiedReference`/`fromReference`）要求消费完整 token，尾随内容一律拒绝；只有赋值提取器用的 `canonicalQualifiedReference` 仍容忍普通散文 |
 
 对应独立提交：`6fd1124`（#64）、`a5ccfd0`（#65）。
+
+第三十三轮（对 `1ed07a3`）补 1 条（P1）：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 66 | `model/security/SecurityEventIdentity` 解析时的来源校验 | P1 | `parseQualifiedReference` 解码后直接把 source id 交给 `SecuritySourceRef`，标识符策略拒绝 URL/凭据片段时会抛异常；`SecurityIncidentService.alertsByReference()` 不隔离单条失败地解析每条活跃告警，于是**一个**这样的 token 就让所有 incident list/get/review 抛错，而不是像 `normalizedKey` 承诺的那样「匹配不到」。现解码出的 source id 走同一策略校验，不通过时解析器返回 `null`（`fromReference` 仍拒绝），畸形引用被忽略而不外溢 |
+
+对应提交：`a3f0d3d`。
