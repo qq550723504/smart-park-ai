@@ -297,9 +297,13 @@ public final class SecurityIncidentService {
                         .thenComparing(SecurityIncidentHandoff::workItemId))
                 .orElse(null);
         if (handoff == null) return restored;
-        return withStoredState(fresh, fresh.incidentId(), SecurityIncidentStatus.HANDOFF, handoff.reviewedAt(),
-                handoff.workItemId(), fresh.riskLevel(), handoff.dispositionRecord().disposition(),
-                handoff.dispositionRecord());
+        SecurityDispositionRecord dispositionRecord = reconcileDisposition(fresh.dispositionRecord(),
+                List.of(handoff.dispositionRecord()));
+        Instant reviewedAt = dispositionRecord.disposition() != SecurityDisposition.UNREVIEWED
+                ? dispositionRecord.decidedAt()
+                : handoff.reviewedAt();
+        return withStoredState(fresh, fresh.incidentId(), SecurityIncidentStatus.HANDOFF, reviewedAt,
+                handoff.workItemId(), fresh.riskLevel(), dispositionRecord.disposition(), dispositionRecord);
     }
 
     private static SecurityIncident restoreRiskProjection(SecurityIncident restored,
@@ -378,15 +382,27 @@ public final class SecurityIncidentService {
      */
     private static SecurityDispositionRecord effectiveDisposition(SecurityIncident fresh,
                                                                   List<SecurityIncident> candidates) {
-        SecurityDispositionRecord storedHumanReview = candidates.stream()
-                .map(SecurityIncident::dispositionRecord)
+        List<SecurityDispositionRecord> stored = new ArrayList<>();
+        candidates.forEach(candidate -> stored.add(candidate.dispositionRecord()));
+        return reconcileDisposition(fresh.dispositionRecord(), stored);
+    }
+
+    /**
+     * Reconciles a freshly correlated record with stored/projected records.
+     * A stored human review stays authoritative and is never replaced by a later
+     * source decision; otherwise the newest decided record — including the fresh
+     * one — wins, so a source can correct an earlier decision and an
+     * {@code UNREVIEWED} first poll can still be upgraded.
+     */
+    private static SecurityDispositionRecord reconcileDisposition(SecurityDispositionRecord fresh,
+                                                                  List<SecurityDispositionRecord> stored) {
+        SecurityDispositionRecord storedHumanReview = stored.stream()
                 .filter(record -> record.source() == SecurityDispositionSource.HUMAN_REVIEW)
                 .min(Comparator.comparing(SecurityDispositionRecord::decidedAt))
                 .orElse(null);
         if (storedHumanReview != null) return storedHumanReview;
-        List<SecurityDispositionRecord> decided = new ArrayList<>();
-        candidates.forEach(candidate -> decided.add(candidate.dispositionRecord()));
-        decided.add(fresh.dispositionRecord());
+        List<SecurityDispositionRecord> decided = new ArrayList<>(stored);
+        decided.add(fresh);
         return decided.stream()
                 .filter(record -> record.disposition() != SecurityDisposition.UNREVIEWED)
                 .max(Comparator.comparing(SecurityDispositionRecord::decidedAt))

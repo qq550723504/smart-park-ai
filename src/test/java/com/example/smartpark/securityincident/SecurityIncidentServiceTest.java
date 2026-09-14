@@ -171,6 +171,65 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void appliesANewerSourceCorrectionToAnEvictedHandedOffIncident() {
+        SecurityDispositionRecord initial = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(60));
+        List<SecurityEvent> events = new ArrayList<>(List.of(eventWithDisposition(
+                event("SEC-CORRECT", "A1", "ACCESS", BASE), initial)));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 1, handoffs);
+        SecurityIncident initialIncident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        assertThat(initialIncident.status()).isEqualTo(SecurityIncidentStatus.REVIEWED);
+        SecurityIncident handedOff = service.handoff(initialIncident.incidentId());
+
+        events.add(event("SEC-EVICT", "A1", "ACCESS", BASE.plusSeconds(16 * 60)));
+        service.list(new SecurityIncidentQuery(null, 20));
+
+        SecurityDispositionRecord correction = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-2", "2026.10", "evt-2",
+                BASE.plusSeconds(600));
+        events.set(0, eventWithDisposition(event("SEC-CORRECT", "A1", "ACCESS", BASE), correction));
+
+        SecurityIncident restored = service.get(initialIncident.incidentId());
+
+        assertThat(restored.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(restored.handoffWorkItemId()).isEqualTo(handedOff.handoffWorkItemId());
+        assertThat(restored.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+        assertThat(restored.dispositionRecord()).isEqualTo(correction);
+        assertThat(handoffs.list()).singleElement()
+                .satisfies(handoff -> assertThat(handoff.dispositionRecord()).isEqualTo(correction));
+    }
+
+    @Test
+    void keepsAStoredHumanHandoffDispositionWhenTheSourceLaterSuppliesANewerModelDecision() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-HANDOFF-HUMAN", "A1", "ACCESS", BASE)));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 1, handoffs);
+        SecurityIncident initial = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        SecurityIncident reviewed = service.review(initial.incidentId(), SecurityDisposition.CONFIRMED_INCIDENT,
+                "APPROVER");
+        service.handoff(initial.incidentId());
+
+        events.add(event("SEC-EVICT", "A1", "ACCESS", BASE.plusSeconds(16 * 60)));
+        service.list(new SecurityIncidentQuery(null, 20));
+
+        SecurityDispositionRecord newerModel = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-2", "2026.10", "evt-2",
+                BASE.plusSeconds(600));
+        events.set(0, eventWithDisposition(event("SEC-HANDOFF-HUMAN", "A1", "ACCESS", BASE), newerModel));
+
+        SecurityIncident restored = service.get(initial.incidentId());
+
+        assertThat(restored.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(restored.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+        assertThat(restored.dispositionRecord()).isEqualTo(reviewed.dispositionRecord());
+        assertThat(handoffs.list()).singleElement()
+                .satisfies(handoff -> assertThat(handoff.dispositionRecord().source())
+                        .isEqualTo(SecurityDispositionSource.HUMAN_REVIEW));
+    }
+
+    @Test
     void removesSupersededStatesBeforeSavingNewIncidents() {
         List<SecurityEvent> events = new ArrayList<>(List.of(
                 event("SEC-A-1", "A1", "ACCESS", BASE),
