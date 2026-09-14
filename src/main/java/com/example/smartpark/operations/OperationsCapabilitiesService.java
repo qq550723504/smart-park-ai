@@ -1,9 +1,11 @@
 package com.example.smartpark.operations;
 
 import com.example.smartpark.collaboration.ExpertCollaborationService;
+import com.example.smartpark.port.security.SecurityEventCapabilityRegistry;
 import com.example.smartpark.securityincident.SecurityIncidentService;
 import org.springframework.beans.factory.ObjectProvider;
 
+import java.util.List;
 import java.util.Objects;
 
 public final class OperationsCapabilitiesService {
@@ -14,6 +16,7 @@ public final class OperationsCapabilitiesService {
     private final boolean localDemoEnabled;
     private final ObjectProvider<ExpertCollaborationService> collaborationService;
     private final ObjectProvider<SecurityIncidentService> securityIncidentService;
+    private final ObjectProvider<SecurityEventCapabilityRegistry> securityCapabilities;
 
     public OperationsCapabilitiesService(
             String knowledgeMode,
@@ -22,7 +25,8 @@ public final class OperationsCapabilitiesService {
             boolean voiceEnabled,
             boolean localDemoEnabled,
             ObjectProvider<ExpertCollaborationService> collaborationService,
-            ObjectProvider<SecurityIncidentService> securityIncidentService) {
+            ObjectProvider<SecurityIncidentService> securityIncidentService,
+            ObjectProvider<SecurityEventCapabilityRegistry> securityCapabilities) {
         this.knowledgeMode = safeMode(knowledgeMode, "mock", "rag");
         this.customerAnswerMode = safeMode(customerAnswerMode, "mock", "dashscope");
         this.analyticsEnabled = analyticsEnabled;
@@ -30,9 +34,11 @@ public final class OperationsCapabilitiesService {
         this.localDemoEnabled = localDemoEnabled;
         this.collaborationService = Objects.requireNonNull(collaborationService, "collaborationService");
         this.securityIncidentService = Objects.requireNonNull(securityIncidentService, "securityIncidentService");
+        this.securityCapabilities = Objects.requireNonNull(securityCapabilities, "securityCapabilities");
     }
 
     public OperationsCapabilitiesSnapshot snapshot() {
+        SecurityEventCapabilityRegistry registry = securityCapabilities.getIfAvailable();
         return new OperationsCapabilitiesSnapshot(
                 knowledgeMode,
                 customerAnswerMode,
@@ -40,7 +46,9 @@ public final class OperationsCapabilitiesService {
                 analyticsEnabled,
                 collaborationService.getIfAvailable() != null,
                 voiceEnabled && localDemoEnabled,
-                securityIncidentService.getIfAvailable() != null);
+                securityIncidentService.getIfAvailable() != null,
+                registry == null ? List.of() : registry.capabilities(),
+                registry != null && registry.dispositionEnabled());
     }
 
     private static String safeMode(String value, String... allowed) {

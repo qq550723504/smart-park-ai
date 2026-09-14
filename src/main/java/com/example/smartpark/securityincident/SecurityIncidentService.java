@@ -172,7 +172,7 @@ public final class SecurityIncidentService {
         List<String> eventIds = events.stream().map(SecurityEvent::eventId).toList();
         List<String> alertIds = linkedAlerts.stream().map(Alert::id).toList();
         List<SecurityIncidentEvidence> evidence = events.stream()
-                .map(event -> new SecurityIncidentEvidence(event.eventId(), event.occurredAt(), event.evidenceSummary())).toList();
+                .map(SecurityIncidentService::evidenceFor).toList();
         List<SecurityIncidentTimelineEntry> timeline = new ArrayList<>();
         events.forEach(event -> timeline.add(new SecurityIncidentTimelineEntry("SECURITY_EVENT", event.eventId(), event.occurredAt(), event.eventType().name())));
         linkedAlerts.forEach(alert -> timeline.add(new SecurityIncidentTimelineEntry("ALERT", alert.id(), alert.occurredAt(), "关联告警")));
@@ -185,6 +185,12 @@ public final class SecurityIncidentService {
                 first.eventType().name(), risk, SecurityIncidentStatus.OPEN, events.get(0).occurredAt(),
                 events.get(events.size() - 1).occurredAt(), eventIds, alertIds, evidence, timeline,
                 recommendationsFor(risk), null, null);
+    }
+
+    private static SecurityIncidentEvidence evidenceFor(SecurityEvent event) {
+        return new SecurityIncidentEvidence(event.eventId(), event.occurredAt(), event.evidenceSummary(),
+                event.rawEventType(), event.source().sourceType().name(), event.source().sourceId(),
+                event.severity().name(), event.confidence());
     }
 
     private Map<AlertEventKey, List<Alert>> alertsByEvent() {

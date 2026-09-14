@@ -1,5 +1,7 @@
 package com.example.smartpark.web;
 
+import com.example.smartpark.model.security.SecurityDispositionRecord;
+import com.example.smartpark.model.security.SecurityDispositionSource;
 import com.example.smartpark.securityincident.SecurityIncident;
 import com.example.smartpark.securityincident.SecurityIncidentEvidence;
 import com.example.smartpark.securityincident.SecurityIncidentPage;
@@ -10,6 +12,10 @@ import java.util.Map;
 
 final class SecurityIncidentDtos {
     private SecurityIncidentDtos() { }
+
+    /** Optional review body; empty body keeps legacy {@code CONFIRMED_INCIDENT} behaviour. */
+    record ReviewRequest(String disposition) {
+    }
 
     static Map<String, Object> page(SecurityIncidentPage page) {
         Map<String, Object> dto = new LinkedHashMap<>();
@@ -43,11 +49,28 @@ final class SecurityIncidentDtos {
         dto.put("eventCount", incident.eventIds().size());
         dto.put("alertCount", incident.alertIds().size());
         dto.put("summary", incident.summary());
+        dto.put("disposition", incident.disposition().name());
+        SecurityDispositionRecord record = incident.dispositionRecord();
+        if (record.source() != SecurityDispositionSource.NONE) {
+            dto.put("dispositionSource", record.source().name());
+        }
+        if (record.decidedAt() != null) {
+            dto.put("dispositionDecidedAt", record.decidedAt().toString());
+        }
         return dto;
     }
 
     private static Map<String, Object> evidence(SecurityIncidentEvidence evidence) {
-        return Map.of("sourceId", evidence.sourceId(), "occurredAt", evidence.occurredAt().toString(), "summary", evidence.summary());
+        Map<String, Object> dto = new LinkedHashMap<>();
+        dto.put("sourceId", evidence.sourceId());
+        dto.put("occurredAt", evidence.occurredAt().toString());
+        dto.put("summary", evidence.summary());
+        if (evidence.rawEventType() != null) dto.put("rawEventType", evidence.rawEventType());
+        if (evidence.sourceType() != null) dto.put("sourceType", evidence.sourceType());
+        if (evidence.eventSourceId() != null) dto.put("eventSourceId", evidence.eventSourceId());
+        if (evidence.severity() != null) dto.put("severity", evidence.severity());
+        if (evidence.confidence() != null) dto.put("confidence", evidence.confidence());
+        return dto;
     }
 
     private static Map<String, Object> timeline(SecurityIncidentTimelineEntry entry) {

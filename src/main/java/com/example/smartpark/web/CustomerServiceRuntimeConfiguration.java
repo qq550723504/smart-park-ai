@@ -6,6 +6,8 @@ import com.example.smartpark.adapter.mock.InMemoryCustomerTicketAdapter;
 import com.example.smartpark.feedback.FeedbackService;
 import com.example.smartpark.operations.OperationsCapabilitiesService;
 import com.example.smartpark.operations.OperationsMetrics;
+import com.example.smartpark.port.security.SecurityEventCapabilityRegistry;
+import com.example.smartpark.port.security.SecuritySourceAdapter;
 import com.example.smartpark.securityincident.SecurityIncidentService;
 import com.example.smartpark.port.customer.CustomerAnswerPort;
 import com.example.smartpark.port.customer.CustomerSessionStore;
@@ -28,9 +30,16 @@ public class CustomerServiceRuntimeConfiguration {
             @Value("${smartpark.voice.enabled:false}") boolean voiceEnabled,
             @Value("${smartpark.local-demo.enabled:false}") boolean localDemoEnabled,
             org.springframework.beans.factory.ObjectProvider<com.example.smartpark.collaboration.ExpertCollaborationService> collaborationService,
-            org.springframework.beans.factory.ObjectProvider<SecurityIncidentService> securityIncidentService) {
+            org.springframework.beans.factory.ObjectProvider<SecurityIncidentService> securityIncidentService,
+            org.springframework.beans.factory.ObjectProvider<SecurityEventCapabilityRegistry> securityCapabilities) {
         return new OperationsCapabilitiesService(knowledgeMode, customerAnswerMode, analyticsEnabled,
-                voiceEnabled, localDemoEnabled, collaborationService, securityIncidentService);
+                voiceEnabled, localDemoEnabled, collaborationService, securityIncidentService, securityCapabilities);
+    }
+
+    @Bean
+    SecurityEventCapabilityRegistry securityEventCapabilityRegistry(
+            org.springframework.beans.factory.ObjectProvider<SecuritySourceAdapter> sourceAdapters) {
+        return new SecurityEventCapabilityRegistry(sourceAdapters.orderedStream().toList());
     }
 
     @Bean

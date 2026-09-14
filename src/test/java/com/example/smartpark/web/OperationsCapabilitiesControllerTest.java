@@ -17,7 +17,7 @@ class OperationsCapabilitiesControllerTest {
     @Test
     void reportsConfiguredRagAndDashScopeModesBackedByCurrentRuntime() {
         OperationsCapabilitiesController controller = new OperationsCapabilitiesController(new OperationsCapabilitiesService(
-                "rag", "dashscope", true, true, true, provider(null), provider(null)));
+                "rag", "dashscope", true, true, true, provider(null), provider(null), provider(null)));
         var capabilities = controller.capabilities();
 
         assertThat(capabilities.knowledgeMode()).isEqualTo("rag");
@@ -31,7 +31,7 @@ class OperationsCapabilitiesControllerTest {
     void reportsCollaborationOnlyWhenItsRuntimeBeanIsAvailable() {
         OperationsCapabilitiesController controller = new OperationsCapabilitiesController(new OperationsCapabilitiesService(
                 "mock", "mock", false, false, false, provider(new ExpertCollaborationService(
-                        null, null, null, null, null, null, null, null)), provider(null)));
+                        null, null, null, null, null, null, null, null)), provider(null), provider(null)));
         var capabilities = controller.capabilities();
 
         assertThat(capabilities.collaborationEnabled()).isTrue();
@@ -40,7 +40,7 @@ class OperationsCapabilitiesControllerTest {
     @Test
     void hidesVoiceWhenTheLocalDemoTransportIsDisabled() {
         OperationsCapabilitiesController controller = new OperationsCapabilitiesController(new OperationsCapabilitiesService(
-                "mock", "mock", false, true, false, provider(null), provider(null)));
+                "mock", "mock", false, true, false, provider(null), provider(null), provider(null)));
         assertThat(controller.capabilities().voiceEnabled()).isFalse();
     }
 

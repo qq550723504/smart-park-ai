@@ -1,12 +1,14 @@
 package com.example.smartpark.web;
 
 import com.example.smartpark.audit.AuditTrail;
+import com.example.smartpark.model.security.SecurityDisposition;
 import com.example.smartpark.securityincident.SecurityIncidentQuery;
 import com.example.smartpark.securityincident.SecurityIncidentService;
 import com.example.smartpark.securityincident.SecurityIncidentStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -51,10 +53,13 @@ public class SecurityIncidentController {
 
     @PostMapping("/api/security/incidents/{incidentId}/review")
     public Map<String, Object> review(@PathVariable String incidentId,
-                                      @RequestHeader(value = "X-Demo-Role", required = false) String role) {
+                                      @RequestHeader(value = "X-Demo-Role", required = false) String role,
+                                      @RequestBody(required = false) SecurityIncidentDtos.ReviewRequest body) {
         DemoRole.require(role, DemoRole.APPROVER, DemoRole.ADMIN);
-        Map<String, Object> response = SecurityIncidentDtos.detail(service.review(incidentId));
-        auditTrail.record(DemoRole.parse(role).name(), "REVIEW_SECURITY_INCIDENT", incidentId, "SUCCESS");
+        String actor = DemoRole.parse(role).name();
+        Map<String, Object> response = SecurityIncidentDtos.detail(
+                service.review(incidentId, parseDisposition(body), actor));
+        auditTrail.record(actor, "REVIEW_SECURITY_INCIDENT", incidentId, "SUCCESS");
         return response;
     }
 
@@ -74,5 +79,21 @@ public class SecurityIncidentController {
         } catch (IllegalArgumentException exception) {
             throw new IllegalArgumentException("status is not supported");
         }
+    }
+
+    private static SecurityDisposition parseDisposition(SecurityIncidentDtos.ReviewRequest body) {
+        if (body == null || body.disposition() == null || body.disposition().isBlank()) {
+            return SecurityDisposition.CONFIRMED_INCIDENT;
+        }
+        SecurityDisposition disposition;
+        try {
+            disposition = SecurityDisposition.valueOf(body.disposition().trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException("disposition is not supported");
+        }
+        if (disposition == SecurityDisposition.UNREVIEWED) {
+            throw new IllegalArgumentException("disposition is not supported");
+        }
+        return disposition;
     }
 }
