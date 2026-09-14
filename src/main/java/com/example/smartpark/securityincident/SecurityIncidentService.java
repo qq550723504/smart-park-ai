@@ -322,6 +322,11 @@ public final class SecurityIncidentService {
         // overlap and may legitimately keep propagating across a correlation resplit.
         Set<String> claimedAliasOnlyIncidentIds = new HashSet<>();
         Set<String> claimedAliasOnlyHandoffWorkItemIds = new HashSet<>();
+        // A source-less stored event can be shadowed by several concrete sources that
+        // reuse its id. The genuine enrichment is the copy whose occurrence time
+        // matches the stored event, so reserve the alias for it before any fresh
+        // incident — including an unrelated source that merely sorts first — claims it.
+        Map<String, String> preferredAliasClaimantIds = preferredAliasClaimants(stored, freshIncidents);
         Set<String> correlatedRetainedHandoffWorkItemIds = new HashSet<>();
         List<SecurityIncident> candidatesForRetirement = new ArrayList<>();
         List<SecurityIncidentHandoff> retainedHandoffsForRetirement = new ArrayList<>();
@@ -330,6 +335,7 @@ public final class SecurityIncidentService {
             List<SecurityIncident> candidates = stored.stream()
                     .filter(existing -> sameCorrelation(existing, fresh))
                     .filter(existing -> overlaps(existing, fresh))
+                    .filter(existing -> !reservedForAnotherClaimant(preferredAliasClaimantIds, existing, fresh))
                     .filter(existing -> !claimedAliasOnlyIncidentIds.contains(existing.incidentId())
                             || sharesExactIdentity(existing, fresh))
                     .toList();
@@ -345,6 +351,7 @@ public final class SecurityIncidentService {
             SecurityIncident restored = restoreState(fresh, candidates, retainStoredIdentity);
             List<SecurityIncidentHandoff> matchingRetainedHandoffs = matchingRetainedHandoffs(fresh, restored,
                     retainedHandoffs).stream()
+                    .filter(handoff -> !reservedForAnotherClaimant(preferredAliasClaimantIds, handoff, fresh))
                     .filter(handoff -> !claimedAliasOnlyHandoffWorkItemIds.contains(handoff.workItemId())
                             || sharesExactIdentity(handoff, fresh))
                     .toList();
@@ -444,6 +451,47 @@ public final class SecurityIncidentService {
         if (incident.eventIdentities().isEmpty() || handoff.eventIdentities().isEmpty()) return false;
         return incident.eventIdentities().stream()
                 .anyMatch(identity -> handoff.eventIdentities().stream().anyMatch(identity::matches));
+    }
+
+    /**
+     * Maps each stored incident that several source-qualified copies alias to onto the
+     * copy whose occurrence time matches it. Without this, an unrelated source that
+     * happens to reuse the id and sort earlier would inherit the stored state.
+     */
+    private static Map<String, String> preferredAliasClaimants(List<SecurityIncident> stored,
+                                                               List<SecurityIncident> freshIncidents) {
+        Map<String, String> preferred = new HashMap<>();
+        for (SecurityIncident existing : stored) {
+            List<SecurityIncident> aliasClaimants = freshIncidents.stream()
+                    .filter(fresh -> sameCorrelation(existing, fresh))
+                    .filter(fresh -> overlaps(existing, fresh))
+                    .filter(fresh -> !sharesExactIdentity(existing, fresh))
+                    .toList();
+            if (aliasClaimants.size() <= 1) continue;
+            aliasClaimants.stream()
+                    .min(Comparator.comparingLong((SecurityIncident fresh) -> aliasDistanceMillis(existing, fresh))
+                            .thenComparing(SecurityIncident::incidentId))
+                    .ifPresent(fresh -> preferred.put(existing.incidentId(), fresh.incidentId()));
+        }
+        return preferred;
+    }
+
+    private static long aliasDistanceMillis(SecurityIncident stored, SecurityIncident fresh) {
+        return Math.abs(Duration.between(fresh.lastOccurredAt(), stored.lastOccurredAt()).toMillis());
+    }
+
+    private static boolean reservedForAnotherClaimant(Map<String, String> preferredAliasClaimantIds,
+                                                      SecurityIncident existing, SecurityIncident fresh) {
+        if (sharesExactIdentity(existing, fresh)) return false;
+        String preferred = preferredAliasClaimantIds.get(existing.incidentId());
+        return preferred != null && !preferred.equals(fresh.incidentId());
+    }
+
+    private static boolean reservedForAnotherClaimant(Map<String, String> preferredAliasClaimantIds,
+                                                      SecurityIncidentHandoff handoff, SecurityIncident fresh) {
+        if (sharesExactIdentity(handoff, fresh)) return false;
+        String preferred = preferredAliasClaimantIds.get(handoff.incidentId());
+        return preferred != null && !preferred.equals(fresh.incidentId());
     }
 
     private SecurityIncident restoreState(SecurityIncident fresh, List<SecurityIncident> candidates,
