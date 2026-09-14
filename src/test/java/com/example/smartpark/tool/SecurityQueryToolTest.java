@@ -1,6 +1,7 @@
 package com.example.smartpark.tool;
 
 import com.example.smartpark.adapter.mock.MockParkFixture;
+import com.example.smartpark.model.security.SecurityEventType;
 import com.example.smartpark.tool.security.SecurityQueryTool;
 import org.junit.jupiter.api.Test;
 
@@ -15,7 +16,8 @@ class SecurityQueryToolTest {
         SecurityQueryTool.SecurityLookupResult result = tool.lookupSecurityEvent("SEC-ACCESS-001");
 
         assertThat(result.error()).isNull();
-        assertThat(result.event().eventType()).isEqualTo("UNAUTHORIZED_ACCESS_ATTEMPT");
+        assertThat(result.event().eventType()).isEqualTo(SecurityEventType.ACCESS_ANOMALY);
+        assertThat(result.event().rawEventType()).isEqualTo("UNAUTHORIZED_ACCESS_ATTEMPT");
         assertThat(result.event().evidenceSummary()).startsWith("REDACTED:");
         assertThat(result.event().evidenceSummary()).doesNotContain("base64", "data:image", "身份证");
         assertThat(result.notice()).contains("No raw media");

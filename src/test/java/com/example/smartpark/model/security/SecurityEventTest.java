@@ -63,6 +63,82 @@ class SecurityEventTest {
                 .hasMessageContaining("evidenceSummary");
     }
 
+    @Test
+    void mapsLegacyRawEventTypeToStandardTypeAndPreservesRawValue() {
+        SecurityEvent event = newEvent("REDACTED: 门禁异常摘要");
+
+        assertThat(event.eventType()).isEqualTo(SecurityEventType.ACCESS_ANOMALY);
+        assertThat(event.rawEventType()).isEqualTo("UNAUTHORIZED_ACCESS");
+        assertThat(event.observedAt()).isEqualTo(event.occurredAt());
+        assertThat(event.occurredAt()).isEqualTo(Instant.parse("2026-08-23T01:00:00Z"));
+    }
+
+    @Test
+    void fallsBackToUnknownStandardTypeForUnmappedRawValue() {
+        SecurityEvent event = newEvent("SEC-002", "PARK-A", "A1", "VENDOR_PRIVATE_CODE_42", "REDACTED: 摘要");
+
+        assertThat(event.eventType()).isEqualTo(SecurityEventType.UNKNOWN);
+        assertThat(event.rawEventType()).isEqualTo("VENDOR_PRIVATE_CODE_42");
+    }
+
+    @Test
+    void appliesSafeDefaultsForSeverityConfidencePrivacyAndDisposition() {
+        SecurityEvent event = newEvent("REDACTED: 门禁异常摘要");
+
+        assertThat(event.severity()).isEqualTo(SecurityEventSeverity.UNKNOWN);
+        assertThat(event.confidence()).isNull();
+        assertThat(event.privacy()).isEqualTo(SecurityPrivacyMetadata.redactedOnly());
+        assertThat(event.disposition()).isEqualTo(SecurityDispositionRecord.unreviewed());
+        assertThat(event.receivedAt()).isEqualTo(event.observedAt());
+    }
+
+    @Test
+    void rejectsConfidenceOutsideUnitInterval() {
+        Stream.of(-0.1d, 1.1d, Double.NaN).forEach(confidence ->
+                assertThatThrownBy(() -> structuredEvent(SecurityEventType.FIRE_SMOKE, confidence,
+                        SecuritySourceRef.unknown(), SecurityPrivacyMetadata.redactedOnly()))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("confidence"));
+    }
+
+    @Test
+    void acceptsConfidenceWithinUnitInterval() {
+        SecurityEvent event = structuredEvent(SecurityEventType.FIRE_SMOKE, 0.87d,
+                SecuritySourceRef.unknown(), SecurityPrivacyMetadata.redactedOnly());
+
+        assertThat(event.confidence()).isEqualTo(0.87d);
+    }
+
+    @Test
+    void rejectsSourceIdContainingCredentialsOrUrls() {
+        Stream.of("rtsp://user:pass@cam-1", "https://internal.example/cam", "token=abc", "password:secret")
+                .forEach(sourceId -> assertThatThrownBy(() -> new SecuritySourceRef(
+                        SecuritySourceType.CAMERA_ANALYTICS, sourceId))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("sourceId"));
+    }
+
+    @Test
+    void rejectsPrivacyMetadataClaimingPersonalDataOrStoredMedia() {
+        assertThatThrownBy(() -> new SecurityPrivacyMetadata(
+                SecurityPrivacyMetadata.RedactionPolicy.REDACTED_ONLY, true, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("personalDataPresent");
+        assertThatThrownBy(() -> new SecurityPrivacyMetadata(
+                SecurityPrivacyMetadata.RedactionPolicy.REDACTED_ONLY, false, true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("mediaStored");
+    }
+
+    private SecurityEvent structuredEvent(SecurityEventType eventType, Double confidence,
+                                          SecuritySourceRef source, SecurityPrivacyMetadata privacy) {
+        Instant observedAt = Instant.parse("2026-08-23T01:00:00Z");
+        return new SecurityEvent("SEC-STRUCTURED", "PARK-A", "A1", eventType, "RAW_CODE",
+                source, SecurityEventLocation.empty(), observedAt, observedAt,
+                SecurityEventSeverity.UNKNOWN, confidence, privacy,
+                SecurityDispositionRecord.unreviewed(), "test-adapter", "1", "REDACTED: 摘要");
+    }
+
     private SecurityEvent newEventWithBlank(String field) {
         String eventId = field.equals("eventId") ? " " : "SEC-001";
         String parkId = field.equals("parkId") ? "\t" : "PARK-A";

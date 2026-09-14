@@ -155,7 +155,7 @@ public final class SecurityIncidentService {
         List<SecurityIncidentEvidence> evidence = events.stream()
                 .map(event -> new SecurityIncidentEvidence(event.eventId(), event.occurredAt(), event.evidenceSummary())).toList();
         List<SecurityIncidentTimelineEntry> timeline = new ArrayList<>();
-        events.forEach(event -> timeline.add(new SecurityIncidentTimelineEntry("SECURITY_EVENT", event.eventId(), event.occurredAt(), event.eventType())));
+        events.forEach(event -> timeline.add(new SecurityIncidentTimelineEntry("SECURITY_EVENT", event.eventId(), event.occurredAt(), event.eventType().name())));
         linkedAlerts.forEach(alert -> timeline.add(new SecurityIncidentTimelineEntry("ALERT", alert.id(), alert.occurredAt(), "关联告警")));
         timeline.sort(Comparator.comparing(SecurityIncidentTimelineEntry::occurredAt).thenComparing(SecurityIncidentTimelineEntry::sourceId));
         SecurityIncidentRisk risk = linkedAlerts.isEmpty()
@@ -163,7 +163,7 @@ public final class SecurityIncidentService {
                 : linkedAlerts.stream().anyMatch(alert -> alert.riskHint() == RiskLevel.HIGH)
                     ? SecurityIncidentRisk.HIGH : SecurityIncidentRisk.LOW;
         return new SecurityIncident(incidentId(first), first.parkId(), first.buildingId(),
-                first.eventType(), risk, SecurityIncidentStatus.OPEN, events.get(0).occurredAt(),
+                first.eventType().name(), risk, SecurityIncidentStatus.OPEN, events.get(0).occurredAt(),
                 events.get(events.size() - 1).occurredAt(), eventIds, alertIds, evidence, timeline,
                 recommendationsFor(risk), null, null);
     }
@@ -359,7 +359,7 @@ public final class SecurityIncidentService {
     }
 
     private static CorrelationKey bucketKey(SecurityEvent event) {
-        return new CorrelationKey(event.parkId(), event.buildingId(), event.eventType());
+        return new CorrelationKey(event.parkId(), event.buildingId(), event.eventType().name());
     }
 
     private static String incidentId(SecurityEvent event) {
