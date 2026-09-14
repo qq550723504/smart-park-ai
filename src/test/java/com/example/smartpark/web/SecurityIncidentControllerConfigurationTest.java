@@ -4,6 +4,7 @@ import com.example.smartpark.audit.AuditTrail;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoffPort;
 import com.example.smartpark.port.security.SecurityEventReader;
+import com.example.smartpark.port.security.SecuritySourceAdapter;
 import com.example.smartpark.securityincident.SecurityIncidentConfiguration;
 import com.example.smartpark.securityincident.SecurityIncidentService;
 import org.junit.jupiter.api.Test;
@@ -96,6 +97,22 @@ class SecurityIncidentControllerConfigurationTest {
                 });
     }
 
+    @Test
+    void registersIncidentServiceWhenOnlyAdaptersProvideEvents() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(SecurityIncidentConfiguration.class, SecurityIncidentWebConfiguration.class,
+                        AdapterOnlyConfiguration.class)
+                .run(context -> {
+                    assertThat(context).hasNotFailed()
+                            .hasSingleBean(AlertPort.class)
+                            .hasSingleBean(SecuritySourceAdapter.class)
+                            .hasSingleBean(SecurityEventReader.class)
+                            .hasSingleBean(SecurityIncidentService.class)
+                            .hasSingleBean(SecurityIncidentController.class);
+                    assertThat(context.getBean(SecurityEventReader.class).listEvents()).isEmpty();
+                });
+    }
+
     @TestConfiguration(proxyBeanMethods = false)
     static class ProviderConfiguration {
         @Bean
@@ -116,6 +133,25 @@ class SecurityIncidentControllerConfigurationTest {
     @TestConfiguration(proxyBeanMethods = false)
     @Import(SecurityIncidentController.class)
     static class ControllerConfiguration {
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class AdapterOnlyConfiguration {
+        @Bean
+        SecuritySourceAdapter securitySourceAdapter() {
+            return org.mockito.Mockito.mock(SecuritySourceAdapter.class);
+        }
+
+        @Bean
+        AlertPort alertPort() { return org.mockito.Mockito.mock(AlertPort.class); }
+
+        @Bean
+        SecurityIncidentHandoffPort securityIncidentHandoffPort() {
+            return org.mockito.Mockito.mock(SecurityIncidentHandoffPort.class);
+        }
+
+        @Bean
+        AuditTrail auditTrail() { return new AuditTrail(); }
     }
 
     @TestConfiguration(proxyBeanMethods = false)

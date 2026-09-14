@@ -29,8 +29,10 @@ public class SecurityIncidentConfiguration {
             implements BeanDefinitionRegistryPostProcessor, Ordered {
         @Override
         public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry) {
+            boolean hasEventSource = BeanDefinitionLookup.hasBean(registry, SecurityEventReader.class)
+                    || BeanDefinitionLookup.hasBean(registry, SecuritySourceAdapter.class);
             if (BeanDefinitionLookup.hasBean(registry, SecurityIncidentService.class)
-                    || !BeanDefinitionLookup.hasBean(registry, SecurityEventReader.class)
+                    || !hasEventSource
                     || !BeanDefinitionLookup.hasBean(registry, AlertPort.class)
                     || !BeanDefinitionLookup.hasBean(registry, SecurityIncidentHandoffPort.class)) return;
             if (!registry.containsBeanDefinition("securityIncidentStore")) {
@@ -41,7 +43,7 @@ public class SecurityIncidentConfiguration {
             if (!registry.containsBeanDefinition("securityIncidentService")) {
                 RootBeanDefinition service = new RootBeanDefinition(SecurityIncidentService.class);
                 service.getConstructorArgumentValues().addIndexedArgumentValue(0,
-                        new RuntimeBeanReference(BeanDefinitionLookup.beanNameFor(registry, SecurityEventReader.class)));
+                        new RuntimeBeanReference(readerBeanName(registry)));
                 service.getConstructorArgumentValues().addIndexedArgumentValue(1,
                         new RuntimeBeanReference(BeanDefinitionLookup.beanNameFor(registry, AlertPort.class)));
                 service.getConstructorArgumentValues().addIndexedArgumentValue(2,
@@ -60,6 +62,18 @@ public class SecurityIncidentConfiguration {
         @Override
         public int getOrder() {
             return Ordered.HIGHEST_PRECEDENCE + 1;
+        }
+
+        /** Uses the registered reader, or installs an empty one when only adapters exist. */
+        private static String readerBeanName(BeanDefinitionRegistry registry) {
+            String existing = BeanDefinitionLookup.beanNameFor(registry, SecurityEventReader.class);
+            if (existing != null) return existing;
+            if (!registry.containsBeanDefinition("securityEventReader")) {
+                RootBeanDefinition reader = new RootBeanDefinition(EmptySecurityEventReader.class);
+                reader.setInstanceSupplier(EmptySecurityEventReader::new);
+                registry.registerBeanDefinition("securityEventReader", reader);
+            }
+            return "securityEventReader";
         }
 
         @Override
