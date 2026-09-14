@@ -79,8 +79,9 @@ class SecurityIncidentServiceTest {
         SecurityDispositionRecord registered = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
                 SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
                 BASE.plusSeconds(30));
-        SecurityEvent adapterCopy = enrichedEvent(readerCopy, registered, BASE.minusSeconds(5),
-                SecurityEventSeverity.HIGH);
+        SecurityEvent adapterCopy = withSource(
+                enrichedEvent(readerCopy, registered, BASE.minusSeconds(5), SecurityEventSeverity.HIGH),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
         SecurityIncidentService service = service(List.of(readerCopy), List.of(), 50,
                 new SecurityIncidentHandoffStore(10), List.of(adapterReturning(adapterCopy)));
 
@@ -203,6 +204,27 @@ class SecurityIncidentServiceTest {
         assertThat(incident.evidence()).singleElement().satisfies(evidence -> {
             assertThat(evidence.severity()).isEqualTo("HIGH");
             assertThat(evidence.eventSourceId()).isEqualTo("access-1");
+        });
+    }
+
+    @Test
+    void prefersTheFreshestCopyWhenTheSameSourceCorrectsStaleMetadata() {
+        SecurityDispositionRecord decision = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(5));
+        SecurityEvent plain = withSource(event("SEC-META", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityEvent stale = enrichedEvent(plain, decision, BASE, SecurityEventSeverity.HIGH);
+        SecurityEvent corrected = receivedLater(plain, BASE.plusSeconds(60));
+        SecurityIncidentService service = service(List.of(stale), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterReturning(corrected)));
+
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(incident.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+        assertThat(incident.evidence()).singleElement().satisfies(evidence -> {
+            assertThat(evidence.eventSourceId()).isEqualTo("access-1");
+            assertThat(evidence.severity()).isEqualTo("UNKNOWN");
         });
     }
 
@@ -1724,6 +1746,13 @@ class SecurityIncidentServiceTest {
         return new SecurityEvent(base.eventId(), base.parkId(), base.buildingId(), base.eventType(),
                 base.rawEventType(), base.source(), base.location(), base.observedAt(), receivedAt, severity, 0.9d,
                 base.privacy(), disposition, "adapter-1", "v2", base.evidenceSummary());
+    }
+
+    private static SecurityEvent receivedLater(SecurityEvent base, Instant receivedAt) {
+        return new SecurityEvent(base.eventId(), base.parkId(), base.buildingId(), base.eventType(),
+                base.rawEventType(), base.source(), base.location(), base.observedAt(), receivedAt,
+                base.severity(), base.confidence(), base.privacy(), base.disposition(), base.ingestedBy(),
+                base.ingestVersion(), base.evidenceSummary());
     }
 
     private static SecurityEvent eventWithDisposition(SecurityEvent base, SecurityDispositionRecord disposition) {

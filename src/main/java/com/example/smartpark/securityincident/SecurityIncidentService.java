@@ -7,7 +7,6 @@ import com.example.smartpark.model.security.SecurityDispositionRecord;
 import com.example.smartpark.model.security.SecurityDispositionSource;
 import com.example.smartpark.model.security.SecurityEvent;
 import com.example.smartpark.model.security.SecurityEventIdentity;
-import com.example.smartpark.model.security.SecurityEventSeverity;
 import com.example.smartpark.model.security.SecurityEventType;
 import com.example.smartpark.model.security.SecuritySourceType;
 import com.example.smartpark.port.alert.AlertPort;
@@ -248,25 +247,17 @@ public final class SecurityIncidentService {
     }
 
     /**
-     * Chooses which copy's metadata survives a merge. A concrete adapter view is
-     * richer than a legacy view, and an event classified with a severity,
-     * confidence and adapter ingest metadata is richer than a bare reader copy, so
-     * richness wins even when the richer copy's receipt time is older; copies of
-     * equal richness fall back to freshness.
+     * Chooses which copy's metadata survives a merge. Richness only resolves a
+     * source-less legacy copy against a concrete copy: a concrete adapter view keeps
+     * its source, severity, confidence and ingest metadata even when the source-less
+     * reader copy carries the decision. Two copies of the same concrete source keep
+     * the freshest representation, so a later correction that clears stale severity,
+     * confidence or ingest metadata is not overwritten by the older, richer snapshot.
      */
     private static SecurityEvent preferredRepresentation(SecurityEvent left, SecurityEvent right) {
-        int richness = Integer.compare(enrichmentScore(right), enrichmentScore(left));
-        if (richness != 0) return richness > 0 ? right : left;
+        int concreteness = Integer.compare(sourceConcreteness(right), sourceConcreteness(left));
+        if (concreteness != 0) return concreteness > 0 ? right : left;
         return fresherEvent(left, right);
-    }
-
-    private static int enrichmentScore(SecurityEvent event) {
-        int score = 0;
-        if (event.source().sourceType() != SecuritySourceType.UNKNOWN) score += 8;
-        if (event.severity() != SecurityEventSeverity.UNKNOWN) score += 4;
-        if (event.confidence() != null) score += 2;
-        if (!"unspecified".equals(event.ingestedBy()) || event.ingestVersion() != null) score += 1;
-        return score;
     }
 
     /** Freshest representation by {@code receivedAt}, preferring the concrete adapter view on a tie. */
