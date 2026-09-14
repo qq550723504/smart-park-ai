@@ -10,6 +10,10 @@ import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoff;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoffPort;
 import com.example.smartpark.port.security.SecurityEventReader;
+import com.example.smartpark.port.security.SecuritySourceAdapter;
+import com.example.smartpark.port.security.SecuritySourceDescriptor;
+import com.example.smartpark.model.security.SecurityEventType;
+import com.example.smartpark.model.security.SecuritySourceType;
 import com.example.smartpark.collaborationcenter.SecurityIncidentHandoffStore;
 import org.junit.jupiter.api.Test;
 
@@ -18,6 +22,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -38,6 +43,30 @@ class SecurityIncidentServiceTest {
         assertThat(page.items()).hasSize(2);
         assertThat(page.items().get(0).eventIds()).containsExactly("SEC-3");
         assertThat(page.items().get(1).eventIds()).containsExactly("SEC-1", "SEC-2");
+    }
+
+    @Test
+    void correlatesEventsContributedByRegisteredSourceAdapters() {
+        SecuritySourceAdapter adapter = adapterReturning(event("SEC-ADAPTER", "A1", "ACCESS", BASE));
+        SecurityIncidentService service = service(List.of(), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapter));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).singleElement()
+                .satisfies(incident -> assertThat(incident.eventIds()).containsExactly("SEC-ADAPTER"));
+    }
+
+    @Test
+    void deduplicatesEventsSharedByTheReaderAndASourceAdapter() {
+        SecurityEvent shared = event("SEC-SHARED", "A1", "ACCESS", BASE);
+        SecurityIncidentService service = service(List.of(shared), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterReturning(shared)));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).singleElement()
+                .satisfies(incident -> assertThat(incident.eventIds()).containsExactly("SEC-SHARED"));
     }
 
     @Test
@@ -747,6 +776,12 @@ class SecurityIncidentServiceTest {
 
     private static SecurityIncidentService service(List<SecurityEvent> events, List<Alert> alerts, int capacity,
                                                     SecurityIncidentHandoffPort handoffs) {
+        return service(events, alerts, capacity, handoffs, List.of());
+    }
+
+    private static SecurityIncidentService service(List<SecurityEvent> events, List<Alert> alerts, int capacity,
+                                                    SecurityIncidentHandoffPort handoffs,
+                                                    List<SecuritySourceAdapter> sourceAdapters) {
         SecurityEventReader security = new SecurityEventReader() {
             @Override
             public SecurityEvent getEvent(String eventId) {
@@ -775,7 +810,22 @@ class SecurityIncidentServiceTest {
             }
         };
         return new SecurityIncidentService(security, alertPort, new SecurityIncidentStore(capacity), handoffs,
-                Clock.fixed(BASE.plusSeconds(3600), ZoneOffset.UTC));
+                Clock.fixed(BASE.plusSeconds(3600), ZoneOffset.UTC), sourceAdapters);
+    }
+
+    private static SecuritySourceAdapter adapterReturning(SecurityEvent... events) {
+        return new SecuritySourceAdapter() {
+            @Override
+            public SecuritySourceDescriptor descriptor() {
+                return new SecuritySourceDescriptor("test-adapter-feed", SecuritySourceType.ACCESS_CONTROL,
+                        Set.of(SecurityEventType.ACCESS_ANOMALY), true);
+            }
+
+            @Override
+            public List<SecurityEvent> readEvents() {
+                return List.of(events);
+            }
+        };
     }
 
     private static SecurityEvent event(String id, String buildingId, String type, Instant occurredAt) {

@@ -3,11 +3,13 @@ package com.example.smartpark.securityincident;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoffPort;
 import com.example.smartpark.port.security.SecurityEventReader;
+import com.example.smartpark.port.security.SecuritySourceAdapter;
 import com.example.smartpark.support.BeanDefinitionLookup;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.beans.factory.config.RuntimeBeanReference;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.beans.factory.support.BeanDefinitionRegistryPostProcessor;
+import org.springframework.beans.factory.support.ManagedList;
 import org.springframework.beans.factory.support.RootBeanDefinition;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -47,6 +49,10 @@ public class SecurityIncidentConfiguration {
                 service.getConstructorArgumentValues().addIndexedArgumentValue(3,
                         new RuntimeBeanReference(BeanDefinitionLookup.beanNameFor(registry, SecurityIncidentHandoffPort.class)));
                 service.getConstructorArgumentValues().addIndexedArgumentValue(4, Clock.systemUTC());
+                ManagedList<RuntimeBeanReference> adapterReferences = new ManagedList<>();
+                BeanDefinitionLookup.beanNamesFor(registry, SecuritySourceAdapter.class)
+                        .forEach(name -> adapterReferences.add(new RuntimeBeanReference(name)));
+                service.getConstructorArgumentValues().addIndexedArgumentValue(5, adapterReferences);
                 registry.registerBeanDefinition("securityIncidentService", service);
             }
         }

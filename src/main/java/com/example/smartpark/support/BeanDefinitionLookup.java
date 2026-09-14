@@ -5,6 +5,9 @@ import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.core.ResolvableType;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * Internal helper shared by bean-definition registrars. Not part of the
  * application's public API; only Spring registration code should depend on it.
@@ -19,13 +22,19 @@ public final class BeanDefinitionLookup {
     }
 
     public static String beanNameFor(BeanDefinitionRegistry registry, Class<?> type) {
+        List<String> names = beanNamesFor(registry, type);
+        return names.isEmpty() ? null : names.get(0);
+    }
+
+    public static List<String> beanNamesFor(BeanDefinitionRegistry registry, Class<?> type) {
         ConfigurableListableBeanFactory beanFactory = registry instanceof ConfigurableListableBeanFactory factory
                 ? factory : null;
+        List<String> matches = new ArrayList<>();
         for (String name : registry.getBeanDefinitionNames()) {
             Class<?> candidate = resolveType(registry, beanFactory, name);
-            if (candidate != null && type.isAssignableFrom(candidate)) return name;
+            if (candidate != null && type.isAssignableFrom(candidate)) matches.add(name);
         }
-        return null;
+        return List.copyOf(matches);
     }
 
     /**

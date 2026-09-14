@@ -10,6 +10,7 @@ import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoff;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoffPort;
 import com.example.smartpark.port.security.SecurityEventReader;
+import com.example.smartpark.port.security.SecuritySourceAdapter;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -37,14 +38,22 @@ public final class SecurityIncidentService {
     private final AlertPort alerts;
     private final SecurityIncidentStore store;
     private final SecurityIncidentHandoffPort handoffs;
+    private final List<SecuritySourceAdapter> sourceAdapters;
     private final Clock clock;
 
     public SecurityIncidentService(SecurityEventReader security, AlertPort alerts, SecurityIncidentStore store,
                                    SecurityIncidentHandoffPort handoffs, Clock clock) {
+        this(security, alerts, store, handoffs, clock, List.of());
+    }
+
+    public SecurityIncidentService(SecurityEventReader security, AlertPort alerts, SecurityIncidentStore store,
+                                   SecurityIncidentHandoffPort handoffs, Clock clock,
+                                   List<SecuritySourceAdapter> sourceAdapters) {
         this.security = Objects.requireNonNull(security, "security");
         this.alerts = Objects.requireNonNull(alerts, "alerts");
         this.store = Objects.requireNonNull(store, "store");
         this.handoffs = Objects.requireNonNull(handoffs, "handoffs");
+        this.sourceAdapters = List.copyOf(sourceAdapters == null ? List.of() : sourceAdapters);
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
@@ -140,8 +149,12 @@ public final class SecurityIncidentService {
     }
 
     private List<SecurityIncident> correlate() {
+        Map<SecurityEvent, SecurityEvent> deduplicated = new LinkedHashMap<>();
+        security.listEvents().forEach(event -> deduplicated.putIfAbsent(event, event));
+        sourceAdapters.forEach(adapter -> adapter.readEvents()
+                .forEach(event -> deduplicated.putIfAbsent(event, event)));
         Map<CorrelationKey, List<SecurityEvent>> buckets = new LinkedHashMap<>();
-        security.listEvents().stream()
+        deduplicated.values().stream()
                 .sorted(Comparator.comparing(SecurityEvent::occurredAt).thenComparing(SecurityEvent::eventId))
                 .forEach(event -> buckets.computeIfAbsent(bucketKey(event), ignored -> new ArrayList<>()).add(event));
         Map<AlertEventKey, List<Alert>> alertsByEvent = alertsByEvent();
