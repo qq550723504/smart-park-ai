@@ -396,7 +396,7 @@ public final class SecurityIncidentService {
                 .orElse(null);
         if (handoff == null) return restored;
         SecurityDispositionRecord dispositionRecord = reconcileDisposition(fresh.dispositionRecord(),
-                List.of(handoff.dispositionRecord()));
+                List.of(restored.dispositionRecord(), handoff.dispositionRecord()));
         Instant reviewedAt = dispositionRecord.disposition() != SecurityDisposition.UNREVIEWED
                 ? dispositionRecord.decidedAt()
                 : handoff.reviewedAt();

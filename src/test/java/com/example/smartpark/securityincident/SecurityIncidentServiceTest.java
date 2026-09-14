@@ -421,6 +421,39 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void keepsAStoredHumanDecisionWhenRecoveringFromAnEvictedModelHandoff() {
+        SecurityDispositionRecord model = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(60));
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                eventWithDisposition(event("SEC-MODEL", "A1", "ACCESS", BASE), model)));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 1, handoffs);
+        SecurityIncident modelIncident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        SecurityIncident handedOff = service.handoff(modelIncident.incidentId());
+
+        // The source-modelled incident is evicted from the incident store while its
+        // handoff survives; the newer human-reviewed incident remains stored.
+        events.add(event("SEC-HUMAN", "A1", "ACCESS", BASE.plusSeconds(16 * 60)));
+        SecurityIncident humanIncident = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.disposition() == SecurityDisposition.UNREVIEWED).findFirst().orElseThrow();
+        SecurityIncident reviewed = service.review(humanIncident.incidentId(), SecurityDisposition.CONFIRMED_INCIDENT,
+                "APPROVER");
+
+        // A bridge event merges the fresh evidence back together; recovering the retained
+        // model handoff must not bury the stored human decision.
+        events.add(event("SEC-BRIDGE", "A1", "ACCESS", BASE.plusSeconds(8 * 60)));
+        SecurityIncident restored = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(restored.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(restored.handoffWorkItemId()).isEqualTo(handedOff.handoffWorkItemId());
+        assertThat(restored.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+        assertThat(restored.dispositionRecord()).isEqualTo(reviewed.dispositionRecord());
+        assertThat(handoffs.list()).singleElement()
+                .satisfies(handoff -> assertThat(handoff.dispositionRecord()).isEqualTo(reviewed.dispositionRecord()));
+    }
+
+    @Test
     void removesSupersededStatesBeforeSavingNewIncidents() {
         List<SecurityEvent> events = new ArrayList<>(List.of(
                 event("SEC-A-1", "A1", "ACCESS", BASE),
