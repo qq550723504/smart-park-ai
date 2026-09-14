@@ -206,7 +206,16 @@ Still out of scope and `NOT_READY`:
 
 - vibration/temperature telemetry and health scoring (#60);
 - predictive-maintenance models;
-- new fire/smoke, crowding, perimeter, post-absence and false-positive security
-  semantics (#62);
+- production fire/smoke, crowding, perimeter, post-absence and false-positive
+  security data sources (#62). The #62 event model, capability separation and
+  human disposition contract are implemented and auditable: `FIRE_SMOKE`,
+  `PERIMETER_INTRUSION`, `CROWDING`, `POST_ABSENCE`, `ACCESS_ANOMALY` and
+  `UNKNOWN` are declared, `GET /api/security/capabilities` reports
+  `modelSupported` separately from `sourceConnected`/`productionSource`, and
+  `FALSE_POSITIVE` is only accepted from human review or a registered, versioned
+  model with evidence. Only the deterministic Demo `ACCESS_ANOMALY` source is
+  `ADAPTED`; the other types and `securityDispositionEnabled` stay `NOT_READY`,
+  so no false-positive counts are shown. See `docs/issue-62-capability-map.md`
+  and `docs/issue-62-browser-verification.md`;
 - cross-process recovery of the existing in-memory Alert Workflow checkpoint;
 - report history/download.
