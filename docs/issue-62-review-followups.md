@@ -413,4 +413,4 @@ cd ui && npx vue-tsc -b && npx vitest run
 | --- | --- | --- | --- |
 | 59 | `securityincident/SecurityIncidentService.normalizedKey` | P2 | 上一轮归一化保留了五段 token 自带的位置，但索引键的 park/building 仍用告警自身的位置；`alertsReferencing` 按被引用事件的位置查询，工作流也按 token 内嵌位置解析，于是跨位置告警虽能解析、其 id 与风险却被丢弃。现 `normalizedKey` 直接返回完整键：token 带位置时引用与键字段都用内嵌位置，无位置 token 用告警位置补全，legacy/畸形 token 原样保留 |
 
-对应提交：`<pending>`（#59）。
+对应提交：`a732efe`（#59）。
