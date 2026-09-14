@@ -129,6 +129,18 @@ class SecurityEventIdentityTest {
     }
 
     @Test
+    void canonicalizesQualifiedReferencesWithDelimiterCharactersAndTrailingProse() {
+        SecurityEventIdentity identity = new SecurityEventIdentity(
+                new SecuritySourceRef(SecuritySourceType.ACCESS_CONTROL, "access/feed"), "E:1", "PARK-A", "A1");
+        String reference = identity.reference();
+
+        assertThat(SecurityEventIdentity.canonicalQualifiedReference(reference)).isEqualTo(reference);
+        assertThat(SecurityEventIdentity.canonicalQualifiedReference(reference + ", and SEC-ACCESS-001"))
+                .isEqualTo(reference);
+        assertThat(SecurityEventIdentity.canonicalQualifiedReference(reference + ".")).isEqualTo(reference);
+    }
+
+    @Test
     void keepsSourcePrefixedEventIdsThatDoNotDecodeAsQualifiedReferences() {
         SecurityEventIdentity identity = identity(SecuritySourceRef.unknown(), "source:not-encoded");
 

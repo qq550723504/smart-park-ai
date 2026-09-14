@@ -8,6 +8,9 @@ import com.example.smartpark.collaboration.model.ExpertDomain;
 import com.example.smartpark.execution.ExecutionEventPublisher;
 import com.example.smartpark.execution.InMemoryExecutionEventPublisher;
 import com.example.smartpark.execution.model.ExecutionEventType;
+import com.example.smartpark.model.security.SecurityEventIdentity;
+import com.example.smartpark.model.security.SecuritySourceRef;
+import com.example.smartpark.model.security.SecuritySourceType;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -262,14 +265,38 @@ class CollaborationRuntimeConfigurationTest {
             inputs.add(arguments);
             return "{\"eventId\":\"SEC-DUAL\",\"rawEventType\":\"UNAUTHORIZED_ACCESS\"}";
         });
-        String reference = new com.example.smartpark.model.security.SecurityEventIdentity(
-                new com.example.smartpark.model.security.SecuritySourceRef(
-                        com.example.smartpark.model.security.SecuritySourceType.ACCESS_CONTROL, "access-1"),
+        String reference = new SecurityEventIdentity(
+                new SecuritySourceRef(SecuritySourceType.ACCESS_CONTROL, "access-1"),
                 "SEC-DUAL", "PARK-A", "A1").reference();
 
         CollaborationRuntimeConfiguration.collectPrimaryEvidence(
                 ExpertDomain.SECURITY,
                 "investigate " + reference + " and SEC-ACCESS-001",
+                new ToolCallback[]{CollaborationRuntimeConfiguration.audited(
+                        callback, ledger, new InMemoryExecutionEventPublisher(), UUID.randomUUID())});
+
+        assertThat(inputs).containsExactly(
+                "{\"eventId\":\"" + reference + "\"}",
+                "{\"eventId\":\"SEC-ACCESS-001\"}");
+    }
+
+    @Test
+    void preservesQualifiedSecurityReferencesWithDelimiterCharactersAndTrailingProse() {
+        EvidenceLedger ledger = new EvidenceLedger();
+        List<String> inputs = new java.util.ArrayList<>();
+        ToolCallback callback = namedCallback("lookupSecurityEvent", arguments -> {
+            inputs.add(arguments);
+            return "{\"eventId\":\"SEC-DUAL\",\"rawEventType\":\"UNAUTHORIZED_ACCESS\"}";
+        });
+        // SecuritySourceRef accepts `access/feed`, so the reference is not a simple token; a
+        // following comma and bare id must not be swallowed either.
+        String reference = new SecurityEventIdentity(
+                new SecuritySourceRef(SecuritySourceType.ACCESS_CONTROL, "access/feed"),
+                "SEC-DUAL", "PARK-A", "A1").reference();
+
+        CollaborationRuntimeConfiguration.collectPrimaryEvidence(
+                ExpertDomain.SECURITY,
+                "investigate " + reference + ",SEC-ACCESS-001",
                 new ToolCallback[]{CollaborationRuntimeConfiguration.audited(
                         callback, ledger, new InMemoryExecutionEventPublisher(), UUID.randomUUID())});
 

@@ -136,33 +136,55 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
     }
 
     /**
-     * Canonical source-qualified reference for {@code token}, tolerating trailing prose
-     * punctuation a caller may have picked up from the surrounding sentence. Returns
-     * {@code null} when {@code token} is not a decodable source-qualified reference; a
-     * legacy bare reference also returns {@code null} because it carries no source.
+     * Canonical source-qualified reference for the prefix of {@code token} that obeys the
+     * {@code source:length#value:length#value:length#value} grammar. Only the encoded
+     * prefix is consumed, so trailing prose (a sentence period, a comma, another bare id)
+     * is ignored, and a source or event id may contain any character such as {@code /}.
+     * Returns {@code null} when {@code token} is not a decodable source-qualified reference;
+     * a legacy bare reference also returns {@code null} because it carries no source.
      */
     public static String canonicalQualifiedReference(String token) {
         if (!isReference(token)) return null;
         String body = token.substring(REFERENCE_PREFIX.length()).trim();
         if (!body.startsWith(SOURCE_REFERENCE_PREFIX)) return null;
-        String material = body.substring(SOURCE_REFERENCE_PREFIX.length());
-        while (true) {
-            List<String> parts = decodeMaterial(material);
-            if (parts != null) {
-                // reference() never encodes a source-less source, so an unknown or misspelled
-                // type is malformed and must not be normalized into a resolvable token.
-                if (SecuritySourceType.fromName(parts.get(0)) == SecuritySourceType.UNKNOWN) return null;
-                return REFERENCE_PREFIX + SOURCE_REFERENCE_PREFIX
-                        + encode(parts.get(0)) + ":" + encode(parts.get(1)) + ":" + encode(parts.get(2));
-            }
-            if (material.isEmpty() || !isTrailingNoise(material.charAt(material.length() - 1))) return null;
-            material = material.substring(0, material.length() - 1);
-        }
+        List<String> parts = decodeMaterialPrefix(body.substring(SOURCE_REFERENCE_PREFIX.length()));
+        if (parts == null) return null;
+        // reference() never encodes a source-less source, so an unknown or misspelled
+        // type is malformed and must not be normalized into a resolvable token.
+        if (SecuritySourceType.fromName(parts.get(0)) == SecuritySourceType.UNKNOWN) return null;
+        return REFERENCE_PREFIX + SOURCE_REFERENCE_PREFIX
+                + encode(parts.get(0)) + ":" + encode(parts.get(1)) + ":" + encode(parts.get(2));
     }
 
-    private static boolean isTrailingNoise(char value) {
-        return value == '.' || value == ':' || value == ';' || value == ',' || value == '!'
-                || value == '?' || value == ')' || value == ']' || value == '}' || value == '"' || value == '\'';
+    /**
+     * Decodes exactly three length-prefixed parts from the start of {@code material} and
+     * ignores anything that follows, unlike {@link #decodeMaterial(String)} which requires
+     * the whole string to be consumed. This is what makes a token with trailing prose
+     * resolvable without guessing where a value ends.
+     */
+    private static List<String> decodeMaterialPrefix(String material) {
+        List<String> parts = new ArrayList<>(3);
+        int index = 0;
+        while (parts.size() < 3) {
+            int delimiter = material.indexOf('#', index);
+            if (delimiter <= index) return null;
+            int length;
+            try {
+                length = Integer.parseInt(material.substring(index, delimiter));
+            } catch (NumberFormatException exception) {
+                return null;
+            }
+            int start = delimiter + 1;
+            if (length < 0 || length > material.length() - start) return null;
+            int end = start + length;
+            parts.add(material.substring(start, end));
+            index = end;
+            if (parts.size() < 3) {
+                if (index >= material.length() || material.charAt(index) != ':') return null;
+                index++;
+            }
+        }
+        return parts;
     }
 
     /**
