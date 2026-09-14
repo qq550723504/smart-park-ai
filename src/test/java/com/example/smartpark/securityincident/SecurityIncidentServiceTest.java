@@ -266,6 +266,29 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void derivesAStableIncidentIdRegardlessOfWhichSourceIsReadFirst() {
+        SecurityEvent access = withSource(event("SEC-DUAL", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityEvent camera = withSource(event("SEC-DUAL", "A1", "ACCESS", BASE),
+                SecuritySourceType.CAMERA_ANALYTICS, "camera-1");
+        SecurityIncidentService forward = service(List.of(), List.of(), 50,
+                new SecurityIncidentHandoffStore(10),
+                List.of(adapterReturning(access), adapterReturning(camera)));
+        SecurityIncidentService reversed = service(List.of(), List.of(), 50,
+                new SecurityIncidentHandoffStore(10),
+                List.of(adapterReturning(camera), adapterReturning(access)));
+
+        SecurityIncident forwardIncident = forward.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        SecurityIncident reversedIncident = reversed.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        // Both sources reuse the same id at the same location, type and instant, so the
+        // incident id must be derived from a deterministic tie-breaker rather than the
+        // ingestion order.
+        assertThat(forwardIncident.parkId()).isEqualTo("PARK-A");
+        assertThat(forwardIncident.incidentId()).isEqualTo(reversedIncident.incidentId());
+    }
+
+    @Test
     void prefersTheEnrichedAdapterCopyWhenTimestampsTie() {
         SecurityEvent readerCopy = event("SEC-TIE", "A1", "ACCESS", BASE);
         SecurityEvent adapterCopy = withSource(

@@ -165,7 +165,13 @@ public final class SecurityIncidentService {
         sourceAdapters.forEach(adapter -> ingested.addAll(adapter.readEvents()));
         Map<CorrelationKey, List<SecurityEvent>> buckets = new LinkedHashMap<>();
         deduplicate(ingested).stream()
-                .sorted(Comparator.comparing(SecurityEvent::occurredAt).thenComparing(SecurityEvent::eventId))
+                .sorted(Comparator.comparing(SecurityEvent::occurredAt)
+                .thenComparing(SecurityEvent::eventId)
+                // Two concrete sources may reuse an event id at the same instant, which the
+                // two keys above cannot separate. The source-qualified material keeps the
+                // derived incident id stable no matter which reader or adapter was read
+                // first, so long-lived API links and stored projections stay valid.
+                .thenComparing(event -> SecurityEventIdentity.of(event).material()))
                 .forEach(event -> buckets.computeIfAbsent(bucketKey(event), ignored -> new ArrayList<>()).add(event));
         Map<AlertReferenceKey, List<Alert>> alertsByReference = alertsByReference();
         List<SecurityIncident> incidents = new ArrayList<>();
