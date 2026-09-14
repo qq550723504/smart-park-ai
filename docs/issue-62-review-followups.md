@@ -448,4 +448,4 @@ cd ui && npx vue-tsc -b && npx vitest run
 | --- | --- | --- | --- |
 | 66 | `model/security/SecurityEventIdentity` 解析时的来源校验 | P1 | `parseQualifiedReference` 解码后直接把 source id 交给 `SecuritySourceRef`，标识符策略拒绝 URL/凭据片段时会抛异常；`SecurityIncidentService.alertsByReference()` 不隔离单条失败地解析每条活跃告警，于是**一个**这样的 token 就让所有 incident list/get/review 抛错，而不是像 `normalizedKey` 承诺的那样「匹配不到」。现解码出的 source id 走同一策略校验，不通过时解析器返回 `null`（`fromReference` 仍拒绝），畸形引用被忽略而不外溢 |
 
-对应提交：`a3f0d3d`。
+对应提交：`484e9ea`。
