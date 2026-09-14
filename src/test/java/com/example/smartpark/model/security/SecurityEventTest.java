@@ -12,7 +12,7 @@ class SecurityEventTest {
 
     @Test
     void rejectsBlankBoundaryText() {
-        Stream.of("eventId", "parkId", "buildingId", "eventType", "evidenceSummary")
+        Stream.of("eventId", "parkId", "buildingId", "rawEventType", "evidenceSummary")
                 .forEach(field -> assertThatThrownBy(() -> newEventWithBlank(field))
                         .isInstanceOf(IllegalArgumentException.class)
                         .hasMessageContaining(field));
@@ -143,9 +143,9 @@ class SecurityEventTest {
         String eventId = field.equals("eventId") ? " " : "SEC-001";
         String parkId = field.equals("parkId") ? "\t" : "PARK-A";
         String buildingId = field.equals("buildingId") ? "  " : "A1";
-        String eventType = field.equals("eventType") ? "" : "UNAUTHORIZED_ACCESS";
+        String rawEventType = field.equals("rawEventType") ? "" : "UNAUTHORIZED_ACCESS";
         String evidenceSummary = field.equals("evidenceSummary") ? "\n" : "REDACTED: 门禁异常摘要";
-        return newEvent(eventId, parkId, buildingId, eventType, evidenceSummary);
+        return newEvent(eventId, parkId, buildingId, rawEventType, evidenceSummary);
     }
 
     private SecurityEvent newEvent(String evidenceSummary) {

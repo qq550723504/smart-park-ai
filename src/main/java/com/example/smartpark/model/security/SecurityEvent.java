@@ -31,7 +31,7 @@ public record SecurityEvent(
         parkId = requireText(parkId, "parkId");
         buildingId = requireText(buildingId, "buildingId");
         eventType = Objects.requireNonNull(eventType, "eventType");
-        rawEventType = requireText(rawEventType, "eventType");
+        rawEventType = requireText(rawEventType, "rawEventType");
         source = source == null ? SecuritySourceRef.unknown() : source;
         location = location == null ? SecurityEventLocation.empty() : location;
         observedAt = Objects.requireNonNull(observedAt, "observedAt");
