@@ -41,7 +41,7 @@ final class SecurityIncidentDtos {
         dto.put("incidentId", incident.incidentId());
         dto.put("parkId", incident.parkId());
         dto.put("buildingId", incident.buildingId());
-        dto.put("eventType", incident.eventType());
+        dto.put("eventType", incident.standardEventType().name());
         dto.put("riskLevel", incident.riskLevel().name());
         dto.put("status", incident.status().name());
         dto.put("openedAt", incident.openedAt().toString());

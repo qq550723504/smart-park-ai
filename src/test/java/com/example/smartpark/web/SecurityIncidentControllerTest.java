@@ -123,6 +123,19 @@ class SecurityIncidentControllerTest {
                 .andExpect(jsonPath("$.evidence[0].prompt").doesNotExist());
     }
 
+    @Test
+    void mapsLegacyEventTypesToTheStandardTypeInSummaries() throws Exception {
+        SecurityIncident legacy = new SecurityIncident("INC-1", "PARK-A", "A1", "UNAUTHORIZED_ACCESS_ATTEMPT",
+                SecurityIncidentRisk.HIGH, SecurityIncidentStatus.OPEN, Instant.parse("2026-09-02T08:00:00Z"),
+                Instant.parse("2026-09-02T08:00:00Z"), List.of("SEC-1"), List.of(), List.of(), List.of(), List.of(),
+                null, null);
+        when(service.get("INC-1")).thenReturn(legacy);
+
+        mockMvc.perform(get("/api/security/incidents/INC-1").header("X-Demo-Role", "ADMIN"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.eventType").value("ACCESS_ANOMALY"));
+    }
+
     private static SecurityIncident reviewedIncident() {
         Instant at = Instant.parse("2026-09-02T08:05:00Z");
         SecurityDispositionRecord record = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
