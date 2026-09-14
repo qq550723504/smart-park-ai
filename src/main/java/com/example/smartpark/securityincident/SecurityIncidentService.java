@@ -160,12 +160,10 @@ public final class SecurityIncidentService {
     }
 
     private List<SecurityIncident> correlate() {
-        Map<SecurityEventIdentity, SecurityEvent> deduplicated = new LinkedHashMap<>();
-        security.listEvents().forEach(event -> mergeEvent(deduplicated, event));
-        sourceAdapters.forEach(adapter -> adapter.readEvents()
-                .forEach(event -> mergeEvent(deduplicated, event)));
+        List<SecurityEvent> ingested = new ArrayList<>(security.listEvents());
+        sourceAdapters.forEach(adapter -> ingested.addAll(adapter.readEvents()));
         Map<CorrelationKey, List<SecurityEvent>> buckets = new LinkedHashMap<>();
-        deduplicated.values().stream()
+        deduplicate(ingested).stream()
                 .sorted(Comparator.comparing(SecurityEvent::occurredAt).thenComparing(SecurityEvent::eventId))
                 .forEach(event -> buckets.computeIfAbsent(bucketKey(event), ignored -> new ArrayList<>()).add(event));
         Map<AlertReferenceKey, List<Alert>> alertsByReference = alertsByReference();
@@ -176,22 +174,54 @@ public final class SecurityIncidentService {
 
     /**
      * Folds a logically identical event seen through multiple ingestion paths.
-     * The identity is source-aware, so two adapters that reuse the same
-     * source-local {@code eventId} stay distinct; a legacy representation that
-     * carries no source ({@code UNKNOWN}) aliases the concrete-source copy of
-     * the same event so the reader/adapter pair is still collapsed.
+     * Concrete-source copies are grouped by their source-aware identity, so two
+     * adapters that reuse the same source-local {@code eventId} stay distinct. A
+     * legacy source-less copy is an alias of the concrete copy of the same event;
+     * when several sources reuse the id it is folded into the best match — same
+     * event type first, then nearest occurrence time — rather than whichever
+     * adapter happened to be read first, so an unrelated source can neither swallow
+     * the legacy representation nor be swallowed by it.
      */
-    private static void mergeEvent(Map<SecurityEventIdentity, SecurityEvent> target, SecurityEvent event) {
-        SecurityEventIdentity identity = SecurityEventIdentity.of(event);
-        SecurityEventIdentity alias = target.keySet().stream()
-                .filter(candidate -> candidate.matches(identity))
-                .findFirst().orElse(null);
-        if (alias != null) {
-            SecurityEvent existing = target.remove(alias);
-            target.put(identity, authoritativeEvent(existing, event));
-            return;
+    private static List<SecurityEvent> deduplicate(List<SecurityEvent> ingested) {
+        Map<SecurityEventIdentity, SecurityEvent> deduplicated = new LinkedHashMap<>();
+        List<SecurityEvent> aliases = new ArrayList<>();
+        for (SecurityEvent event : ingested) {
+            SecurityEventIdentity identity = SecurityEventIdentity.of(event);
+            if (identity.isSourceLess()) {
+                aliases.add(event);
+            } else {
+                deduplicated.merge(identity, event, SecurityIncidentService::authoritativeEvent);
+            }
         }
-        target.merge(identity, event, SecurityIncidentService::authoritativeEvent);
+        for (SecurityEvent alias : aliases) {
+            SecurityEventIdentity identity = SecurityEventIdentity.of(alias);
+            Map.Entry<SecurityEventIdentity, SecurityEvent> match = deduplicated.entrySet().stream()
+                    .filter(entry -> entry.getKey().matches(identity))
+                    .min(aliasPreference(alias))
+                    .orElse(null);
+            if (match != null) {
+                deduplicated.put(match.getKey(), authoritativeEvent(match.getValue(), alias));
+            } else {
+                deduplicated.merge(identity, alias, SecurityIncidentService::authoritativeEvent);
+            }
+        }
+        return List.copyOf(deduplicated.values());
+    }
+
+    /**
+     * Ranks the concrete copies a source-less alias may fold into: a concrete source
+     * is preferred over another alias, then the same event type, then the nearest
+     * occurrence time, with the identity material as a stable final tie-breaker.
+     */
+    private static Comparator<Map.Entry<SecurityEventIdentity, SecurityEvent>> aliasPreference(
+            SecurityEvent alias) {
+        return Comparator
+                .comparingInt((Map.Entry<SecurityEventIdentity, SecurityEvent> entry) ->
+                        entry.getKey().isSourceLess() ? 1 : 0)
+                .thenComparingInt(entry -> entry.getValue().eventType() == alias.eventType() ? 0 : 1)
+                .thenComparingLong(entry -> Math.abs(
+                        Duration.between(entry.getValue().occurredAt(), alias.occurredAt()).toMillis()))
+                .thenComparing(entry -> entry.getKey().material());
     }
 
     /**
