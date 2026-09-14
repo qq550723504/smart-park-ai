@@ -281,3 +281,12 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 31 | `securityincident/SecurityIncidentService.authoritativeEvent()` | P2 | 无源 reader 副本承载选中处置、其匹配的具体 adapter 副本未复核时，该分支整体返回无源记录，丢弃 adapter 的 source、severity、confidence 与 ingest 元数据并把事件投影为 `UNKNOWN`。现把 reconciled 处置附加到「最丰富」的表示上（具体源优先，其次 severity/confidence/adapter ingest 元数据，再次 freshness），而非选择恰好承载决策的副本；`SecurityEvent` 新增 `withDisposition()` |
 
 每个修复对应独立提交：`ed99287`（#30）、`fe92d5a`（#31）。
+
+第十五轮（对 `c1c1774`）补 2 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 32 | `securityincident/SecurityIncidentService.restoreHandoffProjection()` | P1 | 两个被有界 store 淘汰的已交接窗口随后经 bridge event 合并时，`matchingRetainedHandoffs` 可能含两条投影，但原 reconciliation 只纳入按最早 `createdAt` 选中的那条 handoff 的 disposition。若被忽略的投影承载权威人工复核、选中的承载注册模型决策，合并后的 incident 会静默丢失人工 disposition，且该 handoff 随后被 retire。现把每条 matching handoff 的 disposition record 一并折叠进 `reconcileDisposition()`，仍只选一个 work-item ID |
+| 33 | `port/security/SecurityEventCatalog.getEvent(SecurityEventIdentity)` | P1 | source-qualified 身份此前用对称的 `matches()` 别名谓词过滤：当所请求的源不存在、只存在同 id/位置的 source-less legacy 副本（或另一个复用同一 id 的具体源）时，`select()` 只看到一个候选事件并返回，工作流便以一个从未归属到所请求源的事件继续。现具体源请求要求精确身份相等（无精确匹配则 `NoSuchElementException`），仅 source-less legacy 请求继续使用别名谓词与歧义检查 |
+
+每个修复对应独立提交：`102e4b5`（#32）、`5afeda2`（#33）。
