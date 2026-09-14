@@ -299,3 +299,12 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 35 | `collaborationcenter/SecurityIncidentHandoffStore.projectedFieldsChanged()` | P2 | 已交接事件的 occurrence time 被 adapter 修正、而身份/风险/摘要/类型/处置都不变时，替换后的 handoff 虽带新的 `lastOccurredAt`，但 `projectedFieldsChanged()` 未比较该字段而返回 false，保留了旧 `updatedAt`；协同中心按 `updatedAt` 排序安全工单，修正后的投影继续显示为陈旧。现把 `lastOccurredAt` 作为又一个投影字段参与比较 |
 
 每个修复对应独立提交：`bbcade5`（#34）、`a787698`（#35）。
+
+第十七轮（对 `fa8e2d3`）补 2 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 36 | `securityincident/SecurityIncidentService.restoreHandoffProjection()` | P1 | 人工复核的已交接窗口被有界 incident store 淘汰、而较新的注册模型已交接窗口仍留在 store 时，bridge event 合并二者会走 `restored.handoffWorkItemId() != null` 的早返回，使上一轮新增的 reconciliation 段不可达：保留的人工决策随其 handoff 一起被 retire，合并结果只剩模型 disposition（尽管人工复核权威）。现即使在已有 stored handoff ID 的分支，也先把每条 matching retained handoff 的 disposition record 折叠进 `reconcileDisposition()`，再决定是否重建（沿用 stored 的 work-item ID、incident ID 与状态；仅当 reconciliation 改变记录时才重建） |
+| 37 | `securityincident/SecurityIncidentService.preferredAliasClaimants()` 及别名认领集合 | P1 | 一个已复核的 source-less incident 可含多个不同 event id；adapter enrichment 加 occurrence time 修正后这些事件被拆进不同窗口，每个窗口都唯一别名匹配其中一个 stored 身份。但首选认领者 reservation 与 `claimAliasOnly*` 认领集合都以「整个 stored incident」为键、只选一个 fresh incident，另一个窗口在 restore 时被排除，丢失人工 disposition 或 handoff。现两者的键都改为「stored incident + stored event identity」：仅在某个身份被多个窗口争用时才 reservation，且只有当 fresh 窗口共享的**全部**别名身份都已被认领时才排除它，因此每个唯一匹配的拆分窗口都能保留 finalized state；单身份别名（无关源仅排序靠前）行为不变 |
+
+每个修复对应独立提交：`9f9202d`（#36）、`9b58e60`（#37）。
