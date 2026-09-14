@@ -6,6 +6,8 @@ import com.example.smartpark.model.security.SecurityDisposition;
 import com.example.smartpark.model.security.SecurityDispositionRecord;
 import com.example.smartpark.model.security.SecurityDispositionSource;
 import com.example.smartpark.model.security.SecurityEvent;
+import com.example.smartpark.model.security.SecuritySourceRef;
+import com.example.smartpark.model.security.SecuritySourceType;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoff;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoffPort;
@@ -159,7 +161,7 @@ public final class SecurityIncidentService {
     }
 
     private List<SecurityIncident> correlate() {
-        Map<AlertEventKey, SecurityEvent> deduplicated = new LinkedHashMap<>();
+        Map<EventIdentity, SecurityEvent> deduplicated = new LinkedHashMap<>();
         security.listEvents().forEach(event -> mergeEvent(deduplicated, event));
         sourceAdapters.forEach(adapter -> adapter.readEvents()
                 .forEach(event -> mergeEvent(deduplicated, event)));
@@ -173,9 +175,24 @@ public final class SecurityIncidentService {
         return incidents;
     }
 
-    private static void mergeEvent(Map<AlertEventKey, SecurityEvent> target, SecurityEvent event) {
-        target.merge(new AlertEventKey(event.eventId(), event.parkId(), event.buildingId()),
-                event, SecurityIncidentService::authoritativeEvent);
+    /**
+     * Folds a logically identical event seen through multiple ingestion paths.
+     * The identity is source-aware, so two adapters that reuse the same
+     * source-local {@code eventId} stay distinct; a legacy representation that
+     * carries no source ({@code UNKNOWN}) aliases the concrete-source copy of
+     * the same event so the reader/adapter pair is still collapsed.
+     */
+    private static void mergeEvent(Map<EventIdentity, SecurityEvent> target, SecurityEvent event) {
+        EventIdentity identity = EventIdentity.of(event);
+        EventIdentity alias = target.keySet().stream()
+                .filter(candidate -> candidate.aliases(identity))
+                .findFirst().orElse(null);
+        if (alias != null) {
+            SecurityEvent existing = target.remove(alias);
+            target.put(identity, authoritativeEvent(existing, event));
+            return;
+        }
+        target.merge(identity, event, SecurityIncidentService::authoritativeEvent);
     }
 
     /**
@@ -534,6 +551,22 @@ public final class SecurityIncidentService {
     public record ReviewOutcome(SecurityIncident incident, boolean applied) {
         public ReviewOutcome {
             Objects.requireNonNull(incident, "incident");
+        }
+    }
+
+    private record EventIdentity(SecuritySourceType sourceType, String sourceId, String eventId, String parkId,
+                                 String buildingId) {
+        static EventIdentity of(SecurityEvent event) {
+            SecuritySourceRef source = event.source();
+            boolean unknown = source.sourceType() == SecuritySourceType.UNKNOWN;
+            return new EventIdentity(unknown ? null : source.sourceType(), unknown ? null : source.sourceId(),
+                    event.eventId(), event.parkId(), event.buildingId());
+        }
+
+        /** A source-less (legacy) representation aliases the concrete-source copy of the same event. */
+        boolean aliases(EventIdentity other) {
+            return eventId.equals(other.eventId) && parkId.equals(other.parkId) && buildingId.equals(other.buildingId)
+                    && (sourceId == null || other.sourceId == null);
         }
     }
 

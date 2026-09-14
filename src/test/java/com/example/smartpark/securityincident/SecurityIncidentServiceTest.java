@@ -16,6 +16,7 @@ import com.example.smartpark.port.security.SecuritySourceAdapter;
 import com.example.smartpark.port.security.SecuritySourceDescriptor;
 import com.example.smartpark.model.security.SecurityEventType;
 import com.example.smartpark.model.security.SecuritySourceType;
+import com.example.smartpark.model.security.SecuritySourceRef;
 import com.example.smartpark.collaborationcenter.SecurityIncidentHandoffStore;
 import org.junit.jupiter.api.Test;
 
@@ -111,6 +112,49 @@ class SecurityIncidentServiceTest {
                     assertThat(incident.evidence()).singleElement()
                             .satisfies(evidence -> assertThat(evidence.severity()).isEqualTo("HIGH"));
                 });
+    }
+
+    @Test
+    void keepsEventsFromDifferentSourcesThatReuseTheSameSourceLocalId() {
+        SecurityEvent access = withSource(event("SEC-DUAL", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityEvent camera = withSource(event("SEC-DUAL", "A1", "ACCESS", BASE),
+                SecuritySourceType.CAMERA_ANALYTICS, "camera-1");
+        SecurityIncidentService service = service(List.of(), List.of(), 50,
+                new SecurityIncidentHandoffStore(10),
+                List.of(adapterReturning(access), adapterReturning(camera)));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).singleElement().satisfies(incident -> {
+            assertThat(incident.evidence()).hasSize(2);
+            assertThat(incident.evidence()).extracting(SecurityIncidentEvidence::eventSourceId)
+                    .containsExactlyInAnyOrder("access-1", "camera-1");
+        });
+    }
+
+    @Test
+    void aliasesALegacyEventWithItsEnrichedAdapterCopy() {
+        SecurityEvent legacy = event("SEC-ALIAS", "A1", "ACCESS", BASE);
+        SecurityDispositionRecord registered = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(10));
+        SecurityEvent enriched = withSource(
+                enrichedEvent(legacy, registered, BASE.plusSeconds(5), SecurityEventSeverity.HIGH),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityIncidentService service = service(List.of(legacy), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterReturning(enriched)));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).singleElement().satisfies(incident -> {
+            assertThat(incident.evidence()).singleElement()
+                    .satisfies(evidence -> {
+                        assertThat(evidence.eventSourceId()).isEqualTo("access-1");
+                        assertThat(evidence.severity()).isEqualTo("HIGH");
+                    });
+            assertThat(incident.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+        });
     }
 
     @Test
@@ -1046,6 +1090,13 @@ class SecurityIncidentServiceTest {
     private static SecurityEvent event(String id, String parkId, String buildingId, String type, Instant occurredAt,
                                        String summary) {
         return new SecurityEvent(id, parkId, buildingId, type, occurredAt, summary);
+    }
+
+    private static SecurityEvent withSource(SecurityEvent base, SecuritySourceType sourceType, String sourceId) {
+        return new SecurityEvent(base.eventId(), base.parkId(), base.buildingId(), base.eventType(),
+                base.rawEventType(), new SecuritySourceRef(sourceType, sourceId), base.location(), base.observedAt(),
+                base.receivedAt(), base.severity(), base.confidence(), base.privacy(), base.disposition(),
+                base.ingestedBy(), base.ingestVersion(), base.evidenceSummary());
     }
 
     private static SecurityEvent enrichedEvent(SecurityEvent base, SecurityDispositionRecord disposition,
