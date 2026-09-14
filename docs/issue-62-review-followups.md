@@ -158,9 +158,24 @@ cd ui && npx vue-tsc -b && npx vitest run
 
 ## 完成定义（DoD）
 
-- [ ] #1 修复 + 回归测试通过（含 disposition 保持断言）。
-- [ ] #2 条件简化且行为不变，`SmartParkApplicationTest` 通过；工具方法去重。
-- [ ] #3 字段名修正 + `SecurityEventTest` 更新。
-- [ ] #4/#5/#6 视情况处理或在 PR 描述中说明。
-- [ ] 聚焦测试与 `ui` 检查全绿（Docker 相关用例除外）。
-- [ ] 每个问题独立提交，commit message 用 conventional commits（`fix(security): ...` / `refactor(web): ...` / `test(...)`）。
+- [x] #1 修复 + 回归测试通过（含 disposition 保持断言）。
+- [x] #2 条件简化且行为不变，`SmartParkApplicationTest` 通过；工具方法去重。
+- [x] #3 字段名修正 + `SecurityEventTest` 更新。
+- [x] #4 已在 `da75aa3` 绑定到显式 `dispositionFeed`，#5 为行为说明已写入 PR。
+- [x] 聚焦测试与 `ui` 检查全绿（Docker 相关用例除外）。
+- [x] 每个问题独立提交，commit message 用 conventional commits（`fix(security): ...` / `refactor(web): ...` / `test(...)`）。
+
+---
+
+## 附：PR #82 第二轮评审批注处理
+
+评审机器人对 `89e1c20` / `017c7d5` 提出的 5 条 inline 意见及处理：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 1 | `port/security/SecuritySourceAdapter` | P1 | `96493d4`：`SecurityIncidentService` 合并 `SecurityEventReader` 与所有已注册 `SecuritySourceAdapter` 的事件并按记录去重，adapter 真正进入关联路径 |
+| 2 | `securityincident/SecurityIncidentService.build()` | P1 | `ffb295c`：继承最近一次已决事件 disposition，`REVIEWED` + `decidedAt`；全未决保持 `OPEN` |
+| 3 | `securityincident/SecurityIncidentService` handoff 恢复 | P1 | 已在 `3977e1e` 修复 |
+| 4 | `port/security/SecurityEventCapabilityRegistry.dispositionEnabled()` | P2 | `da75aa3`：Require 显式 `dispositionFeed` + 生产源，并收敛前后端文案 |
+| 5 | `ui/.../SecurityIncidentCenter.vue` toast | P2 | `6e2916f`：改用接口返回的已持久化 disposition |
+

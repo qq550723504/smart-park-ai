@@ -28,15 +28,19 @@
 | disposition 模型 | 已实现 | `UNREVIEWED` / `CONFIRMED_INCIDENT` / `FALSE_POSITIVE` / `INCONCLUSIVE` / `DUPLICATE` |
 | `FALSE_POSITIVE` 来源 | 已实现，仅人工复核 | `SecurityDispositionRecord` 强制 `HUMAN_REVIEW`；或已登记自动判定模型（含 `modelId` / `modelVersion` / `evidenceRef` / `decidedAt`） |
 | 研判入口 | 已实现 | `POST /api/security/incidents/{incidentId}/review`，可选 body `{ "disposition": "..." }`；缺省 `CONFIRMED_INCIDENT`，`UNREVIEWED` 与未知值返回 400；幂等并写审计 |
-| 误报统计 | `NOT_READY` | 当前没有生产数据源，`securityDispositionEnabled=false`；前端在无真实 disposition 时显示「暂无复核结论」，不显示误报数 |
+| 误报统计 | `NOT_READY` | 需要 adapter 在 `SecuritySourceDescriptor` 中显式声明 `dispositionFeed` 且为生产源；当前没有这样的来源，`securityDispositionEnabled=false`；前端在无真实 disposition 时显示「暂无复核结论」，不显示误报数 |
 
 `SecurityDispositionRecord.unreviewed()` 是唯一未复核工厂；已判定记录必须带 `decidedAt`，`FALSE_POSITIVE` 必须带合规来源，避免 UI 标签或阈值凭空生成误报。
+
+`dispositionFeed` 与「已接入事件源」分离：接入事件源只证明事件能到达，不证明能产出复核结果，故误报统计必须由来源显式声明评估能力后才点亮。
 
 ## 与既有状态机的集成
 
 - `SecurityIncident` 扩展 `disposition` 与 `dispositionRecord` 两个组件（保留 15 参兼容构造器），仍复用原有 `OPEN` / `REVIEWED` / `HANDOFF` 状态机，没有平行安全事件系统。
 - `SecurityIncident.standardEventType()` 提供类型化访问；Web 层 summary 输出标准类型名，原始值保留在证据 `rawEventType`。
-- `SecurityIncidentService` 只依赖端口（`SecurityEventReader`、`AlertPort`、`SecurityIncidentHandoffPort`、`Clock`），`SecurityIncidentArchitectureTest` 继续通过。
+- `SecurityIncidentService` 只依赖端口（`SecurityEventReader`、`AlertPort`、`SecurityIncidentHandoffPort`、`Clock`，以及可选的 `List<SecuritySourceAdapter>`），`SecurityIncidentArchitectureTest` 继续通过。
+- 关联读取会合并 `SecurityEventReader` 与所有已注册 `SecuritySourceAdapter` 的事件并按记录去重，因此 capability 报告为已接入的 adapter 会真正贡献 incident。
+- 由已判定来源事件归并出的 incident 继承最近一次已决 disposition 并标记为 `REVIEWED`；全 `UNREVIEWED` 时保持 `OPEN`。
 
 ## 与计划的两处偏离
 
