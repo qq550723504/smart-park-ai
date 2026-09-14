@@ -133,7 +133,7 @@ class SecurityWorkflowTest {
                         new WorkOrderTool(fixture.workOrders()),
                         new ParkKnowledgeTool(fixture.knowledge()),
                         new EnergyQueryTool(fixture.energy()),
-                        new SecurityQueryTool(fixture.security())),
+                        new SecurityQueryTool(fixture.security(), List.of())),
                 fixture.devices(),
                 alerts,
                 fixture.workOrders(),

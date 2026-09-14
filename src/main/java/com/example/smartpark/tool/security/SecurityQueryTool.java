@@ -1,11 +1,15 @@
 package com.example.smartpark.tool.security;
 
 import com.example.smartpark.model.security.SecurityEvent;
-import com.example.smartpark.port.security.SecurityPort;
+import com.example.smartpark.port.security.SecurityEventCatalog;
+import com.example.smartpark.port.security.SecurityEventReader;
+import com.example.smartpark.port.security.SecuritySourceAdapter;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Objects;
 
 @Component
@@ -14,10 +18,18 @@ public class SecurityQueryTool {
 
     private static final String MOCK_NOTICE = "Mock redacted security data only. No raw media, identity record, or device control is available.";
 
-    private final SecurityPort securityPort;
+    private final SecurityEventReader securityEvents;
 
-    public SecurityQueryTool(SecurityPort securityPort) {
-        this.securityPort = Objects.requireNonNull(securityPort, "securityPort");
+    /**
+     * Aggregates the legacy reader with every registered adapter, so a lookup sees
+     * adapter events even in a mixed deployment where the legacy reader is the only
+     * {@code SecurityPort} bean.
+     */
+    public SecurityQueryTool(SecurityEventReader securityEventReader,
+                             List<SecuritySourceAdapter> securitySourceAdapters) {
+        this.securityEvents = SecurityEventCatalog.aggregating(
+                Objects.requireNonNull(securityEventReader, "securityEventReader"),
+                securitySourceAdapters == null ? List.of() : securitySourceAdapters);
     }
 
     @Tool(name = "lookupSecurityEvent", description = "Look up a redacted security event summary by event ID. Returns no raw video, image, biometric, identity, or access-control payload. Never invent security evidence.")
@@ -27,7 +39,10 @@ public class SecurityQueryTool {
             return SecurityLookupResult.error(normalizedEventId, "eventId must not be blank");
         }
         try {
-            return SecurityLookupResult.success(normalizedEventId, securityPort.getEvent(normalizedEventId));
+            return SecurityLookupResult.success(normalizedEventId, securityEvents.getEvent(normalizedEventId));
+        }
+        catch (NoSuchElementException ex) {
+            return SecurityLookupResult.error(normalizedEventId, "Unknown security event: " + normalizedEventId);
         }
         catch (IllegalArgumentException ex) {
             return SecurityLookupResult.error(normalizedEventId, ex.getMessage());

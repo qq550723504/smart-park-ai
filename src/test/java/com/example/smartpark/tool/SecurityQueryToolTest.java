@@ -1,9 +1,14 @@
 package com.example.smartpark.tool;
 
 import com.example.smartpark.adapter.mock.MockParkFixture;
+import com.example.smartpark.model.security.SecurityEvent;
 import com.example.smartpark.model.security.SecurityEventType;
+import com.example.smartpark.port.security.SecurityEventReader;
 import com.example.smartpark.tool.security.SecurityQueryTool;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.NoSuchElementException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -11,7 +16,7 @@ class SecurityQueryToolTest {
 
     @Test
     void returnsOnlyTheRedactedSummaryForAKnownSecurityEvent() {
-        SecurityQueryTool tool = new SecurityQueryTool(new MockParkFixture().security());
+        SecurityQueryTool tool = new SecurityQueryTool(new MockParkFixture().security(), List.of());
 
         SecurityQueryTool.SecurityLookupResult result = tool.lookupSecurityEvent("SEC-ACCESS-001");
 
@@ -25,10 +30,31 @@ class SecurityQueryToolTest {
 
     @Test
     void unknownEventReturnsSafeErrorWithoutInventingEvidence() {
-        SecurityQueryTool.SecurityLookupResult result = new SecurityQueryTool(new MockParkFixture().security())
+        SecurityQueryTool.SecurityLookupResult result = new SecurityQueryTool(new MockParkFixture().security(), List.of())
                 .lookupSecurityEvent("missing-event");
 
         assertThat(result.event()).isNull();
         assertThat(result.error()).contains("Unknown security event");
+    }
+
+    @Test
+    void resolvesAdapterEventsWhenALegacyReaderIsAlsoRegistered() {
+        SecurityEventReader emptyLegacyReader = new SecurityEventReader() {
+            @Override
+            public SecurityEvent getEvent(String eventId) {
+                throw new NoSuchElementException("security event not found: " + eventId);
+            }
+
+            @Override
+            public List<SecurityEvent> listEvents() {
+                return List.of();
+            }
+        };
+        SecurityQueryTool tool = new SecurityQueryTool(emptyLegacyReader, List.of(new MockParkFixture().security()));
+
+        SecurityQueryTool.SecurityLookupResult result = tool.lookupSecurityEvent("SEC-ACCESS-001");
+
+        assertThat(result.error()).isNull();
+        assertThat(result.event().eventType()).isEqualTo(SecurityEventType.ACCESS_ANOMALY);
     }
 }
