@@ -414,3 +414,12 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 59 | `securityincident/SecurityIncidentService.normalizedKey` | P2 | 上一轮归一化保留了五段 token 自带的位置，但索引键的 park/building 仍用告警自身的位置；`alertsReferencing` 按被引用事件的位置查询，工作流也按 token 内嵌位置解析，于是跨位置告警虽能解析、其 id 与风险却被丢弃。现 `normalizedKey` 直接返回完整键：token 带位置时引用与键字段都用内嵌位置，无位置 token 用告警位置补全，legacy/畸形 token 原样保留 |
 
 对应提交：`a732efe`（#59）。
+
+第三十轮（对 `db7fdb7`）补 2 条（均 P1）：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 60 | `tool/security/SecurityQueryTool` 依赖类型 | P1 | 该工具默认启用（`matchIfMissing = true`），却要求 `SecurityEventReader`；只注册旧的 get-only `SecurityPort` 的部署无法再启动。现新增 `@Autowired` 构造器注入 `ObjectProvider<SecurityPort>`：存在 reader 时优先用它，否则经新增的 `port/security/SecurityPortReader` 适配该端口；`SecurityEventCatalog.getEvent` 对 `SecurityPortReader`（其 `listEvents()` 必然为空）在聚合列表无命中时回退到直接查找，端口事件仍可解析 |
+| 61 | `model/security/SecurityEventIdentity` 空分量 | P1 | `decodeParts` 会接受零长度分量：长度为 0 但语法合法的 source/event/park/building 会让解析抛异常，或产生随后构造身份时失败的 `QualifiedReference`。由于 `alertsByReference` 会归一化**每条**活跃告警，一个这样的 token 就能让所有 incident list/get/review 失败。现校验所有解码分量：空分量令 `canonicalQualifiedReference`/`parseQualifiedReference` 返回 `null`，`fromReference` 拒绝该 token，单次查找失败而不再拖垮事件读取 |
+
+对应独立提交：`28e920e`（#60）、`b5f61b7`（#61）。
