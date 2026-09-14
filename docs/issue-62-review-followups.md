@@ -327,3 +327,11 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 42 | `tool/security/SecurityQueryTool.SecurityLookupResult` | P2 | notice 硬编码为 “Mock redacted security data only”，但该工具已聚合 legacy reader 与全部 `SecuritySourceAdapter`；`productionSource=true` 的新增 adapter 的结果仍被标为 mock data。现改用在 mock 与生产源下都准确的文案（说明数据已脱敏，不声称是 mock），避免误导模型/工具消费方 |
 
 每个修复对应独立提交：`73932f3`（#40）、`a00c859`（#41）、`39a11a0`（#42）。
+
+第二十轮（对 `58cb69c`）补 1 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 43 | `model/security/SecurityEventIdentity.reference()` / `fromReference()` | P2 | 无源事件的 id 若本身形如合法 qualified payload（如 `source:14#ACCESS_CONTROL:4#feed:3#evt`），`reference()` 输出的 `security-event:` + 裸 id 会被 `fromReference()` 重新解码为具体源 `ACCESS_CONTROL/feed` + 事件 `evt`，工作流因此查找错误的身份或 404。现于模型边界拒绝「会被解码为 qualified reference」的 event id（`SecurityEventIdentity` 与 `SecurityEvent` 共同校验），使裸 legacy reference 不再有歧义；仅以 `source:` 开头但无法解码的 id 仍按 legacy 处理 |
+
+对应独立提交：`e43e3da`（#43）。
