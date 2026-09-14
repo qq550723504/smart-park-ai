@@ -48,19 +48,16 @@ public final class SecurityEventCatalog implements SecurityEventResolver, Securi
     @Override
     public SecurityEvent getEvent(String eventId) {
         Objects.requireNonNull(eventId, "eventId");
-        List<SecurityEvent> matches = events().stream()
+        List<SecurityEvent> matches = candidates(eventId).stream()
                 .filter(event -> event.eventId().equals(eventId))
                 .toList();
-        // A get-only legacy port cannot enumerate its events, so consult its direct
-        // lookup when the aggregated stream has no match. An empty reader still fails here.
-        if (matches.isEmpty() && reader instanceof SecurityPortReader) return reader.getEvent(eventId);
         return select(matches, eventId);
     }
 
     @Override
     public SecurityEvent getEvent(SecurityEventIdentity identity) {
         Objects.requireNonNull(identity, "identity");
-        List<SecurityEvent> events = events();
+        List<SecurityEvent> events = candidates(identity.eventId());
         if (identity.isSourceLess()) {
             return select(events.stream()
                     .filter(event -> SecurityEventIdentity.of(event).matches(identity))
@@ -102,7 +99,7 @@ public final class SecurityEventCatalog implements SecurityEventResolver, Securi
             // rather than downgrade to a bare-id lookup that could ground another source.
             throw new NoSuchElementException("security event not found for reference: " + reference);
         }
-        List<SecurityEvent> matches = events().stream()
+        List<SecurityEvent> matches = candidates(qualified.eventId()).stream()
                 .filter(event -> qualified.matches(SecurityEventIdentity.of(event)))
                 .toList();
         if (matches.isEmpty()) {
@@ -123,6 +120,26 @@ public final class SecurityEventCatalog implements SecurityEventResolver, Securi
         List<SecurityEvent> events = new ArrayList<>(reader.listEvents());
         adapters.forEach(adapter -> events.addAll(adapter.readEvents()));
         return events;
+    }
+
+    /**
+     * Enumerable events plus, for a get-only legacy port, the event the port resolves
+     * directly for {@code eventId}. The port cannot be listed, so its copy must join the
+     * candidates before source and location disambiguation: otherwise an adapter that
+     * reuses the id would hide the ambiguity, or would be returned while the concrete
+     * legacy event stayed unreachable.
+     */
+    private List<SecurityEvent> candidates(String eventId) {
+        List<SecurityEvent> candidates = new ArrayList<>(events());
+        if (reader instanceof SecurityPortReader) {
+            try {
+                SecurityEvent direct = reader.getEvent(eventId);
+                if (direct != null) candidates.add(direct);
+            } catch (NoSuchElementException | IllegalArgumentException notFound) {
+                // The get-only port has no such event.
+            }
+        }
+        return candidates;
     }
 
     /**

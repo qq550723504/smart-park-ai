@@ -233,6 +233,38 @@ class SecurityEventCatalogTest {
         assertThat(resolved.disposition()).isEqualTo(corrected);
     }
 
+    @Test
+    void reportsAmbiguityWhenAGetOnlyPortAndAnAdapterReuseAnId() {
+        SecurityEvent legacy = event("SEC-DUP", new SecuritySourceRef(SecuritySourceType.EXISTING_FEED, "feed-1"),
+                BASE);
+        SecurityEvent adapted = event("SEC-DUP", access("access-1"), BASE.plusSeconds(60));
+        SecurityEventCatalog catalog = new SecurityEventCatalog(new SecurityPortReader(port(legacy)),
+                List.of(adapter(adapted)));
+
+        // The adapter can be enumerated but the get-only port cannot, so the port's copy
+        // has to join the candidates: otherwise the enumerable adapter silently wins a bare
+        // id that two sources actually share.
+        assertThatThrownBy(() -> catalog.getEvent("SEC-DUP"))
+                .isInstanceOf(SecurityEventLookupException.class)
+                .hasMessageContaining("ambiguous");
+    }
+
+    @Test
+    void resolvesAConcreteGetOnlyPortEventByItsQualifiedReference() {
+        SecurityEvent legacy = event("SEC-LEGACY", access("access-7"), BASE);
+        SecurityEvent adapted = event("SEC-OTHER", access("access-8"), BASE.plusSeconds(60));
+        SecurityEventCatalog catalog = new SecurityEventCatalog(new SecurityPortReader(port(legacy)),
+                List.of(adapter(adapted)));
+
+        assertThat(catalog.getEventByReference(SecurityEventIdentity.of(legacy).reference())).isEqualTo(legacy);
+    }
+
+    private static SecurityPort port(SecurityEvent... events) {
+        List<SecurityEvent> all = List.of(events);
+        return eventId -> all.stream().filter(event -> event.eventId().equals(eventId)).findFirst()
+                .orElseThrow(() -> new NoSuchElementException("security event not found: " + eventId));
+    }
+
     private static String locationLessReference(String sourceType, String sourceId, String eventId) {
         return SecurityEventIdentity.REFERENCE_PREFIX + "source:"
                 + sourceType.length() + "#" + sourceType + ":"
