@@ -379,3 +379,12 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 52 | `collaboration/CollaborationRuntimeConfiguration` 安全提取 | P2 | 原模式把 qualified 引用限制在 `[A-Za-z0-9_#:.\-]+`，而 `SecuritySourceRef` 接受 `access/feed` 这类 id 且 `reference()` 原样编码；模式在 `/` 处截断，残缺 token 无法解码后被转成错误的 legacy 查找，引用的证据被静默丢弃。现 `SecurityEventIdentity.canonicalQualifiedReference` 按长度前缀文法从 token 起始严格解析三段并重新编码（忽略后续散文），任何 source/event id 允许的字符都能保留；`CollaborationRuntimeConfiguration` 扫描 `security-event:` 前缀并据此解析，仅在不属于任何 qualified 引用时报告裸 id |
 
 对应独立提交：`7101c79`（#51）、`1e1c35c`（#52）。
+
+第二十六轮（对 `b20777e`）补 2 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 53 | `model/security/SecurityIdentifierPolicy` | P2 | 该策略把 `token`/`password`/`secret`/`apikey`/`credential` 当作子串匹配；策略现已覆盖 event id、raw event type、source id 与 ingest 元数据，`ACCESS_TOKEN_REJECTED`、`INVALID_CREDENTIAL` 这类普通领域术语会导致 `SecurityEvent` 构造失败，甚至让整个 adapter 读取失败。现改为匹配「凭据语法」而非词本身：URL scheme（`://`）、`token=`/`password:` 赋值、`apikey-123` 值、或整串就是裸密钥；`token=abc`、`password:secret`、`credential:v2`、`apikey-123`、`secret` 仍被拒 |
+| 54 | `model/security/SecurityEventIdentity.reference()` | P2 | 引用只编码 source type、source id、event id，未含位置；同一源在两个 park/building 复用本地 id 时两个身份产生同一引用，`SecurityEventCatalog.getEventByReference()` 以歧义拒绝，而 `SecurityQueryTool` 没有 park/building 参数，导致两个事件都无法经推荐路径取回。现 `reference()` 追加长度前缀编码的 park/building，`canonicalQualifiedReference` 保留它们，`fromReference` 优先使用 token 自带位置、仅对 legacy token 回退到告警位置 |
+
+对应独立提交：`f513707`（#53）、`ae2de8a`（#54）。
