@@ -16,7 +16,7 @@ import java.util.Objects;
  * another source's event when two adapters reuse the same source-local id, and
  * adapter-only deployments can still resolve adapter events.
  */
-public final class SecurityEventCatalog implements SecurityEventResolver {
+public final class SecurityEventCatalog implements SecurityEventResolver, SecurityEventReader {
 
     /** Prefers a concrete source over a source-less alias, then the freshest representation. */
     private static final Comparator<SecurityEvent> PREFERRED = Comparator
@@ -29,6 +29,15 @@ public final class SecurityEventCatalog implements SecurityEventResolver {
     public SecurityEventCatalog(SecurityEventReader reader, List<SecuritySourceAdapter> adapters) {
         this.reader = Objects.requireNonNull(reader, "reader");
         this.adapters = List.copyOf(adapters == null ? List.of() : adapters);
+    }
+
+    /**
+     * Builds the aggregate unless the reader already is one, so callers that inject
+     * the shared {@code SecurityEventReader}/{@code SecurityPort} bean never wrap the
+     * adapter aggregate a second time and double-read every adapter event.
+     */
+    public static SecurityEventReader aggregating(SecurityEventReader reader, List<SecuritySourceAdapter> adapters) {
+        return reader instanceof SecurityEventCatalog ? reader : new SecurityEventCatalog(reader, adapters);
     }
 
     @Override

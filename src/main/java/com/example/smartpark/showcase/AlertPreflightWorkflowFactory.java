@@ -52,7 +52,7 @@ public final class AlertPreflightWorkflowFactory {
     public AlertWorkflow create() {
         // Aggregate every ingestion path so a source-qualified reference resolves against
         // the referenced source even when adapters are the only registered event source.
-        SecurityEventCatalog securityEvents = new SecurityEventCatalog(securityEventReader, securitySourceAdapters);
+        SecurityEventReader securityEvents = SecurityEventCatalog.aggregating(securityEventReader, securitySourceAdapters);
         return new AlertWorkflow(
                 triageAgent,
                 diagnosisAgent,

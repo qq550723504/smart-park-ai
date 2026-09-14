@@ -100,7 +100,7 @@ class AlertWorkflowRuntimeConfiguration {
             WorkflowEventPublisher eventPublisher) {
         // Resolve security events through a source-aware aggregate so a source-qualified
         // alert reference is never reduced to a bare id that another source could reuse.
-        SecurityEventCatalog securityEvents = new SecurityEventCatalog(securityEventReader, securitySourceAdapters);
+        SecurityEventReader securityEvents = SecurityEventCatalog.aggregating(securityEventReader, securitySourceAdapters);
         return new AlertWorkflow(
                 triageAgent,
                 diagnosisAgent,

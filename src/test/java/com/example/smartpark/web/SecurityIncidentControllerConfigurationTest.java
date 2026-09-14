@@ -1,9 +1,11 @@
 package com.example.smartpark.web;
 
 import com.example.smartpark.audit.AuditTrail;
+import com.example.smartpark.model.security.SecurityEvent;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoffPort;
 import com.example.smartpark.port.security.SecurityEventReader;
+import com.example.smartpark.port.security.SecurityPort;
 import com.example.smartpark.port.security.SecuritySourceAdapter;
 import com.example.smartpark.securityincident.SecurityIncidentConfiguration;
 import com.example.smartpark.securityincident.SecurityIncidentService;
@@ -14,7 +16,11 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.beans.factory.config.RuntimeBeanReference;
 
+import java.time.Instant;
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.when;
 
 class SecurityIncidentControllerConfigurationTest {
 
@@ -110,6 +116,20 @@ class SecurityIncidentControllerConfigurationTest {
                             .hasSingleBean(SecurityIncidentService.class)
                             .hasSingleBean(SecurityIncidentController.class);
                     assertThat(context.getBean(SecurityEventReader.class).listEvents()).isEmpty();
+                });
+    }
+
+    @Test
+    void exposesAdapterEventsThroughTheInjectedSecurityPortInAdapterOnlyDeployments() {
+        SecurityEvent adapterEvent = new SecurityEvent("SEC-ADAPTER-ONLY", "PARK-A", "A1", "ACCESS",
+                Instant.parse("2026-09-14T00:00:00Z"), "REDACTED: adapter-only event");
+        new ApplicationContextRunner()
+                .withUserConfiguration(SecurityIncidentConfiguration.class, AdapterOnlyConfiguration.class)
+                .run(context -> {
+                    when(context.getBean(SecuritySourceAdapter.class).readEvents())
+                            .thenReturn(List.of(adapterEvent));
+                    assertThat(context.getBean(SecurityPort.class).getEvent("SEC-ADAPTER-ONLY"))
+                            .isSameAs(adapterEvent);
                 });
     }
 
