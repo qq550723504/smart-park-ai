@@ -19,6 +19,14 @@ class SecurityEventTest {
     }
 
     @Test
+    void rejectsEventIdThatWouldBeReparsedAsAQualifiedReference() {
+        assertThatThrownBy(() -> new SecurityEvent("source:14#ACCESS_CONTROL:4#feed:3#evt", "PARK-A", "A1",
+                "UNAUTHORIZED_ACCESS", Instant.parse("2026-08-23T01:00:00Z"), "REDACTED: 摘要"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("eventId");
+    }
+
+    @Test
     void acceptsAndTrimsRedactedEvidenceSummary() {
         SecurityEvent event = newEvent("  REDACTED: 门禁异常摘要  ");
 

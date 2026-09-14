@@ -20,8 +20,23 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
     public SecurityEventIdentity {
         source = source == null ? SecuritySourceRef.unknown() : source;
         eventId = requireText(eventId, "eventId");
+        if (mimicsQualifiedReference(eventId)) {
+            throw new IllegalArgumentException(
+                    "eventId must not mimic a source-qualified reference: " + eventId);
+        }
         parkId = requireText(parkId, "parkId");
         buildingId = requireText(buildingId, "buildingId");
+    }
+
+    /**
+     * True when a bare event id would be decoded as the body of a source-qualified
+     * reference. {@link #reference()} emits the source-less form as
+     * {@code security-event:} plus the bare id, so such an id cannot round-trip and
+     * must be rejected rather than silently resolving a different concrete source.
+     */
+    static boolean mimicsQualifiedReference(String eventId) {
+        if (eventId == null || !eventId.startsWith(SOURCE_REFERENCE_PREFIX)) return false;
+        return decodeMaterial(eventId.substring(SOURCE_REFERENCE_PREFIX.length())) != null;
     }
 
     public static SecurityEventIdentity of(SecurityEvent event) {

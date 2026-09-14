@@ -28,6 +28,10 @@ public record SecurityEvent(
 
     public SecurityEvent {
         eventId = requireText(eventId, "eventId");
+        if (SecurityEventIdentity.mimicsQualifiedReference(eventId)) {
+            throw new IllegalArgumentException(
+                    "eventId must not mimic a source-qualified reference: " + eventId);
+        }
         parkId = requireText(parkId, "parkId");
         buildingId = requireText(buildingId, "buildingId");
         eventType = Objects.requireNonNull(eventType, "eventType");

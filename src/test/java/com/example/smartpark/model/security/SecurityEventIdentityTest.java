@@ -98,4 +98,27 @@ class SecurityEventIdentityTest {
         assertThat(identity.isSourceLess()).isTrue();
         assertThat(identity.eventId()).isEqualTo("source:2147483647#x");
     }
+
+    @Test
+    void rejectsEventIdsThatWouldBeReparsedAsAQualifiedReference() {
+        // reference() emits the source-less form as `security-event:` plus the bare id, so a
+        // bare id that decodes as a qualified payload would resolve a different concrete source.
+        String ambiguous = "source:14#ACCESS_CONTROL:4#feed:3#evt";
+
+        assertThatThrownBy(() -> identity(SecuritySourceRef.unknown(), ambiguous))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("eventId");
+        assertThatThrownBy(() -> identity(ACCESS, ambiguous))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("eventId");
+    }
+
+    @Test
+    void keepsSourcePrefixedEventIdsThatDoNotDecodeAsQualifiedReferences() {
+        SecurityEventIdentity identity = identity(SecuritySourceRef.unknown(), "source:not-encoded");
+
+        assertThat(identity.reference()).isEqualTo("security-event:source:not-encoded");
+        assertThat(SecurityEventIdentity.fromReference(identity.reference(), "PARK-A", "A1").eventId())
+                .isEqualTo("source:not-encoded");
+    }
 }
