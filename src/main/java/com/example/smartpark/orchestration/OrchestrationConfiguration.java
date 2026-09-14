@@ -332,7 +332,8 @@ public class OrchestrationConfiguration {
         LinkedHashSet<String> recommendations = new LinkedHashSet<>();
         matched.forEach(incident -> {
             evidence.add("security-incident:" + incident.incidentId());
-            incident.evidence().forEach(item -> evidence.add("security-event:" + item.sourceId()));
+            incident.evidence().forEach(item -> evidence.add(
+                    item.eventIdentity(incident.parkId(), incident.buildingId()).reference()));
             recommendations.addAll(incident.recommendations());
         });
         return new OrchestrationPorts.EvidenceOutcome("AVAILABLE", "已关联 " + matched.size() + " 个安全事件",

@@ -18,6 +18,7 @@ import com.example.smartpark.model.common.KnowledgeDomain;
 import com.example.smartpark.model.common.RiskLevel;
 import com.example.smartpark.model.common.WorkOrder;
 import com.example.smartpark.model.common.WorkflowStatus;
+import com.example.smartpark.model.security.SecurityEventIdentity;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.device.DevicePort;
 import com.example.smartpark.port.knowledge.KnowledgePort;
@@ -203,8 +204,8 @@ public final class AlertWorkflowNodes {
                 throw new IllegalStateException("Security scenario is not configured");
             }
             String eventId = workflowState.alert().evidence().stream()
-                    .filter(item -> item.startsWith("security-event:"))
-                    .map(item -> item.substring("security-event:".length()))
+                    .map(SecurityEventIdentity::eventIdOfReference)
+                    .filter(Objects::nonNull)
                     .findFirst()
                     .orElseThrow(() -> new IllegalArgumentException("Security alert has no event reference"));
             toolCall(workflowState.workflowId(), SECURITY_REVIEW, "SecurityPort.getEvent");

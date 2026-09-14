@@ -1,5 +1,7 @@
 package com.example.smartpark.model.security;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -10,6 +12,10 @@ import java.util.Objects;
  * enriching an event without splitting the incident that already tracks it.
  */
 public record SecurityEventIdentity(SecuritySourceRef source, String eventId, String parkId, String buildingId) {
+
+    /** Namespace shared by alert evidence and incident projections that reference a security event. */
+    public static final String REFERENCE_PREFIX = "security-event:";
+    private static final String SOURCE_REFERENCE_PREFIX = "source:";
 
     public SecurityEventIdentity {
         source = source == null ? SecuritySourceRef.unknown() : source;
@@ -51,6 +57,66 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
                 ? ""
                 : encode(source.sourceType().name()) + ":" + encode(source.sourceId()) + ":";
         return sourceMaterial + encode(eventId);
+    }
+
+    /**
+     * Alert-evidence reference to this logical event. A concrete source is encoded
+     * with the delimiter-safe material so the reference survives any characters in
+     * the source id or event id; a source-less identity keeps the legacy bare form.
+     */
+    public String reference() {
+        return isSourceLess()
+                ? legacyReference(eventId)
+                : REFERENCE_PREFIX + SOURCE_REFERENCE_PREFIX + material();
+    }
+
+    /** The source-less legacy reference, which aliases any source of the same event. */
+    public static String legacyReference(String eventId) {
+        return REFERENCE_PREFIX + requireText(eventId, "eventId");
+    }
+
+    /** True when {@code token} is a security event reference emitted by {@link #reference()}. */
+    public static boolean isReference(String token) {
+        return token != null && token.startsWith(REFERENCE_PREFIX);
+    }
+
+    /**
+     * Extracts the source-local event id from a reference token, accepting both the
+     * legacy bare form and the source-qualified form. Returns {@code null} when the
+     * token is not a valid security event reference.
+     */
+    public static String eventIdOfReference(String token) {
+        if (!isReference(token)) return null;
+        String body = token.substring(REFERENCE_PREFIX.length()).trim();
+        if (body.isEmpty()) return null;
+        if (!body.startsWith(SOURCE_REFERENCE_PREFIX)) return body;
+        List<String> parts = decodeMaterial(body.substring(SOURCE_REFERENCE_PREFIX.length()));
+        return parts == null ? null : parts.get(2);
+    }
+
+    private static List<String> decodeMaterial(String material) {
+        List<String> parts = new ArrayList<>(3);
+        int index = 0;
+        while (index < material.length()) {
+            int delimiter = material.indexOf('#', index);
+            if (delimiter <= index) return null;
+            int length;
+            try {
+                length = Integer.parseInt(material.substring(index, delimiter));
+            } catch (NumberFormatException exception) {
+                return null;
+            }
+            int start = delimiter + 1;
+            int end = start + length;
+            if (length < 0 || end > material.length()) return null;
+            parts.add(material.substring(start, end));
+            index = end;
+            if (index < material.length()) {
+                if (material.charAt(index) != ':') return null;
+                index++;
+            }
+        }
+        return parts.size() == 3 ? parts : null;
     }
 
     private static String encode(String value) {

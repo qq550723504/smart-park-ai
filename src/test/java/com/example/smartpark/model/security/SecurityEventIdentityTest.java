@@ -48,4 +48,26 @@ class SecurityEventIdentityTest {
         assertThat(identity(ACCESS, "E").material()).isNotEqualTo(legacy.material());
         assertThat(identity(ACCESS, "E").material()).isEqualTo(identity(ACCESS, "E").material());
     }
+
+    @Test
+    void encodesSourceQualifiedReferencesThatSurviveDelimiters() {
+        SecurityEventIdentity identity = new SecurityEventIdentity(
+                new SecuritySourceRef(SecuritySourceType.ACCESS_CONTROL, "feed:one"), "E:1", "PARK-A", "A1");
+
+        String reference = identity.reference();
+
+        assertThat(reference).startsWith(SecurityEventIdentity.REFERENCE_PREFIX);
+        assertThat(SecurityEventIdentity.isReference(reference)).isTrue();
+        assertThat(SecurityEventIdentity.eventIdOfReference(reference)).isEqualTo("E:1");
+    }
+
+    @Test
+    void keepsLegacyReferencesAsAnExplicitAlias() {
+        String legacy = SecurityEventIdentity.legacyReference("E:1");
+
+        assertThat(legacy).isEqualTo("security-event:E:1");
+        assertThat(SecurityEventIdentity.eventIdOfReference(legacy)).isEqualTo("E:1");
+        assertThat(SecurityEventIdentity.eventIdOfReference("device-health:PARK-1:HEALTHY")).isNull();
+        assertThat(SecurityEventIdentity.eventIdOfReference("security-event:source:not-encoded")).isNull();
+    }
 }

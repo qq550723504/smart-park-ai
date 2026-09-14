@@ -34,7 +34,6 @@ import java.util.Set;
 
 public final class SecurityIncidentService {
     private static final Duration GROUPING_WINDOW = Duration.ofMinutes(15);
-    private static final String SECURITY_EVENT_PREFIX = "security-event:";
 
     private final SecurityEventReader security;
     private final AlertPort alerts;
@@ -169,9 +168,9 @@ public final class SecurityIncidentService {
         deduplicated.values().stream()
                 .sorted(Comparator.comparing(SecurityEvent::occurredAt).thenComparing(SecurityEvent::eventId))
                 .forEach(event -> buckets.computeIfAbsent(bucketKey(event), ignored -> new ArrayList<>()).add(event));
-        Map<AlertEventKey, List<Alert>> alertsByEvent = alertsByEvent();
+        Map<AlertReferenceKey, List<Alert>> alertsByReference = alertsByReference();
         List<SecurityIncident> incidents = new ArrayList<>();
-        buckets.values().forEach(events -> splitBucket(events, alertsByEvent, incidents));
+        buckets.values().forEach(events -> splitBucket(events, alertsByReference, incidents));
         return incidents;
     }
 
@@ -227,24 +226,23 @@ public final class SecurityIncidentService {
         return event.source().sourceType() == SecuritySourceType.UNKNOWN ? 0 : 1;
     }
 
-    private void splitBucket(List<SecurityEvent> events, Map<AlertEventKey, List<Alert>> alertsByEvent,
+    private void splitBucket(List<SecurityEvent> events, Map<AlertReferenceKey, List<Alert>> alertsByReference,
                              List<SecurityIncident> target) {
         List<SecurityEvent> current = new ArrayList<>();
         for (SecurityEvent event : events) {
             if (!current.isEmpty() && Duration.between(current.get(current.size() - 1).occurredAt(), event.occurredAt()).compareTo(GROUPING_WINDOW) > 0) {
-                target.add(build(current, alertsByEvent));
+                target.add(build(current, alertsByReference));
                 current.clear();
             }
             current.add(event);
         }
-        if (!current.isEmpty()) target.add(build(current, alertsByEvent));
+        if (!current.isEmpty()) target.add(build(current, alertsByReference));
     }
 
-    private SecurityIncident build(List<SecurityEvent> events, Map<AlertEventKey, List<Alert>> alertsByEvent) {
+    private SecurityIncident build(List<SecurityEvent> events, Map<AlertReferenceKey, List<Alert>> alertsByReference) {
         SecurityEvent first = events.get(0);
         List<Alert> linkedAlerts = events.stream()
-                .flatMap(event -> alertsByEvent.getOrDefault(
-                        new AlertEventKey(event.eventId(), event.parkId(), event.buildingId()), List.of()).stream())
+                .flatMap(event -> alertsReferencing(alertsByReference, event).stream())
                 .distinct().sorted(Comparator.comparing(Alert::occurredAt).thenComparing(Alert::id)).toList();
         List<String> eventIds = events.stream().map(SecurityEvent::eventId).toList();
         List<SecurityEventIdentity> eventIdentities = events.stream().map(SecurityEventIdentity::of).toList();
@@ -252,7 +250,8 @@ public final class SecurityIncidentService {
         List<SecurityIncidentEvidence> evidence = events.stream()
                 .map(SecurityIncidentService::evidenceFor).toList();
         List<SecurityIncidentTimelineEntry> timeline = new ArrayList<>();
-        events.forEach(event -> timeline.add(new SecurityIncidentTimelineEntry("SECURITY_EVENT", event.eventId(), event.occurredAt(), event.eventType().name())));
+        events.forEach(event -> timeline.add(new SecurityIncidentTimelineEntry("SECURITY_EVENT", event.eventId(),
+                event.occurredAt(), event.eventType().name(), SecurityEventIdentity.of(event).reference())));
         linkedAlerts.forEach(alert -> timeline.add(new SecurityIncidentTimelineEntry("ALERT", alert.id(), alert.occurredAt(), "关联告警")));
         timeline.sort(Comparator.comparing(SecurityIncidentTimelineEntry::occurredAt).thenComparing(SecurityIncidentTimelineEntry::sourceId));
         SecurityIncidentRisk risk = linkedAlerts.isEmpty()
@@ -280,15 +279,31 @@ public final class SecurityIncidentService {
                 event.severity().name(), event.confidence());
     }
 
-    private Map<AlertEventKey, List<Alert>> alertsByEvent() {
-        Map<AlertEventKey, List<Alert>> result = new HashMap<>();
+    private Map<AlertReferenceKey, List<Alert>> alertsByReference() {
+        Map<AlertReferenceKey, List<Alert>> result = new HashMap<>();
         alerts.listActive().forEach(alert -> alert.evidence().stream()
-                .filter(token -> token.startsWith(SECURITY_EVENT_PREFIX))
-                .map(token -> token.substring(SECURITY_EVENT_PREFIX.length()))
-                .filter(id -> !id.isBlank())
-                .forEach(id -> result.computeIfAbsent(new AlertEventKey(id, alert.parkId(), alert.buildingId()),
+                .filter(SecurityEventIdentity::isReference)
+                .forEach(reference -> result.computeIfAbsent(
+                        new AlertReferenceKey(reference, alert.parkId(), alert.buildingId()),
                         ignored -> new ArrayList<>()).add(alert)));
         return result;
+    }
+
+    /**
+     * Alerts that reference a specific event. A source-qualified reference only
+     * matches its own source, while the legacy bare reference keeps aliasing the
+     * same source-local id across sources.
+     */
+    private static List<Alert> alertsReferencing(Map<AlertReferenceKey, List<Alert>> alertsByReference,
+                                                 SecurityEvent event) {
+        SecurityEventIdentity identity = SecurityEventIdentity.of(event);
+        AlertReferenceKey qualified = new AlertReferenceKey(identity.reference(), event.parkId(), event.buildingId());
+        AlertReferenceKey legacy = new AlertReferenceKey(
+                SecurityEventIdentity.legacyReference(event.eventId()), event.parkId(), event.buildingId());
+        if (qualified.equals(legacy)) return alertsByReference.getOrDefault(qualified, List.of());
+        List<Alert> matched = new ArrayList<>(alertsByReference.getOrDefault(qualified, List.of()));
+        matched.addAll(alertsByReference.getOrDefault(legacy, List.of()));
+        return matched;
     }
 
     private List<SecurityIncident> restoreStates(List<SecurityIncident> freshIncidents) {
@@ -616,6 +631,6 @@ public final class SecurityIncidentService {
     private record CorrelationKey(String parkId, String buildingId, String eventType) {
     }
 
-    private record AlertEventKey(String eventId, String parkId, String buildingId) {
+    private record AlertReferenceKey(String reference, String parkId, String buildingId) {
     }
 }

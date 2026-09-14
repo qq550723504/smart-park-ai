@@ -1,6 +1,9 @@
 package com.example.smartpark.securityincident;
 
 import com.example.smartpark.model.security.RedactedEvidencePolicy;
+import com.example.smartpark.model.security.SecurityEventIdentity;
+import com.example.smartpark.model.security.SecuritySourceRef;
+import com.example.smartpark.model.security.SecuritySourceType;
 
 import java.time.Instant;
 import java.util.Objects;
@@ -35,6 +38,18 @@ public record SecurityIncidentEvidence(
     private static String requireText(String value, String field) {
         if (value == null || value.isBlank()) throw new IllegalArgumentException(field + " must not be blank");
         return value.trim();
+    }
+
+    /**
+     * Reconstructs the source-qualified logical identity of the evidence. A missing
+     * or unrecognized source falls back to the legacy source-less alias.
+     */
+    public SecurityEventIdentity eventIdentity(String parkId, String buildingId) {
+        SecuritySourceType type = SecuritySourceType.fromName(sourceType);
+        SecuritySourceRef source = type == SecuritySourceType.UNKNOWN || eventSourceId == null
+                ? SecuritySourceRef.unknown()
+                : new SecuritySourceRef(type, eventSourceId);
+        return new SecurityEventIdentity(source, sourceId, parkId, buildingId);
     }
 
     private static String trimToNull(String value) {

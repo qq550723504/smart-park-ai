@@ -74,7 +74,12 @@ final class SecurityIncidentDtos {
     }
 
     private static Map<String, Object> timeline(SecurityIncidentTimelineEntry entry) {
-        return Map.of("sourceType", entry.sourceType(), "sourceId", entry.sourceId(),
-                "occurredAt", entry.occurredAt().toString(), "label", entry.label());
+        Map<String, Object> dto = new LinkedHashMap<>();
+        dto.put("sourceType", entry.sourceType());
+        dto.put("sourceId", entry.sourceId());
+        dto.put("occurredAt", entry.occurredAt().toString());
+        dto.put("label", entry.label());
+        if (entry.reference() != null) dto.put("reference", entry.reference());
+        return dto;
     }
 }

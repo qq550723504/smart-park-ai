@@ -7,6 +7,7 @@ import com.example.smartpark.model.security.SecurityDisposition;
 import com.example.smartpark.model.security.SecurityDispositionRecord;
 import com.example.smartpark.model.security.SecurityDispositionSource;
 import com.example.smartpark.model.security.SecurityEvent;
+import com.example.smartpark.model.security.SecurityEventIdentity;
 import com.example.smartpark.model.security.SecurityEventSeverity;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoff;
@@ -539,6 +540,46 @@ class SecurityIncidentServiceTest {
         assertThat(restored.riskLevel()).isEqualTo(SecurityIncidentRisk.HIGH);
         assertThat(restored.recommendations()).containsExactly(
                 "核对安全处置手册并由授权人员复核。", "必要时记录协同交接并保留人工审计。");
+    }
+
+    @Test
+    void linksAlertsBySourceQualifiedEventReference() {
+        SecurityEvent access = withSource(event("SEC-SHARED-REF", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityEvent camera = withSource(event("SEC-SHARED-REF", "A1", "ACCESS", BASE.plusSeconds(20 * 60)),
+                SecuritySourceType.CAMERA_ANALYTICS, "camera-1");
+        Alert accessAlert = new Alert("ALT-ACCESS", "PARK-A", "A1", "DEV-1", AlertClassification.ACCESS,
+                RiskLevel.HIGH, "REDACTED: access alert", BASE,
+                List.of(SecurityEventIdentity.of(access).reference()));
+        SecurityIncidentService service = service(List.of(access, camera), List.of(accessAlert));
+
+        List<SecurityIncident> incidents = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        assertThat(incidents).hasSize(2);
+        assertThat(incidents).filteredOn(incident -> hasEventSource(incident, "access-1"))
+                .singleElement().satisfies(incident -> {
+                    assertThat(incident.alertIds()).containsExactly("ALT-ACCESS");
+                    assertThat(incident.riskLevel()).isEqualTo(SecurityIncidentRisk.HIGH);
+                });
+        assertThat(incidents).filteredOn(incident -> hasEventSource(incident, "camera-1"))
+                .singleElement().satisfies(incident -> {
+                    assertThat(incident.alertIds()).isEmpty();
+                    assertThat(incident.riskLevel()).isEqualTo(SecurityIncidentRisk.MEDIUM);
+                });
+    }
+
+    @Test
+    void keepsLegacyAlertReferencesAsAnExplicitAlias() {
+        SecurityEvent access = withSource(event("SEC-LEGACY-REF", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        Alert legacyAlert = new Alert("ALT-LEGACY", "PARK-A", "A1", "DEV-1", AlertClassification.ACCESS,
+                RiskLevel.HIGH, "REDACTED: legacy alert", BASE, List.of("security-event:SEC-LEGACY-REF"));
+        SecurityIncidentService service = service(List.of(access), List.of(legacyAlert));
+
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(incident.alertIds()).containsExactly("ALT-LEGACY");
+        assertThat(incident.riskLevel()).isEqualTo(SecurityIncidentRisk.HIGH);
     }
 
     @Test

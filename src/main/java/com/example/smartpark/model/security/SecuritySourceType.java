@@ -8,5 +8,15 @@ public enum SecuritySourceType {
     CAMERA_ANALYTICS,
     ACCESS_CONTROL,
     EXISTING_FEED,
-    UNKNOWN
+    UNKNOWN;
+
+    /** Resolves a stored name, falling back to {@link #UNKNOWN} for unknown or missing values. */
+    public static SecuritySourceType fromName(String name) {
+        if (name == null || name.isBlank()) return UNKNOWN;
+        try {
+            return valueOf(name.trim());
+        } catch (IllegalArgumentException exception) {
+            return UNKNOWN;
+        }
+    }
 }
