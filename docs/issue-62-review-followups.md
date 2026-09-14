@@ -191,3 +191,11 @@ cd ui && npx vue-tsc -b && npx vitest run
 | --- | --- | --- | --- |
 | 7 | `securityincident/SecurityIncidentService.restoreHandoffProjection()` | P1 | handoff 投影无条件用旧记录覆盖 fresh 的新判定，且 `refresh()` 会把旧值写回。现抽出 `reconcileDisposition()` 供 restore 与 handoff 投影共用，人工 handoff 记录的 first-wins 保持不变 |
 
+第五轮（对 `79c2fe1`）补 3 条：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 8 | `securityincident/SecurityIncidentService.correlate()` | P1 | 跨读取路径按 `(eventId, parkId, buildingId)` 逻辑身份去重；同一事件不同表示时优先已决 disposition，否则取 `receivedAt` 最新者 |
+| 9 | `web/SecurityIncidentController.review()` | P1 | 新增 `SecurityIncidentService.ReviewOutcome`/`applyReview()`，审计 outcome 记为 `SUCCESS:<disposition>` 或 `NO_CHANGE:<persisted disposition>`，可区分幂等 no-op 并重建已持久化结论 |
+| 10 | `collaborationcenter/SecurityIncidentHandoffStore` | P2 | `projectedFieldsChanged()` 纳入 `dispositionRecord`，仅 disposition 变化时也推进 `updatedAt` |
+
