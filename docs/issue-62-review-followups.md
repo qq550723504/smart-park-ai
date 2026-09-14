@@ -457,3 +457,11 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 67 | `ui/src/components/security/SecurityIncidentCenter.vue` 误报指标 | P2 | 误报指标此前只要队列里出现任一已决 disposition 就显示：运营在默认 demo 适配器上人工复核一条事件后，hero 就会给出「误报」计数，而 `securityDispositionEnabled` 仍为 false（缺少生产误报评估数据源），与 fail-closed 能力契约相悖。现组件新增 `securityDispositionEnabled`（默认 false），只在能力开启**且**存在已决条目时才统计误报，否则显示「误报数不可统计」；`OperationsWorkbench` 透传该能力 |
 
 对应提交：`85aeea0`。
+
+第三十五轮（对 `c50d995`）补 1 条（P2）：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 68 | `securityincident/SecurityIncidentService` 事件排序 | P2 | 两个具体来源在同一位置、同一 `correlationType`、同一 occurredAt 复用同一 eventId 时，`occurredAt`/`eventId` 比较器判定相等，稳定排序保留 reader/adapter 返回顺序；`build()` 取首个事件派生 incidentId，于是同一批关联证据在摄取顺序变化时得到不同 ID，破坏稳定 API 链接与已存储的（可能已驱逐的）投影关联。现排序追加 `SecurityEventIdentity.of(event).material()` 作为确定性来源身份 tie-breaker |
+
+对应提交：`051823e`。
