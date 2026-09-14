@@ -135,8 +135,10 @@ public final class SecurityEventCatalog implements SecurityEventResolver, Securi
             try {
                 SecurityEvent direct = reader.getEvent(eventId);
                 if (direct != null) candidates.add(direct);
-            } catch (NoSuchElementException | IllegalArgumentException notFound) {
-                // The get-only port has no such event.
+            } catch (NoSuchElementException notFound) {
+                // Only the port's explicit not-found answer means "no such event"; a backend
+                // or configuration failure must propagate to the sanitized unavailable path
+                // instead of being masked by an unrelated adapter copy of the same id.
             }
         }
         return candidates;

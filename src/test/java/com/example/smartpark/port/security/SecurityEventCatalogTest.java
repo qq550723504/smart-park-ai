@@ -259,6 +259,26 @@ class SecurityEventCatalogTest {
         assertThat(catalog.getEventByReference(SecurityEventIdentity.of(legacy).reference())).isEqualTo(legacy);
     }
 
+    @Test
+    void propagatesGetOnlyPortFailuresInsteadOfTreatingThemAsNotFound() {
+        SecurityEvent adapted = event("SEC-FAIL", access("access-1"), BASE);
+        SecurityPort failing = eventId -> {
+            throw new IllegalArgumentException("backend unavailable");
+        };
+        SecurityEventCatalog withoutAdapter = new SecurityEventCatalog(new SecurityPortReader(failing), List.of());
+        SecurityEventCatalog withAdapter = new SecurityEventCatalog(new SecurityPortReader(failing),
+                List.of(adapter(adapted)));
+
+        // A backend/configuration failure is not "not found": it must surface, and an adapter
+        // copy of the same id must not mask it as a successful, unrelated resolution.
+        assertThatThrownBy(() -> withoutAdapter.getEvent("SEC-FAIL"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("backend unavailable");
+        assertThatThrownBy(() -> withAdapter.getEvent("SEC-FAIL"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("backend unavailable");
+    }
+
     private static SecurityPort port(SecurityEvent... events) {
         List<SecurityEvent> all = List.of(events);
         return eventId -> all.stream().filter(event -> event.eventId().equals(eventId)).findFirst()
