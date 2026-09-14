@@ -149,10 +149,10 @@ public final class SecurityIncidentService {
     }
 
     private List<SecurityIncident> correlate() {
-        Map<SecurityEvent, SecurityEvent> deduplicated = new LinkedHashMap<>();
-        security.listEvents().forEach(event -> deduplicated.putIfAbsent(event, event));
+        Map<AlertEventKey, SecurityEvent> deduplicated = new LinkedHashMap<>();
+        security.listEvents().forEach(event -> mergeEvent(deduplicated, event));
         sourceAdapters.forEach(adapter -> adapter.readEvents()
-                .forEach(event -> deduplicated.putIfAbsent(event, event)));
+                .forEach(event -> mergeEvent(deduplicated, event)));
         Map<CorrelationKey, List<SecurityEvent>> buckets = new LinkedHashMap<>();
         deduplicated.values().stream()
                 .sorted(Comparator.comparing(SecurityEvent::occurredAt).thenComparing(SecurityEvent::eventId))
@@ -161,6 +161,26 @@ public final class SecurityIncidentService {
         List<SecurityIncident> incidents = new ArrayList<>();
         buckets.values().forEach(events -> splitBucket(events, alertsByEvent, incidents));
         return incidents;
+    }
+
+    private static void mergeEvent(Map<AlertEventKey, SecurityEvent> target, SecurityEvent event) {
+        target.merge(new AlertEventKey(event.eventId(), event.parkId(), event.buildingId()),
+                event, SecurityIncidentService::authoritativeEvent);
+    }
+
+    /**
+     * Picks the authoritative representation of a logically identical event that
+     * arrives through multiple ingestion paths (legacy reader and/or registered
+     * adapters). A decided disposition always wins so a source's classification is
+     * not dropped when another path reports the same event as {@code UNREVIEWED};
+     * otherwise the freshest representation by {@code receivedAt} wins, favouring
+     * an adapter's enriched view over a staler copy.
+     */
+    private static SecurityEvent authoritativeEvent(SecurityEvent left, SecurityEvent right) {
+        boolean leftDecided = left.disposition().disposition() != SecurityDisposition.UNREVIEWED;
+        boolean rightDecided = right.disposition().disposition() != SecurityDisposition.UNREVIEWED;
+        if (leftDecided != rightDecided) return rightDecided ? right : left;
+        return right.receivedAt().isAfter(left.receivedAt()) ? right : left;
     }
 
     private void splitBucket(List<SecurityEvent> events, Map<AlertEventKey, List<Alert>> alertsByEvent,

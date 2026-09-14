@@ -7,6 +7,7 @@ import com.example.smartpark.model.security.SecurityDisposition;
 import com.example.smartpark.model.security.SecurityDispositionRecord;
 import com.example.smartpark.model.security.SecurityDispositionSource;
 import com.example.smartpark.model.security.SecurityEvent;
+import com.example.smartpark.model.security.SecurityEventSeverity;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoff;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoffPort;
@@ -68,6 +69,48 @@ class SecurityIncidentServiceTest {
 
         assertThat(page.items()).singleElement()
                 .satisfies(incident -> assertThat(incident.eventIds()).containsExactly("SEC-SHARED"));
+    }
+
+    @Test
+    void deduplicatesLogicallyIdenticalEventsAndKeepsTheClassifiedRepresentation() {
+        SecurityEvent readerCopy = event("SEC-ENRICHED", "A1", "ACCESS", BASE);
+        SecurityDispositionRecord registered = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(30));
+        SecurityEvent adapterCopy = enrichedEvent(readerCopy, registered, BASE.minusSeconds(5),
+                SecurityEventSeverity.HIGH);
+        SecurityIncidentService service = service(List.of(readerCopy), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterReturning(adapterCopy)));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).singleElement().satisfies(incident -> {
+            assertThat(incident.eventIds()).containsExactly("SEC-ENRICHED");
+            assertThat(incident.evidence()).singleElement()
+                    .satisfies(evidence -> assertThat(evidence.severity()).isEqualTo("HIGH"));
+            assertThat(incident.timeline())
+                    .filteredOn(entry -> entry.sourceType().equals("SECURITY_EVENT")).hasSize(1);
+            assertThat(incident.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+            assertThat(incident.dispositionRecord()).isEqualTo(registered);
+        });
+    }
+
+    @Test
+    void prefersTheFreshestRepresentationWhenNoDispositionIsAvailable() {
+        SecurityEvent readerCopy = event("SEC-FRESH", "A1", "ACCESS", BASE);
+        SecurityEvent adapterCopy = enrichedEvent(readerCopy, SecurityDispositionRecord.unreviewed(),
+                BASE.plusSeconds(5), SecurityEventSeverity.HIGH);
+        SecurityIncidentService service = service(List.of(readerCopy), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterReturning(adapterCopy)));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).singleElement()
+                .satisfies(incident -> {
+                    assertThat(incident.eventIds()).containsExactly("SEC-FRESH");
+                    assertThat(incident.evidence()).singleElement()
+                            .satisfies(evidence -> assertThat(evidence.severity()).isEqualTo("HIGH"));
+                });
     }
 
     @Test
@@ -1003,6 +1046,13 @@ class SecurityIncidentServiceTest {
     private static SecurityEvent event(String id, String parkId, String buildingId, String type, Instant occurredAt,
                                        String summary) {
         return new SecurityEvent(id, parkId, buildingId, type, occurredAt, summary);
+    }
+
+    private static SecurityEvent enrichedEvent(SecurityEvent base, SecurityDispositionRecord disposition,
+                                               Instant receivedAt, SecurityEventSeverity severity) {
+        return new SecurityEvent(base.eventId(), base.parkId(), base.buildingId(), base.eventType(),
+                base.rawEventType(), base.source(), base.location(), base.observedAt(), receivedAt, severity, 0.9d,
+                base.privacy(), disposition, "adapter-1", "v2", base.evidenceSummary());
     }
 
     private static SecurityEvent eventWithDisposition(SecurityEvent base, SecurityDispositionRecord disposition) {
