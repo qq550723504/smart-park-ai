@@ -98,6 +98,38 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void keepsUnsupportedVendorTypesApartWithinOneCorrelationWindow() {
+        SecurityEvent doorForced = withSource(event("SEC-VENDOR-DOOR", "A1", "DOOR_FORCED", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityEvent turnstileTamper = withSource(event("SEC-VENDOR-TURNSTILE", "A1", "TURNSTILE_TAMPER",
+                BASE.plusSeconds(60)), SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityIncidentService service = service(List.of(), List.of(), 50,
+                new SecurityIncidentHandoffStore(10),
+                List.of(adapterReturning(doorForced, turnstileTamper)));
+
+        List<SecurityIncident> incidents = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        assertThat(incidents).hasSize(2);
+        assertThat(incidents).extracting(SecurityIncident::standardEventType)
+                .containsOnly(SecurityEventType.UNKNOWN);
+        assertThat(incidents).allSatisfy(incident -> assertThat(incident.evidence()).hasSize(1));
+    }
+
+    @Test
+    void stillGroupsRepeatedUnsupportedVendorTypesIntoOneIncident() {
+        SecurityEvent first = withSource(event("SEC-VENDOR-1", "A1", "DOOR_FORCED", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityEvent second = withSource(event("SEC-VENDOR-2", "A1", "DOOR_FORCED", BASE.plusSeconds(60)),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityIncidentService service = service(List.of(), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterReturning(first, second)));
+
+        List<SecurityIncident> incidents = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        assertThat(incidents).singleElement().satisfies(incident -> assertThat(incident.evidence()).hasSize(2));
+    }
+
+    @Test
     void prefersTheNewestDecisionWhenBothIngestionPathsDeliverDecidedRecords() {
         SecurityDispositionRecord stale = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
                 SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",

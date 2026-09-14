@@ -7,6 +7,7 @@ import com.example.smartpark.model.security.SecurityDispositionRecord;
 import com.example.smartpark.model.security.SecurityDispositionSource;
 import com.example.smartpark.model.security.SecurityEvent;
 import com.example.smartpark.model.security.SecurityEventIdentity;
+import com.example.smartpark.model.security.SecurityEventType;
 import com.example.smartpark.model.security.SecuritySourceType;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoff;
@@ -300,7 +301,7 @@ public final class SecurityIncidentService {
                 .orElse(SecurityDispositionRecord.unreviewed());
         boolean sourceDecided = sourceDisposition.disposition() != SecurityDisposition.UNREVIEWED;
         return new SecurityIncident(incidentId(first), first.parkId(), first.buildingId(),
-                first.eventType().name(), risk,
+                correlationType(first), risk,
                 sourceDecided ? SecurityIncidentStatus.REVIEWED : SecurityIncidentStatus.OPEN,
                 events.get(0).occurredAt(), events.get(events.size() - 1).occurredAt(), eventIds, alertIds,
                 evidence, timeline, recommendationsFor(risk),
@@ -695,8 +696,20 @@ public final class SecurityIncidentService {
                 && left.eventType().equals(right.eventType());
     }
 
+    /**
+     * Discriminates the correlation bucket's event type. Unsupported vendor codes
+     * all standardize to {@code UNKNOWN}; falling back to the raw vendor type keeps
+     * unrelated vendor events in the same park/building/window from being merged
+     * into a single incident just because the enum mapping covered neither code.
+     */
+    private static String correlationType(SecurityEvent event) {
+        if (event.eventType() != SecurityEventType.UNKNOWN) return event.eventType().name();
+        String raw = event.rawEventType();
+        return raw == null || raw.isBlank() ? event.eventType().name() : event.eventType().name() + ":" + raw;
+    }
+
     private static CorrelationKey bucketKey(SecurityEvent event) {
-        return new CorrelationKey(event.parkId(), event.buildingId(), event.eventType().name());
+        return new CorrelationKey(event.parkId(), event.buildingId(), correlationType(event));
     }
 
     private static String incidentId(SecurityEvent event) {
