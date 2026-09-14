@@ -161,6 +161,32 @@ class SecurityEventCatalogTest {
     }
 
     @Test
+    void resolvesALocationLessQualifiedReferenceWhenTheSourceReuseIsUnique() {
+        SecurityEvent access = event("SEC-LONE", access("access-1"), BASE);
+        SecurityEventCatalog catalog = new SecurityEventCatalog(reader(), List.of(adapter(access)));
+
+        // A previously emitted three-part token (no park/building) must still resolve to
+        // the one event of that source, rather than being reported as unknown.
+        assertThat(catalog.getEventByReference(locationLessReference("ACCESS_CONTROL", "access-1", "SEC-LONE")))
+                .isEqualTo(access);
+    }
+
+    @Test
+    void rejectsALocationLessQualifiedReferenceWhenTheSourceReusesTheIdAcrossLocations() {
+        SecurityEvent here = event("SEC-SPREAD", access("access-1"), BASE);
+        SecurityEvent elsewhere = new SecurityEvent("SEC-SPREAD", PARK, "A2", SecurityEventType.ACCESS_ANOMALY,
+                "ACCESS", access("access-1"), SecurityEventLocation.empty(), BASE, BASE.plusSeconds(30),
+                SecurityEventSeverity.UNKNOWN, null, SecurityPrivacyMetadata.redactedOnly(),
+                SecurityDispositionRecord.unreviewed(), "test", null, "REDACTED: safe event summary");
+        SecurityEventCatalog catalog = new SecurityEventCatalog(reader(here), List.of(adapter(elsewhere)));
+
+        assertThatThrownBy(() -> catalog.getEventByReference(
+                locationLessReference("ACCESS_CONTROL", "access-1", "SEC-SPREAD")))
+                .isInstanceOf(SecurityEventLookupException.class)
+                .hasMessageContaining("ambiguous");
+    }
+
+    @Test
     void failsWhenNoEventMatches() {
         SecurityEventCatalog catalog = new SecurityEventCatalog(reader(), List.of());
 
@@ -205,6 +231,13 @@ class SecurityEventCatalogTest {
 
         assertThat(resolved.receivedAt()).isEqualTo(BASE.plusSeconds(600));
         assertThat(resolved.disposition()).isEqualTo(corrected);
+    }
+
+    private static String locationLessReference(String sourceType, String sourceId, String eventId) {
+        return SecurityEventIdentity.REFERENCE_PREFIX + "source:"
+                + sourceType.length() + "#" + sourceType + ":"
+                + sourceId.length() + "#" + sourceId + ":"
+                + eventId.length() + "#" + eventId;
     }
 
     private static SecurityEventIdentity accessIdentity() {

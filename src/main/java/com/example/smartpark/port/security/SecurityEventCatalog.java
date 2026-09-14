@@ -78,9 +78,9 @@ public final class SecurityEventCatalog implements SecurityEventResolver, Securi
      * Resolves a reference emitted by {@link SecurityEventIdentity#reference()}. A
      * source-qualified token matches only events of that exact source, so it recovers a
      * colliding bare id that {@link #getEvent(String)} rejects as ambiguous; a legacy bare
-     * token aliases any source of the same event id, like the bare-id lookup. The token
-     * carries the source and the location, so a source that reuses a local id across parks
-     * or buildings still resolves to the exact event instead of staying ambiguous.
+     * token aliases any source of the same event id, like the bare-id lookup. A token that
+     * omits the location still resolves when the source reuse is unique, and is rejected as
+     * ambiguous only when the remaining location candidates disagree.
      */
     @Override
     public SecurityEvent getEventByReference(String reference) {
@@ -91,13 +91,20 @@ public final class SecurityEventCatalog implements SecurityEventResolver, Securi
         if (!SecurityEventIdentity.isQualifiedReference(reference)) {
             return getEvent(SecurityEventIdentity.eventIdOfReference(reference));
         }
+        SecurityEventIdentity.QualifiedReference qualified =
+                SecurityEventIdentity.parseQualifiedReference(reference);
+        if (qualified == null) {
+            // The token decodes but names an unknown or misspelled source type: reject it
+            // rather than downgrade to a bare-id lookup that could ground another source.
+            throw new NoSuchElementException("security event not found for reference: " + reference);
+        }
         List<SecurityEvent> matches = events().stream()
-                .filter(event -> SecurityEventIdentity.of(event).reference().equals(reference))
+                .filter(event -> qualified.matches(SecurityEventIdentity.of(event)))
                 .toList();
         if (matches.isEmpty()) {
             throw new NoSuchElementException("security event not found for reference: " + reference);
         }
-        if (distinctIdentities(matches) > 1) {
+        if (!qualified.hasLocation() && distinctLocations(matches) > 1) {
             throw new SecurityEventLookupException("ambiguous security event reference: " + reference);
         }
         return preferred(matches);
@@ -198,9 +205,9 @@ public final class SecurityEventCatalog implements SecurityEventResolver, Securi
         return identity.parkId() + '\u0000' + identity.buildingId();
     }
 
-    private static int distinctIdentities(List<SecurityEvent> events) {
-        Set<SecurityEventIdentity> identities = new LinkedHashSet<>();
-        events.forEach(event -> identities.add(SecurityEventIdentity.of(event)));
-        return identities.size();
+    private static int distinctLocations(List<SecurityEvent> events) {
+        Set<String> locations = new LinkedHashSet<>();
+        events.forEach(event -> locations.add(location(SecurityEventIdentity.of(event))));
+        return locations.size();
     }
 }

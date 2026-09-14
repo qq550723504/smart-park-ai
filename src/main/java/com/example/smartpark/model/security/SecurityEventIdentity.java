@@ -148,6 +148,57 @@ public record SecurityEventIdentity(SecuritySourceRef source, String eventId, St
     }
 
     /**
+     * A decoded source-qualified reference. {@code parkId} and {@code buildingId} are
+     * {@code null} for a location-less token, which matches the referenced event at any
+     * location so the caller can decide whether the remaining candidates are ambiguous.
+     */
+    public record QualifiedReference(SecuritySourceRef source, String eventId, String parkId, String buildingId) {
+        public QualifiedReference {
+            Objects.requireNonNull(source, "source");
+            eventId = requireText(eventId, "eventId");
+        }
+
+        public boolean hasLocation() {
+            return parkId != null && buildingId != null;
+        }
+
+        /** True when {@code identity} is the concrete source event this reference names. */
+        public boolean matches(SecurityEventIdentity identity) {
+            Objects.requireNonNull(identity, "identity");
+            if (identity.isSourceLess()) return false;
+            if (!eventId.equals(identity.eventId()) || !source.equals(identity.source())) return false;
+            return !hasLocation()
+                    || (parkId.equals(identity.parkId()) && buildingId.equals(identity.buildingId()));
+        }
+    }
+
+    /**
+     * Decodes a source-qualified reference into its source, event id and optional location.
+     * Returns {@code null} when {@code token} is not a decodable source-qualified reference,
+     * including a token that names an unknown or misspelled source type. A location-less
+     * token keeps its location parts {@code null} so a caller can match every location.
+     */
+    public static QualifiedReference parseQualifiedReference(String token) {
+        if (!isReference(token)) return null;
+        String body = token.substring(REFERENCE_PREFIX.length()).trim();
+        if (!body.startsWith(SOURCE_REFERENCE_PREFIX)) return null;
+        String material = body.substring(SOURCE_REFERENCE_PREFIX.length());
+        DecodedMaterial decoded = decodeParts(material, IDENTITY_PARTS);
+        if (decoded == null) return null;
+        List<String> parts = decoded.parts();
+        SecuritySourceType type = SecuritySourceType.fromName(parts.get(0));
+        // reference() never encodes a source-less source, so an unknown or misspelled type
+        // is malformed and must not be resolved as a wildcard.
+        if (type == SecuritySourceType.UNKNOWN) return null;
+        DecodedMaterial location = decodeLocation(material, decoded.consumed());
+        return new QualifiedReference(
+                new SecuritySourceRef(type, parts.get(1)),
+                parts.get(2),
+                location == null ? null : location.parts().get(0),
+                location == null ? null : location.parts().get(1));
+    }
+
+    /**
      * Canonical source-qualified reference for the prefix of {@code token} that obeys the
      * {@code source:length#value:length#value:length#value} grammar, including the optional
      * trailing {@code :length#park:length#building} location when present. Only the encoded
