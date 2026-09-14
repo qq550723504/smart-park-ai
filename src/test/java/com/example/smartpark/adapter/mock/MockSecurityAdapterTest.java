@@ -25,6 +25,18 @@ class MockSecurityAdapterTest {
     }
 
     @Test
+    void attachesTheDeclaredSourceToSeededEvents() {
+        MockSecurityAdapter adapter = new MockSecurityAdapter(new MockParkDataStore());
+
+        assertThat(adapter.listEvents()).isNotEmpty().allSatisfy(event -> {
+            assertThat(event.source().sourceType()).isEqualTo(SecuritySourceType.ACCESS_CONTROL);
+            assertThat(event.source().sourceId()).isEqualTo("mock-access-control-feed");
+        });
+        assertThat(adapter.getEvent("SEC-ACCESS-001").source().sourceType())
+                .isEqualTo(SecuritySourceType.ACCESS_CONTROL);
+    }
+
+    @Test
     void declaresOnlyAccessAnomalyAsANonProductionDemoSource() {
         MockSecurityAdapter adapter = new MockSecurityAdapter(new MockParkDataStore());
 
