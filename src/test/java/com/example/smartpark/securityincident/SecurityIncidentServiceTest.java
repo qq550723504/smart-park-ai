@@ -206,6 +206,37 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void resolvesALegacyAliasToAtMostOneConcreteSource() {
+        List<SecurityEvent> polled = new ArrayList<>(List.of(event("SEC-LEGACY-DUAL", "A1", "ACCESS", BASE)));
+        SecurityIncidentService service = service(List.of(), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterBackedBy(polled)));
+        SecurityIncident reviewed = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(reviewed.incidentId(), SecurityDisposition.FALSE_POSITIVE, "APPROVER");
+        service.handoff(reviewed.incidentId());
+
+        polled.clear();
+        polled.add(withSource(event("SEC-LEGACY-DUAL", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1"));
+        polled.add(withSource(event("SEC-LEGACY-DUAL", "A1", "ACCESS", BASE.plusSeconds(20 * 60)),
+                SecuritySourceType.CAMERA_ANALYTICS, "camera-1"));
+
+        List<SecurityIncident> incidents = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        assertThat(incidents).hasSize(2);
+        assertThat(incidents).filteredOn(incident -> hasEventSource(incident, "access-1"))
+                .singleElement().satisfies(incident -> {
+                    assertThat(incident.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+                    assertThat(incident.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+                });
+        assertThat(incidents).filteredOn(incident -> hasEventSource(incident, "camera-1"))
+                .singleElement().satisfies(incident -> {
+                    assertThat(incident.status()).isEqualTo(SecurityIncidentStatus.OPEN);
+                    assertThat(incident.disposition()).isEqualTo(SecurityDisposition.UNREVIEWED);
+                    assertThat(incident.handoffWorkItemId()).isNull();
+                });
+    }
+
+    @Test
     void aliasesALegacyEventWithItsEnrichedAdapterCopy() {
         SecurityEvent legacy = event("SEC-ALIAS", "A1", "ACCESS", BASE);
         SecurityDispositionRecord registered = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
@@ -1130,6 +1161,11 @@ class SecurityIncidentServiceTest {
         };
         return new SecurityIncidentService(security, alertPort, new SecurityIncidentStore(capacity), handoffs,
                 Clock.fixed(BASE.plusSeconds(3600), ZoneOffset.UTC), sourceAdapters);
+    }
+
+    private static boolean hasEventSource(SecurityIncident incident, String eventSourceId) {
+        return incident.evidence().stream()
+                .anyMatch(evidence -> eventSourceId.equals(evidence.eventSourceId()));
     }
 
     private static SecuritySourceAdapter adapterReturning(SecurityEvent... events) {

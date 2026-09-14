@@ -295,6 +295,13 @@ public final class SecurityIncidentService {
         List<SecurityIncident> stored = store.findAll();
         List<SecurityIncidentHandoff> retainedHandoffs = handoffs.list();
         Set<String> assignedStoredIncidentIds = new HashSet<>();
+        // A stored resource may be discovered through a legacy source-less alias that
+        // matches several concrete sources. Discovery is intentionally permissive, but
+        // an alias-only match is claimed by at most one fresh incident so an unrelated
+        // source can never inherit its state. A fully-equal identity is a genuine
+        // overlap and may legitimately keep propagating across a correlation resplit.
+        Set<String> claimedAliasOnlyIncidentIds = new HashSet<>();
+        Set<String> claimedAliasOnlyHandoffWorkItemIds = new HashSet<>();
         Set<String> correlatedRetainedHandoffWorkItemIds = new HashSet<>();
         List<SecurityIncident> candidatesForRetirement = new ArrayList<>();
         List<SecurityIncidentHandoff> retainedHandoffsForRetirement = new ArrayList<>();
@@ -303,7 +310,12 @@ public final class SecurityIncidentService {
             List<SecurityIncident> candidates = stored.stream()
                     .filter(existing -> sameCorrelation(existing, fresh))
                     .filter(existing -> overlaps(existing, fresh))
+                    .filter(existing -> !claimedAliasOnlyIncidentIds.contains(existing.incidentId())
+                            || sharesExactIdentity(existing, fresh))
                     .toList();
+            candidates.stream()
+                    .filter(existing -> !sharesExactIdentity(existing, fresh))
+                    .forEach(existing -> claimedAliasOnlyIncidentIds.add(existing.incidentId()));
             candidatesForRetirement.addAll(candidates);
             SecurityIncident canonical = candidates.stream()
                     .min(Comparator.comparing(SecurityIncident::openedAt).thenComparing(SecurityIncident::incidentId))
@@ -312,7 +324,13 @@ public final class SecurityIncidentService {
                     && assignedStoredIncidentIds.add(canonical.incidentId());
             SecurityIncident restored = restoreState(fresh, candidates, retainStoredIdentity);
             List<SecurityIncidentHandoff> matchingRetainedHandoffs = matchingRetainedHandoffs(fresh, restored,
-                    retainedHandoffs);
+                    retainedHandoffs).stream()
+                    .filter(handoff -> !claimedAliasOnlyHandoffWorkItemIds.contains(handoff.workItemId())
+                            || sharesExactIdentity(handoff, fresh))
+                    .toList();
+            matchingRetainedHandoffs.stream()
+                    .filter(handoff -> !sharesExactIdentity(handoff, fresh))
+                    .forEach(handoff -> claimedAliasOnlyHandoffWorkItemIds.add(handoff.workItemId()));
             retainedHandoffsForRetirement.addAll(matchingRetainedHandoffs);
             matchingRetainedHandoffs.stream()
                     .map(SecurityIncidentHandoff::workItemId)
@@ -493,6 +511,22 @@ public final class SecurityIncidentService {
                     .anyMatch(one -> right.eventIdentities().stream().anyMatch(one::matches));
         }
         return left.eventIds().stream().anyMatch(right.eventIds()::contains);
+    }
+
+    /**
+     * True when two incidents share a fully-equal logical identity. Unlike
+     * {@link #overlaps}, a legacy source-less alias does not count: alias-only
+     * matches are resolved to at most one concrete source by the caller.
+     */
+    private static boolean sharesExactIdentity(SecurityIncident left, SecurityIncident right) {
+        if (left.eventIdentities().isEmpty() || right.eventIdentities().isEmpty()) {
+            return left.eventIds().stream().anyMatch(right.eventIds()::contains);
+        }
+        return left.eventIdentities().stream().anyMatch(right.eventIdentities()::contains);
+    }
+
+    private static boolean sharesExactIdentity(SecurityIncidentHandoff handoff, SecurityIncident incident) {
+        return handoff.eventIdentities().stream().anyMatch(incident.eventIdentities()::contains);
     }
 
     private static SecurityIncident withStoredState(SecurityIncident fresh, String incidentId, SecurityIncidentStatus status,
