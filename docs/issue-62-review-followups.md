@@ -185,3 +185,9 @@ cd ui && npx vue-tsc -b && npx vitest run
 | --- | --- | --- | --- |
 | 6 | `securityincident/SecurityIncidentService.restoreState()` | P1 | `2` 号修复未覆盖 restore 路径：存量的 `OPEN`/`UNREVIEWED` 候选会覆盖新一轮已带 disposition 的 fresh。现 `effectiveDisposition()` 将 fresh 记录纳入优先级，并保留人工复核的 first-wins |
 
+第四轮（对 `c6a7709`）补 1 条 P1：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 7 | `securityincident/SecurityIncidentService.restoreHandoffProjection()` | P1 | handoff 投影无条件用旧记录覆盖 fresh 的新判定，且 `refresh()` 会把旧值写回。现抽出 `reconcileDisposition()` 供 restore 与 handoff 投影共用，人工 handoff 记录的 first-wins 保持不变 |
+
