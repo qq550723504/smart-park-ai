@@ -51,6 +51,8 @@ export interface SecurityIncidentSummary {
   alertCount: number
   summary: string
   disposition: SecurityDisposition
+  /** True when a contributing source is a production source with a disposition feed. */
+  dispositionProduction?: boolean
   dispositionSource?: SecurityDispositionSource
   dispositionDecidedAt?: string
 }

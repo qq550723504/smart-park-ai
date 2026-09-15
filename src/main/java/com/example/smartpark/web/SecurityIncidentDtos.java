@@ -9,6 +9,7 @@ import com.example.smartpark.securityincident.SecurityIncidentTimelineEntry;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.Predicate;
 
 final class SecurityIncidentDtos {
     private SecurityIncidentDtos() { }
@@ -17,15 +18,16 @@ final class SecurityIncidentDtos {
     record ReviewRequest(String disposition) {
     }
 
-    static Map<String, Object> page(SecurityIncidentPage page) {
+    static Map<String, Object> page(SecurityIncidentPage page, Predicate<SecurityIncident> productionDisposition) {
         Map<String, Object> dto = new LinkedHashMap<>();
-        dto.put("items", page.items().stream().map(SecurityIncidentDtos::summary).toList());
+        dto.put("items", page.items().stream()
+                .map(incident -> summary(incident, productionDisposition)).toList());
         dto.put("total", page.total());
         return dto;
     }
 
-    static Map<String, Object> detail(SecurityIncident incident) {
-        Map<String, Object> dto = summary(incident);
+    static Map<String, Object> detail(SecurityIncident incident, Predicate<SecurityIncident> productionDisposition) {
+        Map<String, Object> dto = summary(incident, productionDisposition);
         dto.put("eventIds", incident.eventIds());
         dto.put("alertIds", incident.alertIds());
         dto.put("evidence", incident.evidence().stream().map(SecurityIncidentDtos::evidence).toList());
@@ -36,7 +38,7 @@ final class SecurityIncidentDtos {
         return dto;
     }
 
-    private static Map<String, Object> summary(SecurityIncident incident) {
+    private static Map<String, Object> summary(SecurityIncident incident, Predicate<SecurityIncident> productionDisposition) {
         Map<String, Object> dto = new LinkedHashMap<>();
         dto.put("incidentId", incident.incidentId());
         dto.put("parkId", incident.parkId());
@@ -50,6 +52,9 @@ final class SecurityIncidentDtos {
         dto.put("alertCount", incident.alertIds().size());
         dto.put("summary", incident.summary());
         dto.put("disposition", incident.disposition().name());
+        // Whether the incident's events came from a production disposition feed, so the UI
+        // can keep nonproduction/manual queue entries out of a production statistic.
+        dto.put("dispositionProduction", productionDisposition.test(incident));
         SecurityDispositionRecord record = incident.dispositionRecord();
         if (record.source() != SecurityDispositionSource.NONE) {
             dto.put("dispositionSource", record.source().name());

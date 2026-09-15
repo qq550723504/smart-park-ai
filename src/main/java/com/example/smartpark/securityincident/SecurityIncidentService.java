@@ -43,6 +43,7 @@ public final class SecurityIncidentService {
     private final SecurityIncidentStore store;
     private final SecurityIncidentHandoffPort handoffs;
     private final List<SecuritySourceAdapter> sourceAdapters;
+    private final Set<SecuritySourceRef> productionDispositionSources;
     private final Clock clock;
 
     public SecurityIncidentService(SecurityEventReader security, AlertPort alerts, SecurityIncidentStore store,
@@ -58,7 +59,33 @@ public final class SecurityIncidentService {
         this.store = Objects.requireNonNull(store, "store");
         this.handoffs = Objects.requireNonNull(handoffs, "handoffs");
         this.sourceAdapters = List.copyOf(sourceAdapters == null ? List.of() : sourceAdapters);
+        this.productionDispositionSources = productionDispositionSources(sourceAdapters);
         this.clock = Objects.requireNonNull(clock, "clock");
+    }
+
+    /**
+     * True when the incident's events include a source that declares both a production
+     * source and a disposition feed. A false-positive statistic may only aggregate
+     * decisions the production feed can be held accountable for, never a manual review of
+     * an event that arrived from a demo or otherwise nonproduction source.
+     */
+    public boolean dispositionIsProductionBacked(SecurityIncident incident) {
+        Objects.requireNonNull(incident, "incident");
+        return incident.eventIdentities().stream()
+                .map(SecurityEventIdentity::source)
+                .anyMatch(productionDispositionSources::contains);
+    }
+
+    private static Set<SecuritySourceRef> productionDispositionSources(List<SecuritySourceAdapter> adapters) {
+        Set<SecuritySourceRef> sources = new HashSet<>();
+        if (adapters == null) return sources;
+        for (SecuritySourceAdapter adapter : adapters) {
+            SecuritySourceDescriptor descriptor = adapter.descriptor();
+            if (descriptor.productionSource() && descriptor.dispositionFeed()) {
+                sources.add(new SecuritySourceRef(descriptor.sourceType(), descriptor.sourceId()));
+            }
+        }
+        return sources;
     }
 
     public synchronized SecurityIncidentPage list(SecurityIncidentQuery query) {

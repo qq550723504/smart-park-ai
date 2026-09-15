@@ -48,6 +48,19 @@ class SecurityIncidentControllerTest {
     }
 
     @Test
+    void reportsWhetherAnIncidentsDispositionComesFromAProductionFeed() throws Exception {
+        when(service.list(any())).thenReturn(new SecurityIncidentPage(List.of(incident()), 1));
+        when(service.dispositionIsProductionBacked(any())).thenReturn(true);
+
+        // The UI must be able to tell a production-backed false positive apart from a manual
+        // review of a demo incident before it publishes a queue-wide statistic.
+        mockMvc.perform(get("/api/security/incidents?limit=20")
+                        .header("X-Demo-Role", "ADMIN").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].dispositionProduction").value(true));
+    }
+
+    @Test
     void customerAgentCannotReadSecurityIncidents() throws Exception {
         mockMvc.perform(get("/api/security/incidents").header("X-Demo-Role", "CUSTOMER_AGENT"))
                 .andExpect(status().isForbidden());

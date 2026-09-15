@@ -23,11 +23,12 @@ const canRead = computed(() => ['APPROVER', 'ADMIN'].includes(props.role))
 const highRiskCount = computed(() => items.value.filter(item => item.riskLevel === 'HIGH').length)
 const openCount = computed(() => items.value.filter(item => item.status === 'OPEN').length)
 const handoffCount = computed(() => items.value.filter(item => item.status === 'HANDOFF').length)
-const hasDispositionData = computed(() => items.value.some(item => item.disposition && item.disposition !== 'UNREVIEWED'))
+const hasProductionDisposition = computed(() => items.value.some(item => item.dispositionProduction === true && item.disposition && item.disposition !== 'UNREVIEWED'))
 // A queue-wide false-positive count is only a real statistic when a production disposition
-// feed exists; a manual review of a demo incident must not make the metric look available.
-const falsePositiveAvailable = computed(() => props.securityDispositionEnabled && hasDispositionData.value)
-const falsePositiveCount = computed(() => items.value.filter(item => item.disposition === 'FALSE_POSITIVE').length)
+// feed exists and the counted incidents actually came from such a feed; a manual review of a
+// demo incident must not make the metric look available or inflate it.
+const falsePositiveAvailable = computed(() => props.securityDispositionEnabled && hasProductionDisposition.value)
+const falsePositiveCount = computed(() => items.value.filter(item => item.dispositionProduction === true && item.disposition === 'FALSE_POSITIVE').length)
 const primaryEvidence = computed(() => selected.value?.evidence[0])
 
 // Sources may reuse the same source-local event id, so list keys must include the

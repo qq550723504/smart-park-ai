@@ -41,14 +41,16 @@ public class SecurityIncidentController {
                                     @RequestParam(defaultValue = "20") int limit,
                                     @RequestHeader(value = "X-Demo-Role", required = false) String role) {
         DemoRole.require(role, DemoRole.APPROVER, DemoRole.ADMIN);
-        return SecurityIncidentDtos.page(service.list(new SecurityIncidentQuery(parseStatus(status), offset, limit)));
+        return SecurityIncidentDtos.page(
+                service.list(new SecurityIncidentQuery(parseStatus(status), offset, limit)),
+                service::dispositionIsProductionBacked);
     }
 
     @GetMapping("/api/security/incidents/{incidentId}")
     public Map<String, Object> get(@PathVariable String incidentId,
                                    @RequestHeader(value = "X-Demo-Role", required = false) String role) {
         DemoRole.require(role, DemoRole.APPROVER, DemoRole.ADMIN);
-        return SecurityIncidentDtos.detail(service.get(incidentId));
+        return SecurityIncidentDtos.detail(service.get(incidentId), service::dispositionIsProductionBacked);
     }
 
     @PostMapping("/api/security/incidents/{incidentId}/review")
@@ -58,7 +60,7 @@ public class SecurityIncidentController {
         DemoRole.require(role, DemoRole.APPROVER, DemoRole.ADMIN);
         String actor = DemoRole.parse(role).name();
         SecurityIncidentService.ReviewOutcome outcome = service.applyReview(incidentId, parseDisposition(body), actor);
-        Map<String, Object> response = SecurityIncidentDtos.detail(outcome.incident());
+        Map<String, Object> response = SecurityIncidentDtos.detail(outcome.incident(), service::dispositionIsProductionBacked);
         auditTrail.record(actor, "REVIEW_SECURITY_INCIDENT", incidentId,
                 (outcome.applied() ? "SUCCESS" : "NO_CHANGE") + ":" + outcome.incident().disposition().name());
         return response;
@@ -68,7 +70,7 @@ public class SecurityIncidentController {
     public Map<String, Object> handoff(@PathVariable String incidentId,
                                        @RequestHeader(value = "X-Demo-Role", required = false) String role) {
         DemoRole.require(role, DemoRole.APPROVER, DemoRole.ADMIN);
-        Map<String, Object> response = SecurityIncidentDtos.detail(service.handoff(incidentId));
+        Map<String, Object> response = SecurityIncidentDtos.detail(service.handoff(incidentId), service::dispositionIsProductionBacked);
         auditTrail.record(DemoRole.parse(role).name(), "HANDOFF_SECURITY_INCIDENT", incidentId, "SUCCESS");
         return response;
     }

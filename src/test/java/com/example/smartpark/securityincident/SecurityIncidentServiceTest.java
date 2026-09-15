@@ -115,6 +115,30 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void onlyMarksIncidentsFromAProductionDispositionFeedAsProductionBacked() {
+        SecurityEvent production = withSource(event("SEC-PROD", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "prod-feed");
+        SecurityEvent demo = withSource(event("SEC-DEMO", "A2", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "demo-feed");
+        SecurityIncidentService service = service(List.of(), List.of(), 50,
+                new SecurityIncidentHandoffStore(10),
+                List.of(productionDispositionAdapter("prod-feed", production), adapterReturning(demo)));
+
+        List<SecurityIncident> incidents = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        // Only the incident whose own source declares a production disposition feed may feed a
+        // production false-positive statistic; a demo adapter must never qualify.
+        assertThat(incidents)
+                .filteredOn(incident -> incident.eventIds().contains("SEC-PROD"))
+                .singleElement()
+                .satisfies(incident -> assertThat(service.dispositionIsProductionBacked(incident)).isTrue());
+        assertThat(incidents)
+                .filteredOn(incident -> incident.eventIds().contains("SEC-DEMO"))
+                .singleElement()
+                .satisfies(incident -> assertThat(service.dispositionIsProductionBacked(incident)).isFalse());
+    }
+
+    @Test
     void deduplicatesLogicallyIdenticalEventsAndKeepsTheClassifiedRepresentation() {
         SecurityEvent readerCopy = event("SEC-ENRICHED", "A1", "ACCESS", BASE);
         SecurityDispositionRecord registered = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,

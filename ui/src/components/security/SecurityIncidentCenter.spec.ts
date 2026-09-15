@@ -197,6 +197,7 @@ describe('SecurityIncidentCenter', () => {
           ...detail,
           status: 'REVIEWED',
           disposition: 'FALSE_POSITIVE',
+          dispositionProduction: true,
           dispositionSource: 'HUMAN_REVIEW',
           dispositionDecidedAt: '2026-09-02T10:00:00Z',
         })
@@ -232,6 +233,25 @@ describe('SecurityIncidentCenter', () => {
     const metric = wrapper.get('[data-security-false-positive]')
     expect(metric.text()).toContain('误报数不可统计')
     expect(metric.text()).not.toContain('1')
+  })
+
+  it('counts only false positives that came from a production disposition feed', async () => {
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      const production = { ...summary, incidentId: 'INC-PROD', status: 'REVIEWED', disposition: 'FALSE_POSITIVE', dispositionProduction: true, dispositionSource: 'HUMAN_REVIEW' }
+      const demo = { ...summary, incidentId: 'INC-DEMO', status: 'REVIEWED', disposition: 'FALSE_POSITIVE', dispositionProduction: false, dispositionSource: 'HUMAN_REVIEW' }
+      if (url.includes('/api/security/incidents?')) return response({ items: [production, demo], total: 2 })
+      return response({ ...detail, ...production })
+    }) as typeof fetch
+
+    // A manual review of a demo incident must not inflate a production false-positive
+    // statistic even when the production disposition capability is present.
+    const wrapper = mount(SecurityIncidentCenter, { props: { role: 'APPROVER', securityDispositionEnabled: true } })
+    await flushPromises()
+
+    const metric = wrapper.get('[data-security-false-positive]')
+    expect(metric.text()).toContain('1')
+    expect(metric.text()).not.toContain('2')
   })
 
   it('reports the persisted disposition when the review request is a no-op', async () => {
