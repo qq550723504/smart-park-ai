@@ -73,6 +73,12 @@ describe('B2 plan estimation', () => {
     expect(planEstimate(fixture, ledger, defaults, 'SCN-PLAN-NONE')).toMatchObject({ estimatedSavedKwhPerDay: 0, estimatedAfterKwhPerDay: 1300 })
   })
 
+  it('withholds the full-cycle estimate while an observation is missing', () => {
+    const { ledger: partial } = effectiveLedger(fixture, 'PARTIAL_DATA')
+    expect(planEstimate(fixture, partial, defaults, 'SCN-PLAN-PUBLIC-HVAC')).toBeNull()
+    expect(planEstimate(fixture, partial, defaults, 'SCN-PLAN-NONE')).toBeNull()
+  })
+
   it('recomputes when the duration changes to 3h', () => {
     const parameters = { savedHours: 3, tariffCnyPerKwh: 1, applicableDaysPerMonth: 22 }
     expect(planEstimate(fixture, ledger, parameters, 'SCN-PLAN-PUBLIC-HVAC')).toEqual({

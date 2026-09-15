@@ -17,7 +17,12 @@ const confirmed = computed(() => snapshot.value.state.confirmedPlan)
 const followup = computed(() => snapshot.value.state.followupResult)
 
 const canSelect = computed(() => stage.value === 'ASSESSED' || stage.value === 'PLAN_SELECTED')
-const canConfirm = computed(() => stage.value === 'PLAN_SELECTED' && snapshot.value.dataQuality === 'COMPLETE')
+const selectedPlan = computed(() => fixture.plans.find((plan) => plan.planId === snapshot.value.state.selectedPlanId) ?? null)
+const canConfirm = computed(() => stage.value === 'PLAN_SELECTED'
+  && snapshot.value.dataQuality === 'COMPLETE'
+  && Boolean(selectedPlan.value?.createsOrder))
+const canKeepObserving = computed(() => stage.value === 'PLAN_SELECTED'
+  && selectedPlan.value?.planId === 'SCN-PLAN-NONE')
 
 const form = reactive<ScenarioParameters>({ ...snapshot.value.defaultParameters })
 watch(
@@ -164,11 +169,14 @@ const selectedPlanId = computed(() => snapshot.value.state.selectedPlanId)
             <span v-if="card.plan.recommended" class="scenario-tag">推荐</span>
           </header>
           <p>{{ card.plan.description }}</p>
-          <dl>
+          <dl v-if="card.estimate">
             <div><dt>每日减少</dt><dd>{{ formatDisplayNumber(card.estimate.estimatedSavedKwhPerDay) }} kWh</dd></div>
             <div><dt>调整后日总量</dt><dd>{{ formatDisplayNumber(card.estimate.estimatedAfterKwhPerDay) }} kWh</dd></div>
             <div><dt>月度估算</dt><dd>{{ formatDisplayNumber(card.estimate.estimatedMonthlySavingsCny) }} 元</dd></div>
           </dl>
+          <p v-else class="scenario-alert" role="status" data-scenario-plan-unavailable>
+            关键小时观测缺失，暂停该方案的完整周期估算。
+          </p>
           <button type="button" class="scenario-button" :disabled="!canSelect" @click="choose(card.plan.planId)">
             {{ selectedPlanId === card.plan.planId ? '已选择' : '选择此方案' }}
           </button>
@@ -203,9 +211,12 @@ const selectedPlanId = computed(() => snapshot.value.state.selectedPlanId)
       <button type="button" class="scenario-button scenario-button--primary" :disabled="!canConfirm || store.busy.value" data-scenario-confirm-order @click="confirm">
         确认并创建演示任务
       </button>
-      <button type="button" class="scenario-button" :disabled="stage !== 'PLAN_SELECTED' || store.busy.value" data-scenario-keep-observing @click="store.keepObserving()">
+      <button type="button" class="scenario-button" :disabled="!canKeepObserving || store.busy.value" data-scenario-keep-observing @click="store.keepObserving()">
         保持现状
       </button>
+      <p v-if="stage === 'PLAN_SELECTED' && !canKeepObserving && selectedPlan?.createsOrder" class="scenario-muted" data-scenario-keep-observing-hint>
+        保持现状仅适用于“仅保持观察”方案。
+      </p>
       <p v-if="confirmed" class="scenario-receipt" data-scenario-confirmed>
         已冻结方案 {{ confirmed.planId }} · 参数 {{ confirmed.parameters.savedHours }}h/{{ confirmed.parameters.tariffCnyPerKwh }}元/{{ confirmed.parameters.applicableDaysPerMonth }}日
         · 预计 {{ formatDisplayNumber(confirmed.estimate.estimatedSavedKwhPerDay) }} kWh/日

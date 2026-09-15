@@ -54,15 +54,22 @@
 - 建单键：`scenarioRunId + anomalyId + planRevision`
 - 报告键：`scenarioRunId + stateRevision + reportKind`
 - `LOST_CREATE_RESPONSE`：建单已在场景内提交但响应丢失；UI 提示并允许**同一身份**重试，不重复建单
+- 幂等身份**由共享 run 状态本身推导**（建单看 `confirmedPlan`/`workOrder`，报告看 `state.reports` 的 `stateRevision+kind`），内存缓存只作加速：页面刷新后同一身份仍解析到同一结果，不会因进程内缓存丢失而卡死在 pending
+- 恢复 run 时，若该 run 尚未消费失联故障则重新武装，已消费则不重复触发
 
 ## 5. 变体
+
+变体是**整段 run 的解释参数**（账本、数据质量、故障）。派生状态在产生它的阶段被冻结，因此变体只能在一段 run 开始前（`READY`）选择；run 推进后锁定，需先“重开本场景”再切换。`constructor`、`setVariant`、`reset` 三处必须一致地按变体武装/解除失联故障。
 
 | 变体 | 行为 |
 | --- | --- |
 | `NORMAL` | 完整主故事 |
 | `NO_ACTION` | 选择保持现状，不建单，事件置 MONITORING |
-| `PARTIAL_DATA` | 省略 `SCN-B2-HVAC-PUBLIC:15` 观测；PARTIAL 不补零，暂停完整估算与提交 |
+| `PARTIAL_DATA` | 省略 `SCN-B2-HVAC-PUBLIC:15` 观测；PARTIAL 不补零，方案卡不展示完整周期估算，提交被阻断 |
 | `LOST_CREATE_RESPONSE` | 模拟建单响应丢失，同键重试 |
+
+- “保持现状”动作仅对 `SCN-PLAN-NONE` 可用；选择可执行方案时按钮禁用并给出说明
+- 报表下载读取已冻结的 markdown 原样导出，不重新生成、不改快照
 
 ## 6. 页面接入
 
@@ -76,14 +83,15 @@
 ```bash
 cd ui
 npx vue-tsc -b
-npx vitest run        # 55 文件 / 607 测试
+npx vitest run        # 56 文件 / 618 测试
 npm run build
 ```
 
-- `calculations.spec.ts`：派生数值与参数边界
-- `provider.spec.ts`：状态机、幂等、变体、故障
+- `calculations.spec.ts`：派生数值与参数边界；数据不完整时估算返回 `null`
+- `provider.spec.ts`：状态机、幂等、变体锁定、失联恢复、报告幂等
 - `store.spec.ts`：持久化、generation 守卫、重置递增
-- `ScenarioFlow.spec.ts`：端到端 巡检→研判→选方案→确认→接单→应用→验证→报告；PARTIAL 阻断；失联重试；联合方案数值
+- `download.spec.ts`：冻结快照原样下载、无浏览器环境静默降级
+- `ScenarioFlow.spec.ts`：端到端 巡检→研判→选方案→确认→接单→应用→验证→报告；PARTIAL 阻断且隐藏估算；失联重试（含刷新恢复）；变体锁定；保持观察门控；下载不重生成
 
 ## 8. 边界
 

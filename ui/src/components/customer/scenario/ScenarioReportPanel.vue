@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { Document, Download, Plus } from '@element-plus/icons-vue'
 import { useB2NightEnergyScenario } from '../../../scenario/b2-night-energy/store'
+import { downloadReportSnapshot } from '../../../scenario/b2-night-energy/download'
 
 const store = useB2NightEnergyScenario()
 const snapshot = store.snapshot
@@ -11,6 +12,11 @@ const reports = computed(() => snapshot.value.state.reports)
 const activeReport = computed(() => store.activeReport.value)
 
 const activeLines = computed(() => activeReport.value?.markdown.split('\n') ?? [])
+
+function downloadActiveReport(): void {
+  // Downloads the frozen snapshot as-is; it never regenerates the report.
+  if (activeReport.value) downloadReportSnapshot(activeReport.value)
+}
 </script>
 
 <template>
@@ -55,7 +61,7 @@ const activeLines = computed(() => activeReport.value?.markdown.split('\n') ?? [
         <header>
           <h3>{{ activeReport.reportId }}</h3>
           <span class="scenario-tag">修订 {{ activeReport.stateRevision }}</span>
-          <button type="button" class="scenario-button" data-scenario-download-report>
+          <button type="button" class="scenario-button" data-scenario-download-report @click="downloadActiveReport">
             <Download aria-hidden="true" /> 下载同一快照
           </button>
         </header>

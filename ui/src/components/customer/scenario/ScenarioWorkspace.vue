@@ -40,10 +40,18 @@ async function selectVariant(variant: ScenarioVariantId): Promise<void> {
       <div class="scenario-workspace__controls">
         <label>
           演示变体
-          <select :value="activeVariant" data-scenario-variant @change="selectVariant(($event.target as HTMLSelectElement).value as ScenarioVariantId)">
+          <select
+            :value="activeVariant"
+            :disabled="snapshot.state.stage !== 'READY'"
+            data-scenario-variant
+            @change="selectVariant(($event.target as HTMLSelectElement).value as ScenarioVariantId)"
+          >
             <option v-for="variant in variants" :key="variant.id" :value="variant.id">{{ variant.label }}</option>
           </select>
         </label>
+        <span v-if="snapshot.state.stage !== 'READY'" class="scenario-muted" data-scenario-variant-locked>
+          变体在场景开始后锁定；如需切换，请先重开本场景。
+        </span>
         <button type="button" class="scenario-button" :disabled="!store.canReset.value" data-scenario-reset @click="store.reset()">
           <Refresh aria-hidden="true" /> 重开本场景
         </button>

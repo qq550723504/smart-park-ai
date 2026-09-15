@@ -62,11 +62,11 @@ describe('B2 provider plan selection and parameters', () => {
   it('recomputes the estimate when the plan or duration changes', () => {
     const provider = toOrdered(newProvider())
     provider.selectPlan('SCN-PLAN-PUBLIC-HVAC')
-    expect(provider.read().state.planDraft?.estimate.estimatedSavedKwhPerDay).toBe(80)
+    expect(provider.read().state.planDraft?.estimate?.estimatedSavedKwhPerDay).toBe(80)
     provider.updateParameters({ savedHours: 3, tariffCnyPerKwh: 1, applicableDaysPerMonth: 22 })
     expect(provider.read().state.planDraft?.estimate).toMatchObject({ estimatedSavedKwhPerDay: 60, estimatedAfterKwhPerDay: 1240 })
     provider.selectPlan('SCN-PLAN-HVAC-LIGHT')
-    expect(provider.read().state.planDraft?.estimate.estimatedMonthlySavingsCny).toBe(1980)
+    expect(provider.read().state.planDraft?.estimate?.estimatedMonthlySavingsCny).toBe(1980)
     expect(provider.read().state.planRevision).toBe(3)
   })
 
@@ -130,6 +130,51 @@ describe('B2 provider lost create response', () => {
     expect(retried.state.workOrder?.id).toBe('SCN-WO-B2-001-001')
     expect(retried.state.pendingCommand).toBeNull()
     expect(retried.state.stateRevision).toBe(afterFault.state.stateRevision)
+  })
+
+  it('resolves the committed identity from a reloaded run and clears the pending command', () => {
+    const provider = new MockScenarioProvider({ fixture, runSequenceNumber: 1, faults: { lostCreateResponse: true } })
+    toOrdered(provider)
+    provider.selectPlan('SCN-PLAN-PUBLIC-HVAC')
+    expect(() => provider.confirmAndCreateOrder()).toThrow(ScenarioFaultError)
+    const persisted = provider.exportState()
+
+    // A page reload builds a provider with an empty in-memory idempotency cache.
+    const restored = new MockScenarioProvider({ fixture })
+    expect(restored.restoreState(persisted)).toBe(true)
+    expect(restored.read().state.pendingCommand?.status).toBe('LOST_RESPONSE')
+
+    const retried = restored.confirmAndCreateOrder()
+    expect(retried.state.workOrder?.id).toBe('SCN-WO-B2-001-001')
+    expect(retried.state.pendingCommand).toBeNull()
+    // The recovered run is no longer stuck: reset is allowed again.
+    expect(restored.reset().state.scenarioRunId).toBe('SCN-B2-NIGHT-ENERGY-001-RUN-002')
+  })
+
+  it('does not re-arm the lost-response fault for a run that already consumed it', () => {
+    const provider = new MockScenarioProvider({ fixture, runSequenceNumber: 1, variant: 'LOST_CREATE_RESPONSE' })
+    toOrdered(provider)
+    provider.selectPlan('SCN-PLAN-PUBLIC-HVAC')
+    expect(() => provider.confirmAndCreateOrder()).toThrow(ScenarioFaultError)
+
+    const restored = new MockScenarioProvider({ fixture })
+    restored.restoreState(provider.exportState())
+    // Retry succeeds; it must not fire a second lost-response fault.
+    expect(restored.confirmAndCreateOrder().state.pendingCommand).toBeNull()
+  })
+
+  it('reuses the same report snapshot after a reload instead of minting a second one', () => {
+    const provider = toOrdered(newProvider())
+    provider.generateReport()
+    const persisted = provider.exportState()
+
+    const restored = new MockScenarioProvider({ fixture })
+    expect(restored.restoreState(persisted)).toBe(true)
+    const revision = restored.read().state.stateRevision
+    const afterRegenerate = restored.generateReport()
+    expect(afterRegenerate.state.reports).toHaveLength(1)
+    expect(afterRegenerate.state.reports[0].reportId).toBe('SCN-RPT-B2-001-01')
+    expect(afterRegenerate.state.stateRevision).toBe(revision)
   })
 })
 
@@ -217,6 +262,7 @@ describe('B2 provider variants and reset', () => {
     expect(snapshot.dataQuality).toBe('PARTIAL')
     expect(snapshot.missingReadingIds).toEqual(['SCN-B2-HVAC-PUBLIC:15'])
     provider.selectPlan('SCN-PLAN-PUBLIC-HVAC')
+    expect(provider.read().state.planDraft?.estimate).toBeNull()
     expect(() => provider.confirmAndCreateOrder()).toThrow(ScenarioStateError)
   })
 
@@ -229,6 +275,15 @@ describe('B2 provider variants and reset', () => {
     expect(reset.state.stage).toBe('READY')
     expect(reset.state.stateRevision).toBe(0)
     expect(reset.state.workOrder).toBeNull()
+  })
+
+  it('allows a variant switch only before the run starts', () => {
+    const provider = newProvider()
+    provider.setVariant('PARTIAL_DATA')
+    expect(provider.read().dataQuality).toBe('PARTIAL')
+    provider.startPatrol()
+    expect(() => provider.setVariant('NORMAL')).toThrow(ScenarioStateError)
+    expect(provider.read().variant).toBe('PARTIAL_DATA')
   })
 
   it('round-trips the shared run through export/restore', () => {

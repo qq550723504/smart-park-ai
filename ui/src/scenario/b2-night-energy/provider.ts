@@ -151,7 +151,9 @@ export class MockScenarioProvider {
     this.fixture = options.fixture ?? B2_SCENARIO_FIXTURE
     this.variant = options.variant ?? 'NORMAL'
     this.runSequenceNumber = options.runSequenceNumber ?? 1
-    this.faults = { ...options.faults }
+    // The variant and the lost-response fault are one switch: selecting the
+    // variant must arm the fault here too, exactly like `setVariant`/`reset`.
+    this.faults = { lostCreateResponse: this.variant === 'LOST_CREATE_RESPONSE', ...options.faults }
     this.state = createInitialState(scenarioRunIdFor(this.runSequenceNumber))
   }
 
@@ -164,12 +166,16 @@ export class MockScenarioProvider {
   }
 
   setVariant(variant: ScenarioVariantId): ScenarioSnapshot {
-    const previous = this.variant
+    if (variant === this.variant) return this.read()
+    // The variant decides the interpretation of the fixture (ledger, data
+    // quality, fault). Derived state is frozen at the stage it was produced,
+    // so swapping the variant mid-run would mix ledgers and estimates. The
+    // run must be reset instead.
+    if (this.state.stage !== 'READY') {
+      throw new ScenarioStateError('场景已开始，不能中途切换演示变体；请先重开本场景。')
+    }
     this.variant = variant
-    // The lost-response variant is the demo switch for this fault; switching
-    // away restores a clean run unless the fault was injected explicitly.
-    if (variant === 'LOST_CREATE_RESPONSE') this.faults.lostCreateResponse = true
-    else if (previous === 'LOST_CREATE_RESPONSE') this.faults.lostCreateResponse = false
+    this.faults.lostCreateResponse = variant === 'LOST_CREATE_RESPONSE'
     return this.read()
   }
 
@@ -285,24 +291,43 @@ export class MockScenarioProvider {
     return `${this.state.scenarioRunId}+${this.fixture.eventTemplate.anomalyId}+${planRevision}`
   }
 
+  /**
+   * Resolves the committed order for the current plan revision from the run
+   * state itself. The in-memory map is only a cache; `state.confirmedPlan` and
+   * `state.workOrder` are the persisted authority, so a run restored from
+   * session storage still resolves its idempotent identity (and can clear a
+   * pending lost-response command) instead of failing the stage check.
+   */
+  private committedOrderSnapshot(): ScenarioSnapshot | null {
+    const confirmed = this.state.confirmedPlan
+    if (!confirmed || !this.state.workOrder) return null
+    if (confirmed.planRevision !== this.state.planRevision) return null
+    const key = this.orderIdempotencyKey(confirmed.planRevision)
+    const cached = this.committed.get(key)
+    if (cached) return cached
+    const snapshot = this.buildSnapshot({ ...clone(this.state), pendingCommand: null })
+    this.committed.set(key, snapshot)
+    return snapshot
+  }
+
   confirmAndCreateOrder(): ScenarioSnapshot {
-    const key = this.orderIdempotencyKey(this.state.planRevision)
-    const alreadyCommitted = this.committed.get(key)
-    if (alreadyCommitted) {
-      this.state = clone(alreadyCommitted.state)
+    const committedOrder = this.committedOrderSnapshot()
+    if (committedOrder) {
+      this.state = clone(committedOrder.state)
       this.state.pendingCommand = null
       return this.read()
     }
     if (this.state.stage !== 'PLAN_SELECTED') throw new ScenarioStateError('请先选择并确认方案。')
     const planId = this.state.selectedPlanId
     const plan = planById(this.fixture, planId)
-    const { ledger, dataQuality } = effectiveLedger(this.fixture, this.variant)
+    const { dataQuality } = effectiveLedger(this.fixture, this.variant)
     if (!plan || !plan.createsOrder) throw new ScenarioStateError('保持现状不会创建任务；请选择可执行方案。')
     if (!planCanExecute(this.fixture, plan, dataQuality)) {
       throw new ScenarioStateError('关键小时数据不完整，已暂停完整节能估算与提交。')
     }
     const draft = this.state.planDraft
     if (!draft || !planId) throw new ScenarioStateError('方案参数缺失，不能创建任务。')
+    if (!draft.estimate) throw new ScenarioStateError('数据不完整，无法形成完整节能估算，已暂停创建任务。')
     const seq = runSequence(this.state.scenarioRunId)
     const now = this.state.virtualNow
     const confirmed: ScenarioConfirmedPlan = {
@@ -338,6 +363,7 @@ export class MockScenarioProvider {
       state.confirmedPlan = confirmed
       state.workOrder = workOrder
     }, 1)
+    const key = this.orderIdempotencyKey(confirmed.planRevision)
     this.committed.set(key, clone(snapshot))
     if (this.faults.lostCreateResponse) {
       this.faults.lostCreateResponse = false
@@ -411,10 +437,16 @@ export class MockScenarioProvider {
     const allowed = this.fixture.reportContract.allowedAfter
     if (!allowed.includes(this.state.stage)) throw new ScenarioStateError('当前阶段不能生成事件简报。')
     const kind = 'SCENARIO_EVENT_BRIEF' as const
-    const key = `${this.state.scenarioRunId}+${this.state.stateRevision}+${kind}`
-    const existing = this.committed.get(key)
+    // Report idempotency is derived from the persisted run state: the same run
+    // + stateRevision + kind already resolves to a snapshot in `state.reports`,
+    // so a reloaded run never mints a second copy or recomputes.
+    const existing = this.state.reports.find(
+      (report) => report.stateRevision === this.state.stateRevision && report.kind === kind,
+    )
     if (existing) {
-      this.state = clone(existing.state)
+      this.state = this.state.activeReportId === existing.reportId
+        ? this.state
+        : { ...clone(this.state), activeReportId: existing.reportId }
       return this.read()
     }
     const snapshotData = this.buildSnapshot(this.state)
@@ -448,11 +480,10 @@ export class MockScenarioProvider {
       title: `研发大厦夜间能耗事件简报 · ${this.state.scenarioRunId}`,
       markdown: renderReportMarkdown(reportSnapshot),
     }
-    const committed = this.commit('GENERATE_REPORT', (draft) => {
+    this.commit('GENERATE_REPORT', (draft) => {
       draft.reports = [...draft.reports, report]
       draft.activeReportId = report.reportId
     }, 0, false)
-    this.committed.set(key, clone(committed))
     return this.read()
   }
 
@@ -497,6 +528,10 @@ export class MockScenarioProvider {
     this.state = clone(persisted.state)
     this.state.commandLog = [...(persisted.state.commandLog ?? [])]
     this.committed.clear()
+    // Re-arm the lost-response fault unless this run already consumed it, so a
+    // reloaded run keeps the same fault semantics while never re-firing it.
+    const faultConsumed = this.state.pendingCommand?.status === 'LOST_RESPONSE'
+    this.faults.lostCreateResponse = persisted.variant === 'LOST_CREATE_RESPONSE' && !faultConsumed
     return true
   }
 

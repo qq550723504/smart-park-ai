@@ -184,12 +184,21 @@ export function planPowerKw(fixture: ScenarioFixture, plan: ScenarioPlan | null)
   return roundHalfUp(plan.targetDeviceIds.reduce((sum, deviceId) => sum + avoidablePowerKw(fixture, deviceId), 0))
 }
 
+/**
+ * Estimates a plan against a ledger.
+ *
+ * Returns `null` when the observation set is incomplete. A full-cycle saving
+ * estimate is only defined on a complete ledger (scenario constraint:
+ * “缺失需要的观测时不计算完整周期收益”), so callers must present the
+ * estimate as unavailable rather than derive numbers from partial data.
+ */
 export function planEstimate(
   fixture: ScenarioFixture,
   ledger: EnergyLedgerRow[],
   parameters: ScenarioParameters,
   planId: string,
-): PlanEstimate {
+): PlanEstimate | null {
+  if (ledger.some((row) => row.observedMissing)) return null
   const observed = b2Totals(fixture, ledger).observedKwh
   const plan = planById(fixture, planId)
   const power = planPowerKw(fixture, plan)

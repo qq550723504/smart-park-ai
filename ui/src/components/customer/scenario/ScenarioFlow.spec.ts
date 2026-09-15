@@ -135,6 +135,9 @@ describe('B2 scenario customer integration', () => {
     await flushPromises()
     await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
     await flushPromises()
+    // No full-cycle estimate may be shown from a partial ledger.
+    expect(wrapper.find('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] [data-scenario-plan-unavailable]').exists()).toBe(true)
+    expect(wrapper.find('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] dd').exists()).toBe(false)
     expect(wrapper.get('[data-scenario-confirm-order]').attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })
@@ -178,5 +181,110 @@ describe('B2 scenario customer integration', () => {
     await flushPromises()
     expect(wrapper.get('[data-scenario-confirmed]').text()).toContain('90')
     wrapper.unmount()
+  })
+
+  it('locks the demo variant once the run has started', async () => {
+    const wrapper = await mountScenario()
+    expect(wrapper.get('[data-scenario-variant]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-variant]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-scenario-variant-locked]').text()).toContain('锁定')
+    wrapper.unmount()
+  })
+
+  it('enables keep-observing only for the no-action plan', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-keep-observing]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-scenario-keep-observing-hint]').exists()).toBe(true)
+
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-NONE"] button').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-keep-observing]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-scenario-keep-observing]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-stage]').text()).toBe('已选择保持观察')
+    wrapper.unmount()
+  })
+
+  it('recovers a reloaded lost-response run on retry and can reset it', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-variant]').setValue('LOST_CREATE_RESPONSE')
+    await flushPromises()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-confirm-order]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-pending]').text()).toContain('LOST_RESPONSE')
+    wrapper.unmount()
+
+    // Reload from session storage: the committed identity must survive the
+    // process boundary so the same order can be retried instead of deadlocking.
+    resetB2NightEnergyScenarioSingleton()
+    const reloaded = mount(ShowcaseHome, {
+      props: { active: true },
+      global: { stubs: { CustomerAssistantPanel: { template: '<aside />' } } },
+    })
+    await flushPromises()
+    expect(reloaded.get('[data-scenario-pending]').text()).toContain('LOST_RESPONSE')
+    await reloaded.get('[data-scenario-retry-order]').trigger('click')
+    await flushPromises()
+    expect(reloaded.get('[data-scenario-order-id]').text()).toBe('SCN-WO-B2-001-001')
+    expect(reloaded.find('[data-scenario-pending]').exists()).toBe(false)
+    expect(reloaded.get('[data-scenario-reset]').attributes('disabled')).toBeUndefined()
+    reloaded.unmount()
+  })
+
+  it('downloads the frozen report without regenerating it', async () => {
+    const createObjectURL = vi.fn(() => 'blob:scenario-report')
+    const revokeObjectURL = vi.fn()
+    const url = URL as unknown as Record<string, unknown>
+    const originalCreate = url.createObjectURL
+    const originalRevoke = url.revokeObjectURL
+    url.createObjectURL = createObjectURL
+    url.revokeObjectURL = revokeObjectURL
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const wrapper = await mountScenario()
+    try {
+      await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+      await flushPromises()
+      await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+      await flushPromises()
+      await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+      await flushPromises()
+      await wrapper.get('[data-customer-nav="reports"]').trigger('click')
+      await flushPromises()
+      await wrapper.get('[data-scenario-generate-report]').trigger('click')
+      await flushPromises()
+      const frozen = wrapper.get('[data-scenario-report-view]').text()
+
+      await wrapper.get('[data-scenario-download-report]').trigger('click')
+      await flushPromises()
+      expect(createObjectURL).toHaveBeenCalledTimes(1)
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:scenario-report')
+      expect(clickSpy).toHaveBeenCalled()
+      // Downloading reads the frozen snapshot; it never regenerates it.
+      expect(wrapper.get('[data-scenario-report-view]').text()).toBe(frozen)
+      expect(wrapper.findAll('[data-scenario-report]')).toHaveLength(1)
+    } finally {
+      url.createObjectURL = originalCreate
+      url.revokeObjectURL = originalRevoke
+      wrapper.unmount()
+    }
   })
 })

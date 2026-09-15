@@ -412,7 +412,8 @@ export type ScenarioReportKind = 'SCENARIO_EVENT_BRIEF'
 export interface ScenarioPlanDraft {
   planId: string
   parameters: ScenarioParameters
-  estimate: PlanEstimate
+  /** Null while the observation set is incomplete; no full-cycle estimate exists then. */
+  estimate: PlanEstimate | null
 }
 
 export interface ScenarioConfirmedPlan {
