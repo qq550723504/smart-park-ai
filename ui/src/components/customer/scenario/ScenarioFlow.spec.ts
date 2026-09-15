@@ -322,6 +322,74 @@ describe('B2 scenario customer integration', () => {
     wrapper.unmount()
   })
 
+  it('keeps the lost-response receipt through report generation until the retry', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-variant]').setValue('LOST_CREATE_RESPONSE')
+    await flushPromises()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-confirm-order]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-pending]').text()).toContain('LOST_RESPONSE')
+
+    // A report may be generated while the receipt is unresolved, but that must
+    // not clear the pending identity or free up reset.
+    await wrapper.get('[data-customer-nav="reports"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-generate-report]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-report-view]').exists()).toBe(true)
+    expect(wrapper.get('[data-scenario-reset]').attributes('disabled')).toBeDefined()
+
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-retry-order]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-pending]').exists()).toBe(false)
+    expect(wrapper.get('[data-scenario-reset]').attributes('disabled')).toBeUndefined()
+    // The report generated while pending survives the acknowledged retry.
+    await wrapper.get('[data-customer-nav="reports"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-report-view]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('enters scenario mode on the first render when a session is restored', async () => {
+    const overviewMounted = vi.fn()
+    sessionStorage.setItem('smart-park:scenario:b2-night-energy:mode:v1', 'true')
+    resetB2NightEnergyScenarioSingleton()
+    const wrapper = mount(ShowcaseHome, {
+      props: { active: true },
+      global: {
+        stubs: {
+          ParkOverview: { setup() { overviewMounted(); return () => null } },
+          CustomerAssistantPanel: { template: '<aside data-assistant-stub />' },
+        },
+      },
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-workspace]').exists()).toBe(true)
+    // The online overview (and its live requests) must never mount.
+    expect(overviewMounted).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('labels the work-orders hero as a simulated receipt in scenario mode', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-customer-nav="work-orders"]').trigger('click')
+    await flushPromises()
+    const hero = wrapper.get('.customer-shell__hero').text()
+    expect(hero).toContain('模拟任务')
+    expect(hero).toContain('非真实回执')
+    wrapper.unmount()
+  })
+
   it('downloads the frozen report without regenerating it', async () => {
     const createObjectURL = vi.fn(() => 'blob:scenario-report')
     const revokeObjectURL = vi.fn()

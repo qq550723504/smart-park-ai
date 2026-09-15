@@ -56,6 +56,8 @@
 - `LOST_CREATE_RESPONSE`：建单已在场景内提交但响应丢失；UI 提示并允许**同一身份**重试，不重复建单
 - 幂等身份**由共享 run 状态本身推导**（建单看 `confirmedPlan`/`workOrder`，报告看 `state.reports` 的 `stateRevision+kind`），内存缓存只作加速：页面刷新后同一身份仍解析到同一结果，不会因进程内缓存丢失而卡死在 pending
 - 恢复 run 时，若该 run 尚未消费失联故障则重新武装，已消费则不重复触发
+- 未确认的 pending 身份**只能被“同一身份重试”消除**：生成/查看报告等正交读操作可继续，但不会清空 pending；其他阶段变更（接单、应用、验证、改参、切换变体、重置）在 pending 未消除前一律被 provider 拒绝，避免绕过重试就解锁“重开本场景”
+- 重试解析**直接从当前 run 状态重建**（无陈旧快照缓存）：pending 期间生成的报告在重试确认后依然保留，不会被旧快照回滚
 
 ## 5. 变体
 
@@ -75,7 +77,9 @@
 ## 6. 页面接入
 
 - `ShowcaseHome` 新增场景模式：入口按钮，或 URL `?scenario=b2-night-energy`（可加 `scenarioPage=overview|analysis|work-orders|reports`）
+- 场景模式在 **setup 阶段（首帧渲染前）** 由 URL/持久化会话解析：刷新恢复或深链进入时不会先挂载在线页面（及其实时请求）再被替换，场景会话始终隔离且确定性
 - 刷新后按 sessionStorage 恢复同一 run 与模式；翻页不重跑命令
+- 场景模式下工单页大标题明确标注“模拟任务 / 非真实回执”，在线模式维持原“同一事件 / 真实回执”文案，不混淆夹具与真实回执
 - 壳层“重开导览”只重置展示状态（页面、焦点、助手会话），**不重置共享场景 run**；清空场景由场景内独立的“重开本场景”负责，与弹窗“不删除共享数据”的承诺一致
 - 参数表单跟随 run 身份：`重开本场景` 后表单回到 fixture 默认值，不会拿上一段 run 的已改参数渲染方案估算
 - 不进入场景模式时，四个在线页面行为完全不变
@@ -86,15 +90,15 @@
 ```bash
 cd ui
 npx vue-tsc -b
-npx vitest run        # 56 文件 / 624 测试
+npx vitest run        # 56 文件 / 628 测试
 npm run build
 ```
 
 - `calculations.spec.ts`：派生数值与参数边界；数据不完整时估算返回 `null`；变体 plan delta 解析
-- `provider.spec.ts`：状态机、幂等、变体锁定与 plan delta 强制、失联恢复、报告幂等
+- `provider.spec.ts`：状态机、幂等、变体锁定与 plan delta 强制、失联恢复、报告幂等；pending 身份跨无关提交保留且阻塞其他变更
 - `store.spec.ts`：持久化、generation 守卫、重置递增
 - `download.spec.ts`：冻结快照原样下载、无浏览器环境静默降级
-- `ScenarioFlow.spec.ts`：端到端 巡检→研判→选方案→确认→接单→应用→验证→报告；PARTIAL 阻断且隐藏估算；失联重试（含刷新恢复）；变体锁定与 NO_ACTION 方案钉住；保持观察门控；表单随 run 重置；重开导览保留 run；下载不重生成
+- `ScenarioFlow.spec.ts`：端到端 巡检→研判→选方案→确认→接单→应用→验证→报告；PARTIAL 阻断且隐藏估算；失联重试（含刷新恢复，及 pending 期间生成报告后仍保留）；变体锁定与 NO_ACTION 方案钉住；保持观察门控；表单随 run 重置；重开导览保留 run；下载不重生成；恢复会话首帧即场景模式（不挂载在线总览）；工单页“非真实回执”标注
 
 ## 8. 边界
 

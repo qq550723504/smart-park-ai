@@ -145,7 +145,6 @@ export class MockScenarioProvider {
   private state: ScenarioRunState
   private variant: ScenarioVariantId
   private readonly faults: ScenarioFaultConfig
-  private readonly committed = new Map<string, ScenarioSnapshot>()
   private runSequenceNumber: number
 
   constructor(options: MockScenarioProviderOptions = {}) {
@@ -168,6 +167,7 @@ export class MockScenarioProvider {
 
   setVariant(variant: ScenarioVariantId): ScenarioSnapshot {
     if (variant === this.variant) return this.read()
+    this.requireNoPendingCommand('SET_VARIANT')
     // The variant decides the interpretation of the fixture (ledger, data
     // quality, fault). Derived state is frozen at the stage it was produced,
     // so swapping the variant mid-run would mix ledgers and estimates. The
@@ -228,18 +228,35 @@ export class MockScenarioProvider {
     }
   }
 
+  /**
+   * A lost create response leaves an unresolved command identity behind. Stage
+   * mutations (other than that command's own same-identity retry) must not run
+   * until it is acknowledged: otherwise a later commit could silently drop the
+   * pending receipt and re-enable reset without ever recovering the committed
+   * order. Orthogonal reads (report generation/opening) stay allowed.
+   */
+  private requireNoPendingCommand(action: string): void {
+    const pending = this.state.pendingCommand
+    if (pending && pending.command !== action) {
+      throw new ScenarioStateError(`存在未确认的模拟命令（${pending.command}），请先按同一身份重试，不要执行其他变更。`)
+    }
+  }
+
   private commit(action: string, mutate: (draft: ScenarioRunState) => void, advanceMinutes = 0, bumpRevision = true): ScenarioSnapshot {
     const draft = clone(this.state)
     mutate(draft)
     if (bumpRevision) draft.stateRevision += 1
     draft.virtualNow = advanceVirtualNow(draft.virtualNow, advanceMinutes)
     draft.commandLog = [...draft.commandLog, { action, at: draft.virtualNow, stateRevision: draft.stateRevision }]
-    draft.pendingCommand = null
+    // `pendingCommand` is deliberately not cleared here. It is only removed by
+    // the same-identity retry that acknowledges the lost response, so unrelated
+    // commits (e.g. generating a report at ORDER_CREATED) can never drop it.
     this.state = draft
     return this.read()
   }
 
   startPatrol(): ScenarioSnapshot {
+    this.requireNoPendingCommand('START_PATROL')
     if (this.state.stage !== 'READY') throw new ScenarioStateError('当前阶段不能重复启动巡检。')
     const { dataQuality } = effectiveLedger(this.fixture, this.variant)
     return this.commit('START_PATROL', (draft) => {
@@ -250,6 +267,7 @@ export class MockScenarioProvider {
   }
 
   runAssessment(): ScenarioSnapshot {
+    this.requireNoPendingCommand('RUN_ASSESSMENT')
     if (this.state.stage !== 'PATROL_DONE') throw new ScenarioStateError('需要先完成巡检，才能形成综合研判。')
     const { ledger } = effectiveLedger(this.fixture, this.variant)
     return this.commit('RUN_ASSESSMENT', (draft) => {
@@ -259,6 +277,7 @@ export class MockScenarioProvider {
   }
 
   selectPlan(planId: string): ScenarioSnapshot {
+    this.requireNoPendingCommand('SELECT_PLAN')
     if (this.state.stage !== 'ASSESSED' && this.state.stage !== 'PLAN_SELECTED') {
       throw new ScenarioStateError('当前阶段不能选择方案。')
     }
@@ -284,6 +303,7 @@ export class MockScenarioProvider {
   }
 
   updateParameters(raw: Partial<ScenarioParameters>): ScenarioSnapshot {
+    this.requireNoPendingCommand('UPDATE_PARAMETERS')
     if (this.state.stage !== 'PLAN_SELECTED') throw new ScenarioStateError('只有在待确认阶段才能调整参数。')
     const planId = this.state.selectedPlanId
     if (!planId) throw new ScenarioStateError('请先选择方案。')
@@ -302,25 +322,23 @@ export class MockScenarioProvider {
   }
 
   /**
-   * Resolves the committed order for the current plan revision from the run
-   * state itself. The in-memory map is only a cache; `state.confirmedPlan` and
-   * `state.workOrder` are the persisted authority, so a run restored from
-   * session storage still resolves its idempotent identity (and can clear a
-   * pending lost-response command) instead of failing the stage check.
+   * Resolves the committed order for the current plan revision directly from
+   * the persisted run state. There is no side cache: `state.confirmedPlan` and
+   * `state.workOrder` are the authority, so a retry always reconstructs the
+   * exact current run (including reports generated while the receipt was
+   * unresolved) instead of restoring a stale snapshot from an earlier commit.
    */
   private committedOrderSnapshot(): ScenarioSnapshot | null {
     const confirmed = this.state.confirmedPlan
     if (!confirmed || !this.state.workOrder) return null
     if (confirmed.planRevision !== this.state.planRevision) return null
-    const key = this.orderIdempotencyKey(confirmed.planRevision)
-    const cached = this.committed.get(key)
-    if (cached) return cached
-    const snapshot = this.buildSnapshot({ ...clone(this.state), pendingCommand: null })
-    this.committed.set(key, snapshot)
-    return snapshot
+    return this.buildSnapshot({ ...clone(this.state), pendingCommand: null })
   }
 
   confirmAndCreateOrder(): ScenarioSnapshot {
+    // The same-identity retry is the one action allowed to resolve the pending
+    // receipt; every other mutating action is rejected while it is unresolved.
+    this.requireNoPendingCommand('CONFIRM_AND_CREATE_ORDER')
     const committedOrder = this.committedOrderSnapshot()
     if (committedOrder) {
       this.state = clone(committedOrder.state)
@@ -374,7 +392,6 @@ export class MockScenarioProvider {
       state.workOrder = workOrder
     }, 1)
     const key = this.orderIdempotencyKey(confirmed.planRevision)
-    this.committed.set(key, clone(snapshot))
     if (this.faults.lostCreateResponse) {
       this.faults.lostCreateResponse = false
       this.state = clone(this.state)
@@ -389,6 +406,7 @@ export class MockScenarioProvider {
   }
 
   keepObserving(): ScenarioSnapshot {
+    this.requireNoPendingCommand('KEEP_OBSERVING')
     if (this.state.stage !== 'PLAN_SELECTED') throw new ScenarioStateError('只有在待确认阶段才能选择保持观察。')
     if (this.state.selectedPlanId !== 'SCN-PLAN-NONE') throw new ScenarioStateError('只有保持现状方案才能跳过建单。')
     return this.commit('KEEP_OBSERVING', (draft) => {
@@ -398,6 +416,7 @@ export class MockScenarioProvider {
   }
 
   takeOrder(): ScenarioSnapshot {
+    this.requireNoPendingCommand('TAKE_ORDER')
     if (this.state.stage !== 'ORDER_CREATED' || !this.state.workOrder) throw new ScenarioStateError('当前没有待接单的模拟任务。')
     return this.commit('TAKE_ORDER', (draft) => {
       draft.stage = 'PROCESSING'
@@ -413,6 +432,7 @@ export class MockScenarioProvider {
   }
 
   applySimulatedPlan(): ScenarioSnapshot {
+    this.requireNoPendingCommand('APPLY_SIMULATED_PLAN')
     if (this.state.stage !== 'PROCESSING' || !this.state.workOrder) throw new ScenarioStateError('模拟应用前需要先接单。')
     return this.commit('APPLY_SIMULATED_PLAN', (draft) => {
       draft.stage = 'APPLIED_AWAITING_VERIFICATION'
@@ -421,6 +441,7 @@ export class MockScenarioProvider {
   }
 
   verifyNextCycle(): ScenarioSnapshot {
+    this.requireNoPendingCommand('VERIFY_NEXT_CYCLE')
     if (this.state.stage !== 'APPLIED_AWAITING_VERIFICATION' || !this.state.confirmedPlan) {
       throw new ScenarioStateError('模拟结果只有在显式验证下一周期后才可见。')
     }
@@ -537,7 +558,6 @@ export class MockScenarioProvider {
     this.runSequenceNumber = persisted.runSequenceNumber
     this.state = clone(persisted.state)
     this.state.commandLog = [...(persisted.state.commandLog ?? [])]
-    this.committed.clear()
     // Re-arm the lost-response fault unless this run already consumed it, so a
     // reloaded run keeps the same fault semantics while never re-firing it.
     const faultConsumed = this.state.pendingCommand?.status === 'LOST_RESPONSE'
@@ -547,9 +567,9 @@ export class MockScenarioProvider {
 
   /** Resets the scenario to a fresh run and invalidates prior command identities. */
   reset(): ScenarioSnapshot {
+    this.requireNoPendingCommand('RESET_SCENARIO')
     this.runSequenceNumber += 1
     this.state = createInitialState(scenarioRunIdFor(this.runSequenceNumber))
-    this.committed.clear()
     this.faults.lostCreateResponse = this.variant === 'LOST_CREATE_RESPONSE'
     return this.read()
   }

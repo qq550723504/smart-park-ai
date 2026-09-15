@@ -38,8 +38,44 @@ const overviewPanel = ref<{ resetForDemo: () => Promise<void> } | null>(null)
 let restartReturnFocus: HTMLElement | null = null
 
 const scenarioStore = useB2NightEnergyScenario()
-const scenarioMode = ref(false)
+
+const SCENARIO_PAGES: CustomerPage[] = ['overview', 'analysis', 'work-orders', 'reports']
+
+function scenarioQuery(): URLSearchParams | null {
+  try {
+    return new URLSearchParams(window.location.search)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Resolves the scenario entry from the deep link or the persisted session
+ * flag. This runs during setup, before the first render: a restored or
+ * deep-linked scenario session must never mount the online pages (and their
+ * live operations requests) for even a single frame.
+ */
+function resolveInitialScenario(): { active: boolean; page: CustomerPage } {
+  const params = scenarioQuery()
+  const requested = params?.get('scenario') === 'b2-night-energy'
+  if (!requested && !scenarioStore.active.value) return { active: false, page: 'overview' }
+  const page = params?.get('scenarioPage')
+  return {
+    active: true,
+    page: page && (SCENARIO_PAGES as string[]).includes(page) ? page as CustomerPage : 'overview',
+  }
+}
+
+const initialScenario = resolveInitialScenario()
+const scenarioMode = ref(initialScenario.active)
 const scenarioContext = computed(() => scenarioMode.value ? scenarioAnalysisContext(scenarioStore.snapshot.value) : null)
+
+if (scenarioMode.value) {
+  scenarioStore.enter()
+  activePage.value = initialScenario.page
+  analysisContext.value = scenarioContext.value
+  workOrdersContext.value = scenarioContext.value
+}
 
 function enterScenario(): void {
   scenarioStore.enter()
@@ -223,21 +259,6 @@ async function confirmRestart(): Promise<void> {
 }
 
 onMounted(() => {
-  try {
-    const params = new URLSearchParams(window.location.search)
-    const requested = params.get('scenario') === 'b2-night-energy'
-    if (requested || scenarioStore.active.value) {
-      scenarioStore.enter()
-      scenarioMode.value = true
-      const page = params.get('scenarioPage')
-      const pages: CustomerPage[] = ['overview', 'analysis', 'work-orders', 'reports']
-      activePage.value = page && (pages as string[]).includes(page) ? page as CustomerPage : 'overview'
-      analysisContext.value = scenarioContext.value
-      workOrdersContext.value = scenarioContext.value
-    }
-  } catch {
-    /* URL parsing must never block the shell */
-  }
   void getOperationsCapabilities()
     .then((current) => {
       capabilities.value = current
@@ -265,9 +286,11 @@ onMounted(() => {
     <template #work-orders-hero>
       <div>
         <h1 id="customer-work-orders-title">事件与工单中心</h1>
-        <p>围绕异常发现、人工确认、建单与跟进，形成可核验的处理闭环</p>
+        <p v-if="scenarioMode">预设场景的模拟处理闭环，工单为演示夹具，不是真实回执</p>
+        <p v-else>围绕异常发现、人工确认、建单与跟进，形成可核验的处理闭环</p>
       </div>
-      <span>同一事件<br />真实回执</span>
+      <span v-if="scenarioMode">模拟任务<br />非真实回执</span>
+      <span v-else>同一事件<br />真实回执</span>
     </template>
     <template #reports-hero>
       <div>

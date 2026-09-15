@@ -151,6 +151,25 @@ describe('B2 provider lost create response', () => {
     expect(restored.reset().state.scenarioRunId).toBe('SCN-B2-NIGHT-ENERGY-001-RUN-002')
   })
 
+  it('keeps the pending identity through unrelated commits and blocks other mutations', () => {
+    const provider = new MockScenarioProvider({ fixture, runSequenceNumber: 1, faults: { lostCreateResponse: true } })
+    toOrdered(provider)
+    provider.selectPlan('SCN-PLAN-PUBLIC-HVAC')
+    expect(() => provider.confirmAndCreateOrder()).toThrow(ScenarioFaultError)
+
+    // Generating a report at ORDER_CREATED is allowed, but it must not drop the
+    // unresolved receipt and re-enable reset without a same-identity retry.
+    provider.generateReport()
+    expect(provider.read().state.pendingCommand?.status).toBe('LOST_RESPONSE')
+    expect(provider.read().state.reports).toHaveLength(1)
+    expect(() => provider.takeOrder()).toThrow(ScenarioStateError)
+    expect(() => provider.reset()).toThrow(ScenarioStateError)
+
+    const retried = provider.confirmAndCreateOrder()
+    expect(retried.state.pendingCommand).toBeNull()
+    expect(retried.state.workOrder?.id).toBe('SCN-WO-B2-001-001')
+  })
+
   it('does not re-arm the lost-response fault for a run that already consumed it', () => {
     const provider = new MockScenarioProvider({ fixture, runSequenceNumber: 1, variant: 'LOST_CREATE_RESPONSE' })
     toOrdered(provider)
