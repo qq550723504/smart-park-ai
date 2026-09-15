@@ -475,3 +475,14 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 71 | `port/security/SecurityEventCatalog` 与 `securityincident/SecurityIncidentService` 双重读取 | P2 | 一个同时注册为 `SecuritySourceAdapter` 的 reader 会被读两遍（`listEvents()` + `readEvents()`）：每个事件重复一次，并且同一条生产数据源在一次成功读取后又被查询第二次（可能失败）。现两处读取都在 adapter 阶段跳过 `adapter == reader` 的实例 |
 
 对应独立提交：`bac3d15`（#69）、`cb05bd0`（#71）、`30da73a`（#70）。
+
+第三十六轮根因补充（对 `dfd40a3`，回应「是否从根因修复」）：
+
+第 36 轮的 #70 与 #71 被复核为**局部补丁**，两处未触及真正的根因：
+
+| 项 | 根因 | 处理 |
+| --- | --- | --- |
+| #71 双重读取 | `SecurityIncidentService` 重新实现了 `SecurityEventCatalog` 已经拥有的「reader + adapter 聚合」职责，于是必须在两处各自判断「reader 是否同时是 adapter」，且仍无法识别「reader 本身就是 adapter 聚合目录」的部署形态（adapters-only）。 | `SecurityIncidentService.correlate()` 改为把摄取委托给 `SecurityEventCatalog.aggregating(security, sourceAdapters).listEvents()`；`SecurityEventCatalog` 成为「每个来源只读一次」的唯一归属地，服务侧不再有 `adapter != reader` 特判。 |
+| #70 生产归属 | `SecurityIncidentConfiguration` 在 adapters-only 部署里把 adapter 列表置空（为规避上一条的双重读取），导致 `dispositionIsProductionBacked` 恒为 false，而由**全部** adapter 构建的 `SecurityEventCapabilityRegistry.dispositionEnabled()` 可能为 true —— 能力门控与逐事件归属口径不一致。 | 配置现在**始终**把完整 adapter 列表交给服务（目录已负责跳过 reader 自身的 adapter 角色），adapters-only 部署不再丢失生产 disposition 来源；「生产 disposition 来源」的判定收拢为 `SecurityEventCapabilityRegistry.suppliesProductionDispositions(...)` 单一规则，能力门控与误报归属共用，无法再漂移。 |
+
+对应提交：`fdc6091`（聚合唯一归属 + adapters-only 生产归属）、`c524ac2`（共享生产 disposition 来源规则）。新增回归测试 `SecurityIncidentServiceTest.keepsProductionProvenanceWhenTheInjectedReaderAlreadyAggregatesTheAdapters`（旧实现下 adapter 被读 2 次）与 `SecurityIncidentControllerConfigurationTest.handsTheAdapterListToTheIncidentServiceEvenInAdapterOnlyDeployments`（旧装配下 adapter 列表为空），均先在旧实现下复现失败再修复。
