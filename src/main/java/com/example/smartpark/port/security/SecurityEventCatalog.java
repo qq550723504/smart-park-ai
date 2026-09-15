@@ -118,7 +118,11 @@ public final class SecurityEventCatalog implements SecurityEventResolver, Securi
 
     private List<SecurityEvent> events() {
         List<SecurityEvent> events = new ArrayList<>(reader.listEvents());
-        adapters.forEach(adapter -> events.addAll(adapter.readEvents()));
+        // A reader that is also registered as an adapter would otherwise be queried twice
+        // and could fail on the second call after a successful first read.
+        adapters.stream()
+                .filter(adapter -> adapter != reader)
+                .forEach(adapter -> events.addAll(adapter.readEvents()));
         return events;
     }
 

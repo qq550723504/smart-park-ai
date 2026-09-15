@@ -8,12 +8,14 @@ import com.example.smartpark.model.security.SecurityDispositionSource;
 import com.example.smartpark.model.security.SecurityEvent;
 import com.example.smartpark.model.security.SecurityEventIdentity;
 import com.example.smartpark.model.security.SecurityEventType;
+import com.example.smartpark.model.security.SecuritySourceRef;
 import com.example.smartpark.model.security.SecuritySourceType;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoff;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoffPort;
 import com.example.smartpark.port.security.SecurityEventReader;
 import com.example.smartpark.port.security.SecuritySourceAdapter;
+import com.example.smartpark.port.security.SecuritySourceDescriptor;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -162,7 +164,11 @@ public final class SecurityIncidentService {
 
     private List<SecurityIncident> correlate() {
         List<SecurityEvent> ingested = new ArrayList<>(security.listEvents());
-        sourceAdapters.forEach(adapter -> ingested.addAll(adapter.readEvents()));
+        // A reader that is also registered as an adapter would otherwise contribute every
+        // event twice and be queried again after a successful first read.
+        sourceAdapters.stream()
+                .filter(adapter -> adapter != security)
+                .forEach(adapter -> ingested.addAll(adapter.readEvents()));
         Map<CorrelationKey, List<SecurityEvent>> buckets = new LinkedHashMap<>();
         deduplicate(ingested).stream()
                 .sorted(Comparator.comparing(SecurityEvent::occurredAt)

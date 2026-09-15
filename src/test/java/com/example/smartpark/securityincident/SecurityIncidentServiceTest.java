@@ -26,7 +26,9 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -71,6 +73,45 @@ class SecurityIncidentServiceTest {
 
         assertThat(page.items()).singleElement()
                 .satisfies(incident -> assertThat(incident.eventIds()).containsExactly("SEC-SHARED"));
+    }
+
+    @Test
+    void readsAReaderThatIsAlsoAnAdapterOnlyOnceWhenCorrelating() {
+        AtomicInteger adapterReads = new AtomicInteger();
+        SecurityEvent dual = event("SEC-DUAL-ROLE", "A1", "ACCESS", BASE);
+        class DualRole implements SecurityEventReader, SecuritySourceAdapter {
+            @Override
+            public SecurityEvent getEvent(String eventId) {
+                if (dual.eventId().equals(eventId)) return dual;
+                throw new NoSuchElementException("security event not found: " + eventId);
+            }
+
+            @Override
+            public List<SecurityEvent> listEvents() {
+                return List.of(dual);
+            }
+
+            @Override
+            public SecuritySourceDescriptor descriptor() {
+                return new SecuritySourceDescriptor("dual-role-feed", SecuritySourceType.ACCESS_CONTROL,
+                        Set.of(SecurityEventType.ACCESS_ANOMALY), true, true);
+            }
+
+            @Override
+            public List<SecurityEvent> readEvents() {
+                adapterReads.incrementAndGet();
+                return List.of(dual);
+            }
+        }
+        DualRole reader = new DualRole();
+        SecurityIncidentService service = service(reader, List.of(), 50, new SecurityIncidentHandoffStore(10),
+                List.of(reader));
+
+        assertThat(service.list(new SecurityIncidentQuery(null, 20)).items()).singleElement()
+                .satisfies(incident -> assertThat(incident.eventIds()).containsExactly("SEC-DUAL-ROLE"));
+        // The reader's own list already contributed the event, so the adapter pass must not
+        // query the same production source a second time.
+        assertThat(adapterReads.get()).isZero();
     }
 
     @Test
@@ -1735,7 +1776,7 @@ class SecurityIncidentServiceTest {
     private static SecurityIncidentService service(List<SecurityEvent> events, List<Alert> alerts, int capacity,
                                                     SecurityIncidentHandoffPort handoffs,
                                                     List<SecuritySourceAdapter> sourceAdapters) {
-        SecurityEventReader security = new SecurityEventReader() {
+        return service(new SecurityEventReader() {
             @Override
             public SecurityEvent getEvent(String eventId) {
                 return events.stream().filter(event -> event.eventId().equals(eventId)).findFirst().orElseThrow();
@@ -1745,7 +1786,12 @@ class SecurityIncidentServiceTest {
             public List<SecurityEvent> listEvents() {
                 return events;
             }
-        };
+        }, alerts, capacity, handoffs, sourceAdapters);
+    }
+
+    private static SecurityIncidentService service(SecurityEventReader security, List<Alert> alerts, int capacity,
+                                                    SecurityIncidentHandoffPort handoffs,
+                                                    List<SecuritySourceAdapter> sourceAdapters) {
         AlertPort alertPort = new AlertPort() {
             @Override
             public Alert getAlert(String alertId) {
@@ -1769,6 +1815,21 @@ class SecurityIncidentServiceTest {
     private static boolean hasEventSource(SecurityIncident incident, String eventSourceId) {
         return incident.evidence().stream()
                 .anyMatch(evidence -> eventSourceId.equals(evidence.eventSourceId()));
+    }
+
+    private static SecuritySourceAdapter productionDispositionAdapter(String sourceId, SecurityEvent... events) {
+        return new SecuritySourceAdapter() {
+            @Override
+            public SecuritySourceDescriptor descriptor() {
+                return new SecuritySourceDescriptor(sourceId, SecuritySourceType.ACCESS_CONTROL,
+                        Set.of(SecurityEventType.ACCESS_ANOMALY), true, true);
+            }
+
+            @Override
+            public List<SecurityEvent> readEvents() {
+                return List.of(events);
+            }
+        };
     }
 
     private static SecuritySourceAdapter adapterReturning(SecurityEvent... events) {

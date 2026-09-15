@@ -308,6 +308,44 @@ class SecurityEventCatalogTest {
     }
 
     @Test
+    void readsAReaderThatIsAlsoAnAdapterOnlyOnce() {
+        AtomicInteger adapterReads = new AtomicInteger();
+        SecurityEvent event = event("SEC-DUAL-ROLE", access("access-1"), BASE);
+        class DualRole implements SecurityEventReader, SecuritySourceAdapter {
+            @Override
+            public SecurityEvent getEvent(String eventId) {
+                if (event.eventId().equals(eventId)) return event;
+                throw new NoSuchElementException("security event not found: " + eventId);
+            }
+
+            @Override
+            public List<SecurityEvent> listEvents() {
+                return List.of(event);
+            }
+
+            @Override
+            public SecuritySourceDescriptor descriptor() {
+                return new SecuritySourceDescriptor("dual-role-feed", SecuritySourceType.ACCESS_CONTROL,
+                        Set.of(SecurityEventType.ACCESS_ANOMALY), true, true);
+            }
+
+            @Override
+            public List<SecurityEvent> readEvents() {
+                adapterReads.incrementAndGet();
+                return List.of(event);
+            }
+        }
+        DualRole dual = new DualRole();
+        SecurityEventCatalog catalog = new SecurityEventCatalog(dual, List.of(dual));
+
+        assertThat(catalog.listEvents()).containsExactly(event);
+        // The dual-role source is already read through the reader path, so the adapter pass
+        // must skip it instead of querying the same production feed a second time.
+        assertThat(adapterReads.get()).isZero();
+        assertThat(catalog.getEvent("SEC-DUAL-ROLE")).isEqualTo(event);
+    }
+
+    @Test
     void rejectsACorruptedLocationSuffixInsteadOfGroundingAnotherLocation() {
         SecurityEvent here = event("SEC-CORRUPT", access("access-1"), BASE);
         SecurityEventCatalog catalog = new SecurityEventCatalog(reader(here), List.of());
