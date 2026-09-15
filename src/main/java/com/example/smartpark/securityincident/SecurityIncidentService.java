@@ -13,6 +13,7 @@ import com.example.smartpark.model.security.SecuritySourceType;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoff;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoffPort;
+import com.example.smartpark.port.security.SecurityEventCapabilityRegistry;
 import com.example.smartpark.port.security.SecurityEventCatalog;
 import com.example.smartpark.port.security.SecurityEventReader;
 import com.example.smartpark.port.security.SecuritySourceAdapter;
@@ -82,7 +83,7 @@ public final class SecurityIncidentService {
         if (adapters == null) return sources;
         for (SecuritySourceAdapter adapter : adapters) {
             SecuritySourceDescriptor descriptor = adapter.descriptor();
-            if (descriptor != null && descriptor.productionSource() && descriptor.dispositionFeed()) {
+            if (SecurityEventCapabilityRegistry.suppliesProductionDispositions(descriptor)) {
                 sources.add(new SecuritySourceRef(descriptor.sourceType(), descriptor.sourceId()));
             }
         }

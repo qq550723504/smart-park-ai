@@ -43,14 +43,23 @@ public final class SecurityEventCapabilityRegistry {
     }
 
     /**
+     * A source can back review outcomes only when it is a production source that also
+     * feeds dispositions. Defined once here so the capability gate and the per-incident
+     * false-positive provenance can never drift apart. A source that cannot describe
+     * itself is treated as ineligible rather than crashing incident-service startup.
+     */
+    public static boolean suppliesProductionDispositions(SecuritySourceDescriptor descriptor) {
+        return descriptor != null && descriptor.productionSource() && descriptor.dispositionFeed();
+    }
+
+    /**
      * Disposition/false-positive statistics require a source that explicitly
      * declares a disposition feed; a connected event feed alone only proves
      * events arrive, not that review outcomes can be produced.
      */
     public boolean dispositionEnabled() {
-        return adapters.stream().anyMatch(adapter -> {
-            SecuritySourceDescriptor descriptor = adapter.descriptor();
-            return descriptor.productionSource() && descriptor.dispositionFeed();
-        });
+        return adapters.stream()
+                .map(SecuritySourceAdapter::descriptor)
+                .anyMatch(SecurityEventCapabilityRegistry::suppliesProductionDispositions);
     }
 }
