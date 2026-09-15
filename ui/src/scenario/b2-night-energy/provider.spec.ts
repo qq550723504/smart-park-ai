@@ -47,6 +47,10 @@ describe('B2 provider patrol and assessment', () => {
     expect(afterPatrol.state.patrolResult?.uniqueEventCount).toBe(1)
     expect(afterPatrol.state.workOrder).toBeNull()
     expect(Date.parse(afterPatrol.state.virtualNow)).toBe(Date.parse('2026-09-11T09:00:00+08:00') + 60_000)
+    // The frozen clock keeps its +08:00 offset: consumers slice the string, so a
+    // UTC conversion would render 09:01 as 01:01.
+    expect(afterPatrol.state.virtualNow).toBe('2026-09-11T09:01:00+08:00')
+    expect(afterPatrol.state.commandLog.every((entry) => entry.at.endsWith('+08:00'))).toBe(true)
   })
 
   it('builds the assessment from the same shared ledger', () => {

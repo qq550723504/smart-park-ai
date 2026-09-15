@@ -53,6 +53,21 @@ describe('B2 scenario ledger and totals', () => {
     expect(roundHalfUp(4.6153846)).toBe(4.62)
     expect(roundHalfUp(11.5384615)).toBe(11.54)
     expect(roundHalfUp(2.225)).toBe(2.23)
+    // Decimal ties must use HALF_UP even when the double is slightly below the
+    // tie (4.725 * 100 === 472.49999999999994).
+    expect(roundHalfUp(4.725)).toBe(4.73)
+    expect(roundHalfUp(1.005)).toBe(1.01)
+    expect(roundHalfUp(-4.725)).toBe(-4.73)
+  })
+
+  it('keeps the allowed combined-plan monthly estimate HALF_UP', () => {
+    const estimate = planEstimate(
+      fixture,
+      ledger,
+      { savedHours: 0.5, tariffCnyPerKwh: 0.42, applicableDaysPerMonth: 1 },
+      'SCN-PLAN-HVAC-LIGHT',
+    )
+    expect(estimate?.estimatedMonthlySavingsCny).toBe(4.73)
   })
 })
 

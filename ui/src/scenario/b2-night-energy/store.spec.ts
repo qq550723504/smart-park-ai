@@ -16,6 +16,19 @@ class FakeStorage implements ScenarioStorage {
   }
 }
 
+/** Mimics a storage-restricted embed where every method throws. */
+class ThrowingStorage implements ScenarioStorage {
+  getItem(): string | null {
+    throw new Error('SecurityError: storage is not available')
+  }
+  setItem(): void {
+    throw new Error('SecurityError: storage is not available')
+  }
+  removeItem(): void {
+    throw new Error('SecurityError: storage is not available')
+  }
+}
+
 const fixture = B2_SCENARIO_FIXTURE
 
 function storeWith(storage: ScenarioStorage | null = null, latencyMs = 0) {
@@ -162,5 +175,14 @@ describe('B2 shared store', () => {
     const reloaded = storeWith(storage)
     expect(reloaded.active.value).toBe(false)
     expect(reloaded.snapshot.value.state.stage).toBe('PATROL_DONE')
+  })
+
+  it('degrades to an empty cache when storage methods throw', async () => {
+    const store = storeWith(new ThrowingStorage())
+    expect(store.active.value).toBe(false)
+    expect(store.snapshot.value.state.stage).toBe('READY')
+    // Commands still run; persistence failures must not break the run.
+    await store.startPatrol()
+    expect(store.snapshot.value.state.stage).toBe('PATROL_DONE')
   })
 })

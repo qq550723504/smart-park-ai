@@ -360,6 +360,34 @@ describe('B2 scenario customer integration', () => {
     wrapper.unmount()
   })
 
+  it('disables taking the order while the receipt is pending and retries from the work-orders page', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-variant]').setValue('LOST_CREATE_RESPONSE')
+    await flushPromises()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-confirm-order]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-customer-nav="work-orders"]').trigger('click')
+    await flushPromises()
+    // The provider rejects takeOrder while pending, so the button must be off
+    // and the same-identity retry must be reachable here too.
+    expect(wrapper.get('[data-scenario-take-order]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-scenario-order-pending]').exists()).toBe(true)
+    await wrapper.get('[data-scenario-order-retry]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-order-pending]').exists()).toBe(false)
+    expect(wrapper.get('[data-scenario-take-order]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it('enters scenario mode on the first render when a session is restored', async () => {
     const overviewMounted = vi.fn()
     sessionStorage.setItem('smart-park:scenario:b2-night-energy:mode:v1', 'true')

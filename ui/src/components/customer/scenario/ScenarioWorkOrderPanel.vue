@@ -21,9 +21,14 @@ const eventStatusLabels: Record<string, string> = {
   CLOSED: '已关闭',
 }
 
-const canTake = computed(() => stage.value === 'ORDER_CREATED')
-const canApply = computed(() => stage.value === 'PROCESSING')
-const canVerify = computed(() => stage.value === 'APPLIED_AWAITING_VERIFICATION')
+const pending = computed(() => snapshot.value.state.pendingCommand)
+
+// A pending lost-response receipt blocks every stage mutation in the provider,
+// so the work-orders actions must reflect that invariant instead of offering a
+// button that is guaranteed to raise an error.
+const canTake = computed(() => stage.value === 'ORDER_CREATED' && !pending.value)
+const canApply = computed(() => stage.value === 'PROCESSING' && !pending.value)
+const canVerify = computed(() => stage.value === 'APPLIED_AWAITING_VERIFICATION' && !pending.value)
 
 const processingRecords = computed(() => snapshot.value.state.commandLog.filter((entry) =>
   ['CONFIRM_AND_CREATE_ORDER', 'TAKE_ORDER', 'APPLY_SIMULATED_PLAN', 'VERIFY_NEXT_CYCLE', 'KEEP_OBSERVING'].includes(entry.action),
@@ -81,6 +86,12 @@ const processingRecords = computed(() => snapshot.value.state.commandLog.filter(
             <Select aria-hidden="true" /> 查看下一周期模拟结果
           </button>
         </div>
+        <p v-if="pending" class="scenario-alert" role="alert" data-scenario-order-pending>
+          模拟建单响应未确认：{{ pending.command }}（{{ pending.status }}）。请按同一身份重试，不会重复建单。
+        </p>
+        <button v-if="pending" type="button" class="scenario-button" :disabled="store.busy.value" data-scenario-order-retry @click="store.confirmAndCreateOrder()">
+          按同一身份重试建单
+        </button>
       </template>
       <p v-else-if="stage === 'CLOSED_NO_ACTION'" class="scenario-muted" data-scenario-order-none>本次选择保持观察，未创建任务。</p>
       <p v-else class="scenario-muted" data-scenario-order-none>尚未创建任务，请先在分析页选择方案并人工确认。</p>

@@ -30,9 +30,17 @@ export function parseDecimal(value: string | number): number {
 /** Decimal HALF_UP to `digits` places, matching the fixture's rounding rule. */
 export function roundHalfUp(value: number, digits = 2): number {
   if (!Number.isFinite(value)) return value
-  const factor = 10 ** digits
   const sign = value < 0 ? -1 : 1
-  return (sign * Math.round(Math.abs(value) * factor + Number.EPSILON)) / factor
+  const abs = Math.abs(value)
+  // Re-parse the value's shortest decimal string with the point shifted by
+  // `digits`. `String(n)` yields the shortest decimal that round-trips, so a
+  // decimal tie such as 4.725 becomes the exactly-representable 472.5 before
+  // rounding; `Math.round` then applies HALF_UP away from zero. The previous
+  // `Number.EPSILON` nudge was too small to repair most binary ties (e.g. it
+  // turned 4.725 into 4.72 instead of the required 4.73).
+  const shifted = Number(`${abs}e${digits}`)
+  const scaled = Number.isFinite(shifted) ? shifted : abs * 10 ** digits
+  return (sign * Math.round(scaled)) / 10 ** digits
 }
 
 export function formatDisplayNumber(value: number, maximumFractionDigits = 2): string {

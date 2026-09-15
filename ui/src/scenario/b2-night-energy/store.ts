@@ -65,6 +65,16 @@ function resolveStorage(): ScenarioStorage | null {
   return null
 }
 
+/** Reads a key, degrading to an empty cache when storage methods throw. */
+function readStorage(storage: ScenarioStorage, key: string): string | null {
+  try {
+    return storage.getItem(key)
+  } catch {
+    /* restricted embeds may expose storage whose methods throw */
+    return null
+  }
+}
+
 function errorMessage(error: unknown): string {
   if (error instanceof ScenarioFaultError) return error.message
   if (error instanceof Error) return error.message
@@ -90,9 +100,9 @@ export function createB2ScenarioStore(options: B2ScenarioStoreOptions = {}): B2S
   const restoredFromCache = ref(false)
 
   if (storage) {
-    const modeRaw = storage.getItem(MODE_STORAGE_KEY)
+    const modeRaw = readStorage(storage, MODE_STORAGE_KEY)
     active.value = modeRaw === 'true'
-    const runRaw = storage.getItem(RUN_STORAGE_KEY)
+    const runRaw = readStorage(storage, RUN_STORAGE_KEY)
     if (runRaw) {
       try {
         const persisted = JSON.parse(runRaw) as PersistedScenarioRun

@@ -66,9 +66,32 @@ export interface PersistedScenarioRun {
   state: ScenarioRunState
 }
 
-function advanceVirtualNow(virtualNow: string, minutes: number): string {
+/**
+ * Formats an epoch instant as an ISO-8601 string carrying the scenario's fixed
+ * UTC offset (e.g. `+08:00`). The frozen clock is pinned to Asia/Shanghai and
+ * consumers render timestamps by slicing the string, so advancing the clock
+ * must not convert to UTC (`toISOString`), which would show a 09:00 patrol as
+ * 01:00.
+ */
+function formatScenarioTimestamp(epochMs: number, offsetMinutes: number): string {
+  const shifted = new Date(epochMs + offsetMinutes * 60_000)
+  const sign = offsetMinutes < 0 ? '-' : '+'
+  const abs = Math.abs(offsetMinutes)
+  const offset = `${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}:${String(abs % 60).padStart(2, '0')}`
+  return `${shifted.toISOString().slice(0, 19)}${offset}`
+}
+
+/** Reads the fixed UTC offset (in minutes) declared by the frozen clock string. */
+function clockOffsetMinutes(initialNow: string): number {
+  const match = /([+-])(\d{2}):(\d{2})$/.exec(initialNow)
+  if (!match) return 0
+  const sign = match[1] === '-' ? -1 : 1
+  return sign * (Number(match[2]) * 60 + Number(match[3]))
+}
+
+function advanceVirtualNow(virtualNow: string, minutes: number, offsetMinutes: number): string {
   if (!minutes) return virtualNow
-  return new Date(Date.parse(virtualNow) + minutes * 60_000).toISOString()
+  return formatScenarioTimestamp(Date.parse(virtualNow) + minutes * 60_000, offsetMinutes)
 }
 
 function clone<T>(value: T): T {
@@ -145,6 +168,7 @@ export class MockScenarioProvider {
   private state: ScenarioRunState
   private variant: ScenarioVariantId
   private readonly faults: ScenarioFaultConfig
+  private readonly clockOffsetMinutes: number
   private runSequenceNumber: number
 
   constructor(options: MockScenarioProviderOptions = {}) {
@@ -154,6 +178,7 @@ export class MockScenarioProvider {
     // The variant and the lost-response fault are one switch: selecting the
     // variant must arm the fault here too, exactly like `setVariant`/`reset`.
     this.faults = { lostCreateResponse: this.variant === 'LOST_CREATE_RESPONSE', ...options.faults }
+    this.clockOffsetMinutes = clockOffsetMinutes(this.fixture.clock.initialNow)
     this.state = createInitialState(scenarioRunIdFor(this.runSequenceNumber))
   }
 
@@ -246,7 +271,7 @@ export class MockScenarioProvider {
     const draft = clone(this.state)
     mutate(draft)
     if (bumpRevision) draft.stateRevision += 1
-    draft.virtualNow = advanceVirtualNow(draft.virtualNow, advanceMinutes)
+    draft.virtualNow = advanceVirtualNow(draft.virtualNow, advanceMinutes, this.clockOffsetMinutes)
     draft.commandLog = [...draft.commandLog, { action, at: draft.virtualNow, stateRevision: draft.stateRevision }]
     // `pendingCommand` is deliberately not cleared here. It is only removed by
     // the same-identity retry that acknowledges the lost response, so unrelated
