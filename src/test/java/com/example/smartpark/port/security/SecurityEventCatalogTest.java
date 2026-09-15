@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -277,6 +278,33 @@ class SecurityEventCatalogTest {
         assertThatThrownBy(() -> withAdapter.getEvent("SEC-FAIL"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("backend unavailable");
+    }
+
+    @Test
+    void resolvesAnEventTheReaderServesDirectlyButDoesNotList() {
+        SecurityEvent listed = event("SEC-RECENT", access("access-1"), BASE);
+        SecurityEvent historical = event("SEC-HISTORIC", access("access-1"), BASE.minusSeconds(3600));
+        SecurityEventReader reader = new SecurityEventReader() {
+            @Override
+            public SecurityEvent getEvent(String eventId) {
+                return List.of(listed, historical).stream()
+                        .filter(event -> event.eventId().equals(eventId)).findFirst()
+                        .orElseThrow(() -> new NoSuchElementException("security event not found: " + eventId));
+            }
+
+            @Override
+            public List<SecurityEvent> listEvents() {
+                return List.of(listed);
+            }
+        };
+        SecurityEventCatalog catalog = new SecurityEventCatalog(reader, List.of());
+
+        // listEvents() only enumerates recent events, but the reader can still resolve the
+        // historical one, so the catalog must consult SecurityPort.getEvent before failing.
+        assertThat(catalog.getEvent("SEC-HISTORIC")).isEqualTo(historical);
+        assertThat(catalog.getEvent(SecurityEventIdentity.of(historical))).isEqualTo(historical);
+        assertThat(catalog.getEventByReference(SecurityEventIdentity.of(historical).reference()))
+                .isEqualTo(historical);
     }
 
     @Test

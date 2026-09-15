@@ -123,23 +123,22 @@ public final class SecurityEventCatalog implements SecurityEventResolver, Securi
     }
 
     /**
-     * Enumerable events plus, for a get-only legacy port, the event the port resolves
-     * directly for {@code eventId}. The port cannot be listed, so its copy must join the
-     * candidates before source and location disambiguation: otherwise an adapter that
-     * reuses the id would hide the ambiguity, or would be returned while the concrete
-     * legacy event stayed unreachable.
+     * Enumerable events plus the event the reader resolves directly for {@code eventId}.
+     * A reader may serve an event through {@link SecurityPort#getEvent(String)} without
+     * listing it (for example when {@code listEvents()} enumerates only recent events),
+     * so its direct answer must join the candidates before source and location
+     * disambiguation; otherwise an adapter that reuses the id could hide the ambiguity or
+     * be returned while the reader's event stayed unreachable.
      */
     private List<SecurityEvent> candidates(String eventId) {
         List<SecurityEvent> candidates = new ArrayList<>(events());
-        if (reader instanceof SecurityPortReader) {
-            try {
-                SecurityEvent direct = reader.getEvent(eventId);
-                if (direct != null) candidates.add(direct);
-            } catch (NoSuchElementException notFound) {
-                // Only the port's explicit not-found answer means "no such event"; a backend
-                // or configuration failure must propagate to the sanitized unavailable path
-                // instead of being masked by an unrelated adapter copy of the same id.
-            }
+        try {
+            SecurityEvent direct = reader.getEvent(eventId);
+            if (direct != null) candidates.add(direct);
+        } catch (NoSuchElementException notFound) {
+            // Only the reader's explicit not-found answer means "no such event"; a backend
+            // or configuration failure must propagate to the sanitized unavailable path
+            // instead of being masked by an unrelated adapter copy of the same id.
         }
         return candidates;
     }

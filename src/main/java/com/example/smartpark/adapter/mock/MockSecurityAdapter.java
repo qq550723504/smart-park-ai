@@ -9,6 +9,7 @@ import com.example.smartpark.port.security.SecuritySourceAdapter;
 import com.example.smartpark.port.security.SecuritySourceDescriptor;
 
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Set;
 
 public final class MockSecurityAdapter implements SecurityEventReader, SecuritySourceAdapter {
@@ -26,7 +27,16 @@ public final class MockSecurityAdapter implements SecurityEventReader, SecurityS
 
     @Override
     public SecurityEvent getEvent(String eventId) {
-        return withDeclaredSource(dataStore.getSecurityEvent(eventId));
+        SecurityEvent stored;
+        try {
+            stored = dataStore.getSecurityEvent(eventId);
+        } catch (IllegalArgumentException notFound) {
+            // The demo store reports a missing id as an IllegalArgumentException; the port
+            // contract requires NoSuchElementException so aggregating callers can keep
+            // treating an unknown id as a plain miss rather than a backend failure.
+            throw new NoSuchElementException("security event not found: " + eventId, notFound);
+        }
+        return withDeclaredSource(stored);
     }
 
     @Override
