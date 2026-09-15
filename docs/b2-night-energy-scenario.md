@@ -29,6 +29,7 @@
 - 园区 2600 → 2900（11.54%）
 - 固定虚拟时钟 2026-09-11 09:00 Asia/Shanghai；观察窗口 [2026-09-10T08:00+08, 2026-09-11T08:00+08)；偏差阈值 20%
 - 所有派生数值按 fixture 的十进制 **HALF_UP** 舍入（用最短十进制字符串移位后再取整，避免二进制表示使 4.725 被当成 4.72）
+- `excess`/`偏差` 只在**观测完整**时发布：`LedgerTotals` 带 `observedMissingCount`/`observedComplete`，只要有一条观测缺失，`excessKwh` 与 `deviationPct` 就为 `null`。PARTIAL 下已取得 1280 与完整基线 1000 覆盖不同周期，不再给出“28%”这种伪造偏差；总览 KPI 显示“观测不完整，暂不计算偏差”，研判摘要也写明观测不完整并把它记入 unknowns
 - 计划：
   - `SCN-PLAN-NONE` 0 / 1300
   - `SCN-PLAN-PUBLIC-HVAC` 20kW × 4h = 80 kWh → 1220，1760 元/月（推荐）
@@ -69,7 +70,7 @@
 | --- | --- |
 | `NORMAL` | 完整主故事 |
 | `NO_ACTION` | delta 固定 `selectedPlanId=SCN-PLAN-NONE`：run 全程钉住“保持现状”，选择可执行方案会被 provider 拒绝，只能“保持观察”，不建单，事件置 MONITORING；简报只在**决定已定稿（`CLOSED_NO_ACTION`）**后写“客户明确选择保持现状/保持观察，本次不创建任务”，在 `PLAN_SELECTED` 阶段仍写“当前选择…尚未确认”，与“尚未确认方案”区分 |
-| `PARTIAL_DATA` | 省略 `SCN-B2-HVAC-PUBLIC:15` 观测；PARTIAL 不补零，方案卡不展示完整周期估算，提交被阻断 |
+| `PARTIAL_DATA` | 省略 `SCN-B2-HVAC-PUBLIC:15` 观测；PARTIAL 不补零，excess/偏差按契约不可计算（显示不完整），方案卡不展示完整周期估算，提交被阻断 |
 | `LOST_CREATE_RESPONSE` | 模拟建单响应丢失，同键重试 |
 
 - 变体 delta 是事实契约（`variantPinnedPlanId`）：`NO_ACTION` 的 `selectedPlanId` 由 **provider 层强制**，页面同步禁用非钉住方案并提示；不把变体当成纯展示标签
@@ -99,15 +100,15 @@
 ```bash
 cd ui
 npx vue-tsc -b
-npx vitest run        # 56 文件 / 638 测试
+npx vitest run        # 56 文件 / 640 测试
 npm run build
 ```
 
-- `calculations.spec.ts`：派生数值与参数边界；数据不完整时估算返回 `null`；变体 plan delta 解析；十进制 HALF_UP 平局与联合方案月度估算
+- `calculations.spec.ts`：派生数值与参数边界；数据不完整时估算返回 `null` 且**不发布 excess/偏差**（总览与研判均为不完整）；变体 plan delta 解析；十进制 HALF_UP 平局与联合方案月度估算
 - `provider.spec.ts`：状态机、幂等、变体锁定与 plan delta 强制、失联恢复、报告幂等；pending 身份跨无关提交保留且阻塞其他变更；虚拟时钟保留 `+08:00` 偏移；NO_ACTION 简报显式记录“保持观察”决定；未定稿前不写“客户明确选择”
 - `store.spec.ts`：持久化、generation 守卫、重置递增；存储受限时的空缓存降级
 - `download.spec.ts`：冻结快照原样下载、无浏览器环境静默降级
-- `ScenarioFlow.spec.ts`：端到端 巡检→研判→选方案→确认→接单→应用→验证→报告；PARTIAL 阻断且隐藏估算；失联重试（含刷新恢复，及 pending 期间生成报告后仍保留）；变体锁定与 NO_ACTION 方案钉住；保持观察门控；表单随 run 重置；重开导览保留 run；下载不重生成；恢复会话首帧即场景模式（不挂载在线总览）；工单页“非真实回执”标注；pending 时工单页接单禁用且可就地重试；重置需二次确认（取消保留、确认清 run）；确认后参数输入冻结且方案卡沿用回执参数；未应用的表单改动会在确认时原子保存；非法表单禁用确认；四个场景面板提供壳层 main 焦点目标
+- `ScenarioFlow.spec.ts`：端到端 巡检→研判→选方案→确认→接单→应用→验证→报告；PARTIAL 阻断且隐藏估算，且总览 KPI 与研判不发完整周期偏差（显示不完整）；失联重试（含刷新恢复，及 pending 期间生成报告后仍保留）；变体锁定与 NO_ACTION 方案钉住；保持观察门控；表单随 run 重置；重开导览保留 run；下载不重生成；恢复会话首帧即场景模式（不挂载在线总览）；工单页“非真实回执”标注；pending 时工单页接单禁用且可就地重试；重置需二次确认（取消保留、确认清 run）；确认后参数输入冻结且方案卡沿用回执参数；未应用的表单改动会在确认时原子保存；非法表单禁用确认；四个场景面板提供壳层 main 焦点目标
 
 ## 8. 边界
 

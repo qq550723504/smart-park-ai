@@ -29,7 +29,14 @@ describe('B2 scenario ledger and totals', () => {
   })
 
   it('keeps B2 baseline 1000, observed 1300, 30% deviation', () => {
-    expect(b2Totals(fixture, ledger)).toEqual({ baselineKwh: 1000, observedKwh: 1300, excessKwh: 300, deviationPct: 30 })
+    expect(b2Totals(fixture, ledger)).toEqual({
+      baselineKwh: 1000,
+      observedKwh: 1300,
+      observedMissingCount: 0,
+      observedComplete: true,
+      excessKwh: 300,
+      deviationPct: 30,
+    })
   })
 
   it('matches the per-channel totals', () => {
@@ -41,7 +48,14 @@ describe('B2 scenario ledger and totals', () => {
   })
 
   it('derives the park total 2600 -> 2900 (11.54%) without reusing B2 30%', () => {
-    expect(parkTotals(fixture, ledger)).toEqual({ baselineKwh: 2600, observedKwh: 2900, excessKwh: 300, deviationPct: 11.54 })
+    expect(parkTotals(fixture, ledger)).toEqual({
+      baselineKwh: 2600,
+      observedKwh: 2900,
+      observedMissingCount: 0,
+      observedComplete: true,
+      excessKwh: 300,
+      deviationPct: 11.54,
+    })
   })
 
   it('never double counts the aggregation-only total meter', () => {
@@ -196,6 +210,32 @@ describe('B2 PARTIAL_DATA variant', () => {
     expect(row?.baselineKwh).toBe(0)
     // observed sum excludes the missing bucket instead of treating it as 0
     expect(b2Totals(fixture, partial.ledger).observedKwh).toBe(1280)
+  })
+
+  it('withholds excess and deviation while the observation set is incomplete', () => {
+    const partial = effectiveLedger(fixture, 'PARTIAL_DATA')
+    const totals = b2Totals(fixture, partial.ledger)
+    expect(totals.observedComplete).toBe(false)
+    expect(totals.observedMissingCount).toBe(1)
+    // The 1280 subtotal and the 1000 baseline cover unlike periods, so no exact
+    // excess/deviation may be published (this used to read 28%).
+    expect(totals.excessKwh).toBeNull()
+    expect(totals.deviationPct).toBeNull()
+
+    const park = parkTotals(fixture, partial.ledger)
+    expect(park.observedComplete).toBe(false)
+    expect(park.excessKwh).toBeNull()
+    expect(park.deviationPct).toBeNull()
+  })
+
+  it('describes the assessment as incomplete instead of publishing a deviation', () => {
+    const partial = effectiveLedger(fixture, 'PARTIAL_DATA')
+    const assessment = buildAssessment(fixture, partial.ledger)
+    expect(assessment.summary).toContain('观测不完整')
+    expect(assessment.summary).toContain('1280')
+    expect(assessment.summary).not.toContain('较基线增加')
+    expect(assessment.summary).not.toContain('%')
+    expect(assessment.unknowns).toContain('观测不完整，本周期总用电与完整基线的偏差尚不可计算')
   })
 
   it('returns a partial follow-up result that is flagged, not silently complete', () => {

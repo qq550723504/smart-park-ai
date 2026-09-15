@@ -295,8 +295,18 @@ export interface ScenarioFixture {
 export interface LedgerTotals {
   baselineKwh: number
   observedKwh: number
-  excessKwh: number
-  deviationPct: number
+  /** Number of rows whose observation is unknown (0 when coverage is complete). */
+  observedMissingCount: number
+  /** True only when every expected observation in the window is present. */
+  observedComplete: boolean
+  /**
+   * Excess over baseline. `null` while observed coverage is incomplete: a
+   * partial observed subtotal and a complete baseline cover different periods,
+   * so an exact excess would be fabricated.
+   */
+  excessKwh: number | null
+  /** Baseline deviation percentage. `null` while observed coverage is incomplete. */
+  deviationPct: number | null
 }
 
 export interface ChannelTotal {

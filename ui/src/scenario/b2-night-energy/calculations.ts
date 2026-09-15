@@ -43,14 +43,14 @@ export function roundHalfUp(value: number, digits = 2): number {
   return (sign * Math.round(scaled)) / 10 ** digits
 }
 
-export function formatDisplayNumber(value: number, maximumFractionDigits = 2): string {
-  if (!Number.isFinite(value)) return '—'
+export function formatDisplayNumber(value: number | null | undefined, maximumFractionDigits = 2): string {
+  if (value == null || !Number.isFinite(value)) return '—'
   return value.toLocaleString('zh-CN', { maximumFractionDigits })
 }
 
 /** Plain (no thousands separator) formatting for contract text templates. */
-export function formatPlainNumber(value: number, maximumFractionDigits = 2): string {
-  if (!Number.isFinite(value)) return '—'
+export function formatPlainNumber(value: number | null | undefined, maximumFractionDigits = 2): string {
+  if (value == null || !Number.isFinite(value)) return '—'
   return String(Number(value.toFixed(maximumFractionDigits)))
 }
 
@@ -129,15 +129,31 @@ export function sumObserved(rows: EnergyLedgerRow[]): number {
   return roundHalfUp(rows.reduce((sum, row) => sum + (row.observedMissing ? 0 : row.observedKwh), 0))
 }
 
-export function totalsFromRows(rows: EnergyLedgerRow[]): LedgerTotals {
-  const baselineKwh = sumBaseline(rows)
-  const observedKwh = sumObserved(rows)
+/**
+ * Assembles totals while keeping the deviation contract honest: excess and
+ * deviation are only published when every expected observation is present, so
+ * a partial observed subtotal is never divided by a complete baseline.
+ */
+function assembleTotals(baselineKwh: number, observedKwh: number, observedMissingCount: number): LedgerTotals {
+  const observedComplete = observedMissingCount === 0
   return {
     baselineKwh,
     observedKwh,
-    excessKwh: roundHalfUp(observedKwh - baselineKwh),
-    deviationPct: baselineKwh === 0 ? 0 : roundHalfUp(((observedKwh - baselineKwh) / baselineKwh) * 100),
+    observedMissingCount,
+    observedComplete,
+    excessKwh: observedComplete ? roundHalfUp(observedKwh - baselineKwh) : null,
+    deviationPct: observedComplete
+      ? (baselineKwh === 0 ? 0 : roundHalfUp(((observedKwh - baselineKwh) / baselineKwh) * 100))
+      : null,
   }
+}
+
+export function totalsFromRows(rows: EnergyLedgerRow[]): LedgerTotals {
+  return assembleTotals(
+    sumBaseline(rows),
+    sumObserved(rows),
+    rows.filter((row) => row.observedMissing).length,
+  )
 }
 
 export function channelTotals(fixture: ScenarioFixture, ledger: EnergyLedgerRow[]): ChannelTotal[] {
@@ -167,14 +183,13 @@ export function parkTotals(fixture: ScenarioFixture, ledger: EnergyLedgerRow[]):
   const background = fixture.buildings
     .filter((building) => building.meterRule === 'SCALED_B2_BASELINE' && building.scale)
     .reduce((sum, building) => sum + b2.baselineKwh * parseDecimal(building.scale!), 0)
-  const baselineKwh = roundHalfUp(b2.baselineKwh + background)
-  const observedKwh = roundHalfUp(b2.observedKwh + background)
-  return {
-    baselineKwh,
-    observedKwh,
-    excessKwh: roundHalfUp(observedKwh - baselineKwh),
-    deviationPct: baselineKwh === 0 ? 0 : roundHalfUp(((observedKwh - baselineKwh) / baselineKwh) * 100),
-  }
+  // Background buildings mirror the B2 baseline, so a missing B2 observation
+  // also makes the park observation incomplete; carry the count across.
+  return assembleTotals(
+    roundHalfUp(b2.baselineKwh + background),
+    roundHalfUp(b2.observedKwh + background),
+    b2.observedMissingCount,
+  )
 }
 
 export function planById(fixture: ScenarioFixture, planId: string | null | undefined): ScenarioPlan | null {
@@ -356,17 +371,25 @@ function interpolate(template: string, values: Record<string, string>): string {
 export function buildAssessment(fixture: ScenarioFixture, ledger: EnergyLedgerRow[]): Assessment {
   const b2 = b2Totals(fixture, ledger)
   const template = fixture.assessmentTemplate
-  const summary = interpolate(template.summaryTemplate, {
-    observedKwh: formatPlainNumber(b2.observedKwh, 0),
-    excessKwh: formatPlainNumber(b2.excessKwh, 0),
-    deviationPct: formatPlainNumber(b2.deviationPct, 2),
-  })
+  // A full-period deviation needs full-period coverage. When an observation is
+  // missing, report the obtained subtotal and withhold the excess/deviation
+  // instead of comparing unlike periods.
+  const summary = b2.observedComplete && b2.excessKwh != null && b2.deviationPct != null
+    ? interpolate(template.summaryTemplate, {
+        observedKwh: formatPlainNumber(b2.observedKwh, 0),
+        excessKwh: formatPlainNumber(b2.excessKwh, 0),
+        deviationPct: formatPlainNumber(b2.deviationPct, 2),
+      })
+    : `研发大厦本周期已取得用电 ${formatPlainNumber(b2.observedKwh, 0)} kWh，但存在缺失观测，观测不完整，暂不计算与完整基线的偏差；公共区域在22:00—02:00存在计划外运行，建议优先核查并调整该范围；研发加班区与必要基础负荷保持不变。`
   return {
     title: template.title,
     mode: template.mode,
     summary,
     facts: template.facts.map((fact) => ({ factId: fact.factId, text: fact.template, evidenceRefs: [...fact.evidenceRefs] })),
-    unknowns: [...template.unknowns],
+    unknowns: [
+      ...template.unknowns,
+      ...(b2.observedComplete ? [] : ['观测不完整，本周期总用电与完整基线的偏差尚不可计算']),
+    ],
     recommendedPlanId: template.recommendedPlanId,
     evidenceRefs: ['/energyLedger', '/operatingFacts'],
   }

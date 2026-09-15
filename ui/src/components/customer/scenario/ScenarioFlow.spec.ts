@@ -132,10 +132,16 @@ describe('B2 scenario customer integration', () => {
 
     await wrapper.get('[data-scenario-start-patrol]').trigger('click')
     await flushPromises()
+    // Overview KPIs must not publish a deviation from unlike coverage.
+    expect(wrapper.get('[data-scenario-b2-deviation]').text()).toBe('—')
+    expect(wrapper.find('[data-scenario-b2-deviation-unavailable]').exists()).toBe(true)
+    expect(wrapper.find('[data-scenario-park-deviation-unavailable]').exists()).toBe(true)
+    expect(wrapper.get('[data-scenario-overview]').text()).not.toContain('28%')
     await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
     await flushPromises()
     await wrapper.get('[data-scenario-run-assessment]').trigger('click')
     await flushPromises()
+    expect(wrapper.get('[data-scenario-assessment-summary]').text()).toContain('观测不完整')
     await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
     await flushPromises()
     // No full-cycle estimate may be shown from a partial ledger.

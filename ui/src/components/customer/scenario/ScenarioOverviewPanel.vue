@@ -46,12 +46,14 @@ async function startPatrol(): Promise<void> {
       <article class="scenario-kpi">
         <span class="scenario-kpi__label"><DataLine aria-hidden="true" /> 园区实测/模拟观测</span>
         <strong data-scenario-park-observed>{{ formatDisplayNumber(park.observedKwh) }} kWh</strong>
-        <small>偏差 {{ formatDisplayNumber(park.deviationPct) }}%（背景楼宇保持不变）</small>
+        <small v-if="park.observedComplete">偏差 {{ formatDisplayNumber(park.deviationPct) }}%（背景楼宇保持不变）</small>
+        <small v-else data-scenario-park-deviation-unavailable>观测不完整，暂不计算偏差（背景楼宇保持不变）</small>
       </article>
       <article class="scenario-kpi scenario-kpi--attention">
         <span class="scenario-kpi__label"><WarningFilled aria-hidden="true" /> 研发大厦 B2</span>
-        <strong data-scenario-b2-deviation>{{ formatDisplayNumber(b2.deviationPct) }}%</strong>
-        <small>基线 {{ formatDisplayNumber(b2.baselineKwh) }} / 观测 {{ formatDisplayNumber(b2.observedKwh) }} kWh</small>
+        <strong data-scenario-b2-deviation>{{ b2.observedComplete ? `${formatDisplayNumber(b2.deviationPct)}%` : '—' }}</strong>
+        <small v-if="b2.observedComplete">基线 {{ formatDisplayNumber(b2.baselineKwh) }} / 观测 {{ formatDisplayNumber(b2.observedKwh) }} kWh</small>
+        <small v-else data-scenario-b2-deviation-unavailable>观测不完整，暂不计算偏差；基线 {{ formatDisplayNumber(b2.baselineKwh) }} / 已取得 {{ formatDisplayNumber(b2.observedKwh) }} kWh</small>
       </article>
     </div>
 
@@ -68,7 +70,9 @@ async function startPatrol(): Promise<void> {
           <span>{{ building.buildingId }}</span>
         </header>
         <p v-if="building.buildingId === 'B2'">
-          主故事楼宇 · 观测 {{ formatDisplayNumber(b2.observedKwh) }} kWh · 偏差 {{ formatDisplayNumber(b2.deviationPct) }}%
+          主故事楼宇 · 观测 {{ formatDisplayNumber(b2.observedKwh) }} kWh ·
+          <template v-if="b2.observedComplete">偏差 {{ formatDisplayNumber(b2.deviationPct) }}%</template>
+          <template v-else>观测不完整，暂不计算偏差</template>
         </p>
         <p v-else>
           背景楼宇 · 按 B2 基线 × {{ building.scale }} 生成，不参与本场景设备检查
