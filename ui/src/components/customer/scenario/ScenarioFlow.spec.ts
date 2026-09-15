@@ -425,6 +425,55 @@ describe('B2 scenario customer integration', () => {
     wrapper.unmount()
   })
 
+  it('rejects a cleared duration field instead of coercing it to zero', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
+    await flushPromises()
+
+    // Clearing the input yields '' (not a number); Number('') is 0 and would
+    // pass min:0, freezing a zero-hour plan from a visibly empty field.
+    await wrapper.get('[data-scenario-input-hours]').setValue('')
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-param-error]').exists()).toBe(true)
+    expect((wrapper.get('[data-scenario-confirm-order]').element as HTMLButtonElement).disabled).toBe(true)
+
+    // An explicitly entered zero remains a deliberate, valid choice.
+    await wrapper.get('[data-scenario-input-hours]').setValue(0)
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-param-error]').exists()).toBe(false)
+    expect((wrapper.get('[data-scenario-confirm-order]').element as HTMLButtonElement).disabled).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps unapplied parameter edits when switching plans', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-scenario-input-hours]').setValue(3)
+    await flushPromises()
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-HVAC-LIGHT"] button').trigger('click')
+    await flushPromises()
+
+    // The user was comparing 3h across the cards; choosing another plan must not
+    // silently revert the visible form to the previously applied 4h.
+    expect((wrapper.get('[data-scenario-input-hours]').element as HTMLInputElement).value).toBe('3')
+    expect(wrapper.get('[data-scenario-plan="SCN-PLAN-HVAC-LIGHT"] dl').text()).toContain('1,485')
+    wrapper.unmount()
+  })
+
   it('exposes focusable shell main targets on every scenario page', async () => {
     const wrapper = await mountScenario()
     const ids = ['overview', 'analysis', 'work-orders', 'reports'] as const

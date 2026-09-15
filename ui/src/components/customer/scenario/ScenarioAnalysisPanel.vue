@@ -30,13 +30,16 @@ const canSelectPlan = (planId: string): boolean => canSelect.value
   && (pinnedPlanId.value == null || planId === pinnedPlanId.value)
 
 const form = reactive<ScenarioParameters>({ ...snapshot.value.defaultParameters })
-// The form belongs to the current run: a new run (or a cleared draft) must fall
-// back to the fixture defaults, otherwise a fresh run would keep the previous
-// run's edited hours/tariff/days and render plan estimates from stale values.
+// The form belongs to the current run and follows the *applied parameter
+// values*, not the selected plan: a plan switch keeps the run-level parameters,
+// so re-syncing on a planId change would silently overwrite unapplied edits the
+// user was comparing. A new run (or a cleared draft) must still fall back to
+// the fixture defaults, otherwise a fresh run would keep the previous run's
+// edited hours/tariff/days and render plan estimates from stale values.
 const parameterSignature = computed(() => {
   const draft = snapshot.value.state.planDraft
   return draft
-    ? `${draft.planId}:${draft.parameters.savedHours}:${draft.parameters.tariffCnyPerKwh}:${draft.parameters.applicableDaysPerMonth}`
+    ? `${draft.parameters.savedHours}:${draft.parameters.tariffCnyPerKwh}:${draft.parameters.applicableDaysPerMonth}`
     : 'default'
 })
 watch(

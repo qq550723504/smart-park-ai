@@ -146,6 +146,18 @@ describe('B2 plan estimation', () => {
     // Days must stay a whole number of days (step 1).
     expect(validateParameters(fixture, { savedHours: 3, tariffCnyPerKwh: 1, applicableDaysPerMonth: 22.5 }).ok).toBe(false)
   })
+
+  it('rejects a cleared field instead of coercing it to zero', () => {
+    // Number('') / Number('   ') / Number(null) are all 0, which would satisfy
+    // the min:0 bound and freeze a zero-hour plan from an empty input.
+    expect(validateParameters(fixture, { savedHours: '', tariffCnyPerKwh: 1, applicableDaysPerMonth: 22 }).ok).toBe(false)
+    expect(validateParameters(fixture, { savedHours: '   ', tariffCnyPerKwh: 1, applicableDaysPerMonth: 22 }).ok).toBe(false)
+    expect(validateParameters(fixture, { savedHours: null as unknown as number, tariffCnyPerKwh: 1, applicableDaysPerMonth: 22 }).ok).toBe(false)
+    expect(validateParameters(fixture, { savedHours: '', tariffCnyPerKwh: '', applicableDaysPerMonth: '' }).ok).toBe(false)
+    // An explicitly entered zero is still a deliberate, valid choice.
+    expect(validateParameters(fixture, { savedHours: 0, tariffCnyPerKwh: 1, applicableDaysPerMonth: 22 }))
+      .toMatchObject({ ok: true, value: { savedHours: 0 } })
+  })
 })
 
 describe('B2 follow-up simulation', () => {

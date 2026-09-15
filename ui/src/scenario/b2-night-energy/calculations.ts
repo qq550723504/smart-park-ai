@@ -69,6 +69,30 @@ export interface ParameterValidation {
 }
 
 /**
+ * Untyped interactive input: an HTML number field hands back a string (and an
+ * empty string once cleared), so validation must accept the raw form values
+ * rather than a pre-parsed `ScenarioParameters`.
+ */
+export interface RawScenarioParameters {
+  savedHours?: unknown
+  tariffCnyPerKwh?: unknown
+  applicableDaysPerMonth?: unknown
+}
+
+/**
+ * Converts an interactive form value to a number without falling for the
+ * empty-string coercion trap: `Number('')`, `Number('  ')` and `Number(null)`
+ * are all `0`, which would let a *cleared* field satisfy a `min: 0` bound and
+ * freeze a zero-hour, zero-savings plan. Blank or non-numeric input becomes
+ * `NaN` so the bounds check rejects it, while an explicit `0` stays valid.
+ */
+function toFiniteNumber(value: unknown): number {
+  if (typeof value === 'number') return value
+  if (typeof value === 'string' && value.trim() !== '') return Number(value)
+  return Number.NaN
+}
+
+/**
  * True when `value` lands on a multiple of `step`. The fixture declares the
  * allowed increment per field, so the page and provider must enforce the same
  * step instead of relying on native `<input step>` validation (the confirm
@@ -81,12 +105,12 @@ function stepAligned(value: number, step: number): boolean {
 }
 
 /** Validates page input against the scenario's interactive bounds (A07). */
-export function validateParameters(fixture: ScenarioFixture, raw: Partial<ScenarioParameters>): ParameterValidation {
+export function validateParameters(fixture: ScenarioFixture, raw: RawScenarioParameters): ParameterValidation {
   const bounds = fixture.optimization.parameterBounds
   const errors: string[] = []
-  const savedHours = Number(raw.savedHours)
-  const tariff = Number(raw.tariffCnyPerKwh)
-  const days = Number(raw.applicableDaysPerMonth)
+  const savedHours = toFiniteNumber(raw.savedHours)
+  const tariff = toFiniteNumber(raw.tariffCnyPerKwh)
+  const days = toFiniteNumber(raw.applicableDaysPerMonth)
 
   const minHours = parseDecimal(bounds.savedHours.min)
   const maxHours = parseDecimal(bounds.savedHours.max)
