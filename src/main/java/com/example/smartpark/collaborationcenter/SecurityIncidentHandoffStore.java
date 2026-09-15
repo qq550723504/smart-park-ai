@@ -30,23 +30,24 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
         SecurityIncidentRisk projectedRisk = existing == null
                 ? incident.riskLevel() : higherRisk(existing.riskLevel(), incident.riskLevel());
         String projectedSummary = incident.summary();
-        SecurityDispositionRecord projectedDisposition = projectedDispositionRecord(existing, incident);
+        ProjectedDisposition projectedDisposition = projectedDisposition(existing, incident);
         Map<SecurityEventIdentity, Instant> identityOccurredAt = identityOccurredAt(incident);
         Instant updatedAt = existing == null || projectedFieldsChanged(existing, incident.incidentId(),
                 existing.parkId(), existing.buildingId(), projectedRisk, projectedSummary,
-                incident.eventType(), incident.eventIdentities(), projectedDisposition, incident.lastOccurredAt(),
-                identityOccurredAt)
+                incident.eventType(), incident.eventIdentities(), projectedDisposition.record(),
+                incident.lastOccurredAt(), identityOccurredAt, projectedDisposition.source())
                 ? now : existing.updatedAt();
         SecurityIncidentHandoff handoff = existing == null
                 ? new SecurityIncidentHandoff("SECURITY_INCIDENT:" + incident.incidentId(), incident.incidentId(),
                         incident.parkId(), incident.buildingId(), incident.riskLevel(), incident.summary(), now,
                         incident.reviewedAt(), now, incident.eventType(), incident.eventIdentities(),
-                        projectedDisposition, incident.lastOccurredAt(), identityOccurredAt)
+                        projectedDisposition.record(), incident.lastOccurredAt(), identityOccurredAt,
+                        projectedDisposition.source())
                 : new SecurityIncidentHandoff(existing.workItemId(), existing.incidentId(), existing.parkId(),
                         existing.buildingId(), projectedRisk, projectedSummary, existing.createdAt(),
                         existing.reviewedAt() != null ? existing.reviewedAt() : incident.reviewedAt(), updatedAt,
-                        incident.eventType(), incident.eventIdentities(), projectedDisposition,
-                        incident.lastOccurredAt(), identityOccurredAt);
+                        incident.eventType(), incident.eventIdentities(), projectedDisposition.record(),
+                        incident.lastOccurredAt(), identityOccurredAt, projectedDisposition.source());
         handoffs.put(incident.incidentId(), handoff);
         trimToCapacity();
         return handoff;
@@ -65,28 +66,30 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
                 SecurityIncidentHandoff existing = handoffs.remove(existingIncidentId);
                 SecurityIncidentRisk projectedRisk = higherRisk(existing.riskLevel(), incident.riskLevel());
                 String projectedSummary = incident.summary();
-                SecurityDispositionRecord projectedDisposition = projectedDispositionRecord(existing, incident);
+                ProjectedDisposition projectedDisposition = projectedDisposition(existing, incident);
                 Map<SecurityEventIdentity, Instant> identityOccurredAt = identityOccurredAt(incident);
                 Instant updatedAt = projectedFieldsChanged(existing, incident.incidentId(), incident.parkId(),
                         incident.buildingId(), projectedRisk, projectedSummary, incident.eventType(),
-                        incident.eventIdentities(), projectedDisposition, incident.lastOccurredAt(), identityOccurredAt)
+                        incident.eventIdentities(), projectedDisposition.record(), incident.lastOccurredAt(),
+                        identityOccurredAt, projectedDisposition.source())
                         ? now : existing.updatedAt();
                 SecurityIncidentHandoff migrated = new SecurityIncidentHandoff(existing.workItemId(),
                         incident.incidentId(), incident.parkId(), incident.buildingId(),
                         projectedRisk, projectedSummary, existing.createdAt(),
                         existing.reviewedAt() != null ? existing.reviewedAt() : incident.reviewedAt(), updatedAt,
-                        incident.eventType(), incident.eventIdentities(), projectedDisposition,
-                        incident.lastOccurredAt(), identityOccurredAt);
+                        incident.eventType(), incident.eventIdentities(), projectedDisposition.record(),
+                        incident.lastOccurredAt(), identityOccurredAt, projectedDisposition.source());
                 handoffs.put(incident.incidentId(), migrated);
                 trimToCapacity();
                 return migrated;
             }
             if (!handoffs.containsKey(incident.incidentId())) {
+                ProjectedDisposition projectedDisposition = projectedDisposition(null, incident);
                 SecurityIncidentHandoff restored = new SecurityIncidentHandoff(incident.handoffWorkItemId(),
                         incident.incidentId(), incident.parkId(), incident.buildingId(), incident.riskLevel(),
                         incident.summary(), now, incident.reviewedAt(), now, incident.eventType(),
-                        incident.eventIdentities(), projectedDispositionRecord(null, incident),
-                        incident.lastOccurredAt(), identityOccurredAt(incident));
+                        incident.eventIdentities(), projectedDisposition.record(),
+                        incident.lastOccurredAt(), identityOccurredAt(incident), projectedDisposition.source());
                 handoffs.put(incident.incidentId(), restored);
                 trimToCapacity();
                 return restored;
@@ -124,12 +127,23 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
         };
     }
 
-    private static SecurityDispositionRecord projectedDispositionRecord(SecurityIncidentHandoff existing,
-                                                                         SecurityIncident incident) {
+    private record ProjectedDisposition(SecurityDispositionRecord record, SecurityEventIdentity source) {
+    }
+
+    /**
+     * Projects the disposition to keep on a handoff together with the event that decided
+     * it. The record and its owner are chosen by one rule so a kept stored decision keeps
+     * the source attribution that goes with it, rather than re-deriving an owner that the
+     * current incident no longer reports.
+     */
+    private static ProjectedDisposition projectedDisposition(SecurityIncidentHandoff existing,
+                                                             SecurityIncident incident) {
         if (incident.dispositionRecord().disposition() != SecurityDisposition.UNREVIEWED) {
-            return incident.dispositionRecord();
+            return new ProjectedDisposition(incident.dispositionRecord(), incident.dispositionSource());
         }
-        return existing == null ? SecurityDispositionRecord.unreviewed() : existing.dispositionRecord();
+        return existing == null
+                ? new ProjectedDisposition(SecurityDispositionRecord.unreviewed(), null)
+                : new ProjectedDisposition(existing.dispositionRecord(), existing.dispositionSource());
     }
 
     private static Map<SecurityEventIdentity, Instant> identityOccurredAt(SecurityIncident incident) {
@@ -148,7 +162,8 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
                                                   List<SecurityEventIdentity> eventIdentities,
                                                   SecurityDispositionRecord dispositionRecord,
                                                   Instant lastOccurredAt,
-                                                  Map<SecurityEventIdentity, Instant> identityOccurredAt) {
+                                                  Map<SecurityEventIdentity, Instant> identityOccurredAt,
+                                                  SecurityEventIdentity dispositionSource) {
         return !existing.incidentId().equals(incidentId)
                 || !existing.parkId().equals(parkId)
                 || !existing.buildingId().equals(buildingId)
@@ -157,6 +172,7 @@ public final class SecurityIncidentHandoffStore implements SecurityIncidentHando
                 || !java.util.Objects.equals(existing.eventType(), eventType)
                 || !existing.eventIdentities().equals(eventIdentities)
                 || !existing.dispositionRecord().equals(dispositionRecord)
+                || !java.util.Objects.equals(existing.dispositionSource(), dispositionSource)
                 || !java.util.Objects.equals(existing.lastOccurredAt(), lastOccurredAt)
                 || !existing.identityOccurredAt().equals(identityOccurredAt);
     }

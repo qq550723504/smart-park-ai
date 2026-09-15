@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.Objects;
 
 import com.example.smartpark.model.security.RedactedEvidencePolicy;
+import com.example.smartpark.model.security.SecurityDisposition;
 import com.example.smartpark.model.security.SecurityDispositionRecord;
 import com.example.smartpark.model.security.SecurityEventIdentity;
 import com.example.smartpark.securityincident.SecurityIncidentRisk;
@@ -19,7 +20,10 @@ import com.example.smartpark.securityincident.SecurityIncidentRisk;
  * the concrete source whose event time matches it. Because a correlation window
  * can hold events at different times, the per-identity occurrence time is
  * projected as well, so an alias is ranked against the time of its own identity
- * rather than the incident-wide latest event.
+ * rather than the incident-wide latest event. The projected disposition also
+ * carries the source-qualified identity of the event that decided it, so a
+ * retained handoff can keep a demo/production attribution even when fresh
+ * evidence no longer reports the decision and the owning event has been evicted.
  */
 public record SecurityIncidentHandoff(String workItemId, String incidentId, String parkId, String buildingId,
                                       SecurityIncidentRisk riskLevel, String safeSummary, Instant createdAt,
@@ -27,7 +31,8 @@ public record SecurityIncidentHandoff(String workItemId, String incidentId, Stri
                                       List<SecurityEventIdentity> eventIdentities,
                                       SecurityDispositionRecord dispositionRecord,
                                       Instant lastOccurredAt,
-                                      Map<SecurityEventIdentity, Instant> identityOccurredAt) {
+                                      Map<SecurityEventIdentity, Instant> identityOccurredAt,
+                                      SecurityEventIdentity dispositionSource) {
     public SecurityIncidentHandoff(String workItemId, String incidentId, String parkId, String buildingId,
                                    SecurityIncidentRisk riskLevel, String safeSummary, Instant createdAt) {
         this(workItemId, incidentId, parkId, buildingId, riskLevel, safeSummary, createdAt, null, createdAt,
@@ -65,7 +70,18 @@ public record SecurityIncidentHandoff(String workItemId, String incidentId, Stri
                                    List<SecurityEventIdentity> eventIdentities,
                                    SecurityDispositionRecord dispositionRecord, Instant lastOccurredAt) {
         this(workItemId, incidentId, parkId, buildingId, riskLevel, safeSummary, createdAt, reviewedAt, updatedAt,
-                eventType, eventIdentities, dispositionRecord, lastOccurredAt, Map.of());
+                eventType, eventIdentities, dispositionRecord, lastOccurredAt, Map.of(), null);
+    }
+
+    /** Compatibility projection without the disposition-owning event. */
+    public SecurityIncidentHandoff(String workItemId, String incidentId, String parkId, String buildingId,
+                                   SecurityIncidentRisk riskLevel, String safeSummary, Instant createdAt,
+                                   Instant reviewedAt, Instant updatedAt, String eventType,
+                                   List<SecurityEventIdentity> eventIdentities,
+                                   SecurityDispositionRecord dispositionRecord, Instant lastOccurredAt,
+                                   Map<SecurityEventIdentity, Instant> identityOccurredAt) {
+        this(workItemId, incidentId, parkId, buildingId, riskLevel, safeSummary, createdAt, reviewedAt, updatedAt,
+                eventType, eventIdentities, dispositionRecord, lastOccurredAt, identityOccurredAt, null);
     }
 
     public SecurityIncidentHandoff {
@@ -81,6 +97,8 @@ public record SecurityIncidentHandoff(String workItemId, String incidentId, Stri
         eventType = eventType == null || eventType.isBlank() ? null : eventType.trim();
         eventIdentities = eventIdentities == null ? List.of() : List.copyOf(eventIdentities);
         identityOccurredAt = identityOccurredAt == null ? Map.of() : Map.copyOf(identityOccurredAt);
+        dispositionSource = dispositionRecord.disposition() == SecurityDisposition.UNREVIEWED
+                ? null : dispositionSource;
     }
 
     private static String requireText(String value, String field) {

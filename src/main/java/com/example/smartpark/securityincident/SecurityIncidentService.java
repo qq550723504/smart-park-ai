@@ -36,6 +36,7 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.stream.Stream;
 
 public final class SecurityIncidentService {
     private static final Duration GROUPING_WINDOW = Duration.ofMinutes(15);
@@ -531,10 +532,13 @@ public final class SecurityIncidentService {
         // reconciled so a human review carried by a handoff that is not selected — or by an
         // evicted handoff while a model-decided handoff stays in the store — is not silently
         // retired with the duplicate work item.
-        List<SecurityDispositionRecord> decisions = new ArrayList<>(retainedHandoffs.size() + 1);
-        decisions.add(restored.dispositionRecord());
-        retainedHandoffs.forEach(each -> decisions.add(each.dispositionRecord()));
-        SecurityDispositionRecord dispositionRecord = reconcileDisposition(fresh.dispositionRecord(), decisions);
+        List<DispositionDecision> decisions = new ArrayList<>(retainedHandoffs.size() + 2);
+        decisions.add(new DispositionDecision(restored.dispositionRecord(), restored.dispositionSource()));
+        retainedHandoffs.forEach(each -> decisions.add(
+                new DispositionDecision(each.dispositionRecord(), each.dispositionSource())));
+        DispositionDecision decision = reconcileDecision(fresh.dispositionRecord(), fresh.dispositionSource(),
+                decisions);
+        SecurityDispositionRecord dispositionRecord = decision.record();
         if (restored.handoffWorkItemId() != null) {
             if (dispositionRecord.equals(restored.dispositionRecord())) return restored;
             Instant reviewedAt = dispositionRecord.disposition() != SecurityDisposition.UNREVIEWED
@@ -542,13 +546,14 @@ public final class SecurityIncidentService {
                     : restored.reviewedAt();
             return withStoredState(fresh, restored.incidentId(), restored.status(), reviewedAt,
                     restored.handoffWorkItemId(), fresh.riskLevel(), dispositionRecord.disposition(),
-                    dispositionRecord);
+                    dispositionRecord, decision.owner());
         }
         Instant reviewedAt = dispositionRecord.disposition() != SecurityDisposition.UNREVIEWED
                 ? dispositionRecord.decidedAt()
                 : handoff.reviewedAt();
         return withStoredState(fresh, fresh.incidentId(), SecurityIncidentStatus.HANDOFF, reviewedAt,
-                handoff.workItemId(), fresh.riskLevel(), dispositionRecord.disposition(), dispositionRecord);
+                handoff.workItemId(), fresh.riskLevel(), dispositionRecord.disposition(), dispositionRecord,
+                decision.owner());
     }
 
     private static SecurityIncident restoreRiskProjection(SecurityIncident restored,
@@ -789,26 +794,57 @@ public final class SecurityIncidentService {
         String handoffWorkItemId = state.handoffWorkItemId();
         if (handoffWorkItemId == null && !handoffIds.isEmpty()) handoffWorkItemId = handoffIds.get(0);
         String incidentId = retainStoredIdentity ? canonical.incidentId() : fresh.incidentId();
-        SecurityDispositionRecord dispositionRecord = effectiveDisposition(fresh, candidates);
+        DispositionDecision decision = effectiveDecision(fresh, candidates);
+        SecurityDispositionRecord dispositionRecord = decision.record();
         Instant effectiveReviewedAt = dispositionRecord.disposition() != SecurityDisposition.UNREVIEWED
                 ? dispositionRecord.decidedAt()
                 : latestReviewedAt(reviewedAt, fresh.reviewedAt());
         return withStoredState(fresh, incidentId, higherStatus(state.status(), fresh.status()), effectiveReviewedAt,
-                handoffWorkItemId, fresh.riskLevel(), dispositionRecord.disposition(), dispositionRecord);
+                handoffWorkItemId, fresh.riskLevel(), dispositionRecord.disposition(), dispositionRecord,
+                decision.owner());
     }
 
     /**
-     * Resolves the disposition to keep when fresh evidence overlaps stored state.
+     * Resolves the disposition to keep when fresh evidence overlaps stored state,
+     * together with the event that owns it.
      * A stored human review stays authoritative and is never replaced by a later
      * source decision; otherwise the newest decided record — including the freshly
      * correlated one — wins, so a source can correct an earlier decision and a
      * first poll that only returned {@code UNREVIEWED} can still be upgraded.
      */
-    private static SecurityDispositionRecord effectiveDisposition(SecurityIncident fresh,
-                                                                  List<SecurityIncident> candidates) {
-        List<SecurityDispositionRecord> stored = new ArrayList<>();
-        candidates.forEach(candidate -> stored.add(candidate.dispositionRecord()));
-        return reconcileDisposition(fresh.dispositionRecord(), stored);
+    private static DispositionDecision effectiveDecision(SecurityIncident fresh,
+                                                         List<SecurityIncident> candidates) {
+        List<DispositionDecision> stored = new ArrayList<>();
+        candidates.forEach(candidate -> stored.add(
+                new DispositionDecision(candidate.dispositionRecord(), candidate.dispositionSource())));
+        return reconcileDecision(fresh.dispositionRecord(), fresh.dispositionSource(), stored);
+    }
+
+    /**
+     * Reconciles a decision — record plus owning event — against stored or projected
+     * decisions. Keeping the owner next to the record is what lets a kept demo/production
+     * attribution survive a poll in which fresh evidence no longer reports the decision:
+     * recomputing the owner from fresh evidence alone would erase it and fall back to the
+     * incident-wide source, counting the decision against the wrong feed.
+     */
+    private static DispositionDecision reconcileDecision(SecurityDispositionRecord freshRecord,
+                                                         SecurityEventIdentity freshOwner,
+                                                         List<DispositionDecision> stored) {
+        SecurityDispositionRecord record = reconcileDisposition(freshRecord,
+                stored.stream().map(DispositionDecision::record).toList());
+        if (record.disposition() == SecurityDisposition.UNREVIEWED) {
+            return new DispositionDecision(record, null);
+        }
+        // Several copies can carry the same record; prefer any that still knows the event
+        // that produced it so a legacy owner-less copy cannot erase a known attribution.
+        SecurityEventIdentity owner = Stream.concat(Stream.of(new DispositionDecision(freshRecord, freshOwner)),
+                        stored.stream())
+                .filter(decision -> record.equals(decision.record()))
+                .map(DispositionDecision::owner)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(null);
+        return new DispositionDecision(record, owner);
     }
 
     /**
@@ -876,20 +912,20 @@ public final class SecurityIncidentService {
                                                     Instant reviewedAt, String handoffWorkItemId,
                                                     SecurityIncidentRisk riskLevel) {
         return withStoredState(fresh, incidentId, status, reviewedAt, handoffWorkItemId, riskLevel,
-                fresh.disposition(), fresh.dispositionRecord());
+                fresh.disposition(), fresh.dispositionRecord(), fresh.dispositionSource());
     }
 
     private static SecurityIncident withStoredState(SecurityIncident fresh, String incidentId, SecurityIncidentStatus status,
                                                     Instant reviewedAt, String handoffWorkItemId,
                                                     SecurityIncidentRisk riskLevel,
                                                     SecurityDisposition disposition,
-                                                    SecurityDispositionRecord dispositionRecord) {
+                                                    SecurityDispositionRecord dispositionRecord,
+                                                    SecurityEventIdentity dispositionSource) {
         return new SecurityIncident(incidentId, fresh.parkId(), fresh.buildingId(), fresh.eventType(),
                 riskLevel, status, fresh.openedAt(), fresh.lastOccurredAt(), fresh.eventIds(), fresh.alertIds(),
                 fresh.evidence(), fresh.timeline(), status == SecurityIncidentStatus.HANDOFF
                         ? recommendationsFor(riskLevel) : fresh.recommendations(), reviewedAt, handoffWorkItemId,
-                disposition, dispositionRecord, fresh.eventIdentities(),
-                dispositionRecord.equals(fresh.dispositionRecord()) ? fresh.dispositionSource() : null);
+                disposition, dispositionRecord, fresh.eventIdentities(), dispositionSource);
     }
 
     private static List<String> recommendationsFor(SecurityIncidentRisk risk) {
@@ -968,5 +1004,13 @@ public final class SecurityIncidentService {
     }
 
     private record AlertReferenceKey(String reference, String parkId, String buildingId) {
+    }
+
+    /**
+     * A reconciled disposition together with the source-qualified event that owns it.
+     * The owner travels with the record through every merge so a kept decision cannot be
+     * attributed to whichever source happens to remain in fresh evidence.
+     */
+    private record DispositionDecision(SecurityDispositionRecord record, SecurityEventIdentity owner) {
     }
 }

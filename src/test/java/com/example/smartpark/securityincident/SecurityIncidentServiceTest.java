@@ -193,6 +193,71 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void keepsADispositionsOwnerWhenFreshEvidenceStopsReportingTheDecision() {
+        SecurityDispositionRecord demoDecision = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(60));
+        SecurityEvent production = withSource(event("SEC-PROD", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "prod-feed");
+        SecurityEvent demo = withSource(
+                eventWithDisposition(event("SEC-DEMO-DECIDED", "A1", "ACCESS", BASE), demoDecision),
+                SecuritySourceType.ACCESS_CONTROL, "demo-feed");
+        List<SecurityEvent> events = new ArrayList<>(List.of(production, demo));
+        SecurityIncidentService service = service(events, List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(productionDispositionAdapter("prod-feed")));
+
+        SecurityIncident decided = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        assertThat(decided.dispositionRecord()).isEqualTo(demoDecision);
+        assertThat(service.dispositionIsProductionBacked(decided)).isFalse();
+
+        // The feed stops reporting the decision, so fresh evidence is unreviewed again and the
+        // kept stored record has nothing to bind to. Deriving the owner from fresh evidence would
+        // erase it and let the incident-wide production identity promote the demo decision.
+        events.set(1, withSource(event("SEC-DEMO-DECIDED", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "demo-feed"));
+
+        SecurityIncident restored = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(restored.dispositionRecord()).isEqualTo(demoDecision);
+        assertThat(service.dispositionIsProductionBacked(restored)).isFalse();
+    }
+
+    @Test
+    void keepsADispositionsOwnerFromARetainedHandoffWhenFreshEvidenceNoLongerReportsTheDecision() {
+        SecurityDispositionRecord demoDecision = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(60));
+        SecurityEvent production = withSource(event("SEC-PROD", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "prod-feed");
+        SecurityEvent demo = withSource(
+                eventWithDisposition(event("SEC-DEMO-DECIDED", "A1", "ACCESS", BASE), demoDecision),
+                SecuritySourceType.ACCESS_CONTROL, "demo-feed");
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncident decided = service(new ArrayList<>(List.of(production, demo)), List.of(), 50, handoffs,
+                List.of(productionDispositionAdapter("prod-feed")))
+                .list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        // Project the decided incident into a retained handoff, as happens when the bounded
+        // incident store evicts it while the handoff stays behind.
+        SecurityIncidentHandoff retained = handoffs.createOrGet(decided, BASE);
+        assertThat(retained.dispositionSource().source().sourceId()).isEqualTo("demo-feed");
+
+        // A service whose incident store no longer holds the incident must recover the decision
+        // from the retained handoff together with the source that owns it.
+        SecurityIncidentService restarted = service(
+                new ArrayList<>(List.of(production, withSource(event("SEC-DEMO-DECIDED", "A1", "ACCESS", BASE),
+                        SecuritySourceType.ACCESS_CONTROL, "demo-feed"))),
+                List.of(), 50, handoffs, List.of(productionDispositionAdapter("prod-feed")));
+
+        SecurityIncident restored = restarted.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.eventIds().contains("SEC-DEMO-DECIDED"))
+                .findFirst().orElseThrow();
+
+        assertThat(restored.dispositionRecord()).isEqualTo(demoDecision);
+        assertThat(restarted.dispositionIsProductionBacked(restored)).isFalse();
+    }
+
+    @Test
     void deduplicatesLogicallyIdenticalEventsAndKeepsTheClassifiedRepresentation() {
         SecurityEvent readerCopy = event("SEC-ENRICHED", "A1", "ACCESS", BASE);
         SecurityDispositionRecord registered = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
