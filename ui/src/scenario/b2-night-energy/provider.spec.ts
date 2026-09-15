@@ -118,6 +118,18 @@ describe('B2 provider order creation and idempotency', () => {
     expect(snapshot.state.eventStatus).toBe('MONITORING')
     expect(snapshot.state.workOrder).toBeNull()
   })
+
+  it('records the deliberate no-action decision in the generated brief', () => {
+    const provider = toOrdered(newProvider())
+    provider.selectPlan('SCN-PLAN-NONE')
+    provider.keepObserving()
+    const report = provider.generateReport().state.reports[0]
+    expect(report.selectedPlanId).toBe('SCN-PLAN-NONE')
+    expect(report.planSnapshot).toBeNull()
+    expect(report.markdown).toContain('客户明确选择“保持现状 / 保持观察”')
+    expect(report.markdown).toContain('本次选择保持观察，未创建任务。')
+    expect(report.markdown).not.toContain('尚未确认可执行方案。')
+  })
 })
 
 describe('B2 provider lost create response', () => {

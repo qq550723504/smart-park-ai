@@ -48,7 +48,20 @@ watch(
 )
 const validation = computed(() => validateParameters(fixture, form))
 
-const parameterSource = computed<ScenarioParameters>(() => validation.value.value ?? snapshot.value.defaultParameters)
+// Parameters are only editable while the plan is still awaiting confirmation.
+// Once approved, the frozen receipt/work order decide the run, so the inputs
+// lock and the plan cards must derive from the frozen snapshot rather than a
+// stale local form that would disagree with the confirmed result.
+const parametersLocked = computed(() => stage.value !== 'PLAN_SELECTED')
+
+const parameterSource = computed<ScenarioParameters>(() => {
+  if (parametersLocked.value) {
+    return confirmed.value?.parameters
+      ?? snapshot.value.state.planDraft?.parameters
+      ?? snapshot.value.defaultParameters
+  }
+  return validation.value.value ?? snapshot.value.defaultParameters
+})
 
 const planCards = computed(() => fixture.plans.map((plan) => ({
   plan,
@@ -205,18 +218,21 @@ const selectedPlanId = computed(() => snapshot.value.state.selectedPlanId)
       <header class="scenario-card__head"><h3>参数调整</h3><span>默认 4.0 小时 / 1.00 元每 kWh / 每月 22 个适用日</span></header>
       <form class="scenario-form" @submit.prevent="applyParameters">
         <label>减少时长（小时）
-          <input v-model.number="form.savedHours" type="number" min="0" max="4" step="0.5" data-scenario-input-hours />
+          <input v-model.number="form.savedHours" type="number" min="0" max="4" step="0.5" :disabled="parametersLocked" data-scenario-input-hours />
         </label>
         <label>演示电价（元/kWh）
-          <input v-model.number="form.tariffCnyPerKwh" type="number" min="0.01" max="5" step="0.01" data-scenario-input-tariff />
+          <input v-model.number="form.tariffCnyPerKwh" type="number" min="0.01" max="5" step="0.01" :disabled="parametersLocked" data-scenario-input-tariff />
         </label>
         <label>月度适用日
-          <input v-model.number="form.applicableDaysPerMonth" type="number" min="1" max="31" step="1" data-scenario-input-days />
+          <input v-model.number="form.applicableDaysPerMonth" type="number" min="1" max="31" step="1" :disabled="parametersLocked" data-scenario-input-days />
         </label>
-        <button type="submit" class="scenario-button" :disabled="!validation.ok || stage !== 'PLAN_SELECTED' || store.busy.value" data-scenario-apply-parameters>
+        <button type="submit" class="scenario-button" :disabled="!validation.ok || parametersLocked || store.busy.value" data-scenario-apply-parameters>
           应用参数
         </button>
       </form>
+      <p v-if="parametersLocked" class="scenario-muted" data-scenario-parameters-locked>
+        方案已确认，参数快照已冻结；如需重新调整，请先重开本场景。
+      </p>
       <p v-if="!validation.ok" class="scenario-alert" role="alert" data-scenario-param-error>{{ validation.errors.join(' ') }}</p>
     </section>
 

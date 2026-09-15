@@ -168,3 +168,10 @@
 @media (max-width: 900px) {
   .scenario-reports { grid-template-columns: 1fr; }
 }
+
+.scenario-reset-confirm { position: fixed; inset: 0; z-index: 960; display: grid; place-items: center; padding: 20px; }
+.scenario-reset-confirm__backdrop { position: absolute; inset: 0; width: 100%; border: 0; background: rgba(20, 49, 84, .38); }
+.scenario-reset-confirm > section { position: relative; width: min(460px, 100%); padding: 22px; color: var(--scenario-muted); background: #fff; border: 1px solid var(--scenario-line); border-radius: 14px; box-shadow: 0 24px 70px rgba(25, 57, 94, .24); }
+.scenario-reset-confirm h2 { margin: 0; color: #173f75; font-size: 19px; }
+.scenario-reset-confirm p { margin: 12px 0 8px; font-size: 12px; line-height: 1.6; }
+.scenario-reset-confirm .scenario-actions { margin-top: 16px; }

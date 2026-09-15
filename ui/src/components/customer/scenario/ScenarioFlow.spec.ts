@@ -297,9 +297,62 @@ describe('B2 scenario customer integration', () => {
 
     await wrapper.get('[data-scenario-reset]').trigger('click')
     await flushPromises()
+    await wrapper.get('[data-scenario-reset-confirm]').trigger('click')
+    await flushPromises()
     // The new run must fall back to the fixture defaults, not keep the
     // previous run's edited hours feeding the plan estimates.
     expect((wrapper.get('[data-scenario-input-hours]').element as HTMLInputElement).value).toBe('4')
+    wrapper.unmount()
+  })
+
+  it('requires confirmation before discarding the scenario run', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-scenario-reset]').trigger('click')
+    await flushPromises()
+    // Opening the dialog must not clear the run yet.
+    expect(wrapper.find('[data-scenario-reset-dialog]').exists()).toBe(true)
+    expect(wrapper.get('[data-scenario-stage]').text()).toBe('巡检已完成')
+    await wrapper.get('[data-scenario-reset-cancel]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-reset-dialog]').exists()).toBe(false)
+    expect(wrapper.get('[data-scenario-stage]').text()).toBe('巡检已完成')
+
+    await wrapper.get('[data-scenario-reset]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-reset-confirm]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-reset-dialog]').exists()).toBe(false)
+    expect(wrapper.get('[data-scenario-stage]').text()).toBe('尚未巡检')
+    wrapper.unmount()
+  })
+
+  it('freezes parameter inputs and plan cards after the order is approved', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-confirm-order]').trigger('click')
+    await flushPromises()
+
+    // Post-approval the receipt/order decide the run, so the form is locked and
+    // a stale local form can no longer rewrite the plan estimates.
+    expect((wrapper.get('[data-scenario-input-hours]').element as HTMLInputElement).disabled).toBe(true)
+    expect(wrapper.find('[data-scenario-parameters-locked]').exists()).toBe(true)
+    const frozen = wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] dl').text()
+    expect(frozen).toContain('1,220')
+
+    // Even a programmatic edit of the local form must not change the frozen card.
+    await wrapper.get('[data-scenario-input-hours]').setValue(1)
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] dl').text()).toBe(frozen)
     wrapper.unmount()
   })
 
