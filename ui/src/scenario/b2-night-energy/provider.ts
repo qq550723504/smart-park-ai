@@ -164,7 +164,12 @@ export class MockScenarioProvider {
   }
 
   setVariant(variant: ScenarioVariantId): ScenarioSnapshot {
+    const previous = this.variant
     this.variant = variant
+    // The lost-response variant is the demo switch for this fault; switching
+    // away restores a clean run unless the fault was injected explicitly.
+    if (variant === 'LOST_CREATE_RESPONSE') this.faults.lostCreateResponse = true
+    else if (previous === 'LOST_CREATE_RESPONSE') this.faults.lostCreateResponse = false
     return this.read()
   }
 
@@ -195,6 +200,15 @@ export class MockScenarioProvider {
       reportContract: clone(this.fixture.reportContract),
       stageLabels: clone(this.fixture.runtimeContract.stageLabels),
       stateRevision: state.stateRevision,
+      anomaly: {
+        anomalyId: this.fixture.eventTemplate.anomalyId,
+        title: this.fixture.eventTemplate.title,
+        category: this.fixture.eventTemplate.category,
+        priority: this.fixture.eventTemplate.priority,
+        observedAt: this.fixture.eventTemplate.observedAt,
+        deviceId: this.fixture.eventTemplate.deviceId,
+        affectedDeviceIds: [...this.fixture.eventTemplate.affectedDeviceIds],
+      },
       effectiveLedger: ledger,
       dataQuality,
       missingReadingIds,
@@ -491,7 +505,7 @@ export class MockScenarioProvider {
     this.runSequenceNumber += 1
     this.state = createInitialState(scenarioRunIdFor(this.runSequenceNumber))
     this.committed.clear()
-    this.faults.lostCreateResponse = false
+    this.faults.lostCreateResponse = this.variant === 'LOST_CREATE_RESPONSE'
     return this.read()
   }
 }

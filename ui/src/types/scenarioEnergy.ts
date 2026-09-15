@@ -528,6 +528,15 @@ export interface ScenarioSnapshot {
   reportContract: ScenarioReportContract
   stageLabels: Record<ScenarioStage, string>
   stateRevision: number
+  anomaly: {
+    anomalyId: string
+    title: string
+    category: string
+    priority: string
+    observedAt: string
+    deviceId: string
+    affectedDeviceIds: string[]
+  }
   effectiveLedger: EnergyLedgerRow[]
   dataQuality: DataQuality
   missingReadingIds: string[]

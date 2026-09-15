@@ -7,10 +7,14 @@ import ParkOverview from '../customer/ParkOverview.vue'
 import CustomerWorkOrders from '../customer/CustomerWorkOrders.vue'
 import CustomerOperationsReports from '../customer/CustomerOperationsReports.vue'
 import CustomerAssistantPanel from '../customer/CustomerAssistantPanel.vue'
+import ScenarioWorkspace from '../customer/scenario/ScenarioWorkspace.vue'
 import { getOperationsCapabilities, type OperationsCapabilities, type ShowcaseScenario } from '../../services/workflowApi'
+import { useB2NightEnergyScenario } from '../../scenario/b2-night-energy/store'
+import { scenarioAnalysisContext } from '../../scenario/b2-night-energy/context'
 import type { CustomerAnalysisContext, CustomerPage } from '../../types/customer'
 import type { WorkbenchView } from '../../types/workbench'
 import '../customer/customer-surface.css'
+import '../customer/scenario/scenario-surface.css'
 
 const props = defineProps<{ active?: boolean }>()
 
@@ -32,6 +36,26 @@ const restartDialog = ref<HTMLElement | null>(null)
 const assistantPanel = ref<{ canResetForDemo: () => boolean; resetForDemo: () => boolean } | null>(null)
 const overviewPanel = ref<{ resetForDemo: () => Promise<void> } | null>(null)
 let restartReturnFocus: HTMLElement | null = null
+
+const scenarioStore = useB2NightEnergyScenario()
+const scenarioMode = ref(false)
+const scenarioContext = computed(() => scenarioMode.value ? scenarioAnalysisContext(scenarioStore.snapshot.value) : null)
+
+function enterScenario(): void {
+  scenarioStore.enter()
+  scenarioMode.value = true
+  activePage.value = 'overview'
+  analysisContext.value = scenarioContext.value
+  workOrdersContext.value = scenarioContext.value
+}
+
+function exitScenario(): void {
+  scenarioStore.exit()
+  scenarioMode.value = false
+  analysisContext.value = null
+  workOrdersContext.value = null
+  activePage.value = 'overview'
+}
 const analysisInstanceKey = computed(() => {
   const context = analysisContext.value
   return context
@@ -39,6 +63,7 @@ const analysisInstanceKey = computed(() => {
     : 'no-analysis-context'
 })
 const assistantContext = computed(() => {
+  if (scenarioMode.value) return scenarioContext.value
   if (activePage.value === 'analysis') return analysisContext.value
   if (activePage.value === 'work-orders') return workOrdersContext.value
   if (activePage.value === 'overview') return latestOverviewContext.value
@@ -47,6 +72,17 @@ const assistantContext = computed(() => {
 
 async function navigate(page: CustomerPage, requestedContext?: CustomerAnalysisContext): Promise<void> {
   restartNotice.value = ''
+  if (scenarioMode.value) {
+    // The scenario owns a single B2 context; page switches never rebuild it.
+    analysisContext.value = scenarioContext.value
+    workOrdersContext.value = scenarioContext.value
+    activePage.value = page
+    await nextTick()
+    const target = document.getElementById(pageMainId(page))
+    target?.setAttribute('tabindex', '-1')
+    target?.focus()
+    return
+  }
   if (page === 'analysis') {
     if (requestedContext) {
       analysisContext.value = requestedContext
@@ -64,16 +100,19 @@ async function navigate(page: CustomerPage, requestedContext?: CustomerAnalysisC
   }
   activePage.value = page
   await nextTick()
-  const mainId = page === 'analysis'
+  const main = document.getElementById(pageMainId(page))
+  main?.setAttribute('tabindex', '-1')
+  main?.focus()
+}
+
+function pageMainId(page: CustomerPage): string {
+  return page === 'analysis'
     ? 'customer-analysis-main'
     : page === 'work-orders'
       ? 'customer-work-orders-main'
       : page === 'reports'
         ? 'customer-reports-main'
-      : 'customer-overview-main'
-  const main = document.getElementById(mainId)
-  main?.setAttribute('tabindex', '-1')
-  main?.focus()
+        : 'customer-overview-main'
 }
 
 function updateContext(context: CustomerAnalysisContext | null): void {
@@ -165,6 +204,9 @@ async function confirmRestart(): Promise<void> {
   restartOpen.value = false
   restartReturnFocus = null
   assistantOpen.value = false
+  if (scenarioMode.value) {
+    void scenarioStore.reset()
+  }
   latestOverviewContext.value = null
   analysisContext.value = null
   workOrdersContext.value = null
@@ -179,6 +221,21 @@ async function confirmRestart(): Promise<void> {
 }
 
 onMounted(() => {
+  try {
+    const params = new URLSearchParams(window.location.search)
+    const requested = params.get('scenario') === 'b2-night-energy'
+    if (requested || scenarioStore.active.value) {
+      scenarioStore.enter()
+      scenarioMode.value = true
+      const page = params.get('scenarioPage')
+      const pages: CustomerPage[] = ['overview', 'analysis', 'work-orders', 'reports']
+      activePage.value = page && (pages as string[]).includes(page) ? page as CustomerPage : 'overview'
+      analysisContext.value = scenarioContext.value
+      workOrdersContext.value = scenarioContext.value
+    }
+  } catch {
+    /* URL parsing must never block the shell */
+  }
   void getOperationsCapabilities()
     .then((current) => {
       capabilities.value = current
@@ -218,41 +275,47 @@ onMounted(() => {
       <span>数据洞察价值<br />报告驱动成长</span>
     </template>
     <p v-if="restartNotice" class="customer-alert customer-demo-restart__notice" role="status" data-restart-notice>{{ restartNotice }}</p>
-    <ParkOverview
-      ref="overviewPanel"
-      v-show="activePage === 'overview'"
-      :active="props.active !== false"
-      @context-change="updateContext"
-      @view-analysis="openAnalysis"
-      @view-reports="navigate('reports')"
-    />
-    <KeepAlive>
-      <EnergyAnalysis
-        :key="analysisInstanceKey"
-        v-show="activePage === 'analysis'"
-        :active="props.active !== false && activePage === 'analysis'"
-        :context="analysisContext"
-        @back="navigate('overview')"
-        @open-work-orders="openWorkOrders"
+    <ScenarioWorkspace v-if="scenarioMode" :active-page="activePage" @exit="exitScenario" />
+    <template v-else>
+      <button type="button" class="scenario-entry" data-enter-scenario @click="enterScenario">
+        演示场景：研发大厦夜间能耗（模拟数据）
+      </button>
+      <ParkOverview
+        ref="overviewPanel"
+        v-show="activePage === 'overview'"
+        :active="props.active !== false"
+        @context-change="updateContext"
+        @view-analysis="openAnalysis"
+        @view-reports="navigate('reports')"
       />
-    </KeepAlive>
-    <KeepAlive>
-      <CustomerWorkOrders
-        :key="workOrdersContext ? `${workOrdersContext.buildingId}:${workOrdersContext.anomalyId ?? 'none'}` : 'no-work-order-context'"
-        v-show="activePage === 'work-orders'"
-        :active="props.active !== false && activePage === 'work-orders'"
-        :context="workOrdersContext"
-        @back="navigate('analysis')"
-        @open-reports="navigate('reports')"
-      />
-    </KeepAlive>
-    <KeepAlive>
-      <CustomerOperationsReports
-        v-show="activePage === 'reports'"
-        :active="props.active !== false && activePage === 'reports'"
-        :available="analyticsAvailable"
-      />
-    </KeepAlive>
+      <KeepAlive>
+        <EnergyAnalysis
+          :key="analysisInstanceKey"
+          v-show="activePage === 'analysis'"
+          :active="props.active !== false && activePage === 'analysis'"
+          :context="analysisContext"
+          @back="navigate('overview')"
+          @open-work-orders="openWorkOrders"
+        />
+      </KeepAlive>
+      <KeepAlive>
+        <CustomerWorkOrders
+          :key="workOrdersContext ? `${workOrdersContext.buildingId}:${workOrdersContext.anomalyId ?? 'none'}` : 'no-work-order-context'"
+          v-show="activePage === 'work-orders'"
+          :active="props.active !== false && activePage === 'work-orders'"
+          :context="workOrdersContext"
+          @back="navigate('analysis')"
+          @open-reports="navigate('reports')"
+        />
+      </KeepAlive>
+      <KeepAlive>
+        <CustomerOperationsReports
+          v-show="activePage === 'reports'"
+          :active="props.active !== false && activePage === 'reports'"
+          :available="analyticsAvailable"
+        />
+      </KeepAlive>
+    </template>
     <CustomerAssistantPanel
       ref="assistantPanel"
       :open="assistantOpen"
