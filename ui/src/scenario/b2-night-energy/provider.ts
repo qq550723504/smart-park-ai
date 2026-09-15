@@ -295,9 +295,12 @@ export class MockScenarioProvider {
 
   private commit(action: string, mutate: (draft: ScenarioRunState) => void, advanceMinutes = 0, bumpRevision = true): ScenarioSnapshot {
     const draft = clone(this.state)
+    // Advance the virtual clock *before* applying the transition so every
+    // timestamp stamped inside `mutate` (work-order createdAt/updatedAt) and the
+    // command log record the transition time, not the preceding state's time.
+    draft.virtualNow = advanceVirtualNow(draft.virtualNow, advanceMinutes, this.clockOffsetMinutes)
     mutate(draft)
     if (bumpRevision) draft.stateRevision += 1
-    draft.virtualNow = advanceVirtualNow(draft.virtualNow, advanceMinutes, this.clockOffsetMinutes)
     draft.commandLog = [...draft.commandLog, { action, at: draft.virtualNow, stateRevision: draft.stateRevision }]
     // `pendingCommand` is deliberately not cleared here. It is only removed by
     // the same-identity retry that acknowledges the lost response, so unrelated
@@ -406,37 +409,40 @@ export class MockScenarioProvider {
     }
     const draft = this.state.planDraft
     if (!draft || !planId) throw new ScenarioStateError('方案参数缺失，不能创建任务。')
-    if (!draft.estimate) throw new ScenarioStateError('数据不完整，无法形成完整节能估算，已暂停创建任务。')
+    const estimate = draft.estimate
+    if (!estimate) throw new ScenarioStateError('数据不完整，无法形成完整节能估算，已暂停创建任务。')
     const seq = runSequence(this.state.scenarioRunId)
-    const now = this.state.virtualNow
     const confirmed: ScenarioConfirmedPlan = {
       planId,
       targetDeviceIds: [...plan.targetDeviceIds],
       protectedDeviceIds: [...this.fixture.operatingFacts.protectedDeviceIds],
       parameters: { ...draft.parameters },
-      estimate: { ...draft.estimate },
+      estimate: { ...estimate },
       planRevision: this.state.planRevision,
     }
-    const workOrder: ScenarioWorkOrder = {
-      id: `${this.fixture.workOrderTemplate.idPrefix}-${seq}-001`,
-      workflowId: `${this.fixture.workOrderTemplate.workflowIdPrefix}-${seq}-001`,
-      parkId: this.fixture.workOrderTemplate.parkId,
-      buildingId: this.fixture.workOrderTemplate.buildingId,
-      deviceId: this.fixture.workOrderTemplate.deviceId,
-      alertId: this.fixture.workOrderTemplate.alertId,
-      summary: `${plan.label}：对 ${plan.targetDeviceIds.join('、')} 减少非必要运行 ${draft.parameters.savedHours} 小时。`,
-      status: this.fixture.workOrderTemplate.initialStatus,
-      statusLabel: this.fixture.workOrderTemplate.statusLabels[this.fixture.workOrderTemplate.initialStatus] ?? '演示任务已创建，待处理',
-      selectedPlanId: planId,
-      targetDeviceIds: [...plan.targetDeviceIds],
-      protectedDeviceIds: [...this.fixture.operatingFacts.protectedDeviceIds],
-      parameterSnapshot: { ...draft.parameters },
-      estimateSnapshot: { ...draft.estimate },
-      assigneeActorId: this.fixture.workOrderTemplate.assigneeActorId,
-      createdAt: now,
-      updatedAt: now,
-    }
-    const snapshot = this.commit('CONFIRM_AND_CREATE_ORDER', (state) => {
+    this.commit('CONFIRM_AND_CREATE_ORDER', (state) => {
+      // Build the work order inside the mutation against the already-advanced
+      // clock, so its receipt timeline matches the resulting state revision.
+      const now = state.virtualNow
+      const workOrder: ScenarioWorkOrder = {
+        id: `${this.fixture.workOrderTemplate.idPrefix}-${seq}-001`,
+        workflowId: `${this.fixture.workOrderTemplate.workflowIdPrefix}-${seq}-001`,
+        parkId: this.fixture.workOrderTemplate.parkId,
+        buildingId: this.fixture.workOrderTemplate.buildingId,
+        deviceId: this.fixture.workOrderTemplate.deviceId,
+        alertId: this.fixture.workOrderTemplate.alertId,
+        summary: `${plan.label}：对 ${plan.targetDeviceIds.join('、')} 减少非必要运行 ${draft.parameters.savedHours} 小时。`,
+        status: this.fixture.workOrderTemplate.initialStatus,
+        statusLabel: this.fixture.workOrderTemplate.statusLabels[this.fixture.workOrderTemplate.initialStatus] ?? '演示任务已创建，待处理',
+        selectedPlanId: planId,
+        targetDeviceIds: [...plan.targetDeviceIds],
+        protectedDeviceIds: [...this.fixture.operatingFacts.protectedDeviceIds],
+        parameterSnapshot: { ...draft.parameters },
+        estimateSnapshot: { ...estimate },
+        assigneeActorId: this.fixture.workOrderTemplate.assigneeActorId,
+        createdAt: now,
+        updatedAt: now,
+      }
       state.stage = 'ORDER_CREATED'
       state.eventStatus = 'HANDLING'
       state.confirmedPlan = confirmed

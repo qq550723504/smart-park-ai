@@ -246,6 +246,33 @@ describe('B2 provider processing and verification', () => {
     expect(applied.state.followupResult).toBeNull()
   })
 
+  it('stamps work-order times with the transition clock, not the prior state', () => {
+    const provider = toOrdered(newProvider())
+    provider.selectPlan('SCN-PLAN-PUBLIC-HVAC')
+
+    const created = provider.confirmAndCreateOrder()
+    expect(created.state.virtualNow).toBe('2026-09-11T09:03:00+08:00')
+    expect(created.state.workOrder?.createdAt).toBe('2026-09-11T09:03:00+08:00')
+    expect(created.state.workOrder?.updatedAt).toBe('2026-09-11T09:03:00+08:00')
+    expect(created.state.commandLog.at(-1)?.at).toBe(created.state.workOrder?.createdAt)
+
+    const taken = provider.takeOrder()
+    expect(taken.state.virtualNow).toBe('2026-09-11T09:04:00+08:00')
+    expect(taken.state.workOrder?.updatedAt).toBe('2026-09-11T09:04:00+08:00')
+
+    const applied = provider.applySimulatedPlan()
+    expect(applied.state.virtualNow).toBe('2026-09-11T09:09:00+08:00')
+    expect(applied.state.workOrder?.updatedAt).toBe('2026-09-11T09:09:00+08:00')
+
+    const verified = provider.verifyNextCycle()
+    expect(verified.state.workOrder?.updatedAt).toBe('2026-09-12T09:00:00+08:00')
+
+    // A report freezing that order must preserve the same timeline.
+    const report = provider.generateReport().state.reports[0]!
+    expect(report.orderSnapshot?.createdAt).toBe('2026-09-11T09:03:00+08:00')
+    expect(report.orderSnapshot?.updatedAt).toBe('2026-09-12T09:00:00+08:00')
+  })
+
   it('reveals 72/1228/22.8 only after explicit verification and keeps the event monitoring', () => {
     const provider = runToProcessing()
     const verified = provider.verifyNextCycle()

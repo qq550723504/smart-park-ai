@@ -33,8 +33,14 @@ async function mountScenario() {
   return wrapper
 }
 
+/** Scenario entry is deep-linked, so each test must start from a clean URL. */
+function resetScenarioUrl(): void {
+  window.history.replaceState({}, '', '/')
+}
+
 describe('B2 scenario customer integration', () => {
   beforeEach(() => {
+    resetScenarioUrl()
     resetB2NightEnergyScenarioSingleton()
     sessionStorage.clear()
     stubFetch()
@@ -44,6 +50,7 @@ describe('B2 scenario customer integration', () => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
     sessionStorage.clear()
+    resetScenarioUrl()
   })
 
   it('renders the scenario workspace instead of the online pages when entered', async () => {
@@ -521,6 +528,37 @@ describe('B2 scenario customer integration', () => {
     expect(wrapper.find('[data-scenario-order-pending]').exists()).toBe(false)
     expect(wrapper.get('[data-scenario-take-order]').attributes('disabled')).toBeUndefined()
     wrapper.unmount()
+  })
+
+  it('clears the deep link on exit so a reload stays out of the scenario', async () => {
+    window.history.replaceState({}, '', '/?scenario=b2-night-energy&scenarioPage=work-orders')
+    resetB2NightEnergyScenarioSingleton()
+    const mountOptions = {
+      props: { active: true },
+      global: {
+        stubs: {
+          ParkOverview: { template: '<main data-park-overview />' },
+          CustomerAssistantPanel: { template: '<aside data-assistant-stub />' },
+        },
+      },
+    }
+    const wrapper = mount(ShowcaseHome, mountOptions)
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-workspace]').exists()).toBe(true)
+    expect(window.location.search).toContain('scenario=b2-night-energy')
+
+    await wrapper.get('[data-exit-scenario]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-workspace]').exists()).toBe(false)
+    expect(window.location.search).not.toContain('scenario')
+    wrapper.unmount()
+
+    // A reload (fresh mount) must not treat the cleared deep link as active.
+    const reloaded = mount(ShowcaseHome, mountOptions)
+    await flushPromises()
+    expect(reloaded.find('[data-scenario-workspace]').exists()).toBe(false)
+    expect(reloaded.find('[data-park-overview]').exists()).toBe(true)
+    reloaded.unmount()
   })
 
   it('enters scenario mode on the first render when a session is restored', async () => {

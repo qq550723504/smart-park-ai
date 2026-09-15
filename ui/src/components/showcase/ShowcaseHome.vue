@@ -83,6 +83,7 @@ function enterScenario(): void {
   activePage.value = 'overview'
   analysisContext.value = scenarioContext.value
   workOrdersContext.value = scenarioContext.value
+  syncScenarioQuery(true, 'overview')
 }
 
 function exitScenario(): void {
@@ -91,6 +92,29 @@ function exitScenario(): void {
   analysisContext.value = null
   workOrdersContext.value = null
   activePage.value = 'overview'
+  // Clear the deep-link parameters too: the query is authoritative on reload,
+  // so leaving `?scenario=…` in place would re-enter the scenario immediately.
+  syncScenarioQuery(false)
+}
+
+/**
+ * Keeps the URL deep link in sync with the scenario mode so a reload restores
+ * exactly the mode (and page) the user last saw, including after exit.
+ */
+function syncScenarioQuery(active: boolean, page: CustomerPage = 'overview'): void {
+  try {
+    const url = new URL(window.location.href)
+    if (active) {
+      url.searchParams.set('scenario', 'b2-night-energy')
+      url.searchParams.set('scenarioPage', page)
+    } else {
+      url.searchParams.delete('scenario')
+      url.searchParams.delete('scenarioPage')
+    }
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
+  } catch {
+    // URL sync is best-effort; the persisted mode flag still drives entry.
+  }
 }
 const analysisInstanceKey = computed(() => {
   const context = analysisContext.value
@@ -113,6 +137,7 @@ async function navigate(page: CustomerPage, requestedContext?: CustomerAnalysisC
     analysisContext.value = scenarioContext.value
     workOrdersContext.value = scenarioContext.value
     activePage.value = page
+    syncScenarioQuery(true, page)
     await nextTick()
     const target = document.getElementById(pageMainId(page))
     target?.setAttribute('tabindex', '-1')
