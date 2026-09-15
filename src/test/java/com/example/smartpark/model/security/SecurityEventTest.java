@@ -12,10 +12,18 @@ class SecurityEventTest {
 
     @Test
     void rejectsBlankBoundaryText() {
-        Stream.of("eventId", "parkId", "buildingId", "eventType", "evidenceSummary")
+        Stream.of("eventId", "parkId", "buildingId", "rawEventType", "evidenceSummary")
                 .forEach(field -> assertThatThrownBy(() -> newEventWithBlank(field))
                         .isInstanceOf(IllegalArgumentException.class)
                         .hasMessageContaining(field));
+    }
+
+    @Test
+    void rejectsEventIdThatWouldBeReparsedAsAQualifiedReference() {
+        assertThatThrownBy(() -> new SecurityEvent("source:14#ACCESS_CONTROL:4#feed:3#evt", "PARK-A", "A1",
+                "UNAUTHORIZED_ACCESS", Instant.parse("2026-08-23T01:00:00Z"), "REDACTED: 摘要"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("eventId");
     }
 
     @Test
@@ -63,13 +71,173 @@ class SecurityEventTest {
                 .hasMessageContaining("evidenceSummary");
     }
 
+    @Test
+    void mapsLegacyRawEventTypeToStandardTypeAndPreservesRawValue() {
+        SecurityEvent event = newEvent("REDACTED: 门禁异常摘要");
+
+        assertThat(event.eventType()).isEqualTo(SecurityEventType.ACCESS_ANOMALY);
+        assertThat(event.rawEventType()).isEqualTo("UNAUTHORIZED_ACCESS");
+        assertThat(event.observedAt()).isEqualTo(event.occurredAt());
+        assertThat(event.occurredAt()).isEqualTo(Instant.parse("2026-08-23T01:00:00Z"));
+    }
+
+    @Test
+    void fallsBackToUnknownStandardTypeForUnmappedRawValue() {
+        SecurityEvent event = newEvent("SEC-002", "PARK-A", "A1", "VENDOR_PRIVATE_CODE_42", "REDACTED: 摘要");
+
+        assertThat(event.eventType()).isEqualTo(SecurityEventType.UNKNOWN);
+        assertThat(event.rawEventType()).isEqualTo("VENDOR_PRIVATE_CODE_42");
+    }
+
+    @Test
+    void appliesSafeDefaultsForSeverityConfidencePrivacyAndDisposition() {
+        SecurityEvent event = newEvent("REDACTED: 门禁异常摘要");
+
+        assertThat(event.severity()).isEqualTo(SecurityEventSeverity.UNKNOWN);
+        assertThat(event.confidence()).isNull();
+        assertThat(event.privacy()).isEqualTo(SecurityPrivacyMetadata.redactedOnly());
+        assertThat(event.disposition()).isEqualTo(SecurityDispositionRecord.unreviewed());
+        assertThat(event.receivedAt()).isEqualTo(event.observedAt());
+    }
+
+    @Test
+    void rejectsConfidenceOutsideUnitInterval() {
+        Stream.of(-0.1d, 1.1d, Double.NaN).forEach(confidence ->
+                assertThatThrownBy(() -> structuredEvent(SecurityEventType.FIRE_SMOKE, confidence,
+                        SecuritySourceRef.unknown(), SecurityPrivacyMetadata.redactedOnly()))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("confidence"));
+    }
+
+    @Test
+    void acceptsConfidenceWithinUnitInterval() {
+        SecurityEvent event = structuredEvent(SecurityEventType.FIRE_SMOKE, 0.87d,
+                SecuritySourceRef.unknown(), SecurityPrivacyMetadata.redactedOnly());
+
+        assertThat(event.confidence()).isEqualTo(0.87d);
+    }
+
+    @Test
+    void rejectsSourceIdContainingCredentialsOrUrls() {
+        Stream.of("rtsp://user:pass@cam-1", "https://internal.example/cam", "token=abc", "password:secret")
+                .forEach(sourceId -> assertThatThrownBy(() -> new SecuritySourceRef(
+                        SecuritySourceType.CAMERA_ANALYTICS, sourceId))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("sourceId"));
+    }
+
+    @Test
+    void rejectsBoundaryIdentifiersContainingCredentialsOrUrls() {
+        Stream.of("https://internal.example/event", "token=abc").forEach(eventId ->
+                assertThatThrownBy(() -> newEvent(eventId, "PARK-A", "A1", "UNAUTHORIZED_ACCESS", "REDACTED: 摘要"))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("eventId"));
+        Stream.of("https://internal.example/park", "secret").forEach(parkId ->
+                assertThatThrownBy(() -> newEvent("SEC-001", parkId, "A1", "UNAUTHORIZED_ACCESS", "REDACTED: 摘要"))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("parkId"));
+        Stream.of("rtsp://cam-1", "credential:v2").forEach(buildingId ->
+                assertThatThrownBy(() -> newEvent("SEC-001", "PARK-A", buildingId, "UNAUTHORIZED_ACCESS", "REDACTED: 摘要"))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("buildingId"));
+    }
+
+    @Test
+    void rejectsRawEventTypeContainingCredentialsOrUrls() {
+        Stream.of("rtsp://user:pass@cam-1", "https://internal.example/cam", "token=abc", "password:secret")
+                .forEach(rawEventType -> assertThatThrownBy(() ->
+                        newEvent("SEC-RAW", "PARK-A", "A1", rawEventType, "REDACTED: 摘要"))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("rawEventType"));
+    }
+
+    @Test
+    void acceptsDomainTerminologyThatMerelyContainsCredentialWords() {
+        SecurityEvent event = newEvent("ACCESS_TOKEN_REJECTED", "PARK-A", "A1",
+                "INVALID_CREDENTIAL", "REDACTED: 摘要");
+
+        assertThat(event.eventId()).isEqualTo("ACCESS_TOKEN_REJECTED");
+        assertThat(event.rawEventType()).isEqualTo("INVALID_CREDENTIAL");
+        assertThat(ingestedEvent("credential-audit", "CREDENTIAL_REVIEWED").ingestVersion())
+                .isEqualTo("CREDENTIAL_REVIEWED");
+    }
+
+    @Test
+    void rejectsPrivacyMetadataClaimingPersonalDataOrStoredMedia() {
+        assertThatThrownBy(() -> new SecurityPrivacyMetadata(
+                SecurityPrivacyMetadata.RedactionPolicy.REDACTED_ONLY, true, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("personalDataPresent");
+        assertThatThrownBy(() -> new SecurityPrivacyMetadata(
+                SecurityPrivacyMetadata.RedactionPolicy.REDACTED_ONLY, false, true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("mediaStored");
+    }
+
+    private SecurityEvent structuredEvent(SecurityEventType eventType, Double confidence,
+                                          SecuritySourceRef source, SecurityPrivacyMetadata privacy) {
+        Instant observedAt = Instant.parse("2026-08-23T01:00:00Z");
+        return new SecurityEvent("SEC-STRUCTURED", "PARK-A", "A1", eventType, "RAW_CODE",
+                source, SecurityEventLocation.empty(), observedAt, observedAt,
+                SecurityEventSeverity.UNKNOWN, confidence, privacy,
+                SecurityDispositionRecord.unreviewed(), "test-adapter", "1", "REDACTED: 摘要");
+    }
+
     private SecurityEvent newEventWithBlank(String field) {
         String eventId = field.equals("eventId") ? " " : "SEC-001";
         String parkId = field.equals("parkId") ? "\t" : "PARK-A";
         String buildingId = field.equals("buildingId") ? "  " : "A1";
-        String eventType = field.equals("eventType") ? "" : "UNAUTHORIZED_ACCESS";
+        String rawEventType = field.equals("rawEventType") ? "" : "UNAUTHORIZED_ACCESS";
         String evidenceSummary = field.equals("evidenceSummary") ? "\n" : "REDACTED: 门禁异常摘要";
-        return newEvent(eventId, parkId, buildingId, eventType, evidenceSummary);
+        return newEvent(eventId, parkId, buildingId, rawEventType, evidenceSummary);
+    }
+
+    @Test
+    void rejectsIngestProvenanceContainingCredentialsOrUrls() {
+        Stream.of("rtsp://user:pass@cam-1", "token=abc", "https://internal.example/ingest")
+                .forEach(ingestedBy -> assertThatThrownBy(() -> ingestedEvent(ingestedBy, null))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("ingestedBy"));
+    }
+
+    @Test
+    void rejectsIngestVersionContainingCredentials() {
+        Stream.of("apikey-123", "credential:v2", "secret")
+                .forEach(ingestVersion -> assertThatThrownBy(() -> ingestedEvent("adapter-1", ingestVersion))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("ingestVersion"));
+    }
+
+    @Test
+    void normalizesSafeIngestProvenanceAndDefaultsBlankToUnspecified() {
+        SecurityEvent event = ingestedEvent("  adapter-1  ", "  2026.09  ");
+        SecurityEvent blank = ingestedEvent("   ", "   ");
+
+        assertThat(event.ingestedBy()).isEqualTo("adapter-1");
+        assertThat(event.ingestVersion()).isEqualTo("2026.09");
+        assertThat(blank.ingestedBy()).isEqualTo("unspecified");
+        assertThat(blank.ingestVersion()).isNull();
+    }
+
+    private SecurityEvent ingestedEvent(String ingestedBy, String ingestVersion) {
+        Instant observedAt = Instant.parse("2026-08-23T01:00:00Z");
+        return new SecurityEvent("SEC-INGEST", "PARK-A", "A1", SecurityEventType.ACCESS_ANOMALY, "RAW_CODE",
+                SecuritySourceRef.unknown(), SecurityEventLocation.empty(), observedAt, observedAt,
+                SecurityEventSeverity.UNKNOWN, null, SecurityPrivacyMetadata.redactedOnly(),
+                SecurityDispositionRecord.unreviewed(), ingestedBy, ingestVersion, "REDACTED: 摘要");
+    }
+
+    @Test
+    void replacesOnlyTheDispositionWhenCopyingAnEvent() {
+        SecurityEvent event = newEvent("REDACTED: 门禁异常摘要");
+        SecurityDispositionRecord decision = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                Instant.parse("2026-08-23T02:00:00Z"));
+
+        SecurityEvent copy = event.withDisposition(decision);
+
+        assertThat(copy.disposition()).isSameAs(decision);
+        assertThat(copy).usingRecursiveComparison().ignoringFields("disposition").isEqualTo(event);
     }
 
     private SecurityEvent newEvent(String evidenceSummary) {

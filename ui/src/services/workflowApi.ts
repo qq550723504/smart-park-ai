@@ -1,6 +1,7 @@
 import type { ActionableAlertResponse, AuditEntry, CustomerConversationResponse, CustomerServiceResponse, DemoRole, FeedbackRating, KnowledgeMetadata, OperationsMetrics, WorkflowEvent, WorkflowObservability, WorkflowResponse } from '../types/workflow'
 import type { ShowcaseLaunchInput, ShowcaseScenarioId } from '../types/workbench'
 import type { CollaborationSlaSnapshot, CollaborationWorkItem, CollaborationWorkItemFilters } from '../types/collaborationCenter'
+import type { SecurityEventCapability } from '../types/securityIncident'
 
 export class WorkflowApiError extends Error {
   constructor(message: string, readonly status: number) {
@@ -131,6 +132,8 @@ export interface OperationsCapabilities {
   collaborationEnabled: boolean
   voiceEnabled: boolean
   securityIncidentEnabled: boolean
+  securityEventCapabilities?: SecurityEventCapability[]
+  securityDispositionEnabled?: boolean
 }
 
 export function getOperationsCapabilities() {

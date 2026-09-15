@@ -19,6 +19,7 @@ import com.example.smartpark.execution.model.ExecutionEventType;
 import com.example.smartpark.execution.model.ExecutionScenario;
 import com.example.smartpark.execution.model.ExecutionStage;
 import com.example.smartpark.execution.model.ExecutionStatus;
+import com.example.smartpark.model.security.SecurityEventIdentity;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -49,6 +50,9 @@ import java.util.concurrent.TimeUnit;
 public class CollaborationRuntimeConfiguration {
 
     private static final Logger LOG = LoggerFactory.getLogger(CollaborationRuntimeConfiguration.class);
+
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON =
+            new com.fasterxml.jackson.databind.ObjectMapper();
 
 
     @Bean
@@ -164,20 +168,17 @@ public class CollaborationRuntimeConfiguration {
      */
     static String collectPrimaryEvidence(ExpertDomain domain, String assignment, ToolCallback[] callbacks) {
         PrimaryEvidenceSpec spec = primaryEvidenceSpec(domain);
-        java.util.regex.Matcher matcher = spec.entityPattern().matcher(assignment == null ? "" : assignment);
         ToolCallback callback = java.util.Arrays.stream(callbacks)
                 .filter(candidate -> spec.toolName().equals(candidate.getToolDefinition().name()))
                 .findFirst().orElse(null);
         if (callback == null) return "";
 
-        java.util.Set<String> entityIds = new java.util.LinkedHashSet<>();
-        while (matcher.find()) {
-            entityIds.add(matcher.group().toUpperCase(java.util.Locale.ROOT));
-        }
+        java.util.Set<String> entityIds = new java.util.LinkedHashSet<>(
+                spec.extractor().apply(assignment == null ? "" : assignment));
         java.util.List<String> evidence = new java.util.ArrayList<>();
         for (String entityId : entityIds) {
             try {
-                String result = callback.call("{\"" + spec.argumentName() + "\":\"" + entityId + "\"}");
+                String result = callback.call(toolArguments(spec.argumentName(), entityId));
                 if (result != null && !result.isBlank()) evidence.add(result);
             } catch (RuntimeException toolFailure) {
                 LOG.warn("PRIMARY_EVIDENCE_COLLECTION_FAILED");
@@ -186,20 +187,95 @@ public class CollaborationRuntimeConfiguration {
         return String.join("\n", evidence);
     }
 
+    /**
+     * Serializes a tool argument as JSON so an identifier that contains a quote or
+     * backslash (allowed by the identifier policy and preserved by the length-prefixed
+     * reference parser) cannot corrupt the callback payload.
+     */
+    private static String toolArguments(String argumentName, String value) {
+        try {
+            return JSON.writeValueAsString(Map.of(argumentName, value));
+        } catch (com.fasterxml.jackson.core.JsonProcessingException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    }
+
+    /**
+     * Extracts the entities a domain assignment grounds. Energy and device ids are found by
+     * a case-insensitive pattern and upper-cased for a stable lookup; security ids need a
+     * dedicated pass because a source-qualified reference is length-prefixed and may carry
+     * any character, so it cannot be found (or upper-cased) with a simple pattern.
+     */
     private static PrimaryEvidenceSpec primaryEvidenceSpec(ExpertDomain domain) {
         int insensitive = java.util.regex.Pattern.CASE_INSENSITIVE;
         return switch (domain) {
             case ENERGY -> new PrimaryEvidenceSpec("lookupEnergyConsumption", "meterId",
-                    java.util.regex.Pattern.compile("\\bDEV-(?:ENERGY|METER)[A-Z0-9-]*\\b", insensitive));
+                    assignment -> extractMatching(assignment,
+                            java.util.regex.Pattern.compile("\\bDEV-(?:ENERGY|METER)[A-Z0-9-]*\\b", insensitive)));
             case DEVICE -> new PrimaryEvidenceSpec("lookupDeviceStatus", "deviceId",
-                    java.util.regex.Pattern.compile("\\bDEV-(?!(?:ENERGY|METER)(?:-|\\b))[A-Z0-9-]+\\b", insensitive));
+                    assignment -> extractMatching(assignment,
+                            java.util.regex.Pattern.compile(
+                                    "\\bDEV-(?!(?:ENERGY|METER)(?:-|\\b))[A-Z0-9-]+\\b", insensitive)));
             case SECURITY -> new PrimaryEvidenceSpec("lookupSecurityEvent", "eventId",
-                    java.util.regex.Pattern.compile("\\bSEC-[A-Z0-9-]+\\b", insensitive));
+                    CollaborationRuntimeConfiguration::extractSecurityReferences);
         };
     }
 
+    private static java.util.List<String> extractMatching(String assignment, java.util.regex.Pattern pattern) {
+        java.util.regex.Matcher matcher = pattern.matcher(assignment);
+        java.util.List<String> ids = new java.util.ArrayList<>();
+        while (matcher.find()) {
+            ids.add(matcher.group().toUpperCase(java.util.Locale.ROOT));
+        }
+        return ids;
+    }
+
+    private static final java.util.regex.Pattern SECURITY_BARE_ID = java.util.regex.Pattern.compile(
+            "\\bSEC-[A-Z0-9-]+\\b", java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    /**
+     * Extracts the security events a collaboration question references. A source-qualified
+     * reference is parsed with its length-prefixed grammar and normalized to the exact token
+     * the catalog resolves, so the case-sensitive encoded material (which may contain any
+     * character, such as {@code access/feed}) survives. Bare legacy ids are upper-cased and
+     * reported only when they are not already part of a qualified reference.
+     */
+    private static java.util.List<String> extractSecurityReferences(String assignment) {
+        java.util.List<EntityMatch> matches = new java.util.ArrayList<>();
+        java.util.List<int[]> qualifiedRanges = new java.util.ArrayList<>();
+        int cursor = 0;
+        while (true) {
+            int start = assignment.indexOf(SecurityEventIdentity.REFERENCE_PREFIX, cursor);
+            if (start < 0) break;
+            String canonical = SecurityEventIdentity.canonicalQualifiedReference(assignment.substring(start));
+            if (canonical == null) {
+                cursor = start + SecurityEventIdentity.REFERENCE_PREFIX.length();
+                continue;
+            }
+            matches.add(new EntityMatch(start, canonical));
+            qualifiedRanges.add(new int[]{start, start + canonical.length()});
+            cursor = start + canonical.length();
+        }
+        java.util.regex.Matcher bare = SECURITY_BARE_ID.matcher(assignment);
+        while (bare.find()) {
+            int start = bare.start();
+            boolean insideQualified = qualifiedRanges.stream()
+                    .anyMatch(range -> start >= range[0] && start < range[1]);
+            if (!insideQualified) {
+                matches.add(new EntityMatch(start, bare.group().toUpperCase(java.util.Locale.ROOT)));
+            }
+        }
+        return matches.stream()
+                .sorted(java.util.Comparator.comparingInt(EntityMatch::start))
+                .map(EntityMatch::value)
+                .distinct()
+                .toList();
+    }
+
+    private record EntityMatch(int start, String value) { }
+
     private record PrimaryEvidenceSpec(String toolName, String argumentName,
-                                       java.util.regex.Pattern entityPattern) { }
+                                       java.util.function.Function<String, java.util.List<String>> extractor) { }
 
     static ExpertFinding bindPrimaryEvidence(ExpertFinding modelFinding, Set<String> primaryEvidenceRefs) {
         if (primaryEvidenceRefs == null || primaryEvidenceRefs.isEmpty()) return modelFinding;

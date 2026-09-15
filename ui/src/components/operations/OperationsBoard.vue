@@ -9,7 +9,9 @@ import OrchestrationPanel from './OrchestrationPanel.vue'
 import type { ExecutionTraceLike } from '../../composables/useOperationsAnalysis'
 import type { DemoRole } from '../../types/workflow'
 import type { AnomalyFilters } from '../../types/operationsAnomaly'
+import type { SecurityEventCapability } from '../../types/securityIncident'
 import type { WorkbenchView } from '../../types/workbench'
+import { securityEventTypeLabel } from '../../utils/labels'
 
 const props = withDefaults(defineProps<{
   role: DemoRole
@@ -18,7 +20,16 @@ const props = withDefaults(defineProps<{
   analyticsAvailable?: boolean
   collaborationAvailable?: boolean
   securityIncidentAvailable?: boolean
-}>(), { active: true, analyticsAvailable: false, collaborationAvailable: false, securityIncidentAvailable: false })
+  securityEventCapabilities?: SecurityEventCapability[]
+  securityDispositionEnabled?: boolean
+}>(), {
+  active: true,
+  analyticsAvailable: false,
+  collaborationAvailable: false,
+  securityIncidentAvailable: false,
+  securityEventCapabilities: () => [],
+  securityDispositionEnabled: false,
+})
 const emit = defineEmits<{
   'open-analysis': [question: string]
   'open-building': [buildingId: string, filters: AnomalyFilters]
@@ -95,6 +106,27 @@ watch(() => props.active, (active) => {
       <article data-cockpit-feature="device-health" :data-feature-state="deviceHealthStatus"><span>设备健康研判</span><strong>{{ deviceHealthStatus }}</strong><small>解释性状态与证据；不生成健康分</small><button type="button" @click="emit('open-analysis', '各设备类型离线设备数')">分析设备状态</button></article>
       <article data-cockpit-feature="temperature-telemetry" :data-feature-state="temperatureStatus"><span>温度遥测</span><strong>{{ temperatureStatus }}</strong><small>确定性 Demo source；非生产 IoT</small></article>
       <article data-cockpit-feature="vibration-telemetry" data-feature-state="NOT_READY"><span>振动遥测</span><strong>NOT_READY</strong><small>当前没有振动 datasource</small></article>
+    </section>
+
+    <section class="operations-board__capability-strip operations-board__security-capabilities" aria-label="安全事件能力状态" data-security-capabilities>
+      <article
+        v-for="capability in props.securityEventCapabilities ?? []"
+        :key="capability.eventType"
+        :data-security-capability="capability.eventType"
+        :data-feature-state="capability.state"
+      >
+        <span>{{ securityEventTypeLabel(capability.eventType) }}</span>
+        <strong>{{ capability.state }}</strong>
+        <small v-if="capability.state === 'AVAILABLE'">已接入生产数据源，可参与统计</small>
+        <small v-else-if="capability.state === 'ADAPTED'">仅有非生产适配数据，不参与统计</small>
+        <small v-else>模型已定义该类型，但当前部署未接入数据源</small>
+      </article>
+      <article data-security-disposition :data-feature-state="props.securityDispositionEnabled ? 'AVAILABLE' : 'NOT_READY'">
+        <span>误报统计</span>
+        <strong>{{ props.securityDispositionEnabled ? 'AVAILABLE' : 'NOT_READY' }}</strong>
+        <small>{{ props.securityDispositionEnabled ? '存在生产数据源与误报评估数据源' : '缺少可用的误报评估数据源，误报数不可统计' }}</small>
+      </article>
+      <p v-if="!(props.securityEventCapabilities ?? []).length" class="operations-board__security-capabilities-empty" data-security-capabilities-empty>安全事件类型能力尚未上报，暂按 NOT_READY 处理。</p>
     </section>
 
     <EnergyTimeSeriesPanel
@@ -188,6 +220,8 @@ watch(() => props.active, (active) => {
 .operations-board__capability-strip article[data-feature-state='AVAILABLE'] strong { color: var(--showcase-cyan); }
 .operations-board__capability-strip small { color: var(--showcase-muted); line-height: 1.45; }
 .operations-board__capability-strip button { justify-self: start; margin-top: auto; padding: 0; color: var(--showcase-cyan); border: 0; background: transparent; cursor: pointer; }
+.operations-board__security-capabilities { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.operations-board__security-capabilities-empty { grid-column: 1 / -1; margin: 0; padding: 10px 12px; color: var(--showcase-amber); border: 1px solid rgba(255, 210, 122, .26); background: rgba(83, 59, 24, .16); font-size: .78rem; }
 .operations-board__workbench { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(280px, .55fr); gap: 18px; padding: 26px; overflow: hidden; }
 .operations-board__workbench h2 { margin: 8px 0; font-size: 1.7rem; }
 .operations-board__workbench p { color: var(--showcase-muted); line-height: 1.6; }

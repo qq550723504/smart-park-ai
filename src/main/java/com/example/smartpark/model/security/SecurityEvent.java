@@ -3,28 +3,87 @@ package com.example.smartpark.model.security;
 import java.time.Instant;
 import java.util.Objects;
 
+/**
+ * Unified security domain event. Adapters map vendor-private payloads into this
+ * model; the UI never depends on vendor fields. All optional metadata reflects
+ * what the source actually provided and is never synthesized.
+ */
 public record SecurityEvent(
         String eventId,
         String parkId,
         String buildingId,
-        String eventType,
-        Instant occurredAt,
+        SecurityEventType eventType,
+        String rawEventType,
+        SecuritySourceRef source,
+        SecurityEventLocation location,
+        Instant observedAt,
+        Instant receivedAt,
+        SecurityEventSeverity severity,
+        Double confidence,
+        SecurityPrivacyMetadata privacy,
+        SecurityDispositionRecord disposition,
+        String ingestedBy,
+        String ingestVersion,
         String evidenceSummary) {
 
     public SecurityEvent {
-        eventId = requireText(eventId, "eventId");
-        parkId = requireText(parkId, "parkId");
-        buildingId = requireText(buildingId, "buildingId");
-        eventType = requireText(eventType, "eventType");
-        occurredAt = Objects.requireNonNull(occurredAt, "occurredAt");
+        // Every boundary identifier is projected to the UI and the AI tool, so all of them
+        // obeys the credential/URL safety policy instead of only being trimmed. A vendor
+        // eventId of "https://internal.example/event" or "token=abc" must not reach
+        // SecurityEventSummary.eventId or an incident evidence sourceId.
+        eventId = SecurityIdentifierPolicy.requireSafe(eventId, "eventId");
+        if (SecurityEventIdentity.mimicsQualifiedReference(eventId)) {
+            throw new IllegalArgumentException(
+                    "eventId must not mimic a source-qualified reference: " + eventId);
+        }
+        parkId = SecurityIdentifierPolicy.requireSafe(parkId, "parkId");
+        buildingId = SecurityIdentifierPolicy.requireSafe(buildingId, "buildingId");
+        eventType = Objects.requireNonNull(eventType, "eventType");
+        // rawEventType is projected to the UI and the AI tool verbatim, so it must obey
+        // the same credential/URL safety policy as the other identifiers instead of only
+        // being trimmed. A vendor code that carries a URL or token is rejected at ingestion.
+        rawEventType = SecurityIdentifierPolicy.requireSafe(rawEventType, "rawEventType");
+        source = source == null ? SecuritySourceRef.unknown() : source;
+        location = location == null ? SecurityEventLocation.empty() : location;
+        observedAt = Objects.requireNonNull(observedAt, "observedAt");
+        receivedAt = receivedAt == null ? observedAt : receivedAt;
+        severity = severity == null ? SecurityEventSeverity.UNKNOWN : severity;
+        if (confidence != null && (confidence.isNaN() || confidence < 0.0d || confidence > 1.0d)) {
+            throw new IllegalArgumentException("confidence must be between 0.0 and 1.0");
+        }
+        privacy = privacy == null ? SecurityPrivacyMetadata.redactedOnly() : privacy;
+        disposition = disposition == null ? SecurityDispositionRecord.unreviewed() : disposition;
+        ingestedBy = SecurityIdentifierPolicy.optionalSafe(ingestedBy, "ingestedBy");
+        ingestedBy = ingestedBy == null ? "unspecified" : ingestedBy;
+        ingestVersion = SecurityIdentifierPolicy.optionalSafe(ingestVersion, "ingestVersion");
         evidenceSummary = RedactedEvidencePolicy.require(evidenceSummary, "evidenceSummary");
     }
 
-    private static String requireText(String value, String fieldName) {
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException(fieldName + " must not be blank");
-        }
-        return value.trim();
+    /**
+     * Backwards-compatible constructor for simple single-source events. The raw
+     * type is mapped to a standard type, severity stays {@code UNKNOWN}, and no
+     * confidence is invented.
+     */
+    public SecurityEvent(String eventId, String parkId, String buildingId, String rawEventType,
+                         Instant occurredAt, String evidenceSummary) {
+        this(eventId, parkId, buildingId, SecurityEventType.fromRaw(rawEventType), rawEventType,
+                SecuritySourceRef.unknown(), SecurityEventLocation.empty(), occurredAt, occurredAt,
+                SecurityEventSeverity.UNKNOWN, null, SecurityPrivacyMetadata.redactedOnly(),
+                SecurityDispositionRecord.unreviewed(), "unspecified", null, evidenceSummary);
     }
 
+    /** Legacy alias: {@code occurredAt} is the observed time. */
+    public Instant occurredAt() {
+        return observedAt;
+    }
+
+    /**
+     * Returns a copy carrying {@code replacement}. Used when reconciliation selects a
+     * decision that arrived through another ingestion path, so the enriched
+     * representation can keep its source, severity, confidence and ingest metadata.
+     */
+    public SecurityEvent withDisposition(SecurityDispositionRecord replacement) {
+        return new SecurityEvent(eventId, parkId, buildingId, eventType, rawEventType, source, location, observedAt,
+                receivedAt, severity, confidence, privacy, replacement, ingestedBy, ingestVersion, evidenceSummary);
+    }
 }

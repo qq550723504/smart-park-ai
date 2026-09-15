@@ -1,12 +1,8 @@
 package com.example.smartpark.web;
 
 import com.example.smartpark.audit.AuditTrail;
-import com.example.smartpark.port.alert.AlertPort;
-import com.example.smartpark.port.collaboration.SecurityIncidentHandoffPort;
-import com.example.smartpark.port.security.SecurityEventReader;
-import com.example.smartpark.securityincident.SecurityIncidentConfiguration;
 import com.example.smartpark.securityincident.SecurityIncidentService;
-import org.springframework.beans.factory.config.BeanDefinition;
+import com.example.smartpark.support.BeanDefinitionLookup;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.beans.factory.config.RuntimeBeanReference;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
@@ -28,18 +24,14 @@ public class SecurityIncidentWebConfiguration {
             implements BeanDefinitionRegistryPostProcessor, Ordered {
         @Override
         public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry) {
-            boolean runtimeDependenciesPresent = hasBean(registry, SecurityEventReader.class)
-                    && hasBean(registry, AlertPort.class)
-                    && hasBean(registry, SecurityIncidentHandoffPort.class);
-            if ((!hasBean(registry, SecurityIncidentService.class)
-                    && (!hasBean(registry, SecurityIncidentConfiguration.class)
-                    || !runtimeDependenciesPresent))
-                    || registry.containsBeanDefinition("securityIncidentController")) return;
-            String serviceBeanName = beanNameFor(registry, SecurityIncidentService.class);
+            if (registry.containsBeanDefinition("securityIncidentController")
+                    || !BeanDefinitionLookup.hasBean(registry, SecurityIncidentService.class)) return;
+            String serviceBeanName = BeanDefinitionLookup.beanNameFor(registry, SecurityIncidentService.class);
+            if (serviceBeanName == null) return;
             RootBeanDefinition controller = new RootBeanDefinition(SecurityIncidentController.class);
             controller.getConstructorArgumentValues().addIndexedArgumentValue(0,
                     new RuntimeBeanReference(serviceBeanName));
-            String auditTrailBeanName = beanNameFor(registry, AuditTrail.class);
+            String auditTrailBeanName = BeanDefinitionLookup.beanNameFor(registry, AuditTrail.class);
             if (auditTrailBeanName != null) {
                 controller.getConstructorArgumentValues().addIndexedArgumentValue(1,
                         new RuntimeBeanReference(auditTrailBeanName));
@@ -55,18 +47,5 @@ public class SecurityIncidentWebConfiguration {
         @Override
         public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) {
         }
-    }
-
-    private static boolean hasBean(BeanDefinitionRegistry registry, Class<?> type) {
-        return beanNameFor(registry, type) != null;
-    }
-
-    private static String beanNameFor(BeanDefinitionRegistry registry, Class<?> type) {
-        for (String name : registry.getBeanDefinitionNames()) {
-            BeanDefinition definition = registry.getBeanDefinition(name);
-            if (definition.getResolvableType() != org.springframework.core.ResolvableType.NONE
-                    && type.isAssignableFrom(definition.getResolvableType().toClass())) return name;
-        }
-        return null;
     }
 }

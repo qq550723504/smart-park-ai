@@ -1,13 +1,16 @@
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import SecurityIncidentCenter from './SecurityIncidentCenter.vue'
+
+const messageSpies = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
+vi.mock('element-plus', () => ({ ElMessage: messageSpies }))
 
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 }
 
 const summary = {
-  incidentId: 'INC-1', parkId: 'PARK-A', buildingId: 'A1', eventType: 'UNAUTHORIZED_ACCESS_ATTEMPT',
+  incidentId: 'INC-1', parkId: 'PARK-A', buildingId: 'A1', eventType: 'ACCESS_ANOMALY',
   riskLevel: 'HIGH', status: 'OPEN', openedAt: '2026-09-02T08:00:00Z', lastOccurredAt: '2026-09-02T08:09:00Z',
   eventCount: 2, alertCount: 1, summary: 'REDACTED:安全事件摘要',
 }
@@ -22,6 +25,7 @@ describe('SecurityIncidentCenter', () => {
   const originalFetch = globalThis.fetch
   enableAutoUnmount(afterEach)
   afterEach(() => { globalThis.fetch = originalFetch })
+  beforeEach(() => { messageSpies.success.mockClear(); messageSpies.error.mockClear() })
 
   it('renders a safe incident and allows review and handoff for approver', async () => {
     const requests: Array<{ url: string; method: string }> = []
@@ -178,6 +182,175 @@ describe('SecurityIncidentCenter', () => {
     expect(wrapper.emitted('open-collaboration')).toEqual([[
       { incidentId: 'INC-1', workItemId: 'SECURITY_INCIDENT:INC-1' },
     ]])
+  })
+
+  it('records a human false-positive disposition instead of fabricating review data', async () => {
+    const bodies: Array<string | undefined> = []
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input)
+      if (url.includes('/api/security/incidents?')) {
+        return response({ items: [{ ...summary, disposition: 'UNREVIEWED' }], total: 1 })
+      }
+      if (url.endsWith('/review')) {
+        bodies.push(init?.body as string | undefined)
+        return response({
+          ...detail,
+          status: 'REVIEWED',
+          disposition: 'FALSE_POSITIVE',
+          dispositionProduction: true,
+          dispositionSource: 'HUMAN_REVIEW',
+          dispositionDecidedAt: '2026-09-02T10:00:00Z',
+        })
+      }
+      return response({ ...detail, disposition: 'UNREVIEWED' })
+    }) as typeof fetch
+
+    const wrapper = mount(SecurityIncidentCenter, { props: { role: 'APPROVER', securityDispositionEnabled: true } })
+    await flushPromises()
+    expect(wrapper.get('[data-security-false-positive]').text()).toContain('暂无复核结论')
+
+    await wrapper.get('[data-security-action="review-false-positive"]').trigger('click')
+    await flushPromises()
+
+    expect(bodies).toEqual([JSON.stringify({ disposition: 'FALSE_POSITIVE' })])
+    expect(wrapper.get('[data-security-disposition]').text()).toContain('误报（人工复核结论）')
+    expect(wrapper.get('[data-security-false-positive]').text()).toContain('1')
+  })
+
+  it('keeps the false-positive metric unavailable without the production disposition capability', async () => {
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      const decided = { ...summary, status: 'REVIEWED', disposition: 'FALSE_POSITIVE', dispositionSource: 'HUMAN_REVIEW' }
+      if (url.includes('/api/security/incidents?')) return response({ items: [decided], total: 1 })
+      return response({ ...detail, ...decided })
+    }) as typeof fetch
+
+    // The default demo adapter can record manual dispositions, but without a production
+    // disposition feed there is no queue-wide false-positive statistic to promise.
+    const wrapper = mount(SecurityIncidentCenter, { props: { role: 'APPROVER' } })
+    await flushPromises()
+
+    const metric = wrapper.get('[data-security-false-positive]')
+    expect(metric.text()).toContain('误报数不可统计')
+    expect(metric.text()).not.toContain('1')
+  })
+
+  it('counts only false positives that came from a production disposition feed', async () => {
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      const production = { ...summary, incidentId: 'INC-PROD', status: 'REVIEWED', disposition: 'FALSE_POSITIVE', dispositionProduction: true, dispositionSource: 'HUMAN_REVIEW' }
+      const demo = { ...summary, incidentId: 'INC-DEMO', status: 'REVIEWED', disposition: 'FALSE_POSITIVE', dispositionProduction: false, dispositionSource: 'HUMAN_REVIEW' }
+      if (url.includes('/api/security/incidents?')) return response({ items: [production, demo], total: 2 })
+      return response({ ...detail, ...production })
+    }) as typeof fetch
+
+    // A manual review of a demo incident must not inflate a production false-positive
+    // statistic even when the production disposition capability is present.
+    const wrapper = mount(SecurityIncidentCenter, { props: { role: 'APPROVER', securityDispositionEnabled: true } })
+    await flushPromises()
+
+    const metric = wrapper.get('[data-security-false-positive]')
+    expect(metric.text()).toContain('1')
+    expect(metric.text()).not.toContain('2')
+  })
+
+  it('reports the persisted disposition when the review request is a no-op', async () => {
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      if (url.includes('/api/security/incidents?')) {
+        return response({ items: [{ ...summary, disposition: 'UNREVIEWED' }], total: 1 })
+      }
+      if (url.endsWith('/review')) {
+        return response({
+          ...detail,
+          status: 'REVIEWED',
+          disposition: 'CONFIRMED_INCIDENT',
+          dispositionSource: 'HUMAN_REVIEW',
+        })
+      }
+      return response({ ...detail, disposition: 'UNREVIEWED' })
+    }) as typeof fetch
+
+    const wrapper = mount(SecurityIncidentCenter, { props: { role: 'APPROVER' } })
+    await flushPromises()
+
+    await wrapper.get('[data-security-action="review-false-positive"]').trigger('click')
+    await flushPromises()
+
+    expect(messageSpies.success).toHaveBeenCalledWith('事件已记录研判：确认事件')
+  })
+
+  it('labels event type and source metadata without exposing raw media', async () => {
+    const enriched = {
+      ...detail,
+      disposition: 'UNREVIEWED',
+      evidence: [{
+        ...detail.evidence[0],
+        rawEventType: 'UNAUTHORIZED_ACCESS_ATTEMPT',
+        sourceType: 'ACCESS_CONTROL',
+        eventSourceId: 'demo-access',
+        severity: 'MEDIUM',
+        confidence: 0.6,
+      }],
+    }
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      return url.includes('/api/security/incidents?')
+        ? response({ items: [{ ...summary, disposition: 'UNREVIEWED' }], total: 1 })
+        : response(enriched)
+    }) as typeof fetch
+
+    const wrapper = mount(SecurityIncidentCenter, { props: { role: 'ADMIN' } })
+    await flushPromises()
+
+    expect(wrapper.get('[data-security-event-type]').text()).toContain('门禁异常')
+    expect(wrapper.get('[data-security-evidence-source]').text()).toContain('UNAUTHORIZED_ACCESS_ATTEMPT')
+    expect(wrapper.get('[data-security-evidence-source]').text()).toContain('门禁系统')
+    expect(wrapper.get('[data-security-confidence]').text()).toBe('60%')
+    expect(wrapper.text()).not.toContain('data:image')
+  })
+
+  it('keeps duplicate event ids from different sources as distinct list entries', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const duplicated = {
+      ...detail,
+      evidence: [
+        { sourceId: 'SEC-DUP', occurredAt: summary.openedAt, summary: 'REDACTED:门禁', sourceType: 'ACCESS_CONTROL', eventSourceId: 'demo-access' },
+        { sourceId: 'SEC-DUP', occurredAt: summary.openedAt, summary: 'REDACTED:摄像机', sourceType: 'CAMERA_ANALYTICS', eventSourceId: 'demo-camera' },
+      ],
+      timeline: [
+        { sourceType: 'SECURITY_EVENT', sourceId: 'SEC-DUP', occurredAt: summary.openedAt, label: '安全事件', reference: 'security-event:source:1#a' },
+        { sourceType: 'SECURITY_EVENT', sourceId: 'SEC-DUP', occurredAt: summary.openedAt, label: '安全事件', reference: 'security-event:source:1#b' },
+      ],
+    }
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      return url.includes('/api/security/incidents?') ? response({ items: [summary], total: 1 }) : response(duplicated)
+    }) as typeof fetch
+
+    const wrapper = mount(SecurityIncidentCenter, { props: { role: 'ADMIN' } })
+    await flushPromises()
+
+    expect(wrapper.findAll('.security-incident-evidence li')).toHaveLength(2)
+    expect(wrapper.findAll('.security-incident-timeline li')).toHaveLength(2)
+    expect(warn.mock.calls.flat().join(' ')).not.toContain('Duplicate keys')
+    warn.mockRestore()
+  })
+
+  it('disables every disposition action once the incident is reviewed', async () => {
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      return url.includes('/api/security/incidents?')
+        ? response({ items: [{ ...summary, status: 'REVIEWED', disposition: 'CONFIRMED_INCIDENT' }], total: 1 })
+        : response({ ...detail, status: 'REVIEWED', disposition: 'CONFIRMED_INCIDENT', dispositionSource: 'HUMAN_REVIEW' })
+    }) as typeof fetch
+
+    const wrapper = mount(SecurityIncidentCenter, { props: { role: 'ADMIN' } })
+    await flushPromises()
+
+    for (const action of ['review', 'review-false-positive', 'review-inconclusive', 'review-duplicate']) {
+      expect(wrapper.get(`[data-security-action="${action}"]`).attributes('disabled')).toBeDefined()
+    }
   })
 
   it('ignores a late handoff response after selecting another incident', async () => {

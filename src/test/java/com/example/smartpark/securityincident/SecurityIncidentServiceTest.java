@@ -3,11 +3,22 @@ package com.example.smartpark.securityincident;
 import com.example.smartpark.model.alert.Alert;
 import com.example.smartpark.model.alert.AlertClassification;
 import com.example.smartpark.model.common.RiskLevel;
+import com.example.smartpark.model.security.SecurityDisposition;
+import com.example.smartpark.model.security.SecurityDispositionRecord;
+import com.example.smartpark.model.security.SecurityDispositionSource;
 import com.example.smartpark.model.security.SecurityEvent;
+import com.example.smartpark.model.security.SecurityEventIdentity;
+import com.example.smartpark.model.security.SecurityEventSeverity;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoff;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoffPort;
+import com.example.smartpark.port.security.SecurityEventCatalog;
 import com.example.smartpark.port.security.SecurityEventReader;
+import com.example.smartpark.port.security.SecuritySourceAdapter;
+import com.example.smartpark.port.security.SecuritySourceDescriptor;
+import com.example.smartpark.model.security.SecurityEventType;
+import com.example.smartpark.model.security.SecuritySourceType;
+import com.example.smartpark.model.security.SecuritySourceRef;
 import com.example.smartpark.collaborationcenter.SecurityIncidentHandoffStore;
 import org.junit.jupiter.api.Test;
 
@@ -16,6 +27,9 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.NoSuchElementException;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -36,6 +50,1011 @@ class SecurityIncidentServiceTest {
         assertThat(page.items()).hasSize(2);
         assertThat(page.items().get(0).eventIds()).containsExactly("SEC-3");
         assertThat(page.items().get(1).eventIds()).containsExactly("SEC-1", "SEC-2");
+    }
+
+    @Test
+    void correlatesEventsContributedByRegisteredSourceAdapters() {
+        SecuritySourceAdapter adapter = adapterReturning(event("SEC-ADAPTER", "A1", "ACCESS", BASE));
+        SecurityIncidentService service = service(List.of(), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapter));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).singleElement()
+                .satisfies(incident -> assertThat(incident.eventIds()).containsExactly("SEC-ADAPTER"));
+    }
+
+    @Test
+    void deduplicatesEventsSharedByTheReaderAndASourceAdapter() {
+        SecurityEvent shared = event("SEC-SHARED", "A1", "ACCESS", BASE);
+        SecurityIncidentService service = service(List.of(shared), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterReturning(shared)));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).singleElement()
+                .satisfies(incident -> assertThat(incident.eventIds()).containsExactly("SEC-SHARED"));
+    }
+
+    @Test
+    void readsAReaderThatIsAlsoAnAdapterOnlyOnceWhenCorrelating() {
+        AtomicInteger adapterReads = new AtomicInteger();
+        SecurityEvent dual = event("SEC-DUAL-ROLE", "A1", "ACCESS", BASE);
+        class DualRole implements SecurityEventReader, SecuritySourceAdapter {
+            @Override
+            public SecurityEvent getEvent(String eventId) {
+                if (dual.eventId().equals(eventId)) return dual;
+                throw new NoSuchElementException("security event not found: " + eventId);
+            }
+
+            @Override
+            public List<SecurityEvent> listEvents() {
+                return List.of(dual);
+            }
+
+            @Override
+            public SecuritySourceDescriptor descriptor() {
+                return new SecuritySourceDescriptor("dual-role-feed", SecuritySourceType.ACCESS_CONTROL,
+                        Set.of(SecurityEventType.ACCESS_ANOMALY), true, true);
+            }
+
+            @Override
+            public List<SecurityEvent> readEvents() {
+                adapterReads.incrementAndGet();
+                return List.of(dual);
+            }
+        }
+        DualRole reader = new DualRole();
+        SecurityIncidentService service = service(reader, List.of(), 50, new SecurityIncidentHandoffStore(10),
+                List.of(reader));
+
+        assertThat(service.list(new SecurityIncidentQuery(null, 20)).items()).singleElement()
+                .satisfies(incident -> assertThat(incident.eventIds()).containsExactly("SEC-DUAL-ROLE"));
+        // The reader's own list already contributed the event, so the adapter pass must not
+        // query the same production source a second time.
+        assertThat(adapterReads.get()).isZero();
+    }
+
+    @Test
+    void keepsProductionProvenanceWhenTheInjectedReaderAlreadyAggregatesTheAdapters() {
+        AtomicInteger adapterReads = new AtomicInteger();
+        SecurityEvent production = withSource(event("SEC-AGGREGATED", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "prod-feed");
+        SecuritySourceAdapter adapter = new SecuritySourceAdapter() {
+            @Override
+            public SecuritySourceDescriptor descriptor() {
+                return new SecuritySourceDescriptor("prod-feed", SecuritySourceType.ACCESS_CONTROL,
+                        Set.of(SecurityEventType.ACCESS_ANOMALY), true, true);
+            }
+
+            @Override
+            public List<SecurityEvent> readEvents() {
+                adapterReads.incrementAndGet();
+                return List.of(production);
+            }
+        };
+        // Adapter-only deployments inject the adapter aggregate as the reader; the service must
+        // still receive the adapter descriptors for provenance and must not read it twice.
+        SecurityEventReader aggregate = new SecurityEventCatalog(new EmptySecurityEventReader(), List.of(adapter));
+        SecurityIncidentService service = service(aggregate, List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapter));
+
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(service.dispositionIsProductionBacked(incident)).isTrue();
+        assertThat(adapterReads.get()).isEqualTo(1);
+    }
+
+    @Test
+    void onlyMarksIncidentsFromAProductionDispositionFeedAsProductionBacked() {
+        SecurityEvent production = withSource(event("SEC-PROD", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "prod-feed");
+        SecurityEvent demo = withSource(event("SEC-DEMO", "A2", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "demo-feed");
+        SecurityIncidentService service = service(List.of(), List.of(), 50,
+                new SecurityIncidentHandoffStore(10),
+                List.of(productionDispositionAdapter("prod-feed", production), adapterReturning(demo)));
+
+        List<SecurityIncident> incidents = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        // Only the incident whose own source declares a production disposition feed may feed a
+        // production false-positive statistic; a demo adapter must never qualify.
+        assertThat(incidents)
+                .filteredOn(incident -> incident.eventIds().contains("SEC-PROD"))
+                .singleElement()
+                .satisfies(incident -> assertThat(service.dispositionIsProductionBacked(incident)).isTrue());
+        assertThat(incidents)
+                .filteredOn(incident -> incident.eventIds().contains("SEC-DEMO"))
+                .singleElement()
+                .satisfies(incident -> assertThat(service.dispositionIsProductionBacked(incident)).isFalse());
+    }
+
+    @Test
+    void bindsProductionProvenanceToTheEventThatSuppliedTheDisposition() {
+        SecurityDispositionRecord demoDecision = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(60));
+        SecurityEvent production = withSource(event("SEC-PROD", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "prod-feed");
+        SecurityEvent demo = withSource(
+                eventWithDisposition(event("SEC-DEMO-DECIDED", "A1", "ACCESS", BASE), demoDecision),
+                SecuritySourceType.ACCESS_CONTROL, "demo-feed");
+        SecurityIncidentService service = service(List.of(), List.of(), 50,
+                new SecurityIncidentHandoffStore(10),
+                List.of(productionDispositionAdapter("prod-feed", production), adapterReturning(demo)));
+
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        // The incident correlates a production event with a demo event that carried the newest
+        // decision. The statistic must follow the decision's own source, not merely any
+        // production identity that happens to share the incident.
+        assertThat(incident.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+        assertThat(service.dispositionIsProductionBacked(incident)).isFalse();
+    }
+
+    @Test
+    void keepsADispositionsOwnerWhenFreshEvidenceStopsReportingTheDecision() {
+        SecurityDispositionRecord demoDecision = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(60));
+        SecurityEvent production = withSource(event("SEC-PROD", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "prod-feed");
+        SecurityEvent demo = withSource(
+                eventWithDisposition(event("SEC-DEMO-DECIDED", "A1", "ACCESS", BASE), demoDecision),
+                SecuritySourceType.ACCESS_CONTROL, "demo-feed");
+        List<SecurityEvent> events = new ArrayList<>(List.of(production, demo));
+        SecurityIncidentService service = service(events, List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(productionDispositionAdapter("prod-feed")));
+
+        SecurityIncident decided = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        assertThat(decided.dispositionRecord()).isEqualTo(demoDecision);
+        assertThat(service.dispositionIsProductionBacked(decided)).isFalse();
+
+        // The feed stops reporting the decision, so fresh evidence is unreviewed again and the
+        // kept stored record has nothing to bind to. Deriving the owner from fresh evidence would
+        // erase it and let the incident-wide production identity promote the demo decision.
+        events.set(1, withSource(event("SEC-DEMO-DECIDED", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "demo-feed"));
+
+        SecurityIncident restored = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(restored.dispositionRecord()).isEqualTo(demoDecision);
+        assertThat(service.dispositionIsProductionBacked(restored)).isFalse();
+    }
+
+    @Test
+    void keepsADispositionsOwnerFromARetainedHandoffWhenFreshEvidenceNoLongerReportsTheDecision() {
+        SecurityDispositionRecord demoDecision = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(60));
+        SecurityEvent production = withSource(event("SEC-PROD", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "prod-feed");
+        SecurityEvent demo = withSource(
+                eventWithDisposition(event("SEC-DEMO-DECIDED", "A1", "ACCESS", BASE), demoDecision),
+                SecuritySourceType.ACCESS_CONTROL, "demo-feed");
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncident decided = service(new ArrayList<>(List.of(production, demo)), List.of(), 50, handoffs,
+                List.of(productionDispositionAdapter("prod-feed")))
+                .list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        // Project the decided incident into a retained handoff, as happens when the bounded
+        // incident store evicts it while the handoff stays behind.
+        SecurityIncidentHandoff retained = handoffs.createOrGet(decided, BASE);
+        assertThat(retained.dispositionSource().source().sourceId()).isEqualTo("demo-feed");
+
+        // A service whose incident store no longer holds the incident must recover the decision
+        // from the retained handoff together with the source that owns it.
+        SecurityIncidentService restarted = service(
+                new ArrayList<>(List.of(production, withSource(event("SEC-DEMO-DECIDED", "A1", "ACCESS", BASE),
+                        SecuritySourceType.ACCESS_CONTROL, "demo-feed"))),
+                List.of(), 50, handoffs, List.of(productionDispositionAdapter("prod-feed")));
+
+        SecurityIncident restored = restarted.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.eventIds().contains("SEC-DEMO-DECIDED"))
+                .findFirst().orElseThrow();
+
+        assertThat(restored.dispositionRecord()).isEqualTo(demoDecision);
+        assertThat(restarted.dispositionIsProductionBacked(restored)).isFalse();
+    }
+
+    @Test
+    void deduplicatesLogicallyIdenticalEventsAndKeepsTheClassifiedRepresentation() {
+        SecurityEvent readerCopy = event("SEC-ENRICHED", "A1", "ACCESS", BASE);
+        SecurityDispositionRecord registered = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(30));
+        SecurityEvent adapterCopy = withSource(
+                enrichedEvent(readerCopy, registered, BASE.minusSeconds(5), SecurityEventSeverity.HIGH),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityIncidentService service = service(List.of(readerCopy), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterReturning(adapterCopy)));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).singleElement().satisfies(incident -> {
+            assertThat(incident.eventIds()).containsExactly("SEC-ENRICHED");
+            assertThat(incident.evidence()).singleElement()
+                    .satisfies(evidence -> assertThat(evidence.severity()).isEqualTo("HIGH"));
+            assertThat(incident.timeline())
+                    .filteredOn(entry -> entry.sourceType().equals("SECURITY_EVENT")).hasSize(1);
+            assertThat(incident.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+            assertThat(incident.dispositionRecord()).isEqualTo(registered);
+        });
+    }
+
+    @Test
+    void keepsUnsupportedVendorTypesApartWithinOneCorrelationWindow() {
+        SecurityEvent doorForced = withSource(event("SEC-VENDOR-DOOR", "A1", "DOOR_FORCED", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityEvent turnstileTamper = withSource(event("SEC-VENDOR-TURNSTILE", "A1", "TURNSTILE_TAMPER",
+                BASE.plusSeconds(60)), SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityIncidentService service = service(List.of(), List.of(), 50,
+                new SecurityIncidentHandoffStore(10),
+                List.of(adapterReturning(doorForced, turnstileTamper)));
+
+        List<SecurityIncident> incidents = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        assertThat(incidents).hasSize(2);
+        assertThat(incidents).extracting(SecurityIncident::standardEventType)
+                .containsOnly(SecurityEventType.UNKNOWN);
+        assertThat(incidents).allSatisfy(incident -> assertThat(incident.evidence()).hasSize(1));
+    }
+
+    @Test
+    void stillGroupsRepeatedUnsupportedVendorTypesIntoOneIncident() {
+        SecurityEvent first = withSource(event("SEC-VENDOR-1", "A1", "DOOR_FORCED", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityEvent second = withSource(event("SEC-VENDOR-2", "A1", "DOOR_FORCED", BASE.plusSeconds(60)),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityIncidentService service = service(List.of(), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterReturning(first, second)));
+
+        List<SecurityIncident> incidents = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        assertThat(incidents).singleElement().satisfies(incident -> assertThat(incident.evidence()).hasSize(2));
+    }
+
+    @Test
+    void keepsTheEnrichedAdapterCopyWhenALegacyReaderCopyCarriesTheDecision() {
+        SecurityDispositionRecord selected = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(5));
+        SecurityEvent readerCopy = enrichedEvent(event("SEC-ONE-SIDED", "A1", "ACCESS", BASE), selected, BASE,
+                SecurityEventSeverity.LOW);
+        SecurityEvent adapterCopy = withSource(
+                enrichedEvent(event("SEC-ONE-SIDED", "A1", "ACCESS", BASE), SecurityDispositionRecord.unreviewed(),
+                        BASE.plusSeconds(30), SecurityEventSeverity.HIGH),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityIncidentService service = service(List.of(readerCopy), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterReturning(adapterCopy)));
+
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(incident.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+        assertThat(incident.dispositionRecord()).isEqualTo(selected);
+        assertThat(incident.evidence()).singleElement().satisfies(evidence -> {
+            assertThat(evidence.severity()).isEqualTo("HIGH");
+            assertThat(evidence.eventSourceId()).isEqualTo("access-1");
+        });
+    }
+
+    @Test
+    void prefersTheNewestDecisionWhenBothIngestionPathsDeliverDecidedRecords() {
+        SecurityDispositionRecord stale = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(10));
+        SecurityDispositionRecord correction = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-2", "2026.10", "evt-2",
+                BASE.plusSeconds(60));
+        SecurityEvent readerCopy = eventWithDisposition(
+                enrichedEvent(event("SEC-CORRECT", "A1", "ACCESS", BASE), stale, BASE.plusSeconds(120),
+                        SecurityEventSeverity.HIGH),
+                stale);
+        SecurityEvent adapterCopy = withSource(
+                enrichedEvent(event("SEC-CORRECT", "A1", "ACCESS", BASE), correction, BASE,
+                        SecurityEventSeverity.HIGH),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityIncidentService service = service(List.of(readerCopy), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterReturning(adapterCopy)));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).singleElement().satisfies(incident -> {
+            assertThat(incident.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+            assertThat(incident.dispositionRecord()).isEqualTo(correction);
+        });
+    }
+
+    @Test
+    void prefersTheEnrichedRepresentationWhenBothIngestionPathsAgreeOnTheDecision() {
+        SecurityDispositionRecord shared = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(5));
+        SecurityEvent readerCopy = eventWithDisposition(
+                enrichedEvent(event("SEC-AGREE", "A1", "ACCESS", BASE), shared, BASE,
+                        SecurityEventSeverity.LOW),
+                shared);
+        SecurityEvent adapterCopy = withSource(
+                enrichedEvent(event("SEC-AGREE", "A1", "ACCESS", BASE), shared, BASE,
+                        SecurityEventSeverity.HIGH),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityIncidentService service = service(List.of(readerCopy), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterReturning(adapterCopy)));
+
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(incident.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+        assertThat(incident.dispositionRecord()).isEqualTo(shared);
+        assertThat(incident.evidence()).singleElement().satisfies(evidence -> {
+            assertThat(evidence.severity()).isEqualTo("HIGH");
+            assertThat(evidence.eventSourceId()).isEqualTo("access-1");
+        });
+    }
+
+    @Test
+    void prefersTheFreshestCopyWhenTheSameSourceCorrectsStaleMetadata() {
+        SecurityDispositionRecord decision = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(5));
+        SecurityEvent plain = withSource(event("SEC-META", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityEvent stale = enrichedEvent(plain, decision, BASE, SecurityEventSeverity.HIGH);
+        SecurityEvent corrected = receivedLater(plain, BASE.plusSeconds(60));
+        SecurityIncidentService service = service(List.of(stale), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterReturning(corrected)));
+
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(incident.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+        assertThat(incident.evidence()).singleElement().satisfies(evidence -> {
+            assertThat(evidence.eventSourceId()).isEqualTo("access-1");
+            assertThat(evidence.severity()).isEqualTo("UNKNOWN");
+        });
+    }
+
+    @Test
+    void prefersTheFreshestRepresentationWhenNoDispositionIsAvailable() {
+        SecurityEvent readerCopy = event("SEC-FRESH", "A1", "ACCESS", BASE);
+        SecurityEvent adapterCopy = enrichedEvent(readerCopy, SecurityDispositionRecord.unreviewed(),
+                BASE.plusSeconds(5), SecurityEventSeverity.HIGH);
+        SecurityIncidentService service = service(List.of(readerCopy), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterReturning(adapterCopy)));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).singleElement()
+                .satisfies(incident -> {
+                    assertThat(incident.eventIds()).containsExactly("SEC-FRESH");
+                    assertThat(incident.evidence()).singleElement()
+                            .satisfies(evidence -> assertThat(evidence.severity()).isEqualTo("HIGH"));
+                });
+    }
+
+    @Test
+    void keepsEventsFromDifferentSourcesThatReuseTheSameSourceLocalId() {
+        SecurityEvent access = withSource(event("SEC-DUAL", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityEvent camera = withSource(event("SEC-DUAL", "A1", "ACCESS", BASE),
+                SecuritySourceType.CAMERA_ANALYTICS, "camera-1");
+        SecurityIncidentService service = service(List.of(), List.of(), 50,
+                new SecurityIncidentHandoffStore(10),
+                List.of(adapterReturning(access), adapterReturning(camera)));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).singleElement().satisfies(incident -> {
+            assertThat(incident.evidence()).hasSize(2);
+            assertThat(incident.evidence()).extracting(SecurityIncidentEvidence::eventSourceId)
+                    .containsExactlyInAnyOrder("access-1", "camera-1");
+        });
+    }
+
+    @Test
+    void derivesAStableIncidentIdRegardlessOfWhichSourceIsReadFirst() {
+        SecurityEvent access = withSource(event("SEC-DUAL", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityEvent camera = withSource(event("SEC-DUAL", "A1", "ACCESS", BASE),
+                SecuritySourceType.CAMERA_ANALYTICS, "camera-1");
+        SecurityIncidentService forward = service(List.of(), List.of(), 50,
+                new SecurityIncidentHandoffStore(10),
+                List.of(adapterReturning(access), adapterReturning(camera)));
+        SecurityIncidentService reversed = service(List.of(), List.of(), 50,
+                new SecurityIncidentHandoffStore(10),
+                List.of(adapterReturning(camera), adapterReturning(access)));
+
+        SecurityIncident forwardIncident = forward.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        SecurityIncident reversedIncident = reversed.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        // Both sources reuse the same id at the same location, type and instant, so the
+        // incident id must be derived from a deterministic tie-breaker rather than the
+        // ingestion order.
+        assertThat(forwardIncident.parkId()).isEqualTo("PARK-A");
+        assertThat(forwardIncident.incidentId()).isEqualTo(reversedIncident.incidentId());
+    }
+
+    @Test
+    void prefersTheEnrichedAdapterCopyWhenTimestampsTie() {
+        SecurityEvent readerCopy = event("SEC-TIE", "A1", "ACCESS", BASE);
+        SecurityEvent adapterCopy = withSource(
+                enrichedEvent(readerCopy, SecurityDispositionRecord.unreviewed(), BASE, SecurityEventSeverity.HIGH),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityIncidentService service = service(List.of(readerCopy), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterReturning(adapterCopy)));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).singleElement()
+                .satisfies(incident -> assertThat(incident.evidence()).singleElement()
+                        .satisfies(evidence -> {
+                            assertThat(evidence.severity()).isEqualTo("HIGH");
+                            assertThat(evidence.eventSourceId()).isEqualTo("access-1");
+                        }));
+    }
+
+    @Test
+    void keepsDispositionsOfDifferentSourcesThatReuseTheSameEventIdApart() {
+        SecurityEvent access = withSource(event("SEC-DUAL-POLL", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityEvent camera = withSource(event("SEC-DUAL-POLL", "A1", "ACCESS", BASE),
+                SecuritySourceType.CAMERA_ANALYTICS, "camera-1");
+        List<SecurityEvent> polled = new java.util.ArrayList<>(List.of(access));
+        SecurityIncidentService service = service(List.of(), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterBackedBy(polled)));
+
+        SecurityIncident reviewed = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(reviewed.incidentId(), SecurityDisposition.FALSE_POSITIVE, "APPROVER");
+        service.handoff(reviewed.incidentId());
+
+        polled.clear();
+        polled.add(camera);
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).singleElement().satisfies(incident -> {
+            assertThat(incident.incidentId()).isNotEqualTo(reviewed.incidentId());
+            assertThat(incident.disposition()).isEqualTo(SecurityDisposition.UNREVIEWED);
+            assertThat(incident.status()).isEqualTo(SecurityIncidentStatus.OPEN);
+            assertThat(incident.handoffWorkItemId()).isNull();
+        });
+    }
+
+    @Test
+    void resolvesALegacyAliasToAtMostOneConcreteSource() {
+        List<SecurityEvent> polled = new ArrayList<>(List.of(event("SEC-LEGACY-DUAL", "A1", "ACCESS", BASE)));
+        SecurityIncidentService service = service(List.of(), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterBackedBy(polled)));
+        SecurityIncident reviewed = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(reviewed.incidentId(), SecurityDisposition.FALSE_POSITIVE, "APPROVER");
+        service.handoff(reviewed.incidentId());
+
+        polled.clear();
+        polled.add(withSource(event("SEC-LEGACY-DUAL", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1"));
+        polled.add(withSource(event("SEC-LEGACY-DUAL", "A1", "ACCESS", BASE.plusSeconds(20 * 60)),
+                SecuritySourceType.CAMERA_ANALYTICS, "camera-1"));
+
+        List<SecurityIncident> incidents = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        assertThat(incidents).hasSize(2);
+        assertThat(incidents).filteredOn(incident -> hasEventSource(incident, "access-1"))
+                .singleElement().satisfies(incident -> {
+                    assertThat(incident.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+                    assertThat(incident.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+                });
+        assertThat(incidents).filteredOn(incident -> hasEventSource(incident, "camera-1"))
+                .singleElement().satisfies(incident -> {
+                    assertThat(incident.status()).isEqualTo(SecurityIncidentStatus.OPEN);
+                    assertThat(incident.disposition()).isEqualTo(SecurityDisposition.UNREVIEWED);
+                    assertThat(incident.handoffWorkItemId()).isNull();
+                });
+    }
+
+    @Test
+    void prefersTheAliasCopyWithTheMatchingOccurrenceTimeOverAnEarlierUnrelatedSource() {
+        List<SecurityEvent> polled = new ArrayList<>(List.of(event("SEC-LEGACY-ORDER", "A1", "ACCESS", BASE)));
+        SecurityIncidentService service = service(List.of(), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterBackedBy(polled)));
+        SecurityIncident reviewed = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(reviewed.incidentId(), SecurityDisposition.FALSE_POSITIVE, "APPROVER");
+        service.handoff(reviewed.incidentId());
+
+        polled.clear();
+        polled.add(withSource(event("SEC-LEGACY-ORDER", "A1", "ACCESS", BASE.minusSeconds(20 * 60)),
+                SecuritySourceType.CAMERA_ANALYTICS, "camera-1"));
+        polled.add(withSource(event("SEC-LEGACY-ORDER", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1"));
+
+        List<SecurityIncident> incidents = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        assertThat(incidents).hasSize(2);
+        assertThat(incidents).filteredOn(incident -> hasEventSource(incident, "access-1"))
+                .singleElement().satisfies(incident -> {
+                    assertThat(incident.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+                    assertThat(incident.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+                });
+        assertThat(incidents).filteredOn(incident -> hasEventSource(incident, "camera-1"))
+                .singleElement().satisfies(incident -> {
+                    assertThat(incident.status()).isEqualTo(SecurityIncidentStatus.OPEN);
+                    assertThat(incident.disposition()).isEqualTo(SecurityDisposition.UNREVIEWED);
+                    assertThat(incident.handoffWorkItemId()).isNull();
+                });
+    }
+
+    @Test
+    void foldsALegacyEventIntoTheAdapterCopyWithTheMatchingEventFacts() {
+        SecurityDispositionRecord registered = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1", BASE);
+        SecurityEvent legacy = eventWithDisposition(event("SEC-LEGACY-FACTS", "A1", "ACCESS", BASE), registered);
+        SecurityEvent earlierCamera = withSource(
+                event("SEC-LEGACY-FACTS", "A1", "ACCESS", BASE.minusSeconds(20 * 60)),
+                SecuritySourceType.CAMERA_ANALYTICS, "camera-1");
+        SecurityEvent matchingAccess = withSource(event("SEC-LEGACY-FACTS", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityIncidentService service = service(List.of(legacy), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterReturning(earlierCamera, matchingAccess)));
+
+        List<SecurityIncident> incidents = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        assertThat(incidents).hasSize(2);
+        assertThat(incidents).filteredOn(incident -> hasEventSource(incident, "camera-1"))
+                .singleElement().satisfies(incident ->
+                        assertThat(incident.disposition()).isEqualTo(SecurityDisposition.UNREVIEWED));
+        assertThat(incidents).filteredOn(incident ->
+                        incident.disposition() == SecurityDisposition.CONFIRMED_INCIDENT)
+                .singleElement();
+    }
+
+    @Test
+    void matchesUnsupportedVendorAliasesByRawTypeNotOnlyTimestamp() {
+        SecurityDispositionRecord registered = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1", BASE);
+        SecurityEvent legacy = eventWithDisposition(event("SEC-LEGACY-VENDOR", "A1", "DOOR_FORCED", BASE),
+                registered);
+        SecurityEvent unrelatedCamera = withSource(
+                event("SEC-LEGACY-VENDOR", "A1", "TURNSTILE_TAMPER", BASE.plusSeconds(5)),
+                SecuritySourceType.CAMERA_ANALYTICS, "camera-1");
+        SecurityEvent matchingAccess = withSource(
+                event("SEC-LEGACY-VENDOR", "A1", "DOOR_FORCED", BASE.plusSeconds(30)),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityIncidentService service = service(List.of(legacy), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterReturning(unrelatedCamera, matchingAccess)));
+
+        List<SecurityIncident> incidents = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        assertThat(incidents).hasSize(2);
+        assertThat(incidents).filteredOn(incident -> hasEventSource(incident, "camera-1"))
+                .singleElement().satisfies(incident ->
+                        assertThat(incident.disposition()).isEqualTo(SecurityDisposition.UNREVIEWED));
+        assertThat(incidents).filteredOn(incident -> hasEventSource(incident, "access-1"))
+                .singleElement().satisfies(incident ->
+                        assertThat(incident.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT));
+    }
+
+    @Test
+    void aliasesALegacyEventWithItsEnrichedAdapterCopy() {
+        SecurityEvent legacy = event("SEC-ALIAS", "A1", "ACCESS", BASE);
+        SecurityDispositionRecord registered = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(10));
+        SecurityEvent enriched = withSource(
+                enrichedEvent(legacy, registered, BASE.plusSeconds(5), SecurityEventSeverity.HIGH),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityIncidentService service = service(List.of(legacy), List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapterReturning(enriched)));
+
+        SecurityIncidentPage page = service.list(new SecurityIncidentQuery(null, 20));
+
+        assertThat(page.items()).singleElement().satisfies(incident -> {
+            assertThat(incident.evidence()).singleElement()
+                    .satisfies(evidence -> {
+                        assertThat(evidence.eventSourceId()).isEqualTo("access-1");
+                        assertThat(evidence.severity()).isEqualTo("HIGH");
+                    });
+            assertThat(incident.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+        });
+    }
+
+    @Test
+    void carriesARegisteredModelDispositionIntoTheBuiltIncident() {
+        SecurityDispositionRecord registered = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1", BASE);
+        SecurityEvent classified = eventWithDisposition(event("SEC-MODEL", "A1", "ACCESS", BASE), registered);
+
+        SecurityIncidentService service = service(List.of(classified));
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(incident.status()).isEqualTo(SecurityIncidentStatus.REVIEWED);
+        assertThat(incident.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+        assertThat(incident.dispositionRecord()).isEqualTo(registered);
+        assertThat(incident.reviewedAt()).isEqualTo(BASE);
+    }
+
+    @Test
+    void keepsTheLatestDecidedSourceDispositionWhenEventsDisagree() {
+        SecurityDispositionRecord earlier = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
+                SecurityDispositionSource.HUMAN_REVIEW, "analyst-1", null, null, null, BASE);
+        SecurityDispositionRecord later = new SecurityDispositionRecord(SecurityDisposition.INCONCLUSIVE,
+                SecurityDispositionSource.HUMAN_REVIEW, "analyst-2", null, null, null, BASE.plusSeconds(60));
+        SecurityEvent firstEvent = eventWithDisposition(event("SEC-D1", "A1", "ACCESS", BASE), earlier);
+        SecurityEvent secondEvent = eventWithDisposition(event("SEC-D2", "A1", "ACCESS", BASE.plusSeconds(60)), later);
+
+        SecurityIncidentService service = service(List.of(firstEvent, secondEvent));
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(incident.status()).isEqualTo(SecurityIncidentStatus.REVIEWED);
+        assertThat(incident.disposition()).isEqualTo(SecurityDisposition.INCONCLUSIVE);
+        assertThat(incident.dispositionRecord()).isEqualTo(later);
+        assertThat(incident.reviewedAt()).isEqualTo(BASE.plusSeconds(60));
+    }
+
+    @Test
+    void upgradesAStoredUnreviewedIncidentWhenTheSourceLaterSuppliesADisposition() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-UPGRADE", "A1", "ACCESS", BASE)));
+        SecurityIncidentService service = service(events, List.of(), 50);
+        SecurityIncident initial = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        assertThat(initial.status()).isEqualTo(SecurityIncidentStatus.OPEN);
+        assertThat(initial.disposition()).isEqualTo(SecurityDisposition.UNREVIEWED);
+
+        SecurityDispositionRecord model = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(300));
+        events.set(0, eventWithDisposition(event("SEC-UPGRADE", "A1", "ACCESS", BASE), model));
+
+        SecurityIncident upgraded = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(upgraded.incidentId()).isEqualTo(initial.incidentId());
+        assertThat(upgraded.status()).isEqualTo(SecurityIncidentStatus.REVIEWED);
+        assertThat(upgraded.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+        assertThat(upgraded.dispositionRecord()).isEqualTo(model);
+        assertThat(upgraded.reviewedAt()).isEqualTo(BASE.plusSeconds(300));
+    }
+
+    @Test
+    void keepsAStoredHumanDecisionWhenTheSourceLaterSuppliesANewerModelDecision() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-HUMAN", "A1", "ACCESS", BASE)));
+        SecurityIncidentService service = service(events, List.of(), 50);
+        SecurityIncident initial = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        SecurityIncident reviewed = service.review(initial.incidentId(), SecurityDisposition.CONFIRMED_INCIDENT,
+                "APPROVER");
+
+        SecurityDispositionRecord newerModel = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-2", "2026.10", "evt-2",
+                BASE.plusSeconds(600));
+        events.set(0, eventWithDisposition(event("SEC-HUMAN", "A1", "ACCESS", BASE), newerModel));
+
+        SecurityIncident restored = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(restored.status()).isEqualTo(SecurityIncidentStatus.REVIEWED);
+        assertThat(restored.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+        assertThat(restored.dispositionRecord()).isEqualTo(reviewed.dispositionRecord());
+        assertThat(restored.dispositionRecord().source()).isEqualTo(SecurityDispositionSource.HUMAN_REVIEW);
+        assertThat(restored.reviewedAt()).isEqualTo(reviewed.reviewedAt());
+    }
+
+    @Test
+    void replacesAnOlderStoredSourceDecisionWithANewerOne() {
+        SecurityDispositionRecord older = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(60));
+        List<SecurityEvent> events = new ArrayList<>(List.of(eventWithDisposition(
+                event("SEC-MODEL-CORRECTION", "A1", "ACCESS", BASE), older)));
+        SecurityIncidentService service = service(events, List.of(), 50);
+        service.list(new SecurityIncidentQuery(null, 20));
+
+        SecurityDispositionRecord newer = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-2", "2026.10", "evt-2",
+                BASE.plusSeconds(600));
+        events.set(0, eventWithDisposition(event("SEC-MODEL-CORRECTION", "A1", "ACCESS", BASE), newer));
+
+        SecurityIncident corrected = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(corrected.status()).isEqualTo(SecurityIncidentStatus.REVIEWED);
+        assertThat(corrected.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+        assertThat(corrected.dispositionRecord()).isEqualTo(newer);
+        assertThat(corrected.reviewedAt()).isEqualTo(BASE.plusSeconds(600));
+    }
+
+    @Test
+    void appliesANewerSourceCorrectionToAnEvictedHandedOffIncident() {
+        SecurityDispositionRecord initial = new SecurityDispositionRecord(SecurityDisposition.CONFIRMED_INCIDENT,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(60));
+        List<SecurityEvent> events = new ArrayList<>(List.of(eventWithDisposition(
+                event("SEC-CORRECT", "A1", "ACCESS", BASE), initial)));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 1, handoffs);
+        SecurityIncident initialIncident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        assertThat(initialIncident.status()).isEqualTo(SecurityIncidentStatus.REVIEWED);
+        SecurityIncident handedOff = service.handoff(initialIncident.incidentId());
+
+        events.add(event("SEC-EVICT", "A1", "ACCESS", BASE.plusSeconds(16 * 60)));
+        service.list(new SecurityIncidentQuery(null, 20));
+
+        SecurityDispositionRecord correction = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-2", "2026.10", "evt-2",
+                BASE.plusSeconds(600));
+        events.set(0, eventWithDisposition(event("SEC-CORRECT", "A1", "ACCESS", BASE), correction));
+
+        SecurityIncident restored = service.get(initialIncident.incidentId());
+
+        assertThat(restored.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(restored.handoffWorkItemId()).isEqualTo(handedOff.handoffWorkItemId());
+        assertThat(restored.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+        assertThat(restored.dispositionRecord()).isEqualTo(correction);
+        assertThat(handoffs.list()).singleElement()
+                .satisfies(handoff -> assertThat(handoff.dispositionRecord()).isEqualTo(correction));
+    }
+
+    @Test
+    void reservesARetainedHandoffForTheSourceWhoseOccurrenceTimeMatches() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-ALIAS-EVICT", "A1", "ACCESS", BASE)));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 1, handoffs);
+        SecurityIncident initial = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(initial.incidentId(), SecurityDisposition.FALSE_POSITIVE, "APPROVER");
+        SecurityIncident handedOff = service.handoff(initial.incidentId());
+
+        // A later event evicts the source-less incident from the bounded incident store
+        // while its human-reviewed handoff survives.
+        events.add(event("SEC-EVICT", "A1", "ACCESS", BASE.plusSeconds(16 * 60)));
+        service.list(new SecurityIncidentQuery(null, 20));
+
+        // Two concrete sources now reuse the evicted event id: an unrelated camera copy
+        // 20 minutes earlier and the access copy matching the handed-off occurrence.
+        events.remove(0);
+        events.add(withSource(event("SEC-ALIAS-EVICT", "A1", "ACCESS", BASE.minusSeconds(20 * 60)),
+                SecuritySourceType.CAMERA_ANALYTICS, "camera-1"));
+        events.add(withSource(event("SEC-ALIAS-EVICT", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1"));
+
+        SecurityIncident restored = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.status() == SecurityIncidentStatus.HANDOFF)
+                .findFirst().orElseThrow();
+
+        assertThat(restored.handoffWorkItemId()).isEqualTo(handedOff.handoffWorkItemId());
+        assertThat(restored.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+        assertThat(hasEventSource(restored, "access-1")).isTrue();
+        assertThat(hasEventSource(restored, "camera-1")).isFalse();
+        assertThat(handoffs.list()).singleElement()
+                .satisfies(handoff -> assertThat(handoff.eventIdentities())
+                        .anyMatch(identity -> identity.source().sourceId().equals("access-1")));
+    }
+
+    @Test
+    void keepsAStoredHumanHandoffDispositionWhenTheSourceLaterSuppliesANewerModelDecision() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-HANDOFF-HUMAN", "A1", "ACCESS", BASE)));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 1, handoffs);
+        SecurityIncident initial = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        SecurityIncident reviewed = service.review(initial.incidentId(), SecurityDisposition.CONFIRMED_INCIDENT,
+                "APPROVER");
+        service.handoff(initial.incidentId());
+
+        events.add(event("SEC-EVICT", "A1", "ACCESS", BASE.plusSeconds(16 * 60)));
+        service.list(new SecurityIncidentQuery(null, 20));
+
+        SecurityDispositionRecord newerModel = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-2", "2026.10", "evt-2",
+                BASE.plusSeconds(600));
+        events.set(0, eventWithDisposition(event("SEC-HANDOFF-HUMAN", "A1", "ACCESS", BASE), newerModel));
+
+        SecurityIncident restored = service.get(initial.incidentId());
+
+        assertThat(restored.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(restored.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+        assertThat(restored.dispositionRecord()).isEqualTo(reviewed.dispositionRecord());
+        assertThat(handoffs.list()).singleElement()
+                .satisfies(handoff -> assertThat(handoff.dispositionRecord().source())
+                        .isEqualTo(SecurityDispositionSource.HUMAN_REVIEW));
+    }
+
+    @Test
+    void keepsAStoredHumanDecisionWhenRecoveringFromAnEvictedModelHandoff() {
+        SecurityDispositionRecord model = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(60));
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                eventWithDisposition(event("SEC-MODEL", "A1", "ACCESS", BASE), model)));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 1, handoffs);
+        SecurityIncident modelIncident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        SecurityIncident handedOff = service.handoff(modelIncident.incidentId());
+
+        // The source-modelled incident is evicted from the incident store while its
+        // handoff survives; the newer human-reviewed incident remains stored.
+        events.add(event("SEC-HUMAN", "A1", "ACCESS", BASE.plusSeconds(16 * 60)));
+        SecurityIncident humanIncident = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.disposition() == SecurityDisposition.UNREVIEWED).findFirst().orElseThrow();
+        SecurityIncident reviewed = service.review(humanIncident.incidentId(), SecurityDisposition.CONFIRMED_INCIDENT,
+                "APPROVER");
+
+        // A bridge event merges the fresh evidence back together; recovering the retained
+        // model handoff must not bury the stored human decision.
+        events.add(event("SEC-BRIDGE", "A1", "ACCESS", BASE.plusSeconds(8 * 60)));
+        SecurityIncident restored = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(restored.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(restored.handoffWorkItemId()).isEqualTo(handedOff.handoffWorkItemId());
+        assertThat(restored.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+        assertThat(restored.dispositionRecord()).isEqualTo(reviewed.dispositionRecord());
+        assertThat(handoffs.list()).singleElement()
+                .satisfies(handoff -> assertThat(handoff.dispositionRecord()).isEqualTo(reviewed.dispositionRecord()));
+    }
+
+    @Test
+    void reconcilesEveryRetainedHandoffDecisionWhenTwoEvictedWindowsMerge() {
+        SecurityDispositionRecord model = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(60));
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                eventWithDisposition(event("SEC-A-MODEL", "A1", "ACCESS", BASE), model)));
+        List<SecurityIncidentHandoff> handoffs = new ArrayList<>();
+        SecurityIncidentService service = service(events, List.of(), 1, orderedHandoffs(handoffs));
+
+        SecurityIncident modelIncident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.handoff(modelIncident.incidentId());
+
+        events.add(event("SEC-B-HUMAN", "A1", "ACCESS", BASE.plusSeconds(30 * 60)));
+        SecurityIncident humanIncident = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.disposition() == SecurityDisposition.UNREVIEWED).findFirst().orElseThrow();
+        SecurityIncident reviewed = service.review(humanIncident.incidentId(), SecurityDisposition.CONFIRMED_INCIDENT,
+                "APPROVER");
+        service.handoff(humanIncident.incidentId());
+
+        // A newer event evicts the second handed-off incident too; only the handoffs survive.
+        events.add(event("SEC-EVICT", "A1", "ACCESS", BASE.plusSeconds(90 * 60)));
+        service.list(new SecurityIncidentQuery(null, 20));
+
+        // A bridge event merges the two evicted windows back into one incident. Folding only
+        // the earliest handoff would bury the human review and then retire it with the
+        // duplicate work item.
+        events.add(event("SEC-BRIDGE", "A1", "ACCESS", BASE.plusSeconds(15 * 60)));
+        SecurityIncident merged = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.status() == SecurityIncidentStatus.HANDOFF).findFirst().orElseThrow();
+
+        assertThat(merged.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+        assertThat(merged.dispositionRecord()).isEqualTo(reviewed.dispositionRecord());
+        assertThat(handoffs).singleElement()
+                .satisfies(handoff -> assertThat(handoff.dispositionRecord().source())
+                        .isEqualTo(SecurityDispositionSource.HUMAN_REVIEW));
+    }
+
+    @Test
+    void keepsARetainedHumanDecisionWhenAStoredModelHandoffSurvives() {
+        SecurityDispositionRecord model = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(16 * 60));
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-HUMAN", "A1", "ACCESS", BASE)));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 2, handoffs);
+        SecurityIncident humanIncident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        SecurityIncident reviewed = service.review(humanIncident.incidentId(), SecurityDisposition.CONFIRMED_INCIDENT,
+                "APPROVER");
+        service.handoff(humanIncident.incidentId());
+
+        events.add(eventWithDisposition(event("SEC-MODEL", "A1", "ACCESS", BASE.plusSeconds(16 * 60)), model));
+        SecurityIncident modelIncident = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.disposition() == SecurityDisposition.FALSE_POSITIVE).findFirst()
+                .orElseThrow();
+        SecurityIncident handedOff = service.handoff(modelIncident.incidentId());
+
+        // A newer unrelated window evicts the human-reviewed incident while the model-decided
+        // handoff stays in the bounded store.
+        events.add(event("SEC-EVICT", "A1", "ACCESS", BASE.plusSeconds(90 * 60)));
+        service.list(new SecurityIncidentQuery(null, 20));
+
+        // A bridge event merges the fresh evidence back together; the stored handoff keeps the
+        // work item, but the retained human review must not be silently retired with it.
+        events.add(event("SEC-BRIDGE", "A1", "ACCESS", BASE.plusSeconds(8 * 60)));
+        SecurityIncident merged = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.status() == SecurityIncidentStatus.HANDOFF).findFirst().orElseThrow();
+
+        assertThat(merged.handoffWorkItemId()).isEqualTo(handedOff.handoffWorkItemId());
+        assertThat(merged.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+        assertThat(merged.dispositionRecord()).isEqualTo(reviewed.dispositionRecord());
+        assertThat(handoffs.list()).singleElement()
+                .satisfies(handoff -> assertThat(handoff.dispositionRecord())
+                        .isEqualTo(reviewed.dispositionRecord()));
+    }
+
+    @Test
+    void retainsTheHumanDecisionForEachSplitOfAMultiEventIncident() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-A", "A1", "ACCESS", BASE),
+                event("SEC-B", "A1", "ACCESS", BASE.plusSeconds(120))));
+        SecurityIncidentService service = service(events, List.of(), 20);
+        SecurityIncident multiEvent = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.eventIds().size() == 2).findFirst().orElseThrow();
+        SecurityIncident reviewed = service.review(multiEvent.incidentId(), SecurityDisposition.CONFIRMED_INCIDENT,
+                "APPROVER");
+
+        // Adapter enrichment replaces the source-less copies with concrete ones whose corrected
+        // occurrence times split the two events into separate windows; each window uniquely
+        // aliases one stored identity and must retain the finalized human state.
+        events.clear();
+        events.add(withSource(event("SEC-A", "A1", "ACCESS", BASE), SecuritySourceType.ACCESS_CONTROL, "access-a"));
+        events.add(withSource(event("SEC-B", "A1", "ACCESS", BASE.plusSeconds(30 * 60)),
+                SecuritySourceType.ACCESS_CONTROL, "access-b"));
+
+        List<SecurityIncident> restored = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        assertThat(restored).hasSize(2);
+        assertThat(restored).allSatisfy(incident -> {
+            assertThat(incident.status()).isEqualTo(SecurityIncidentStatus.REVIEWED);
+            assertThat(incident.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+            assertThat(incident.dispositionRecord()).isEqualTo(reviewed.dispositionRecord());
+        });
+    }
+
+    @Test
+    void ranksAliasCopiesByTheStoredIdentitysOwnOccurrenceTime() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-A", "A1", "ACCESS", BASE),
+                event("SEC-B", "A1", "ACCESS", BASE.plusSeconds(10 * 60))));
+        SecurityIncidentService service = service(events, List.of(), 20);
+        SecurityIncident multiEvent = service.list(new SecurityIncidentQuery(null, 20)).items().stream()
+                .filter(incident -> incident.eventIds().size() == 2).findFirst().orElseThrow();
+        SecurityIncident reviewed = service.review(multiEvent.incidentId(), SecurityDisposition.CONFIRMED_INCIDENT,
+                "APPROVER");
+
+        // Two concrete sources expose SEC-A in separate windows: one near SEC-A's own time and
+        // one near the incident's final event (SEC-B). Only the first is the genuine enrichment,
+        // but ranking against the incident-wide lastOccurredAt would reserve the second.
+        events.clear();
+        events.add(withSource(event("SEC-A", "A1", "ACCESS", BASE.minusSeconds(8 * 60)),
+                SecuritySourceType.ACCESS_CONTROL, "access-a"));
+        events.add(withSource(event("SEC-A", "A1", "ACCESS", BASE.plusSeconds(12 * 60)),
+                SecuritySourceType.CAMERA_ANALYTICS, "camera-a"));
+
+        List<SecurityIncident> restored = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        assertThat(restored).filteredOn(incident -> hasEventSource(incident, "access-a")).singleElement()
+                .satisfies(incident -> {
+                    assertThat(incident.status()).isEqualTo(SecurityIncidentStatus.REVIEWED);
+                    assertThat(incident.dispositionRecord()).isEqualTo(reviewed.dispositionRecord());
+                });
+        assertThat(restored).filteredOn(incident -> hasEventSource(incident, "camera-a")).singleElement()
+                .satisfies(incident -> {
+                    assertThat(incident.status()).isEqualTo(SecurityIncidentStatus.OPEN);
+                    assertThat(incident.disposition()).isEqualTo(SecurityDisposition.UNREVIEWED);
+                });
+    }
+
+    @Test
+    void ranksRetainedHandoffAliasCopiesByTheIdentitysOwnOccurrenceTime() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(
+                event("SEC-A", "A1", "ACCESS", BASE),
+                event("SEC-B", "A1", "ACCESS", BASE.plusSeconds(10 * 60))));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 2, handoffs);
+        SecurityIncident multiEvent = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        SecurityIncident reviewed = service.review(multiEvent.incidentId(), SecurityDisposition.CONFIRMED_INCIDENT,
+                "APPROVER");
+        service.handoff(multiEvent.incidentId());
+
+        // Two newer windows evict the reviewed incident from the bounded store, so only the
+        // handoff projection retains the human decision and the per-identity occurrence times.
+        events.add(event("SEC-EVICT-1", "A1", "ACCESS", BASE.plusSeconds(60 * 60)));
+        events.add(event("SEC-EVICT-2", "A1", "ACCESS", BASE.plusSeconds(120 * 60)));
+        service.list(new SecurityIncidentQuery(null, 20));
+        events.clear();
+
+        events.add(withSource(event("SEC-A", "A1", "ACCESS", BASE.minusSeconds(8 * 60)),
+                SecuritySourceType.ACCESS_CONTROL, "access-a"));
+        events.add(withSource(event("SEC-A", "A1", "ACCESS", BASE.plusSeconds(12 * 60)),
+                SecuritySourceType.CAMERA_ANALYTICS, "camera-a"));
+
+        List<SecurityIncident> restored = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        assertThat(restored).filteredOn(incident -> hasEventSource(incident, "access-a")).singleElement()
+                .satisfies(incident -> {
+                    assertThat(incident.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+                    assertThat(incident.dispositionRecord()).isEqualTo(reviewed.dispositionRecord());
+                });
+        assertThat(restored).filteredOn(incident -> hasEventSource(incident, "camera-a")).singleElement()
+                .satisfies(incident -> {
+                    assertThat(incident.status()).isEqualTo(SecurityIncidentStatus.OPEN);
+                    assertThat(incident.disposition()).isEqualTo(SecurityDisposition.UNREVIEWED);
+                });
     }
 
     @Test
@@ -158,6 +1177,100 @@ class SecurityIncidentServiceTest {
         assertThat(restored.riskLevel()).isEqualTo(SecurityIncidentRisk.HIGH);
         assertThat(restored.recommendations()).containsExactly(
                 "核对安全处置手册并由授权人员复核。", "必要时记录协同交接并保留人工审计。");
+    }
+
+    @Test
+    void linksAlertsBySourceQualifiedEventReference() {
+        SecurityEvent access = withSource(event("SEC-SHARED-REF", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        SecurityEvent camera = withSource(event("SEC-SHARED-REF", "A1", "ACCESS", BASE.plusSeconds(20 * 60)),
+                SecuritySourceType.CAMERA_ANALYTICS, "camera-1");
+        Alert accessAlert = new Alert("ALT-ACCESS", "PARK-A", "A1", "DEV-1", AlertClassification.ACCESS,
+                RiskLevel.HIGH, "REDACTED: access alert", BASE,
+                List.of(SecurityEventIdentity.of(access).reference()));
+        SecurityIncidentService service = service(List.of(access, camera), List.of(accessAlert));
+
+        List<SecurityIncident> incidents = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        assertThat(incidents).hasSize(2);
+        assertThat(incidents).filteredOn(incident -> hasEventSource(incident, "access-1"))
+                .singleElement().satisfies(incident -> {
+                    assertThat(incident.alertIds()).containsExactly("ALT-ACCESS");
+                    assertThat(incident.riskLevel()).isEqualTo(SecurityIncidentRisk.HIGH);
+                });
+        assertThat(incidents).filteredOn(incident -> hasEventSource(incident, "camera-1"))
+                .singleElement().satisfies(incident -> {
+                    assertThat(incident.alertIds()).isEmpty();
+                    assertThat(incident.riskLevel()).isEqualTo(SecurityIncidentRisk.MEDIUM);
+                });
+    }
+
+    @Test
+    void linksAlertsByALocationLessSourceQualifiedReference() {
+        SecurityEvent access = withSource(event("SEC-OLD-REF", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        Alert accessAlert = new Alert("ALT-OLD-REF", "PARK-A", "A1", "DEV-1", AlertClassification.ACCESS,
+                RiskLevel.HIGH, "REDACTED: access alert", BASE,
+                List.of(locationLessReference("ACCESS_CONTROL", "access-1", "SEC-OLD-REF")));
+        SecurityIncidentService service = service(List.of(access), List.of(accessAlert));
+
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        // A previously emitted three-part token has no location, so it is completed from the
+        // alert's location and still links the HIGH alert to its incident.
+        assertThat(incident.alertIds()).containsExactly("ALT-OLD-REF");
+        assertThat(incident.riskLevel()).isEqualTo(SecurityIncidentRisk.HIGH);
+    }
+
+    @Test
+    void ignoresAnAlertReferenceWhoseSourceIdViolatesTheIdentifierPolicy() {
+        SecurityEvent access = withSource(event("SEC-UNSAFE-REF", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        Alert unsafeAlert = new Alert("ALT-UNSAFE", "PARK-A", "A1", "DEV-1", AlertClassification.ACCESS,
+                RiskLevel.HIGH, "REDACTED: unsafe alert", BASE,
+                List.of(locationLessReference("ACCESS_CONTROL", "token=value", "SEC-UNSAFE-REF")));
+        SecurityIncidentService service = service(List.of(access), List.of(unsafeAlert));
+
+        List<SecurityIncident> incidents = service.list(new SecurityIncidentQuery(null, 20)).items();
+
+        // A malformed reference on one active alert must match nothing rather than abort
+        // every incident list/get/review call while the index is being built.
+        assertThat(incidents).singleElement().satisfies(incident -> {
+            assertThat(incident.alertIds()).isEmpty();
+            assertThat(incident.riskLevel()).isEqualTo(SecurityIncidentRisk.MEDIUM);
+        });
+    }
+
+    @Test
+    void linksAlertsByTheLocationEncodedInAQualifiedReference() {
+        SecurityEvent foreign = withSource(event("SEC-FOREIGN-REF", "PARK-B", "B1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        Alert alert = new Alert("ALT-FOREIGN-REF", "PARK-A", "A1", "DEV-1", AlertClassification.ACCESS,
+                RiskLevel.HIGH, "REDACTED: cross-location alert", BASE,
+                List.of(SecurityEventIdentity.of(foreign).reference()));
+        SecurityIncidentService service = service(List.of(foreign), List.of(alert));
+
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        // The token names PARK-B/B1 and the workflow resolves it there, so the key must use
+        // the encoded location rather than the alert's own PARK-A/A1.
+        assertThat(incident.parkId()).isEqualTo("PARK-B");
+        assertThat(incident.alertIds()).containsExactly("ALT-FOREIGN-REF");
+        assertThat(incident.riskLevel()).isEqualTo(SecurityIncidentRisk.HIGH);
+    }
+
+    @Test
+    void keepsLegacyAlertReferencesAsAnExplicitAlias() {
+        SecurityEvent access = withSource(event("SEC-LEGACY-REF", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "access-1");
+        Alert legacyAlert = new Alert("ALT-LEGACY", "PARK-A", "A1", "DEV-1", AlertClassification.ACCESS,
+                RiskLevel.HIGH, "REDACTED: legacy alert", BASE, List.of("security-event:SEC-LEGACY-REF"));
+        SecurityIncidentService service = service(List.of(access), List.of(legacyAlert));
+
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(incident.alertIds()).containsExactly("ALT-LEGACY");
+        assertThat(incident.riskLevel()).isEqualTo(SecurityIncidentRisk.HIGH);
     }
 
     @Test
@@ -416,7 +1529,8 @@ class SecurityIncidentServiceTest {
         SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
         SecurityIncidentService service = service(events, List.of(), 1, handoffs);
         SecurityIncident initial = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
-        SecurityIncident reviewed = service.review(initial.incidentId());
+        SecurityIncident reviewed = service.review(initial.incidentId(), SecurityDisposition.FALSE_POSITIVE,
+                "APPROVER");
         service.handoff(initial.incidentId());
         events.add(event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(16 * 60)));
         service.list(new SecurityIncidentQuery(null, 20));
@@ -425,6 +1539,30 @@ class SecurityIncidentServiceTest {
 
         assertThat(restored.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
         assertThat(restored.reviewedAt()).isEqualTo(reviewed.reviewedAt());
+        assertThat(restored.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+        assertThat(restored.dispositionRecord().source()).isEqualTo(SecurityDispositionSource.HUMAN_REVIEW);
+    }
+
+    @Test
+    void keepsAHumanDispositionWhenTheEventStoreEvictsAHandedOffIncident() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        SecurityIncidentHandoffStore handoffs = new SecurityIncidentHandoffStore(10);
+        SecurityIncidentService service = service(events, List.of(), 1, handoffs);
+        SecurityIncident initial = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+        service.review(initial.incidentId(), SecurityDisposition.FALSE_POSITIVE, "APPROVER");
+        service.handoff(initial.incidentId());
+        events.add(event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(16 * 60)));
+        service.list(new SecurityIncidentQuery(null, 20));
+
+        SecurityIncident restored = service.get(initial.incidentId());
+
+        assertThat(restored.status()).isEqualTo(SecurityIncidentStatus.HANDOFF);
+        assertThat(restored.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+        assertThat(restored.dispositionRecord().source()).isEqualTo(SecurityDispositionSource.HUMAN_REVIEW);
+        assertThat(restored.dispositionRecord().actor()).isEqualTo("APPROVER");
+        assertThat(handoffs.list()).singleElement()
+                .satisfies(handoff -> assertThat(handoff.dispositionRecord().disposition())
+                        .isEqualTo(SecurityDisposition.FALSE_POSITIVE));
     }
 
     @Test
@@ -605,6 +1743,71 @@ class SecurityIncidentServiceTest {
                 .isEqualTo(merged.handoffWorkItemId());
     }
 
+    @Test
+    void recordsAHumanDispositionWhenReviewingAnIncident() {
+        SecurityIncidentService service = service(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        String incidentId = service.list(new SecurityIncidentQuery(null, 20)).items().get(0).incidentId();
+
+        SecurityIncident reviewed = service.review(incidentId, SecurityDisposition.FALSE_POSITIVE, "APPROVER");
+
+        assertThat(reviewed.status()).isEqualTo(SecurityIncidentStatus.REVIEWED);
+        assertThat(reviewed.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+        assertThat(reviewed.reviewedAt()).isEqualTo(BASE.plusSeconds(3600));
+        assertThat(reviewed.dispositionRecord().source()).isEqualTo(SecurityDispositionSource.HUMAN_REVIEW);
+        assertThat(reviewed.dispositionRecord().actor()).isEqualTo("APPROVER");
+        assertThat(reviewed.dispositionRecord().evidenceRef()).isEqualTo("human-review:" + incidentId);
+        assertThat(reviewed.dispositionRecord().decidedAt()).isEqualTo(BASE.plusSeconds(3600));
+    }
+
+    @Test
+    void defaultsToConfirmedIncidentForTheLegacyReviewEntryPoint() {
+        SecurityIncidentService service = service(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        String incidentId = service.list(new SecurityIncidentQuery(null, 20)).items().get(0).incidentId();
+
+        SecurityIncident reviewed = service.review(incidentId);
+
+        assertThat(reviewed.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+        assertThat(reviewed.dispositionRecord().source()).isEqualTo(SecurityDispositionSource.HUMAN_REVIEW);
+    }
+
+    @Test
+    void keepsTheFirstDispositionOnIdempotentReview() {
+        SecurityIncidentService service = service(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        String incidentId = service.list(new SecurityIncidentQuery(null, 20)).items().get(0).incidentId();
+
+        service.review(incidentId, SecurityDisposition.CONFIRMED_INCIDENT, "APPROVER");
+        SecurityIncident second = service.review(incidentId, SecurityDisposition.FALSE_POSITIVE, "ADMIN");
+
+        assertThat(second.disposition()).isEqualTo(SecurityDisposition.CONFIRMED_INCIDENT);
+        assertThat(second.dispositionRecord().actor()).isEqualTo("APPROVER");
+    }
+
+    @Test
+    void rejectsAnUnreviewedDispositionDecision() {
+        SecurityIncidentService service = service(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        String incidentId = service.list(new SecurityIncidentQuery(null, 20)).items().get(0).incidentId();
+
+        assertThatThrownBy(() -> service.review(incidentId, SecurityDisposition.UNREVIEWED, "APPROVER"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("decided disposition");
+    }
+
+    @Test
+    void retainsAStoredDispositionWhenNewEventsArrive() {
+        List<SecurityEvent> events = new ArrayList<>(List.of(event("SEC-1", "A1", "ACCESS", BASE)));
+        SecurityIncidentService service = service(events);
+        String incidentId = service.list(new SecurityIncidentQuery(null, 20)).items().get(0).incidentId();
+        service.review(incidentId, SecurityDisposition.FALSE_POSITIVE, "APPROVER");
+
+        events.add(event("SEC-2", "A1", "ACCESS", BASE.plusSeconds(60)));
+
+        SecurityIncident restored = service.get(incidentId);
+        assertThat(restored.status()).isEqualTo(SecurityIncidentStatus.REVIEWED);
+        assertThat(restored.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+        assertThat(restored.dispositionRecord().source()).isEqualTo(SecurityDispositionSource.HUMAN_REVIEW);
+        assertThat(restored.dispositionRecord().actor()).isEqualTo("APPROVER");
+    }
+
     private static SecurityIncidentService service(List<SecurityEvent> events) {
         return service(events, List.of(), 50);
     }
@@ -613,13 +1816,22 @@ class SecurityIncidentServiceTest {
         return service(events, alerts, 50);
     }
 
+    private static String locationLessReference(String sourceType, String sourceId, String eventId) {
+        return SecurityEventIdentity.REFERENCE_PREFIX + "source:"
+                + sourceType.length() + "#" + sourceType + ":"
+                + sourceId.length() + "#" + sourceId + ":"
+                + eventId.length() + "#" + eventId;
+    }
+
     private static SecurityIncidentService service(List<SecurityEvent> events, List<Alert> alerts, int capacity) {
         List<SecurityIncidentHandoff> created = new ArrayList<>();
         return service(events, alerts, capacity, new SecurityIncidentHandoffPort() {
             @Override
             public SecurityIncidentHandoff createOrGet(SecurityIncident incident, Instant now) {
                 SecurityIncidentHandoff handoff = new SecurityIncidentHandoff("WI:" + incident.incidentId(), incident.incidentId(), incident.parkId(),
-                        incident.buildingId(), incident.riskLevel(), incident.summary(), now);
+                        incident.buildingId(), incident.riskLevel(), incident.summary(), now, null, now,
+                        incident.eventType(), incident.eventIdentities(), incident.dispositionRecord(),
+                        incident.lastOccurredAt());
                 created.removeIf(existing -> existing.workItemId().equals(handoff.workItemId()));
                 created.add(handoff);
                 return handoff;
@@ -633,7 +1845,8 @@ class SecurityIncidentServiceTest {
                 if (existing == null) return createOrGet(incident, now);
                 SecurityIncidentHandoff refreshed = new SecurityIncidentHandoff(existing.workItemId(), incident.incidentId(),
                         incident.parkId(), incident.buildingId(), incident.riskLevel(), incident.summary(),
-                        existing.createdAt(), existing.reviewedAt(), now, incident.eventType(), incident.eventIds());
+                        existing.createdAt(), existing.reviewedAt(), now, incident.eventType(), incident.eventIdentities(),
+                        incident.dispositionRecord(), incident.lastOccurredAt());
                 created.removeIf(handoff -> handoff.workItemId().equals(existing.workItemId()));
                 created.add(refreshed);
                 return refreshed;
@@ -653,7 +1866,60 @@ class SecurityIncidentServiceTest {
 
     private static SecurityIncidentService service(List<SecurityEvent> events, List<Alert> alerts, int capacity,
                                                     SecurityIncidentHandoffPort handoffs) {
-        SecurityEventReader security = new SecurityEventReader() {
+        return service(events, alerts, capacity, handoffs, List.of());
+    }
+
+    /**
+     * Retains handoffs like the in-memory store, but stamps each new handoff with a
+     * strictly increasing {@code createdAt} so a test can deterministically select
+     * the earliest work item. The fixed test clock otherwise ties every handoff.
+     */
+    private static SecurityIncidentHandoffPort orderedHandoffs(List<SecurityIncidentHandoff> created) {
+        return new SecurityIncidentHandoffPort() {
+            private int createdCount;
+
+            @Override
+            public SecurityIncidentHandoff createOrGet(SecurityIncident incident, Instant now) {
+                SecurityIncidentHandoff handoff = new SecurityIncidentHandoff("WI:" + incident.incidentId(),
+                        incident.incidentId(), incident.parkId(), incident.buildingId(), incident.riskLevel(),
+                        incident.summary(), now.plusSeconds(createdCount++), null, now, incident.eventType(),
+                        incident.eventIdentities(), incident.dispositionRecord(), incident.lastOccurredAt());
+                created.removeIf(existing -> existing.workItemId().equals(handoff.workItemId()));
+                created.add(handoff);
+                return handoff;
+            }
+
+            @Override
+            public SecurityIncidentHandoff refresh(SecurityIncident incident, Instant now) {
+                SecurityIncidentHandoff existing = created.stream()
+                        .filter(handoff -> handoff.workItemId().equals(incident.handoffWorkItemId()))
+                        .findFirst().orElse(null);
+                if (existing == null) return createOrGet(incident, now);
+                SecurityIncidentHandoff refreshed = new SecurityIncidentHandoff(existing.workItemId(),
+                        incident.incidentId(), incident.parkId(), incident.buildingId(), incident.riskLevel(),
+                        incident.summary(), existing.createdAt(), existing.reviewedAt(), now, incident.eventType(),
+                        incident.eventIdentities(), incident.dispositionRecord(), incident.lastOccurredAt());
+                created.removeIf(handoff -> handoff.workItemId().equals(existing.workItemId()));
+                created.add(refreshed);
+                return refreshed;
+            }
+
+            @Override
+            public List<SecurityIncidentHandoff> list() {
+                return List.copyOf(created);
+            }
+
+            @Override
+            public void retire(String incidentId) {
+                created.removeIf(handoff -> handoff.incidentId().equals(incidentId));
+            }
+        };
+    }
+
+    private static SecurityIncidentService service(List<SecurityEvent> events, List<Alert> alerts, int capacity,
+                                                    SecurityIncidentHandoffPort handoffs,
+                                                    List<SecuritySourceAdapter> sourceAdapters) {
+        return service(new SecurityEventReader() {
             @Override
             public SecurityEvent getEvent(String eventId) {
                 return events.stream().filter(event -> event.eventId().equals(eventId)).findFirst().orElseThrow();
@@ -663,7 +1929,12 @@ class SecurityIncidentServiceTest {
             public List<SecurityEvent> listEvents() {
                 return events;
             }
-        };
+        }, alerts, capacity, handoffs, sourceAdapters);
+    }
+
+    private static SecurityIncidentService service(SecurityEventReader security, List<Alert> alerts, int capacity,
+                                                    SecurityIncidentHandoffPort handoffs,
+                                                    List<SecuritySourceAdapter> sourceAdapters) {
         AlertPort alertPort = new AlertPort() {
             @Override
             public Alert getAlert(String alertId) {
@@ -681,7 +1952,57 @@ class SecurityIncidentServiceTest {
             }
         };
         return new SecurityIncidentService(security, alertPort, new SecurityIncidentStore(capacity), handoffs,
-                Clock.fixed(BASE.plusSeconds(3600), ZoneOffset.UTC));
+                Clock.fixed(BASE.plusSeconds(3600), ZoneOffset.UTC), sourceAdapters);
+    }
+
+    private static boolean hasEventSource(SecurityIncident incident, String eventSourceId) {
+        return incident.evidence().stream()
+                .anyMatch(evidence -> eventSourceId.equals(evidence.eventSourceId()));
+    }
+
+    private static SecuritySourceAdapter productionDispositionAdapter(String sourceId, SecurityEvent... events) {
+        return new SecuritySourceAdapter() {
+            @Override
+            public SecuritySourceDescriptor descriptor() {
+                return new SecuritySourceDescriptor(sourceId, SecuritySourceType.ACCESS_CONTROL,
+                        Set.of(SecurityEventType.ACCESS_ANOMALY), true, true);
+            }
+
+            @Override
+            public List<SecurityEvent> readEvents() {
+                return List.of(events);
+            }
+        };
+    }
+
+    private static SecuritySourceAdapter adapterReturning(SecurityEvent... events) {
+        return new SecuritySourceAdapter() {
+            @Override
+            public SecuritySourceDescriptor descriptor() {
+                return new SecuritySourceDescriptor("test-adapter-feed", SecuritySourceType.ACCESS_CONTROL,
+                        Set.of(SecurityEventType.ACCESS_ANOMALY), true);
+            }
+
+            @Override
+            public List<SecurityEvent> readEvents() {
+                return List.of(events);
+            }
+        };
+    }
+
+    private static SecuritySourceAdapter adapterBackedBy(List<SecurityEvent> events) {
+        return new SecuritySourceAdapter() {
+            @Override
+            public SecuritySourceDescriptor descriptor() {
+                return new SecuritySourceDescriptor("test-adapter-feed", SecuritySourceType.ACCESS_CONTROL,
+                        Set.of(SecurityEventType.ACCESS_ANOMALY), true);
+            }
+
+            @Override
+            public List<SecurityEvent> readEvents() {
+                return List.copyOf(events);
+            }
+        };
     }
 
     private static SecurityEvent event(String id, String buildingId, String type, Instant occurredAt) {
@@ -699,5 +2020,33 @@ class SecurityIncidentServiceTest {
     private static SecurityEvent event(String id, String parkId, String buildingId, String type, Instant occurredAt,
                                        String summary) {
         return new SecurityEvent(id, parkId, buildingId, type, occurredAt, summary);
+    }
+
+    private static SecurityEvent withSource(SecurityEvent base, SecuritySourceType sourceType, String sourceId) {
+        return new SecurityEvent(base.eventId(), base.parkId(), base.buildingId(), base.eventType(),
+                base.rawEventType(), new SecuritySourceRef(sourceType, sourceId), base.location(), base.observedAt(),
+                base.receivedAt(), base.severity(), base.confidence(), base.privacy(), base.disposition(),
+                base.ingestedBy(), base.ingestVersion(), base.evidenceSummary());
+    }
+
+    private static SecurityEvent enrichedEvent(SecurityEvent base, SecurityDispositionRecord disposition,
+                                               Instant receivedAt, SecurityEventSeverity severity) {
+        return new SecurityEvent(base.eventId(), base.parkId(), base.buildingId(), base.eventType(),
+                base.rawEventType(), base.source(), base.location(), base.observedAt(), receivedAt, severity, 0.9d,
+                base.privacy(), disposition, "adapter-1", "v2", base.evidenceSummary());
+    }
+
+    private static SecurityEvent receivedLater(SecurityEvent base, Instant receivedAt) {
+        return new SecurityEvent(base.eventId(), base.parkId(), base.buildingId(), base.eventType(),
+                base.rawEventType(), base.source(), base.location(), base.observedAt(), receivedAt,
+                base.severity(), base.confidence(), base.privacy(), base.disposition(), base.ingestedBy(),
+                base.ingestVersion(), base.evidenceSummary());
+    }
+
+    private static SecurityEvent eventWithDisposition(SecurityEvent base, SecurityDispositionRecord disposition) {
+        return new SecurityEvent(base.eventId(), base.parkId(), base.buildingId(), base.eventType(),
+                base.rawEventType(), base.source(), base.location(), base.observedAt(), base.receivedAt(),
+                base.severity(), base.confidence(), base.privacy(), disposition, base.ingestedBy(),
+                base.ingestVersion(), base.evidenceSummary());
     }
 }

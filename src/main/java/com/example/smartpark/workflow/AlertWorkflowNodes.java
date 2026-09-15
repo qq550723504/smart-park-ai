@@ -18,9 +18,11 @@ import com.example.smartpark.model.common.KnowledgeDomain;
 import com.example.smartpark.model.common.RiskLevel;
 import com.example.smartpark.model.common.WorkOrder;
 import com.example.smartpark.model.common.WorkflowStatus;
+import com.example.smartpark.model.security.SecurityEventIdentity;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.device.DevicePort;
 import com.example.smartpark.port.knowledge.KnowledgePort;
+import com.example.smartpark.port.security.SecurityEventResolver;
 import com.example.smartpark.port.workorder.WorkOrderPort;
 
 import java.time.Clock;
@@ -202,9 +204,10 @@ public final class AlertWorkflowNodes {
             if (securityPort == null) {
                 throw new IllegalStateException("Security scenario is not configured");
             }
-            String eventId = workflowState.alert().evidence().stream()
-                    .filter(item -> item.startsWith("security-event:"))
-                    .map(item -> item.substring("security-event:".length()))
+            Alert alert = workflowState.alert();
+            SecurityEventIdentity identity = alert.evidence().stream()
+                    .filter(SecurityEventIdentity::isReference)
+                    .map(token -> SecurityEventIdentity.fromReference(token, alert.parkId(), alert.buildingId()))
                     .findFirst()
                     .orElseThrow(() -> new IllegalArgumentException("Security alert has no event reference"));
             toolCall(workflowState.workflowId(), SECURITY_REVIEW, "SecurityPort.getEvent");
@@ -212,7 +215,7 @@ public final class AlertWorkflowNodes {
                     WorkflowFailure.Code.PARK_CONTEXT_FAILED,
                     "Unable to review security scenario",
                     SECURITY_REVIEW,
-                    () -> securityPort.getEvent(eventId));
+                    () -> resolveSecurityEvent(identity));
             if (!event.evidenceSummary().startsWith("REDACTED:")) {
                 throw new IllegalStateException("Security evidence is not redacted");
             }
@@ -220,6 +223,13 @@ public final class AlertWorkflowNodes {
                     + " | " + event.evidenceSummary();
             return Map.of(AlertWorkflowState.SCENARIO_ANALYSIS, analysis);
         });
+    }
+
+    private com.example.smartpark.model.security.SecurityEvent resolveSecurityEvent(SecurityEventIdentity identity) {
+        // The production wiring always installs a source-aware catalog; a plain
+        // single-source port still works through the legacy id lookup.
+        if (securityPort instanceof SecurityEventResolver resolver) return resolver.getEvent(identity);
+        return securityPort.getEvent(identity.eventId());
     }
 
     public String scenarioRoute(OverAllState state) {

@@ -8,6 +8,7 @@ import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.device.DevicePort;
 import com.example.smartpark.port.energy.EnergyPort;
 import com.example.smartpark.port.knowledge.KnowledgePort;
+import com.example.smartpark.port.security.SecurityEventReader;
 import com.example.smartpark.port.security.SecurityPort;
 import com.example.smartpark.voice.VoiceAnswerAgent;
 import com.example.smartpark.voice.port.StreamingAsrPort;
@@ -34,6 +35,7 @@ class ShowcasePreflightRegistrationTest {
             .withBean(KnowledgePort.class, () -> mock(KnowledgePort.class))
             .withBean(EnergyPort.class, () -> mock(EnergyPort.class))
             .withBean(SecurityPort.class, () -> mock(SecurityPort.class))
+            .withBean(SecurityEventReader.class, () -> mock(SecurityEventReader.class))
             .withBean(StreamingAsrPort.class, () -> mock(StreamingAsrPort.class))
             .withBean(VoiceAnswerAgent.class, () -> mock(VoiceAnswerAgent.class))
             .withBean(StreamingTtsPort.class, () -> mock(StreamingTtsPort.class))

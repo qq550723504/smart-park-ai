@@ -353,9 +353,10 @@ Remove-Item Env:SERVER_ADDRESS -ErrorAction SilentlyContinue
 | `GET /api/customer-service/sessions/{sessionId}/conversation` | 查看对话与安全检索轨迹 | 不返回知识正文 |
 | `GET /api/customer-service/tickets` | 查看人工工单 | 需要 `CUSTOMER_AGENT` 或 `ADMIN` |
 | `GET /api/collaboration/work-items` | 查看安全协同队列 | 需要 `CUSTOMER_AGENT`、`APPROVER` 或 `ADMIN`，支持 `source`、`status`、`limit`（最多 50）和 `workItemId` 精确定位；详情操作复用原审批/工单状态接口 |
+| `GET /api/security/capabilities` | 查看安全事件类型接入状态与误报研判可用性 | 需要 `APPROVER` 或 `ADMIN`；逐类型返回 `AVAILABLE`/`ADAPTED`/`NOT_READY`，模型支持与数据源接入分开 |
 | `GET /api/security/incidents` | 查看安全事件研判队列 | 需要 `APPROVER` 或 `ADMIN`，返回脱敏归并结果 |
 | `GET /api/security/incidents/{incidentId}` | 查看安全事件详情 | 需要 `APPROVER` 或 `ADMIN`，返回脱敏证据与时间线 |
-| `POST /api/security/incidents/{incidentId}/review` | 标记安全事件已研判 | 需要 `APPROVER` 或 `ADMIN`；幂等并写入审计记录 |
+| `POST /api/security/incidents/{incidentId}/review` | 记录安全事件研判结论 | 需要 `APPROVER` 或 `ADMIN`；可选 body `{"disposition": "..."}`，缺省为 `CONFIRMED_INCIDENT`，`UNREVIEWED` 与未知值返回 400；误报只允许人工复核结论，幂等并写入审计记录 |
 | `POST /api/security/incidents/{incidentId}/handoff` | 将已研判事件记录为协同交接 | 需要 `APPROVER` 或 `ADMIN`；必须先研判，交接工作项为已完成投影并写入审计记录 |
 | `POST /api/alerts/{alertId}/workflows` | 启动告警工作流 | 只在 DashScope 启用时存在 |
 | `GET /api/workflows/{workflowId}` | 查询工作流状态 | 只返回脱敏公开 DTO |
@@ -457,6 +458,8 @@ $env:AI_DASHSCOPE_API_KEY = [System.Net.NetworkCredential]::new('', $secureDashS
 - **知识检索：** `SimpleVectorStore` 是进程内实现；生产环境需要持久化向量库、文档切片、批量导入和索引版本管理。
 - **真实系统接入：** 当前 `AlertPort`、`DevicePort`、`EnergyPort`、`SecurityPort`、`KnowledgePort` 和 `WorkOrderPort` 都只连接 Mock 或演示适配器。
 - **安防数据：** 真实安防适配器必须在端口前增加专用脱敏、审计和访问控制，不能把原始媒体或人员身份数据送入通用告警模型。
+- **安防事件类型：** `FIRE_SMOKE`、`PERIMETER_INTRUSION`、`CROWDING`、`POST_ABSENCE`、`ACCESS_ANOMALY`、`UNKNOWN` 已在模型中定义；当前部署只有 `ACCESS_ANOMALY` 的确定性 Demo 适配来源，状态为 `ADAPTED`，其余类型为 `NOT_READY`。模型支持不等于已接入数据源。
+- **误报统计：** `FALSE_POSITIVE` 必须来自人工复核或已登记、含版本与证据的自动判定；没有生产数据源时不显示误报数，驾驶舱与治理中心按 `NOT_READY` 呈现。
 
 ## 停止与清理
 

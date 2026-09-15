@@ -152,7 +152,7 @@ class AlertDiagnosisAgentTest {
                 new WorkOrderTool(parkSystem.workOrders()),
                 new ParkKnowledgeTool(parkSystem.knowledge()),
                 new EnergyQueryTool(parkSystem.energy()),
-                new SecurityQueryTool(parkSystem.security()));
+                new SecurityQueryTool(parkSystem.security(), List.of()));
 
         List<String> toolNames = java.util.Arrays.stream(agent.toolCallbacks())
                 .map(ToolCallback::getToolDefinition)

@@ -448,6 +448,7 @@ function confidence(value?: number) {
       :role="role"
       :active="props.active && activeView === 'security-incidents'"
       :focus-incident-id="securityIncidentTargetId"
+      :security-disposition-enabled="capabilities?.securityDispositionEnabled === true"
       @open-collaboration="openCollaborationFromIncident"
     />
 
@@ -462,6 +463,8 @@ function confidence(value?: number) {
       :analytics-available="capabilities?.analyticsEnabled === true"
       :collaboration-available="capabilities?.collaborationEnabled === true"
       :security-incident-available="capabilities?.securityIncidentEnabled === true && ['ADMIN', 'APPROVER'].includes(role)"
+      :security-event-capabilities="capabilities?.securityEventCapabilities ?? []"
+      :security-disposition-enabled="capabilities?.securityDispositionEnabled === true"
       @open-analysis="openAnalysisFromBoard"
       @open-trace="openTraceFromBoard"
       @open-view="openViewFromBoard"
