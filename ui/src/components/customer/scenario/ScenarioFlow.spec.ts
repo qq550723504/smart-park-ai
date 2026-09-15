@@ -1,0 +1,697 @@
+import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import ShowcaseHome from '../../showcase/ShowcaseHome.vue'
+import { resetB2NightEnergyScenarioSingleton } from '../../../scenario/b2-night-energy/store'
+
+function stubFetch(): void {
+  vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({
+    knowledgeMode: 'mock',
+    customerAnswerMode: 'mock',
+    vectorStore: 'none',
+    analyticsEnabled: true,
+    collaborationEnabled: false,
+    voiceEnabled: false,
+    securityIncidentEnabled: false,
+  }), { status: 200 }))))
+}
+
+async function mountScenario() {
+  const wrapper = mount(ShowcaseHome, {
+    props: { active: true },
+    attachTo: document.body,
+    global: {
+      stubs: {
+        CustomerAssistantPanel: {
+          methods: { canResetForDemo: () => true, resetForDemo: () => true },
+          template: '<aside data-assistant-stub />',
+        },
+      },
+    },
+  })
+  await wrapper.get('[data-enter-scenario]').trigger('click')
+  await flushPromises()
+  return wrapper
+}
+
+/** Scenario entry is deep-linked, so each test must start from a clean URL. */
+function resetScenarioUrl(): void {
+  window.history.replaceState({}, '', '/')
+}
+
+describe('B2 scenario customer integration', () => {
+  beforeEach(() => {
+    resetScenarioUrl()
+    resetB2NightEnergyScenarioSingleton()
+    sessionStorage.clear()
+    stubFetch()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    sessionStorage.clear()
+    resetScenarioUrl()
+  })
+
+  it('renders the scenario workspace instead of the online pages when entered', async () => {
+    const wrapper = await mountScenario()
+    expect(wrapper.find('[data-scenario-workspace]').exists()).toBe(true)
+    expect(wrapper.find('[data-park-overview]').exists()).toBe(false)
+    expect(wrapper.get('[data-scenario-banner]').text()).toContain('模拟场景')
+    wrapper.unmount()
+  })
+
+  it('runs the recommended story end to end through the shared run', async () => {
+    const wrapper = await mountScenario()
+
+    // Overview: patrol builds one event.
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-patrol-summary]').text()).toContain('2 项关注')
+
+    // Analysis: choose the recommended plan and confirm.
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+    const planCard = wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"]')
+    await planCard.get('button').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-confirm-order]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-confirmed]').text()).toContain('80')
+
+    // Work orders: future result stays hidden until explicit verification.
+    await wrapper.get('[data-customer-nav="work-orders"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-order-id]').text()).toBe('SCN-WO-B2-001-001')
+    expect(wrapper.find('[data-scenario-followup-hidden]').exists()).toBe(true)
+    expect(wrapper.find('[data-scenario-verified]').exists()).toBe(false)
+
+    await wrapper.get('[data-scenario-take-order]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-apply-plan]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-followup-hidden]').exists()).toBe(true)
+
+    await wrapper.get('[data-scenario-verify]').trigger('click')
+    await flushPromises()
+    const verified = wrapper.get('[data-scenario-verified]').text()
+    expect(verified).toContain('72')
+    expect(verified).toContain('22.8')
+
+    // Reports: the snapshot freezes the verified state.
+    await wrapper.get('[data-customer-nav="reports"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-generate-report]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-report-view]').text()).toContain('SCN-RPT-B2-001-01')
+    wrapper.unmount()
+  })
+
+  it('keeps the run after a page switch and a reload', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="overview"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-stage]').text()).toBe('巡检已完成')
+    wrapper.unmount()
+
+    resetB2NightEnergyScenarioSingleton()
+    const reloaded = mount(ShowcaseHome, {
+      props: { active: true },
+      global: { stubs: { CustomerAssistantPanel: { template: '<aside />' } } },
+    })
+    await flushPromises()
+    expect(reloaded.find('[data-scenario-workspace]').exists()).toBe(true)
+    expect(reloaded.get('[data-scenario-stage]').text()).toBe('巡检已完成')
+    reloaded.unmount()
+  })
+
+  it('blocks confirmation and shows partial data under the PARTIAL_DATA variant', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-variant]').setValue('PARTIAL_DATA')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-partial]').text()).toContain('SCN-B2-HVAC-PUBLIC:15')
+
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    // Overview KPIs must not publish a deviation from unlike coverage.
+    expect(wrapper.get('[data-scenario-b2-deviation]').text()).toBe('—')
+    expect(wrapper.find('[data-scenario-b2-deviation-unavailable]').exists()).toBe(true)
+    expect(wrapper.find('[data-scenario-park-deviation-unavailable]').exists()).toBe(true)
+    expect(wrapper.get('[data-scenario-overview]').text()).not.toContain('28%')
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-assessment-summary]').text()).toContain('观测不完整')
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
+    await flushPromises()
+    // No full-cycle estimate may be shown from a partial ledger.
+    expect(wrapper.find('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] [data-scenario-plan-unavailable]').exists()).toBe(true)
+    expect(wrapper.find('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] dd').exists()).toBe(false)
+    expect(wrapper.get('[data-scenario-confirm-order]').attributes('disabled')).toBeDefined()
+
+    // The generated brief must keep disclosing the data-quality limitation.
+    await wrapper.get('[data-customer-nav="reports"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-generate-report]').trigger('click')
+    await flushPromises()
+    const brief = wrapper.get('[data-scenario-report-view]').text()
+    expect(brief).toContain('数据质量：PARTIAL（关键小时观测缺失）')
+    expect(brief).toContain('SCN-B2-HVAC-PUBLIC:15')
+    expect(brief).toContain('暂停完整节能估算与提交')
+    wrapper.unmount()
+  })
+
+  it('surfaces the lost-response fault and reuses the same order on retry', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-variant]').setValue('LOST_CREATE_RESPONSE')
+    await flushPromises()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-confirm-order]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-error]').text()).toContain('响应丢失')
+    expect(wrapper.get('[data-scenario-pending]').text()).toContain('LOST_RESPONSE')
+
+    await wrapper.get('[data-scenario-retry-order]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-order-id]').text()).toBe('SCN-WO-B2-001-001')
+    expect(wrapper.find('[data-scenario-pending]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('switches the chosen plan to the combined 90/1980 values', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-HVAC-LIGHT"] button').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-confirm-order]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-confirmed]').text()).toContain('90')
+    wrapper.unmount()
+  })
+
+  it('locks the demo variant once the run has started', async () => {
+    const wrapper = await mountScenario()
+    expect(wrapper.get('[data-scenario-variant]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-variant]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-scenario-variant-locked]').text()).toContain('锁定')
+    wrapper.unmount()
+  })
+
+  it('enables keep-observing only for the no-action plan', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-keep-observing]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-scenario-keep-observing-hint]').exists()).toBe(true)
+
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-NONE"] button').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-keep-observing]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-scenario-keep-observing]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-stage]').text()).toBe('已选择保持观察')
+    wrapper.unmount()
+  })
+
+  it('recovers a reloaded lost-response run on retry and can reset it', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-variant]').setValue('LOST_CREATE_RESPONSE')
+    await flushPromises()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-confirm-order]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-pending]').text()).toContain('LOST_RESPONSE')
+    wrapper.unmount()
+
+    // Reload from session storage: the committed identity must survive the
+    // process boundary so the same order can be retried instead of deadlocking.
+    resetB2NightEnergyScenarioSingleton()
+    const reloaded = mount(ShowcaseHome, {
+      props: { active: true },
+      global: { stubs: { CustomerAssistantPanel: { template: '<aside />' } } },
+    })
+    await flushPromises()
+    expect(reloaded.get('[data-scenario-pending]').text()).toContain('LOST_RESPONSE')
+    await reloaded.get('[data-scenario-retry-order]').trigger('click')
+    await flushPromises()
+    expect(reloaded.get('[data-scenario-order-id]').text()).toBe('SCN-WO-B2-001-001')
+    expect(reloaded.find('[data-scenario-pending]').exists()).toBe(false)
+    expect(reloaded.get('[data-scenario-reset]').attributes('disabled')).toBeUndefined()
+    reloaded.unmount()
+  })
+
+  it('enforces the no-action variant by locking executable plans', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-variant]').setValue('NO_ACTION')
+    await flushPromises()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-scenario-variant-plan-locked]').exists()).toBe(true)
+    expect(wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-scenario-plan="SCN-PLAN-HVAC-LIGHT"] button').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-scenario-plan="SCN-PLAN-NONE"] button').attributes('disabled')).toBeUndefined()
+
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-NONE"] button').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-keep-observing]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-stage]').text()).toBe('已选择保持观察')
+
+    await wrapper.get('[data-customer-nav="work-orders"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-order-none]').text()).toContain('未创建任务')
+    expect(wrapper.find('[data-scenario-order-id]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('resets the parameter form when the scenario run is reopened', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-input-hours]').setValue(3)
+    await flushPromises()
+
+    await wrapper.get('[data-scenario-reset]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-reset-confirm]').trigger('click')
+    await flushPromises()
+    // The new run must fall back to the fixture defaults, not keep the
+    // previous run's edited hours feeding the plan estimates.
+    expect((wrapper.get('[data-scenario-input-hours]').element as HTMLInputElement).value).toBe('4')
+    wrapper.unmount()
+  })
+
+  it('requires confirmation before discarding the scenario run', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-scenario-reset]').trigger('click')
+    await flushPromises()
+    // Opening the dialog must not clear the run yet.
+    expect(wrapper.find('[data-scenario-reset-dialog]').exists()).toBe(true)
+    expect(wrapper.get('[data-scenario-stage]').text()).toBe('巡检已完成')
+    await wrapper.get('[data-scenario-reset-cancel]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-reset-dialog]').exists()).toBe(false)
+    expect(wrapper.get('[data-scenario-stage]').text()).toBe('巡检已完成')
+
+    await wrapper.get('[data-scenario-reset]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-reset-confirm]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-reset-dialog]').exists()).toBe(false)
+    expect(wrapper.get('[data-scenario-stage]').text()).toBe('尚未巡检')
+    wrapper.unmount()
+  })
+
+  it('freezes parameter inputs and plan cards after the order is approved', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-confirm-order]').trigger('click')
+    await flushPromises()
+
+    // Post-approval the receipt/order decide the run, so the form is locked and
+    // a stale local form can no longer rewrite the plan estimates.
+    expect((wrapper.get('[data-scenario-input-hours]').element as HTMLInputElement).disabled).toBe(true)
+    expect(wrapper.find('[data-scenario-parameters-locked]').exists()).toBe(true)
+    const frozen = wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] dl').text()
+    expect(frozen).toContain('1,220')
+
+    // Even a programmatic edit of the local form must not change the frozen card.
+    await wrapper.get('[data-scenario-input-hours]').setValue(1)
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] dl').text()).toBe(frozen)
+    wrapper.unmount()
+  })
+
+  it('confirms with the reviewed parameters even when they were not applied first', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
+    await flushPromises()
+
+    // Edit without clicking “应用参数”: the card previews 3h and confirmation
+    // must persist exactly that, never the previously applied 4h draft.
+    await wrapper.get('[data-scenario-input-hours]').setValue(3)
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] dl').text()).toContain('1,240')
+    expect(wrapper.find('[data-scenario-parameters-dirty]').exists()).toBe(true)
+
+    await wrapper.get('[data-scenario-confirm-order]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-scenario-parameters-dirty]').exists()).toBe(false)
+    const receipt = wrapper.get('[data-scenario-confirmed]').text()
+    expect(receipt).toContain('3h')
+    expect(receipt).toContain('60 kWh/日')
+    wrapper.unmount()
+  })
+
+  it('blocks confirmation while the visible parameters are invalid', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-scenario-input-hours]').setValue(5)
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-param-error]').exists()).toBe(true)
+    expect((wrapper.get('[data-scenario-confirm-order]').element as HTMLButtonElement).disabled).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('rejects a cleared duration field instead of coercing it to zero', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
+    await flushPromises()
+
+    // Clearing the input yields '' (not a number); Number('') is 0 and would
+    // pass min:0, freezing a zero-hour plan from a visibly empty field.
+    await wrapper.get('[data-scenario-input-hours]').setValue('')
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-param-error]').exists()).toBe(true)
+    expect((wrapper.get('[data-scenario-confirm-order]').element as HTMLButtonElement).disabled).toBe(true)
+
+    // An explicitly entered zero remains a deliberate, valid choice.
+    await wrapper.get('[data-scenario-input-hours]').setValue(0)
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-param-error]').exists()).toBe(false)
+    expect((wrapper.get('[data-scenario-confirm-order]').element as HTMLButtonElement).disabled).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps unapplied parameter edits when switching plans', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-scenario-input-hours]').setValue(3)
+    await flushPromises()
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-HVAC-LIGHT"] button').trigger('click')
+    await flushPromises()
+
+    // The user was comparing 3h across the cards; choosing another plan must not
+    // silently revert the visible form to the previously applied 4h.
+    expect((wrapper.get('[data-scenario-input-hours]').element as HTMLInputElement).value).toBe('3')
+    expect(wrapper.get('[data-scenario-plan="SCN-PLAN-HVAC-LIGHT"] dl').text()).toContain('1,485')
+    wrapper.unmount()
+  })
+
+  it('exposes focusable shell main targets on every scenario page', async () => {
+    const wrapper = await mountScenario()
+    const ids = ['overview', 'analysis', 'work-orders', 'reports'] as const
+    const mainIds = {
+      overview: 'customer-overview-main',
+      analysis: 'customer-analysis-main',
+      'work-orders': 'customer-work-orders-main',
+      reports: 'customer-reports-main',
+    }
+    for (const page of ids) {
+      await wrapper.get(`[data-customer-nav="${page}"]`).trigger('click')
+      await flushPromises()
+      const main = document.getElementById(mainIds[page])
+      expect(main).not.toBeNull()
+      expect(main?.getAttribute('tabindex')).toBe('-1')
+      expect(document.activeElement).toBe(main)
+    }
+    wrapper.unmount()
+  })
+
+  it('keeps the shared scenario run when the customer tour is restarted', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-stage]').text()).toBe('巡检已完成')
+
+    await wrapper.get('[data-restart-demo]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-confirm-restart]').trigger('click')
+    await flushPromises()
+
+    // 重开导览 only clears presentation state; the run survives until the
+    // explicit “重开本场景” control resets it.
+    expect(wrapper.find('[data-scenario-workspace]').exists()).toBe(true)
+    expect(wrapper.get('[data-scenario-stage]').text()).toBe('巡检已完成')
+    expect(wrapper.get('[data-restart-notice]').text()).toContain('重开本场景')
+    wrapper.unmount()
+  })
+
+  it('syncs the scenario deep link back to overview when the tour restarts', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-customer-nav="reports"]').trigger('click')
+    await flushPromises()
+    expect(window.location.search).toContain('scenarioPage=reports')
+
+    await wrapper.get('[data-restart-demo]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-confirm-restart]').trigger('click')
+    await flushPromises()
+
+    // The tour returns to its starting page, so a reload must not restore the page we left.
+    expect(window.location.search).toContain('scenarioPage=overview')
+    expect(window.location.search).not.toContain('reports')
+    wrapper.unmount()
+  })
+
+  it('keeps the lost-response receipt through report generation until the retry', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-variant]').setValue('LOST_CREATE_RESPONSE')
+    await flushPromises()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-confirm-order]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-pending]').text()).toContain('LOST_RESPONSE')
+
+    // A report may be generated while the receipt is unresolved, but that must
+    // not clear the pending identity or free up reset.
+    await wrapper.get('[data-customer-nav="reports"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-generate-report]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-report-view]').exists()).toBe(true)
+    expect(wrapper.get('[data-scenario-reset]').attributes('disabled')).toBeDefined()
+
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-retry-order]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-pending]').exists()).toBe(false)
+    expect(wrapper.get('[data-scenario-reset]').attributes('disabled')).toBeUndefined()
+    // The report generated while pending survives the acknowledged retry.
+    await wrapper.get('[data-customer-nav="reports"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-report-view]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('disables taking the order while the receipt is pending and retries from the work-orders page', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-variant]').setValue('LOST_CREATE_RESPONSE')
+    await flushPromises()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-confirm-order]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-customer-nav="work-orders"]').trigger('click')
+    await flushPromises()
+    // The provider rejects takeOrder while pending, so the button must be off
+    // and the same-identity retry must be reachable here too.
+    expect(wrapper.get('[data-scenario-take-order]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-scenario-order-pending]').exists()).toBe(true)
+    await wrapper.get('[data-scenario-order-retry]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-order-pending]').exists()).toBe(false)
+    expect(wrapper.get('[data-scenario-take-order]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('clears the deep link on exit so a reload stays out of the scenario', async () => {
+    window.history.replaceState({}, '', '/?scenario=b2-night-energy&scenarioPage=work-orders')
+    resetB2NightEnergyScenarioSingleton()
+    const mountOptions = {
+      props: { active: true },
+      global: {
+        stubs: {
+          ParkOverview: { template: '<main data-park-overview />' },
+          CustomerAssistantPanel: { template: '<aside data-assistant-stub />' },
+        },
+      },
+    }
+    const wrapper = mount(ShowcaseHome, mountOptions)
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-workspace]').exists()).toBe(true)
+    expect(window.location.search).toContain('scenario=b2-night-energy')
+
+    await wrapper.get('[data-exit-scenario]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-workspace]').exists()).toBe(false)
+    expect(window.location.search).not.toContain('scenario')
+    wrapper.unmount()
+
+    // A reload (fresh mount) must not treat the cleared deep link as active.
+    const reloaded = mount(ShowcaseHome, mountOptions)
+    await flushPromises()
+    expect(reloaded.find('[data-scenario-workspace]').exists()).toBe(false)
+    expect(reloaded.find('[data-park-overview]').exists()).toBe(true)
+    reloaded.unmount()
+  })
+
+  it('enters scenario mode on the first render when a session is restored', async () => {
+    const overviewMounted = vi.fn()
+    sessionStorage.setItem('smart-park:scenario:b2-night-energy:mode:v1', 'true')
+    resetB2NightEnergyScenarioSingleton()
+    const wrapper = mount(ShowcaseHome, {
+      props: { active: true },
+      global: {
+        stubs: {
+          ParkOverview: { setup() { overviewMounted(); return () => null } },
+          CustomerAssistantPanel: { template: '<aside data-assistant-stub />' },
+        },
+      },
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-workspace]').exists()).toBe(true)
+    // The online overview (and its live requests) must never mount.
+    expect(overviewMounted).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('labels the work-orders hero as a simulated receipt in scenario mode', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-customer-nav="work-orders"]').trigger('click')
+    await flushPromises()
+    const hero = wrapper.get('.customer-shell__hero').text()
+    expect(hero).toContain('模拟任务')
+    expect(hero).toContain('非真实回执')
+    wrapper.unmount()
+  })
+
+  it('downloads the frozen report without regenerating it', async () => {
+    const createObjectURL = vi.fn(() => 'blob:scenario-report')
+    const revokeObjectURL = vi.fn()
+    const url = URL as unknown as Record<string, unknown>
+    const originalCreate = url.createObjectURL
+    const originalRevoke = url.revokeObjectURL
+    url.createObjectURL = createObjectURL
+    url.revokeObjectURL = revokeObjectURL
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const wrapper = await mountScenario()
+    try {
+      await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+      await flushPromises()
+      await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+      await flushPromises()
+      await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+      await flushPromises()
+      await wrapper.get('[data-customer-nav="reports"]').trigger('click')
+      await flushPromises()
+      await wrapper.get('[data-scenario-generate-report]').trigger('click')
+      await flushPromises()
+      const frozen = wrapper.get('[data-scenario-report-view]').text()
+
+      await wrapper.get('[data-scenario-download-report]').trigger('click')
+      await flushPromises()
+      expect(createObjectURL).toHaveBeenCalledTimes(1)
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:scenario-report')
+      expect(clickSpy).toHaveBeenCalled()
+      // Downloading reads the frozen snapshot; it never regenerates it.
+      expect(wrapper.get('[data-scenario-report-view]').text()).toBe(frozen)
+      expect(wrapper.findAll('[data-scenario-report]')).toHaveLength(1)
+    } finally {
+      url.createObjectURL = originalCreate
+      url.revokeObjectURL = originalRevoke
+      wrapper.unmount()
+    }
+  })
+})

@@ -1,0 +1,1744 @@
+{
+  "meta": {
+    "scenarioId": "SCN-B2-NIGHT-ENERGY-001",
+    "version": "1.0.0",
+    "title": "研发大厦夜间能耗异常：发现、选择、处理与复盘",
+    "artifactStatus": "PLANNED_FIXTURE_NOT_INTEGRATED",
+    "dataSource": "SCENARIO_FIXTURE",
+    "businessDataMode": "SIMULATED",
+    "narrativeMode": "PRESET_SCENARIO_EXPLANATION",
+    "banner": "演示园区 · 模拟场景",
+    "detailModeLabel": "预设场景研判与模拟执行",
+    "repositoryBaseline": {
+      "repository": "qq550723504/smart-park-ai",
+      "commit": "902286df043fd0460dc4b4dffcbfe8183cbf2f60"
+    },
+    "description": "本文件是新增场景的事实与行为契约，不是当前API响应或已经运行的工单。与原OPERATIONS_ANALYTICS数据、旧B2在线23.68%案例隔离。",
+    "currency": "CNY",
+    "energyUnit": "kWh",
+    "powerUnit": "kW",
+    "rounding": "Decimal HALF_UP; display 2 decimals; aggregate before rounding",
+    "createdOn": "2026-09-11"
+  },
+  "clock": {
+    "timezone": "Asia/Shanghai",
+    "initialNow": "2026-09-11T09:00:00+08:00",
+    "policy": "FROZEN_VIRTUAL_CLOCK",
+    "observationWindow": {
+      "from": "2026-09-10T08:00:00+08:00",
+      "to": "2026-09-11T08:00:00+08:00",
+      "semantics": "[from,to)"
+    },
+    "analysisWindowRef": "/clock/observationWindow",
+    "baselineWindowRef": "/clock/observationWindow",
+    "followupWindow": {
+      "from": "2026-09-11T08:00:00+08:00",
+      "to": "2026-09-12T08:00:00+08:00",
+      "semantics": "[from,to)"
+    },
+    "verificationNow": "2026-09-12T09:00:00+08:00",
+    "hostClockAffectsBusinessData": false
+  },
+  "park": {
+    "parkId": "PARK-SCENARIO-001",
+    "name": "智创演示园区"
+  },
+  "buildings": [
+    {
+      "buildingId": "B1",
+      "name": "创新中心",
+      "purpose": "CONTEXT_ONLY",
+      "meterRule": "SCALED_B2_BASELINE",
+      "scale": "0.90"
+    },
+    {
+      "buildingId": "B2",
+      "name": "研发大厦",
+      "purpose": "PRIMARY_STORY",
+      "meterRule": "SUM_CHILD_CHANNELS"
+    },
+    {
+      "buildingId": "B3",
+      "name": "运营中心",
+      "purpose": "CONTEXT_ONLY",
+      "meterRule": "SCALED_B2_BASELINE",
+      "scale": "0.70"
+    }
+  ],
+  "zones": [
+    {
+      "zoneId": "SCN-B2-Z-PUBLIC",
+      "buildingId": "B2",
+      "name": "公共办公与会议区域",
+      "protected": false
+    },
+    {
+      "zoneId": "SCN-B2-Z-RD",
+      "buildingId": "B2",
+      "name": "研发加班区域",
+      "protected": true,
+      "protectionReason": "本场景已批准夜间使用"
+    },
+    {
+      "zoneId": "SCN-B2-Z-ESSENTIAL",
+      "buildingId": "B2",
+      "name": "机房与必要基础负荷",
+      "protected": true,
+      "protectionReason": "本场景设定为不可中断负荷"
+    }
+  ],
+  "devices": [
+    {
+      "deviceId": "SCN-B2-METER-TOTAL",
+      "buildingId": "B2",
+      "zoneId": null,
+      "name": "研发大厦总电表",
+      "type": "METER",
+      "aggregationOnly": true,
+      "adjustable": false,
+      "state": "ONLINE"
+    },
+    {
+      "deviceId": "SCN-B2-HVAC-PUBLIC",
+      "buildingId": "B2",
+      "zoneId": "SCN-B2-Z-PUBLIC",
+      "name": "公共区域空调机组",
+      "type": "HVAC",
+      "aggregationOnly": false,
+      "adjustable": true,
+      "state": "ONLINE"
+    },
+    {
+      "deviceId": "SCN-B2-LIGHT-PUBLIC",
+      "buildingId": "B2",
+      "zoneId": "SCN-B2-Z-PUBLIC",
+      "name": "公共区域照明回路",
+      "type": "LIGHTING",
+      "aggregationOnly": false,
+      "adjustable": true,
+      "state": "ONLINE",
+      "note": "只减少非必要增量照明，不减少基准照明"
+    },
+    {
+      "deviceId": "SCN-B2-HVAC-RD",
+      "buildingId": "B2",
+      "zoneId": "SCN-B2-Z-RD",
+      "name": "研发加班区空调",
+      "type": "HVAC",
+      "aggregationOnly": false,
+      "adjustable": false,
+      "state": "ONLINE"
+    },
+    {
+      "deviceId": "SCN-B2-ESSENTIAL",
+      "buildingId": "B2",
+      "zoneId": "SCN-B2-Z-ESSENTIAL",
+      "name": "机房与必要基础用电",
+      "type": "ESSENTIAL_LOAD",
+      "aggregationOnly": false,
+      "adjustable": false,
+      "state": "ONLINE"
+    }
+  ],
+  "actors": [
+    {
+      "actorId": "SCN-ACTOR-MANAGER",
+      "displayName": "园区运营经理（演示角色）",
+      "role": "OPERATOR"
+    },
+    {
+      "actorId": "SCN-ACTOR-APPROVER",
+      "displayName": "园区审批人（演示角色）",
+      "role": "APPROVER"
+    },
+    {
+      "actorId": "SCN-ACTOR-TECH",
+      "displayName": "运维值班员（演示角色）",
+      "role": "OPERATOR",
+      "teamName": "设备运维组（模拟）"
+    }
+  ],
+  "operatingFacts": {
+    "scheduleId": "SCN-SCHEDULE-PUBLIC",
+    "publicOffHours": {
+      "from": "22:00",
+      "to": "06:00",
+      "crossesMidnight": true
+    },
+    "publicObservedExtraRun": {
+      "from": "2026-09-10T22:00:00+08:00",
+      "to": "2026-09-11T02:00:00+08:00",
+      "deviceIds": [
+        "SCN-B2-HVAC-PUBLIC",
+        "SCN-B2-LIGHT-PUBLIC"
+      ]
+    },
+    "publicReservation": {
+      "recordId": "SCN-RESERVATION-PUBLIC",
+      "from": "2026-09-10T22:00:00+08:00",
+      "to": "2026-09-11T02:00:00+08:00",
+      "approvedUseCount": 0,
+      "scope": "仅本场景公共区域预约记录"
+    },
+    "researchOvertime": {
+      "recordId": "SCN-OVERTIME-RD",
+      "zoneId": "SCN-B2-Z-RD",
+      "from": "2026-09-10T19:00:00+08:00",
+      "to": "2026-09-11T02:00:00+08:00",
+      "approved": true
+    },
+    "protectedDeviceIds": [
+      "SCN-B2-HVAC-RD",
+      "SCN-B2-ESSENTIAL"
+    ],
+    "causeBoundary": "场景设定确认公共区域计划与运行记录不一致，但不把全部300kWh偏差归因于该四小时；不推断现实设备故障或人员行为。"
+  },
+  "energyLedger": {
+    "granularity": "HOUR",
+    "bucketMeaning": "这一小时内的用电量；不是累积表码或瞬时功率",
+    "rows": [
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:00",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-10T08:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 10,
+        "observedKwh": 20,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:01",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-10T09:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 12,
+        "observedKwh": 22,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:02",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-10T10:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 14,
+        "observedKwh": 24,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:03",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-10T11:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 16,
+        "observedKwh": 26,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:04",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-10T12:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 18,
+        "observedKwh": 28,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:05",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-10T13:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 20,
+        "observedKwh": 30,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:06",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-10T14:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 22,
+        "observedKwh": 32,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:07",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-10T15:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 22,
+        "observedKwh": 32,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:08",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-10T16:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 20,
+        "observedKwh": 30,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:09",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-10T17:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 18,
+        "observedKwh": 28,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:10",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-10T18:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 16,
+        "observedKwh": 26,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:11",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-10T19:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 14,
+        "observedKwh": 24,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:12",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-10T20:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 10,
+        "observedKwh": 10,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:13",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-10T21:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 8,
+        "observedKwh": 8,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:14",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-10T22:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 0,
+        "observedKwh": 20,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:15",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-10T23:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 0,
+        "observedKwh": 20,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:16",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-11T00:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 0,
+        "observedKwh": 20,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:17",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-11T01:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 0,
+        "observedKwh": 20,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:18",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-11T02:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 0,
+        "observedKwh": 0,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:19",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-11T03:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 0,
+        "observedKwh": 0,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:20",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-11T04:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 0,
+        "observedKwh": 0,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:21",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-11T05:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 0,
+        "observedKwh": 0,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:22",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-11T06:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 8,
+        "observedKwh": 8,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-PUBLIC:23",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "bucketStart": "2026-09-11T07:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 12,
+        "observedKwh": 12,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:00",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-10T08:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 8,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:01",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-10T09:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 8,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:02",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-10T10:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 8,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:03",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-10T11:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 8,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:04",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-10T12:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 8,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:05",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-10T13:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 8,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:06",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-10T14:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 8,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:07",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-10T15:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 8,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:08",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-10T16:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 8,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:09",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-10T17:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 8,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:10",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-10T18:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 5,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:11",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-10T19:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 5,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:12",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-10T20:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 5,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:13",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-10T21:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 5,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:14",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-10T22:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 7.5,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:15",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-10T23:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 7.5,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:16",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-11T00:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 7.5,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:17",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-11T01:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 7.5,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:18",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-11T02:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 5,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:19",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-11T03:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 5,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:20",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-11T04:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 5,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:21",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-11T05:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 5,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:22",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-11T06:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 5,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-LIGHT-PUBLIC:23",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "bucketStart": "2026-09-11T07:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 5,
+        "observedKwh": 5,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:00",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-10T08:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 16,
+        "observedKwh": 16,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:01",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-10T09:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 16,
+        "observedKwh": 16,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:02",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-10T10:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 16,
+        "observedKwh": 16,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:03",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-10T11:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 16,
+        "observedKwh": 16,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:04",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-10T12:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 16,
+        "observedKwh": 16,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:05",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-10T13:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 16,
+        "observedKwh": 16,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:06",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-10T14:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 16,
+        "observedKwh": 16,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:07",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-10T15:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 16,
+        "observedKwh": 16,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:08",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-10T16:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 16,
+        "observedKwh": 16,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:09",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-10T17:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 16,
+        "observedKwh": 16,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:10",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-10T18:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 16,
+        "observedKwh": 16,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:11",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-10T19:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 16,
+        "observedKwh": 26,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:12",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-10T20:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 16,
+        "observedKwh": 26,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:13",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-10T21:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 16,
+        "observedKwh": 26,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:14",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-10T22:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 6,
+        "observedKwh": 16,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:15",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-10T23:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 6,
+        "observedKwh": 16,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:16",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-11T00:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 4,
+        "observedKwh": 14,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:17",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-11T01:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 4,
+        "observedKwh": 4,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:18",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-11T02:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 4,
+        "observedKwh": 4,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:19",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-11T03:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 4,
+        "observedKwh": 4,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:20",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-11T04:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 4,
+        "observedKwh": 4,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:21",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-11T05:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 4,
+        "observedKwh": 4,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:22",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-11T06:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 10,
+        "observedKwh": 10,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-HVAC-RD:23",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-HVAC-RD",
+        "bucketStart": "2026-09-11T07:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 10,
+        "observedKwh": 10,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:00",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-10T08:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:01",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-10T09:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:02",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-10T10:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:03",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-10T11:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:04",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-10T12:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:05",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-10T13:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:06",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-10T14:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:07",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-10T15:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:08",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-10T16:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:09",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-10T17:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:10",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-10T18:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:11",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-10T19:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:12",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-10T20:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:13",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-10T21:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:14",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-10T22:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:15",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-10T23:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:16",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-11T00:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:17",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-11T01:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:18",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-11T02:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:19",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-11T03:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:20",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-11T04:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:21",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-11T05:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:22",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-11T06:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      },
+      {
+        "readingId": "SCN-B2-ESSENTIAL:23",
+        "buildingId": "B2",
+        "deviceId": "SCN-B2-ESSENTIAL",
+        "bucketStart": "2026-09-11T07:00:00+08:00",
+        "durationMinutes": 60,
+        "baselineKwh": 15,
+        "observedKwh": 15,
+        "quality": "COMPLETE_SIMULATED"
+      }
+    ],
+    "meterAggregation": {
+      "parentDeviceId": "SCN-B2-METER-TOTAL",
+      "childDeviceIds": [
+        "SCN-B2-HVAC-PUBLIC",
+        "SCN-B2-LIGHT-PUBLIC",
+        "SCN-B2-HVAC-RD",
+        "SCN-B2-ESSENTIAL"
+      ],
+      "rule": "SUM_CHILDREN_PER_BUCKET_ONLY"
+    },
+    "supportingBuildingsRule": "B1/B3的每小时baseline与observed均等于B2基线分项合计乘各自scale。支持园区级概览，不参加本场景设备检查。"
+  },
+  "eventTemplate": {
+    "anomalyId": "SCN-ALT-B2-NIGHT-001",
+    "parkId": "PARK-SCENARIO-001",
+    "buildingId": "B2",
+    "deviceId": "SCN-B2-METER-TOTAL",
+    "affectedDeviceIds": [
+      "SCN-B2-HVAC-PUBLIC",
+      "SCN-B2-LIGHT-PUBLIC"
+    ],
+    "category": "ENERGY",
+    "priority": "中",
+    "title": "研发大厦公共区域存在非必要夜间运行",
+    "observedAt": "2026-09-11T08:00:00+08:00",
+    "windowRef": "/clock/observationWindow",
+    "initialStatus": "NOT_SURFACED",
+    "surfaceAfter": "START_PATROL",
+    "businessKeyRule": "scenarioRunId + anomalyId",
+    "resolvedByOrderAlone": false,
+    "multiCheckDeduplication": "同一次巡检两个检查异常只生成一个业务事件"
+  },
+  "patrolChecks": [
+    {
+      "checkId": "SCN-CHECK-ENERGY",
+      "label": "比较楼宇用电与基线",
+      "scope": "B2/observationWindow",
+      "rule": "DAILY_DEVIATION_GT",
+      "thresholdPct": "20.00",
+      "thresholdOrigin": "本场景模拟规则，不是行业标准",
+      "successResult": "ATTENTION",
+      "eventRef": "SCN-ALT-B2-NIGHT-001",
+      "evidenceRefs": [
+        "/energyLedger",
+        "/clock/observationWindow"
+      ]
+    },
+    {
+      "checkId": "SCN-CHECK-SCHEDULE",
+      "label": "核对公共区域运行计划",
+      "scope": "B2/public",
+      "rule": "EXTRA_RUN_WITHOUT_APPROVED_USE",
+      "successResult": "ATTENTION",
+      "eventRef": "SCN-ALT-B2-NIGHT-001",
+      "evidenceRefs": [
+        "/operatingFacts/publicObservedExtraRun",
+        "/operatingFacts/publicReservation",
+        "/operatingFacts/publicOffHours"
+      ]
+    },
+    {
+      "checkId": "SCN-CHECK-RD",
+      "label": "确认加班区域不受影响",
+      "scope": "B2/RD",
+      "rule": "PROTECTED_USE_EXISTS",
+      "successResult": "PASS",
+      "eventRef": null,
+      "evidenceRefs": [
+        "/operatingFacts/researchOvertime"
+      ]
+    },
+    {
+      "checkId": "SCN-CHECK-DATA",
+      "label": "核对本次数据完整性",
+      "scope": "B2/4 load channels/24 buckets",
+      "rule": "ALL_EXPECTED_BUCKETS_PRESENT",
+      "successResult": "PASS",
+      "eventRef": null,
+      "evidenceRefs": [
+        "/energyLedger"
+      ]
+    }
+  ],
+  "assessmentTemplate": {
+    "mode": "PRESET_SCENARIO_EXPLANATION",
+    "title": "先调整公共区域，保留研发加班服务",
+    "summaryTemplate": "研发大厦本周期用电{observedKwh} kWh，较基线增加{excessKwh} kWh（{deviationPct}%）。公共区域在22:00—02:00存在计划外运行，建议优先核查并调整该范围；研发加班区与必要基础负荷保持不变。",
+    "facts": [
+      {
+        "factId": "SCN-FACT-ENERGY",
+        "template": "本周期总用电与基线对比",
+        "evidenceRefs": [
+          "/energyLedger"
+        ]
+      },
+      {
+        "factId": "SCN-FACT-SCHEDULE",
+        "template": "公共区域运行超出计划且本场景没有批准预约",
+        "evidenceRefs": [
+          "/operatingFacts/publicObservedExtraRun",
+          "/operatingFacts/publicReservation",
+          "/operatingFacts/publicOffHours"
+        ]
+      },
+      {
+        "factId": "SCN-FACT-RD",
+        "template": "研发区域有批准加班安排，不纳入方案",
+        "evidenceRefs": [
+          "/operatingFacts/researchOvertime",
+          "/operatingFacts/protectedDeviceIds"
+        ]
+      }
+    ],
+    "unknowns": [
+      "公共空调其他时段的用电偏差尚未解释",
+      "不把所有基线偏差直接换算为可节约用电"
+    ],
+    "recommendedPlanId": "SCN-PLAN-PUBLIC-HVAC",
+    "aiRequestRequired": false
+  },
+  "optimization": {
+    "calculatorId": "ENERGY_SCENARIO_ESTIMATE_V1",
+    "doNotEvaluateArbitraryExpressions": true,
+    "defaultParameters": {
+      "savedHours": "4.0",
+      "tariffCnyPerKwh": "1.00",
+      "applicableDaysPerMonth": 22
+    },
+    "parameterBounds": {
+      "savedHours": {
+        "min": "0.0",
+        "max": "4.0",
+        "step": "0.5"
+      },
+      "tariffCnyPerKwh": {
+        "min": "0.01",
+        "max": "5.00",
+        "step": "0.01"
+      },
+      "applicableDaysPerMonth": {
+        "min": 1,
+        "max": 31,
+        "step": 1
+      }
+    },
+    "adjustmentWindowInObservation": {
+      "from": "2026-09-10T22:00:00+08:00",
+      "maxTo": "2026-09-11T02:00:00+08:00"
+    },
+    "adjustmentWindowInFollowup": {
+      "from": "2026-09-11T22:00:00+08:00",
+      "maxTo": "2026-09-12T02:00:00+08:00"
+    },
+    "powerAssumptions": [
+      {
+        "deviceId": "SCN-B2-HVAC-PUBLIC",
+        "avoidablePowerKw": "20.0"
+      },
+      {
+        "deviceId": "SCN-B2-LIGHT-PUBLIC",
+        "avoidablePowerKw": "2.5"
+      }
+    ],
+    "formulaDefinitions": {
+      "estimatedSavedKwh": "sum(eligible power kW × selected duration h)",
+      "estimatedDailyAfterKwh": "observed B2 kWh - estimatedSavedKwh",
+      "estimatedSavingPct": "estimatedSavedKwh / observed B2 kWh × 100",
+      "estimatedMonthlySavingsCny": "estimatedSavedKwh × applicableDaysPerMonth × tariffCnyPerKwh",
+      "baselineDeviationPct": "(observed B2 kWh - baseline B2 kWh) / baseline B2 kWh × 100"
+    },
+    "constraints": [
+      "不能调整受保护设备",
+      "不能减少基准/必要照明",
+      "每小时减量不能超过该目标小时observed-baseline",
+      "方案审批后不得原地修改已保存参数",
+      "缺失需要的观测时不计算完整周期收益"
+    ],
+    "costScope": "演示固定电价，仅电量电费；不含需量、税费、峰谷、执行人工或改造费用",
+    "noMeasuredCustomerSavingsClaim": true
+  },
+  "plans": [
+    {
+      "planId": "SCN-PLAN-NONE",
+      "label": "保持现状",
+      "targetDeviceIds": [],
+      "recommended": false,
+      "createsOrder": false,
+      "description": "保留观察，不生成调整任务。"
+    },
+    {
+      "planId": "SCN-PLAN-PUBLIC-HVAC",
+      "label": "公共空调分区优化",
+      "targetDeviceIds": [
+        "SCN-B2-HVAC-PUBLIC"
+      ],
+      "recommended": true,
+      "createsOrder": true,
+      "description": "只减少公共空调非必要运行，不影响研发加班与基础负荷。"
+    },
+    {
+      "planId": "SCN-PLAN-HVAC-LIGHT",
+      "label": "空调与照明联合优化",
+      "targetDeviceIds": [
+        "SCN-B2-HVAC-PUBLIC",
+        "SCN-B2-LIGHT-PUBLIC"
+      ],
+      "recommended": false,
+      "createsOrder": true,
+      "description": "在推荐方案基础上减少非必要增量照明，增加一项照明巡查确认。"
+    }
+  ],
+  "followupSimulation": {
+    "generatorId": "FOLLOWUP_ENERGY_V1",
+    "responseFactor": "0.90",
+    "factorMeaning": "场景编排参数，故意区分预计与模拟结果；不是预测准确率或真实设备物理模型",
+    "generationRule": "将各observed小时平移24小时；仅选定目标时段/设备扣除 power × bucketOverlapHours × responseFactor；其他设备和B1/B3不变。",
+    "visibleAfter": "VERIFY_NEXT_CYCLE",
+    "resultLabel": "下一周期模拟结果",
+    "sameExternalConditionsAssumption": true,
+    "residualEventPolicy": "完成所选优化任务不等于原能耗偏差归零；模拟后仍超20%则事件MONITORING，保留后续观察。"
+  },
+  "workOrderTemplate": {
+    "idPrefix": "SCN-WO-B2",
+    "workflowIdPrefix": "SCN-WF-B2",
+    "parkId": "PARK-SCENARIO-001",
+    "buildingId": "B2",
+    "deviceId": "SCN-B2-METER-TOTAL",
+    "alertId": "SCN-ALT-B2-NIGHT-001",
+    "reviewerActorId": "SCN-ACTOR-APPROVER",
+    "assigneeActorId": "SCN-ACTOR-TECH",
+    "initialStatus": "PENDING_EXECUTION",
+    "statusLabels": {
+      "PENDING_EXECUTION": "演示任务已创建，待处理",
+      "IN_PROGRESS": "模拟处理进行中",
+      "RESOLVED": "模拟任务已完成",
+      "CANCELLED": "演示任务已取消"
+    },
+    "materializeAfter": "CONFIRM_AND_CREATE_ORDER",
+    "materializeFields": [
+      "selectedPlanId",
+      "targetDeviceIds",
+      "protectedDeviceIds",
+      "parameterSnapshot",
+      "estimateSnapshot",
+      "scenarioRunId",
+      "createdAt",
+      "updatedAt"
+    ],
+    "idempotencyKeyRule": "scenarioRunId + anomalyId + confirmedPlanRevision",
+    "completionScope": "仅本方案的模拟任务，不表示整个楼宇恢复正常"
+  },
+  "reportContract": {
+    "idPrefix": "SCN-RPT-B2",
+    "kind": "SCENARIO_EVENT_BRIEF",
+    "format": "Markdown",
+    "snapshotPolicy": "IMMUTABLE_AT_GENERATION",
+    "allowedAfter": [
+      "ASSESSED",
+      "PLAN_SELECTED",
+      "ORDER_CREATED",
+      "PROCESSING",
+      "APPLIED_AWAITING_VERIFICATION",
+      "VERIFIED",
+      "CLOSED_NO_ACTION"
+    ],
+    "sections": [
+      "本次问题与周期",
+      "多方面依据",
+      "选择的方案及参数",
+      "预计效果",
+      "任务状态与处理记录",
+      "模拟后续结果（已验证才显示）",
+      "仍需关注与后续建议"
+    ],
+    "sourceFields": [
+      "scenarioId",
+      "scenarioVersion",
+      "scenarioRunId",
+      "dataSource",
+      "stateRevision",
+      "virtualGeneratedAt",
+      "observationWindow",
+      "followupWindow",
+      "buildingId",
+      "anomalyId",
+      "planSnapshot",
+      "orderSnapshot",
+      "estimateSnapshot",
+      "followupSnapshot"
+    ],
+    "idempotencyKeyRule": "scenarioRunId + stateRevision + reportKind",
+    "readAndDownloadNeverGenerate": true,
+    "existingReportBoundary": "新增场景简报，不把原有三个固定日报章节改标题冒充本场景完整报告，不覆写既有日报快照。"
+  },
+  "runtimeContract": {
+    "persistence": "本场景单会话缓存；页面切换不重置，刷新恢复同一run；首次无缓存才用initialState。无需生产数据库。",
+    "identityRule": "scenarioId + version + scenarioRunId；建筑B2本身不足以区分数据源",
+    "initialState": {
+      "scenarioRunId": "SCN-B2-NIGHT-ENERGY-001-RUN-001",
+      "stage": "READY",
+      "stateRevision": 0,
+      "virtualNow": "2026-09-11T09:00:00+08:00",
+      "selectedBuildingId": "B2",
+      "selectedPlanId": null,
+      "planRevision": 0,
+      "planDraft": null,
+      "eventStatus": "NOT_SURFACED",
+      "patrolResult": null,
+      "assessment": null,
+      "confirmedPlan": null,
+      "workOrder": null,
+      "followupResult": null,
+      "reports": [],
+      "activeReportId": null,
+      "pendingCommand": null
+    },
+    "resetPolicy": "显式确认后只清理本场景run，run序号加1，业务时钟回到initialNow。使旧回调失效；不删除原工作台、线上工单、历史日报或其他场景。",
+    "pendingPolicy": "启动/提交结果未确认时保留命令身份并阻止重置；普通读刷新不清空已知回执。",
+    "stageLabels": {
+      "READY": "尚未巡检",
+      "PATROL_DONE": "巡检已完成",
+      "ASSESSED": "研判已完成",
+      "PLAN_SELECTED": "方案待确认",
+      "ORDER_CREATED": "演示任务待处理",
+      "PROCESSING": "模拟处理中",
+      "APPLIED_AWAITING_VERIFICATION": "已模拟应用，待验证",
+      "VERIFIED": "模拟复盘已完成",
+      "CLOSED_NO_ACTION": "已选择保持观察"
+    },
+    "mainStages": [
+      "READY",
+      "PATROL_DONE",
+      "ASSESSED",
+      "PLAN_SELECTED",
+      "ORDER_CREATED",
+      "PROCESSING",
+      "APPLIED_AWAITING_VERIFICATION",
+      "VERIFIED",
+      "CLOSED_NO_ACTION"
+    ],
+    "actionTransitions": [
+      {
+        "action": "START_PATROL",
+        "from": [
+          "READY"
+        ],
+        "to": "PATROL_DONE",
+        "virtualAdvanceMinutes": 1,
+        "effect": "读取统一事实，执行4项检查，聚合1个业务事件，eventStatus=OPEN，不生成工单。"
+      },
+      {
+        "action": "RUN_ASSESSMENT",
+        "from": [
+          "PATROL_DONE"
+        ],
+        "to": "ASSESSED",
+        "virtualAdvanceMinutes": 1,
+        "effect": "按证据模板形成场景研判；无在线模型请求或伪造模型运行。"
+      },
+      {
+        "action": "SELECT_PLAN",
+        "from": [
+          "ASSESSED",
+          "PLAN_SELECTED"
+        ],
+        "to": "PLAN_SELECTED",
+        "effect": "保存所选planId、planDraft及默认或保留参数，增加planRevision，按共享参数重算估算。"
+      },
+      {
+        "action": "UPDATE_PARAMETERS",
+        "from": [
+          "PLAN_SELECTED"
+        ],
+        "to": "PLAN_SELECTED",
+        "effect": "验证输入，planRevision增加；同源图表与方案卡同步重算。"
+      },
+      {
+        "action": "CONFIRM_AND_CREATE_ORDER",
+        "from": [
+          "PLAN_SELECTED"
+        ],
+        "to": "ORDER_CREATED",
+        "virtualAdvanceMinutes": 1,
+        "effect": "非零方案、范围合法且明确确认后原子保存方案并取得1个模拟回执；eventStatus=HANDLING。"
+      },
+      {
+        "action": "KEEP_OBSERVING",
+        "from": [
+          "PLAN_SELECTED"
+        ],
+        "to": "CLOSED_NO_ACTION",
+        "effect": "仅SCN-PLAN-NONE可用，不建单，eventStatus=MONITORING。"
+      },
+      {
+        "action": "TAKE_ORDER",
+        "from": [
+          "ORDER_CREATED"
+        ],
+        "to": "PROCESSING",
+        "virtualAdvanceMinutes": 1,
+        "effect": "PENDING_EXECUTION -> IN_PROGRESS，追加模拟接单记录。"
+      },
+      {
+        "action": "APPLY_SIMULATED_PLAN",
+        "from": [
+          "PROCESSING"
+        ],
+        "to": "APPLIED_AWAITING_VERIFICATION",
+        "virtualAdvanceMinutes": 5,
+        "effect": "记录方案已模拟应用；仍IN_PROGRESS，尚无跟踪周期结果。"
+      },
+      {
+        "action": "VERIFY_NEXT_CYCLE",
+        "from": [
+          "APPLIED_AWAITING_VERIFICATION"
+        ],
+        "to": "VERIFIED",
+        "effect": "时钟显式推进verificationNow，计算后续曲线及结果；任务RESOLVED，事件按余下偏差置MONITORING。"
+      }
+    ],
+    "orthogonalActions": {
+      "CANCEL_CONFIRM": "只关弹窗，不改变选择/参数/任务",
+      "NAVIGATE": "只改页面与焦点",
+      "REFRESH_READS": "重读同run事实/状态，不能另建任务或改变参数",
+      "GENERATE_REPORT": "按当前stateRevision复制不可变简报，运行主stage不变化",
+      "OPEN_REPORT": "选中已有快照，页面结论随该快照；不换用最新状态",
+      "DOWNLOAD_REPORT": "导出选中快照，不重算不生成",
+      "RESET_SCENARIO": "见resetPolicy"
+    }
+  },
+  "variants": [
+    {
+      "variantId": "NORMAL",
+      "label": "完整主故事",
+      "delta": null
+    },
+    {
+      "variantId": "NO_ACTION",
+      "label": "客户选择保持现状",
+      "delta": {
+        "selectedPlanId": "SCN-PLAN-NONE"
+      },
+      "expected": "不生成任务，简报写保持观察。"
+    },
+    {
+      "variantId": "PARTIAL_DATA",
+      "label": "公共空调缺失一个关键小时",
+      "delta": {
+        "omitObservedReadingId": "SCN-B2-HVAC-PUBLIC:15",
+        "baselineRemainsAvailable": true,
+        "applyToRuntimeObservationOnly": true
+      },
+      "expected": "该域PARTIAL，显示已取得值而非完整日总量；暂停完整节能估算与提交，不补零。"
+    },
+    {
+      "variantId": "LOST_CREATE_RESPONSE",
+      "label": "模拟建单已提交但响应丢失",
+      "delta": {
+        "command": "CONFIRM_AND_CREATE_ORDER",
+        "fault": "RETURN_LOST_AFTER_COMMIT"
+      },
+      "expected": "按同run/同command查询或原样重试；仅1个工单，不换键再创建。"
+    }
+  ],
+  "expectedAssertions": {
+    "use": "仅验收断言，不是第二份页面业务数据；页面必须从ledger与parameters求值。",
+    "initialB2": {
+      "baselineKwh": 1000,
+      "observedKwh": 1300,
+      "excessKwh": 300,
+      "deviationPct": 30
+    },
+    "channelTotals": {
+      "SCN-B2-HVAC-PUBLIC": {
+        "baselineKwh": 240.0,
+        "observedKwh": 440.0
+      },
+      "SCN-B2-LIGHT-PUBLIC": {
+        "baselineKwh": 120.0,
+        "observedKwh": 160.0
+      },
+      "SCN-B2-HVAC-RD": {
+        "baselineKwh": 280.0,
+        "observedKwh": 340.0
+      },
+      "SCN-B2-ESSENTIAL": {
+        "baselineKwh": 360.0,
+        "observedKwh": 360.0
+      }
+    },
+    "initialPark": {
+      "baselineKwh": 2600,
+      "observedKwh": 2900,
+      "excessKwh": 300,
+      "deviationPct": 11.54
+    },
+    "defaultPlanResults": {
+      "SCN-PLAN-NONE": {
+        "estimatedSavedKwhPerDay": 0.0,
+        "estimatedAfterKwhPerDay": 1300.0,
+        "estimatedSavingPctOfObserved": 0.0,
+        "estimatedMonthlySavingsCny": 0.0,
+        "simulatedSavedKwh": 0.0,
+        "simulatedFollowupKwh": 1300.0,
+        "simulatedRemainingDeviationPct": 30.0
+      },
+      "SCN-PLAN-PUBLIC-HVAC": {
+        "estimatedSavedKwhPerDay": 80.0,
+        "estimatedAfterKwhPerDay": 1220.0,
+        "estimatedSavingPctOfObserved": 6.15,
+        "estimatedMonthlySavingsCny": 1760.0,
+        "simulatedSavedKwh": 72.0,
+        "simulatedFollowupKwh": 1228.0,
+        "simulatedRemainingDeviationPct": 22.8
+      },
+      "SCN-PLAN-HVAC-LIGHT": {
+        "estimatedSavedKwhPerDay": 90.0,
+        "estimatedAfterKwhPerDay": 1210.0,
+        "estimatedSavingPctOfObserved": 6.92,
+        "estimatedMonthlySavingsCny": 1980.0,
+        "simulatedSavedKwh": 81.0,
+        "simulatedFollowupKwh": 1219.0,
+        "simulatedRemainingDeviationPct": 21.9
+      }
+    },
+    "parameterExample": {
+      "planId": "SCN-PLAN-PUBLIC-HVAC",
+      "savedHours": 3,
+      "tariffCnyPerKwh": 1,
+      "applicableDaysPerMonth": 22,
+      "outputs": {
+        "estimatedSavedKwhPerDay": 60.0,
+        "estimatedAfterKwhPerDay": 1240.0,
+        "estimatedSavingPctOfObserved": 4.62,
+        "estimatedMonthlySavingsCny": 1320.0,
+        "simulatedSavedKwh": 54.0,
+        "simulatedFollowupKwh": 1246.0,
+        "simulatedRemainingDeviationPct": 24.6
+      }
+    },
+    "patrol": {
+      "checkCount": 4,
+      "attentionCheckCount": 2,
+      "passCheckCount": 2,
+      "uniqueEventCount": 1,
+      "initialWorkOrderCount": 0
+    },
+    "recommendedPostVerification": {
+      "workOrderStatus": "RESOLVED",
+      "eventStatus": "MONITORING",
+      "remainingExcessKwh": 228,
+      "parkFollowupKwh": 2828,
+      "futureResultVisibleBeforeVerification": false
+    }
+  },
+  "sourceBasis": [
+    {
+      "sourceId": "S1",
+      "kind": "REPOSITORY_REUSE",
+      "path": "ui/src/types/customer.ts",
+      "commit": "902286df043fd0460dc4b4dffcbfe8183cbf2f60",
+      "supports": "沿用B1/B2/B3名称与客户上下文字段思路，不宣称新增场景source已支持"
+    },
+    {
+      "sourceId": "S2",
+      "kind": "REPOSITORY_REUSE",
+      "path": "ui/src/types/workflow.ts",
+      "commit": "902286df043fd0460dc4b4dffcbfe8183cbf2f60",
+      "supports": "工单状态和alert/building/device关联结构"
+    },
+    {
+      "sourceId": "S3",
+      "kind": "REPOSITORY_BOUNDARY",
+      "path": "docs/issue-71-capability-map.md",
+      "commit": "902286df043fd0460dc4b4dffcbfe8183cbf2f60",
+      "supports": "现有成功建单夹具是B1；新场景需一致B2适配，不替换为B1或放宽校验"
+    },
+    {
+      "sourceId": "D1",
+      "kind": "NEW_DESIGN",
+      "supports": "本场景所有数值、设备、人员角色、曲线、规则、电价、系数和剧情均为本轮新设计的模拟事实，不来自实测或行业标准"
+    }
+  ]
+}

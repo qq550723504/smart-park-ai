@@ -7,10 +7,14 @@ import ParkOverview from '../customer/ParkOverview.vue'
 import CustomerWorkOrders from '../customer/CustomerWorkOrders.vue'
 import CustomerOperationsReports from '../customer/CustomerOperationsReports.vue'
 import CustomerAssistantPanel from '../customer/CustomerAssistantPanel.vue'
+import ScenarioWorkspace from '../customer/scenario/ScenarioWorkspace.vue'
 import { getOperationsCapabilities, type OperationsCapabilities, type ShowcaseScenario } from '../../services/workflowApi'
+import { useB2NightEnergyScenario } from '../../scenario/b2-night-energy/store'
+import { scenarioAnalysisContext } from '../../scenario/b2-night-energy/context'
 import type { CustomerAnalysisContext, CustomerPage } from '../../types/customer'
 import type { WorkbenchView } from '../../types/workbench'
 import '../customer/customer-surface.css'
+import '../customer/scenario/scenario-surface.css'
 
 const props = defineProps<{ active?: boolean }>()
 
@@ -32,6 +36,86 @@ const restartDialog = ref<HTMLElement | null>(null)
 const assistantPanel = ref<{ canResetForDemo: () => boolean; resetForDemo: () => boolean } | null>(null)
 const overviewPanel = ref<{ resetForDemo: () => Promise<void> } | null>(null)
 let restartReturnFocus: HTMLElement | null = null
+
+const scenarioStore = useB2NightEnergyScenario()
+
+const SCENARIO_PAGES: CustomerPage[] = ['overview', 'analysis', 'work-orders', 'reports']
+
+function scenarioQuery(): URLSearchParams | null {
+  try {
+    return new URLSearchParams(window.location.search)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Resolves the scenario entry from the deep link or the persisted session
+ * flag. This runs during setup, before the first render: a restored or
+ * deep-linked scenario session must never mount the online pages (and their
+ * live operations requests) for even a single frame.
+ */
+function resolveInitialScenario(): { active: boolean; page: CustomerPage } {
+  const params = scenarioQuery()
+  const requested = params?.get('scenario') === 'b2-night-energy'
+  if (!requested && !scenarioStore.active.value) return { active: false, page: 'overview' }
+  const page = params?.get('scenarioPage')
+  return {
+    active: true,
+    page: page && (SCENARIO_PAGES as string[]).includes(page) ? page as CustomerPage : 'overview',
+  }
+}
+
+const initialScenario = resolveInitialScenario()
+const scenarioMode = ref(initialScenario.active)
+const scenarioContext = computed(() => scenarioMode.value ? scenarioAnalysisContext(scenarioStore.snapshot.value) : null)
+
+if (scenarioMode.value) {
+  scenarioStore.enter()
+  activePage.value = initialScenario.page
+  analysisContext.value = scenarioContext.value
+  workOrdersContext.value = scenarioContext.value
+}
+
+function enterScenario(): void {
+  scenarioStore.enter()
+  scenarioMode.value = true
+  activePage.value = 'overview'
+  analysisContext.value = scenarioContext.value
+  workOrdersContext.value = scenarioContext.value
+  syncScenarioQuery(true, 'overview')
+}
+
+function exitScenario(): void {
+  scenarioStore.exit()
+  scenarioMode.value = false
+  analysisContext.value = null
+  workOrdersContext.value = null
+  activePage.value = 'overview'
+  // Clear the deep-link parameters too: the query is authoritative on reload,
+  // so leaving `?scenario=…` in place would re-enter the scenario immediately.
+  syncScenarioQuery(false)
+}
+
+/**
+ * Keeps the URL deep link in sync with the scenario mode so a reload restores
+ * exactly the mode (and page) the user last saw, including after exit.
+ */
+function syncScenarioQuery(active: boolean, page: CustomerPage = 'overview'): void {
+  try {
+    const url = new URL(window.location.href)
+    if (active) {
+      url.searchParams.set('scenario', 'b2-night-energy')
+      url.searchParams.set('scenarioPage', page)
+    } else {
+      url.searchParams.delete('scenario')
+      url.searchParams.delete('scenarioPage')
+    }
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
+  } catch {
+    // URL sync is best-effort; the persisted mode flag still drives entry.
+  }
+}
 const analysisInstanceKey = computed(() => {
   const context = analysisContext.value
   return context
@@ -39,6 +123,7 @@ const analysisInstanceKey = computed(() => {
     : 'no-analysis-context'
 })
 const assistantContext = computed(() => {
+  if (scenarioMode.value) return scenarioContext.value
   if (activePage.value === 'analysis') return analysisContext.value
   if (activePage.value === 'work-orders') return workOrdersContext.value
   if (activePage.value === 'overview') return latestOverviewContext.value
@@ -47,6 +132,18 @@ const assistantContext = computed(() => {
 
 async function navigate(page: CustomerPage, requestedContext?: CustomerAnalysisContext): Promise<void> {
   restartNotice.value = ''
+  if (scenarioMode.value) {
+    // The scenario owns a single B2 context; page switches never rebuild it.
+    analysisContext.value = scenarioContext.value
+    workOrdersContext.value = scenarioContext.value
+    activePage.value = page
+    syncScenarioQuery(true, page)
+    await nextTick()
+    const target = document.getElementById(pageMainId(page))
+    target?.setAttribute('tabindex', '-1')
+    target?.focus()
+    return
+  }
   if (page === 'analysis') {
     if (requestedContext) {
       analysisContext.value = requestedContext
@@ -64,16 +161,19 @@ async function navigate(page: CustomerPage, requestedContext?: CustomerAnalysisC
   }
   activePage.value = page
   await nextTick()
-  const mainId = page === 'analysis'
+  const main = document.getElementById(pageMainId(page))
+  main?.setAttribute('tabindex', '-1')
+  main?.focus()
+}
+
+function pageMainId(page: CustomerPage): string {
+  return page === 'analysis'
     ? 'customer-analysis-main'
     : page === 'work-orders'
       ? 'customer-work-orders-main'
       : page === 'reports'
         ? 'customer-reports-main'
-      : 'customer-overview-main'
-  const main = document.getElementById(mainId)
-  main?.setAttribute('tabindex', '-1')
-  main?.focus()
+        : 'customer-overview-main'
 }
 
 function updateContext(context: CustomerAnalysisContext | null): void {
@@ -169,8 +269,16 @@ async function confirmRestart(): Promise<void> {
   analysisContext.value = null
   workOrdersContext.value = null
   activePage.value = 'overview'
+  // The tour restart returns to the starting page; keep the scenario deep link
+  // in step, otherwise a reload would restore the page we just left.
+  if (scenarioMode.value) syncScenarioQuery(true, 'overview')
   const overviewRefresh = overviewPanel.value?.resetForDemo()
-  restartNotice.value = '客户导览已回到起点；仅清除了本页选择与助手会话，后台工单、报告和进行中的任务均未删除。'
+  // Restarting the tour only resets presentation state. The shared scenario run
+  // is deliberately preserved: it has its own explicit “重开本场景” control, and
+  // the dialog promises that shared demo data is never deleted here.
+  restartNotice.value = scenarioMode.value
+    ? '客户导览已回到起点；仅清除了本页选择与助手会话。场景 run 与后台工单、报告和进行中的任务均未删除；如需清空场景请使用“重开本场景”。'
+    : '客户导览已回到起点；仅清除了本页选择与助手会话，后台工单、报告和进行中的任务均未删除。'
   await nextTick()
   const overviewMain = document.getElementById('customer-overview-main')
   overviewMain?.setAttribute('tabindex', '-1')
@@ -206,9 +314,11 @@ onMounted(() => {
     <template #work-orders-hero>
       <div>
         <h1 id="customer-work-orders-title">事件与工单中心</h1>
-        <p>围绕异常发现、人工确认、建单与跟进，形成可核验的处理闭环</p>
+        <p v-if="scenarioMode">预设场景的模拟处理闭环，工单为演示夹具，不是真实回执</p>
+        <p v-else>围绕异常发现、人工确认、建单与跟进，形成可核验的处理闭环</p>
       </div>
-      <span>同一事件<br />真实回执</span>
+      <span v-if="scenarioMode">模拟任务<br />非真实回执</span>
+      <span v-else>同一事件<br />真实回执</span>
     </template>
     <template #reports-hero>
       <div>
@@ -218,41 +328,47 @@ onMounted(() => {
       <span>数据洞察价值<br />报告驱动成长</span>
     </template>
     <p v-if="restartNotice" class="customer-alert customer-demo-restart__notice" role="status" data-restart-notice>{{ restartNotice }}</p>
-    <ParkOverview
-      ref="overviewPanel"
-      v-show="activePage === 'overview'"
-      :active="props.active !== false"
-      @context-change="updateContext"
-      @view-analysis="openAnalysis"
-      @view-reports="navigate('reports')"
-    />
-    <KeepAlive>
-      <EnergyAnalysis
-        :key="analysisInstanceKey"
-        v-show="activePage === 'analysis'"
-        :active="props.active !== false && activePage === 'analysis'"
-        :context="analysisContext"
-        @back="navigate('overview')"
-        @open-work-orders="openWorkOrders"
+    <ScenarioWorkspace v-if="scenarioMode" :active-page="activePage" @exit="exitScenario" />
+    <template v-else>
+      <button type="button" class="scenario-entry" data-enter-scenario @click="enterScenario">
+        演示场景：研发大厦夜间能耗（模拟数据）
+      </button>
+      <ParkOverview
+        ref="overviewPanel"
+        v-show="activePage === 'overview'"
+        :active="props.active !== false"
+        @context-change="updateContext"
+        @view-analysis="openAnalysis"
+        @view-reports="navigate('reports')"
       />
-    </KeepAlive>
-    <KeepAlive>
-      <CustomerWorkOrders
-        :key="workOrdersContext ? `${workOrdersContext.buildingId}:${workOrdersContext.anomalyId ?? 'none'}` : 'no-work-order-context'"
-        v-show="activePage === 'work-orders'"
-        :active="props.active !== false && activePage === 'work-orders'"
-        :context="workOrdersContext"
-        @back="navigate('analysis')"
-        @open-reports="navigate('reports')"
-      />
-    </KeepAlive>
-    <KeepAlive>
-      <CustomerOperationsReports
-        v-show="activePage === 'reports'"
-        :active="props.active !== false && activePage === 'reports'"
-        :available="analyticsAvailable"
-      />
-    </KeepAlive>
+      <KeepAlive>
+        <EnergyAnalysis
+          :key="analysisInstanceKey"
+          v-show="activePage === 'analysis'"
+          :active="props.active !== false && activePage === 'analysis'"
+          :context="analysisContext"
+          @back="navigate('overview')"
+          @open-work-orders="openWorkOrders"
+        />
+      </KeepAlive>
+      <KeepAlive>
+        <CustomerWorkOrders
+          :key="workOrdersContext ? `${workOrdersContext.buildingId}:${workOrdersContext.anomalyId ?? 'none'}` : 'no-work-order-context'"
+          v-show="activePage === 'work-orders'"
+          :active="props.active !== false && activePage === 'work-orders'"
+          :context="workOrdersContext"
+          @back="navigate('analysis')"
+          @open-reports="navigate('reports')"
+        />
+      </KeepAlive>
+      <KeepAlive>
+        <CustomerOperationsReports
+          v-show="activePage === 'reports'"
+          :active="props.active !== false && activePage === 'reports'"
+          :available="analyticsAvailable"
+        />
+      </KeepAlive>
+    </template>
     <CustomerAssistantPanel
       ref="assistantPanel"
       :open="assistantOpen"

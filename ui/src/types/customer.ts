@@ -19,7 +19,7 @@ export interface CustomerAnalysisContext {
   overviewDomainStatus: AnomalyDomainStatusMap
   anomalyWindow: AnomalyWindow
   energyWindow: CustomerEnergyWindow
-  source: 'OPERATIONS_ANALYTICS'
+  source: 'OPERATIONS_ANALYTICS' | 'SCENARIO_FIXTURE'
 }
 
 export const CUSTOMER_BUILDINGS: Record<string, { name: string; position: { left: string; top: string } }> = {

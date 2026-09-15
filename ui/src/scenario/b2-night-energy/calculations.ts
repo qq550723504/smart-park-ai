@@ -1,0 +1,450 @@
+import type {
+  ChannelTotal,
+  DataQuality,
+  EnergyLedgerRow,
+  FollowupRow,
+  FollowupSimulation,
+  LedgerTotals,
+  PlanEstimate,
+  ScenarioBuilding,
+  ScenarioFixture,
+  ScenarioParameters,
+  ScenarioPlan,
+  ScenarioVariantId,
+  PatrolCheckResult,
+  PatrolEvent,
+  PatrolResult,
+  Assessment,
+} from '../../types/scenarioEnergy'
+
+/**
+ * Pure derived calculations for SCN-B2-NIGHT-ENERGY-001. No page may hold a
+ * second copy of these numbers; every view reads the same helpers. Formulas
+ * are implemented explicitly (never `eval`-ed from formulaDefinitions).
+ */
+
+export function parseDecimal(value: string | number): number {
+  return typeof value === 'number' ? value : Number.parseFloat(value)
+}
+
+/** Decimal HALF_UP to `digits` places, matching the fixture's rounding rule. */
+export function roundHalfUp(value: number, digits = 2): number {
+  if (!Number.isFinite(value)) return value
+  const sign = value < 0 ? -1 : 1
+  const abs = Math.abs(value)
+  // Re-parse the value's shortest decimal string with the point shifted by
+  // `digits`. `String(n)` yields the shortest decimal that round-trips, so a
+  // decimal tie such as 4.725 becomes the exactly-representable 472.5 before
+  // rounding; `Math.round` then applies HALF_UP away from zero. The previous
+  // `Number.EPSILON` nudge was too small to repair most binary ties (e.g. it
+  // turned 4.725 into 4.72 instead of the required 4.73).
+  const shifted = Number(`${abs}e${digits}`)
+  const scaled = Number.isFinite(shifted) ? shifted : abs * 10 ** digits
+  return (sign * Math.round(scaled)) / 10 ** digits
+}
+
+export function formatDisplayNumber(value: number | null | undefined, maximumFractionDigits = 2): string {
+  if (value == null || !Number.isFinite(value)) return '—'
+  return value.toLocaleString('zh-CN', { maximumFractionDigits })
+}
+
+/** Plain (no thousands separator) formatting for contract text templates. */
+export function formatPlainNumber(value: number | null | undefined, maximumFractionDigits = 2): string {
+  if (value == null || !Number.isFinite(value)) return '—'
+  return String(Number(value.toFixed(maximumFractionDigits)))
+}
+
+export function defaultParametersFromFixture(fixture: ScenarioFixture): ScenarioParameters {
+  return {
+    savedHours: parseDecimal(fixture.optimization.defaultParameters.savedHours),
+    tariffCnyPerKwh: parseDecimal(fixture.optimization.defaultParameters.tariffCnyPerKwh),
+    applicableDaysPerMonth: fixture.optimization.defaultParameters.applicableDaysPerMonth,
+  }
+}
+
+export interface ParameterValidation {
+  ok: boolean
+  value: ScenarioParameters | null
+  errors: string[]
+}
+
+/**
+ * Untyped interactive input: an HTML number field hands back a string (and an
+ * empty string once cleared), so validation must accept the raw form values
+ * rather than a pre-parsed `ScenarioParameters`.
+ */
+export interface RawScenarioParameters {
+  savedHours?: unknown
+  tariffCnyPerKwh?: unknown
+  applicableDaysPerMonth?: unknown
+}
+
+/**
+ * Converts an interactive form value to a number without falling for the
+ * empty-string coercion trap: `Number('')`, `Number('  ')` and `Number(null)`
+ * are all `0`, which would let a *cleared* field satisfy a `min: 0` bound and
+ * freeze a zero-hour, zero-savings plan. Blank or non-numeric input becomes
+ * `NaN` so the bounds check rejects it, while an explicit `0` stays valid.
+ */
+function toFiniteNumber(value: unknown): number {
+  if (typeof value === 'number') return value
+  if (typeof value === 'string' && value.trim() !== '') return Number(value)
+  return Number.NaN
+}
+
+/**
+ * True when `value` lands on a multiple of `step`. The fixture declares the
+ * allowed increment per field, so the page and provider must enforce the same
+ * step instead of relying on native `<input step>` validation (the confirm
+ * button lives outside the form and bypasses it).
+ */
+function stepAligned(value: number, step: number): boolean {
+  if (!Number.isFinite(step) || step <= 0) return true
+  const ratio = value / step
+  return Math.abs(ratio - Math.round(ratio)) <= 1e-9
+}
+
+/** Validates page input against the scenario's interactive bounds (A07). */
+export function validateParameters(fixture: ScenarioFixture, raw: RawScenarioParameters): ParameterValidation {
+  const bounds = fixture.optimization.parameterBounds
+  const errors: string[] = []
+  const savedHours = toFiniteNumber(raw.savedHours)
+  const tariff = toFiniteNumber(raw.tariffCnyPerKwh)
+  const days = toFiniteNumber(raw.applicableDaysPerMonth)
+
+  const minHours = parseDecimal(bounds.savedHours.min)
+  const maxHours = parseDecimal(bounds.savedHours.max)
+  const stepHours = parseDecimal(bounds.savedHours.step)
+  const minTariff = parseDecimal(bounds.tariffCnyPerKwh.min)
+  const maxTariff = parseDecimal(bounds.tariffCnyPerKwh.max)
+  const stepTariff = parseDecimal(bounds.tariffCnyPerKwh.step)
+
+  if (!Number.isFinite(savedHours) || savedHours < minHours || savedHours > maxHours) {
+    errors.push(`减少时长需在 ${minHours}—${maxHours} 小时之间。`)
+  } else if (!stepAligned(savedHours, stepHours)) {
+    errors.push(`减少时长需按 ${stepHours} 小时调整。`)
+  }
+  if (!Number.isFinite(tariff) || tariff < minTariff || tariff > maxTariff) {
+    errors.push(`演示电价需在 ${minTariff}—${maxTariff} 元/kWh 之间。`)
+  } else if (!stepAligned(tariff, stepTariff)) {
+    errors.push(`演示电价需按 ${stepTariff} 元/kWh 调整。`)
+  }
+  if (!Number.isFinite(days) || days < bounds.applicableDaysPerMonth.min || days > bounds.applicableDaysPerMonth.max) {
+    errors.push(`月度适用日需为 ${bounds.applicableDaysPerMonth.min}—${bounds.applicableDaysPerMonth.max} 的整数。`)
+  } else if (!stepAligned(days, bounds.applicableDaysPerMonth.step)) {
+    errors.push(`月度适用日需按 ${bounds.applicableDaysPerMonth.step} 天调整。`)
+  }
+  if (errors.length) return { ok: false, value: null, errors }
+  return {
+    ok: true,
+    value: { savedHours, tariffCnyPerKwh: tariff, applicableDaysPerMonth: days },
+    errors,
+  }
+}
+
+/** Applies the PARTIAL_DATA variant without mutating the fixture. */
+export function effectiveLedger(
+  fixture: ScenarioFixture,
+  variant: ScenarioVariantId,
+): { ledger: EnergyLedgerRow[]; missingReadingIds: string[]; dataQuality: DataQuality } {
+  const omitted = new Set<string>()
+  if (variant === 'PARTIAL_DATA') {
+    const partial = fixture.variants.find((item) => item.variantId === 'PARTIAL_DATA')
+    const omitId = partial?.delta?.omitObservedReadingId
+    if (typeof omitId === 'string') omitted.add(omitId)
+  }
+  const ledger = fixture.energyLedger.rows.map((row) => omitted.has(row.readingId)
+    ? { ...row, observedMissing: true }
+    : { ...row })
+  return {
+    ledger,
+    missingReadingIds: [...omitted],
+    dataQuality: omitted.size ? 'PARTIAL' : 'COMPLETE',
+  }
+}
+
+export function sumBaseline(rows: EnergyLedgerRow[]): number {
+  return roundHalfUp(rows.reduce((sum, row) => sum + row.baselineKwh, 0))
+}
+
+export function sumObserved(rows: EnergyLedgerRow[]): number {
+  return roundHalfUp(rows.reduce((sum, row) => sum + (row.observedMissing ? 0 : row.observedKwh), 0))
+}
+
+/**
+ * Assembles totals while keeping the deviation contract honest: excess and
+ * deviation are only published when every expected observation is present, so
+ * a partial observed subtotal is never divided by a complete baseline.
+ */
+function assembleTotals(baselineKwh: number, observedKwh: number, observedMissingCount: number): LedgerTotals {
+  const observedComplete = observedMissingCount === 0
+  return {
+    baselineKwh,
+    observedKwh,
+    observedMissingCount,
+    observedComplete,
+    excessKwh: observedComplete ? roundHalfUp(observedKwh - baselineKwh) : null,
+    deviationPct: observedComplete
+      ? (baselineKwh === 0 ? 0 : roundHalfUp(((observedKwh - baselineKwh) / baselineKwh) * 100))
+      : null,
+  }
+}
+
+export function totalsFromRows(rows: EnergyLedgerRow[]): LedgerTotals {
+  return assembleTotals(
+    sumBaseline(rows),
+    sumObserved(rows),
+    rows.filter((row) => row.observedMissing).length,
+  )
+}
+
+export function channelTotals(fixture: ScenarioFixture, ledger: EnergyLedgerRow[]): ChannelTotal[] {
+  return fixture.energyLedger.meterAggregation.childDeviceIds.map((deviceId) => {
+    const rows = ledger.filter((row) => row.deviceId === deviceId)
+    return {
+      deviceId,
+      baselineKwh: sumBaseline(rows),
+      observedKwh: sumObserved(rows),
+      observedMissingCount: rows.filter((row) => row.observedMissing).length,
+    }
+  })
+}
+
+/** B2 total meter is the per-bucket sum of its four child channels only. */
+export function b2Totals(fixture: ScenarioFixture, ledger: EnergyLedgerRow[]): LedgerTotals {
+  const childIds = new Set(fixture.energyLedger.meterAggregation.childDeviceIds)
+  return totalsFromRows(ledger.filter((row) => childIds.has(row.deviceId)))
+}
+
+/**
+ * B1/B3 are explicit demo generators: both baseline and observed are the B2
+ * baseline sum times their scale, so the park never reuses B2's 30% story.
+ */
+export function parkTotals(fixture: ScenarioFixture, ledger: EnergyLedgerRow[]): LedgerTotals {
+  const b2 = b2Totals(fixture, ledger)
+  const background = fixture.buildings
+    .filter((building) => building.meterRule === 'SCALED_B2_BASELINE' && building.scale)
+    .reduce((sum, building) => sum + b2.baselineKwh * parseDecimal(building.scale!), 0)
+  // Background buildings mirror the B2 baseline, so a missing B2 observation
+  // also makes the park observation incomplete; carry the count across.
+  return assembleTotals(
+    roundHalfUp(b2.baselineKwh + background),
+    roundHalfUp(b2.observedKwh + background),
+    b2.observedMissingCount,
+  )
+}
+
+export function planById(fixture: ScenarioFixture, planId: string | null | undefined): ScenarioPlan | null {
+  if (!planId) return null
+  return fixture.plans.find((plan) => plan.planId === planId) ?? null
+}
+
+/**
+ * The plan a variant's delta pins for the whole run (e.g. NO_ACTION always
+ * resolves to “保持现状”). Returns null when the variant leaves the choice to
+ * the operator. The delta is part of the fixture contract, so the provider
+ * must honour it rather than treating the variant as a display-only label.
+ */
+export function variantPinnedPlanId(fixture: ScenarioFixture, variant: ScenarioVariantId): string | null {
+  const entry = fixture.variants.find((item) => item.variantId === variant)
+  const pinned = entry?.delta?.selectedPlanId
+  return typeof pinned === 'string' ? pinned : null
+}
+
+export function avoidablePowerKw(fixture: ScenarioFixture, deviceId: string): number {
+  const assumption = fixture.optimization.powerAssumptions.find((item) => item.deviceId === deviceId)
+  return assumption ? parseDecimal(assumption.avoidablePowerKw) : 0
+}
+
+export function planPowerKw(fixture: ScenarioFixture, plan: ScenarioPlan | null): number {
+  if (!plan || !plan.createsOrder) return 0
+  return roundHalfUp(plan.targetDeviceIds.reduce((sum, deviceId) => sum + avoidablePowerKw(fixture, deviceId), 0))
+}
+
+/**
+ * Estimates a plan against a ledger.
+ *
+ * Returns `null` when the observation set is incomplete. A full-cycle saving
+ * estimate is only defined on a complete ledger (scenario constraint:
+ * “缺失需要的观测时不计算完整周期收益”), so callers must present the
+ * estimate as unavailable rather than derive numbers from partial data.
+ */
+export function planEstimate(
+  fixture: ScenarioFixture,
+  ledger: EnergyLedgerRow[],
+  parameters: ScenarioParameters,
+  planId: string,
+): PlanEstimate | null {
+  if (ledger.some((row) => row.observedMissing)) return null
+  const observed = b2Totals(fixture, ledger).observedKwh
+  const plan = planById(fixture, planId)
+  const power = planPowerKw(fixture, plan)
+  const saved = roundHalfUp(power * parameters.savedHours)
+  return {
+    planId,
+    estimatedSavedKwhPerDay: saved,
+    estimatedAfterKwhPerDay: roundHalfUp(observed - saved),
+    estimatedSavingPctOfObserved: observed === 0 ? 0 : roundHalfUp((saved / observed) * 100),
+    estimatedMonthlySavingsCny: roundHalfUp(saved * parameters.applicableDaysPerMonth * parameters.tariffCnyPerKwh),
+  }
+}
+
+function windowOverlapHours(bucketStartMs: number, durationMinutes: number, windowStartMs: number, windowEndMs: number): number {
+  const bucketEndMs = bucketStartMs + durationMinutes * 60_000
+  const overlap = Math.min(bucketEndMs, windowEndMs) - Math.max(bucketStartMs, windowStartMs)
+  return overlap > 0 ? overlap / 3_600_000 : 0
+}
+
+/**
+ * Generates the next-cycle simulated result (FOLLOWUP_ENERGY_V1).
+ *
+ * The observation buckets are shifted +24h; only the selected plan's target
+ * devices inside the adjustment window are reduced by
+ * `power × overlapHours × responseFactor`, and never below the bucket's own
+ * baseline. Protected devices and background buildings are untouched.
+ */
+export function simulateFollowup(
+  fixture: ScenarioFixture,
+  ledger: EnergyLedgerRow[],
+  parameters: ScenarioParameters,
+  planId: string,
+  options: { verificationNow?: string } = {},
+): FollowupSimulation {
+  const plan = planById(fixture, planId)
+  const responseFactor = parseDecimal(fixture.followupSimulation.responseFactor)
+  const missingReadingIds = ledger.filter((row) => row.observedMissing).map((row) => row.readingId)
+  const observedTotal = b2Totals(fixture, ledger).observedKwh
+  const baselineTotal = b2Totals(fixture, ledger).baselineKwh
+
+  const targetDevices = new Set(plan?.createsOrder ? plan.targetDeviceIds : [])
+  const windowStartMs = Date.parse(fixture.optimization.adjustmentWindowInObservation.from)
+  const windowMaxMs = Date.parse(fixture.optimization.adjustmentWindowInObservation.maxTo)
+  const requestedEndMs = windowStartMs + parameters.savedHours * 3_600_000
+  const windowEndMs = Math.min(requestedEndMs, windowMaxMs)
+  const shiftMs = 24 * 3_600_000
+
+  let savedKwh = 0
+  const rows: FollowupRow[] = ledger.map((row) => {
+    let deducted = 0
+    if (targetDevices.has(row.deviceId) && !row.observedMissing) {
+      const bucketStartMs = Date.parse(row.bucketStart)
+      const overlapHours = windowOverlapHours(bucketStartMs, row.durationMinutes, windowStartMs, windowEndMs)
+      if (overlapHours > 0) {
+        const requested = avoidablePowerKw(fixture, row.deviceId) * overlapHours * responseFactor
+        const positiveIncrement = Math.max(0, row.observedKwh - row.baselineKwh)
+        deducted = roundHalfUp(Math.min(requested, positiveIncrement))
+      }
+    }
+    savedKwh += deducted
+    return {
+      deviceId: row.deviceId,
+      bucketStart: row.bucketStart,
+      followupBucketStart: new Date(Date.parse(row.bucketStart) + shiftMs).toISOString(),
+      baselineKwh: row.baselineKwh,
+      observedKwh: row.observedMissing ? Number.NaN : row.observedKwh,
+      followupKwh: row.observedMissing ? Number.NaN : roundHalfUp(row.observedKwh - deducted),
+      deductedKwh: deducted,
+    }
+  })
+
+  const roundedSaved = roundHalfUp(savedKwh)
+  const followupKwh = roundHalfUp(observedTotal - roundedSaved)
+  return {
+    planId,
+    parameters,
+    savedKwh: roundedSaved,
+    followupKwh,
+    remainingDeviationPct: baselineTotal === 0 ? 0 : roundHalfUp(((followupKwh - baselineTotal) / baselineTotal) * 100),
+    rows,
+    partial: missingReadingIds.length > 0,
+    missingReadingIds,
+  }
+}
+
+/** Park-level simulated follow-up total including the unchanged B1/B3. */
+export function parkFollowupKwh(fixture: ScenarioFixture, ledger: EnergyLedgerRow[], b2FollowupKwh: number): number {
+  const b2Baseline = b2Totals(fixture, ledger).baselineKwh
+  const background = fixture.buildings
+    .filter((building) => building.meterRule === 'SCALED_B2_BASELINE' && building.scale)
+    .reduce((sum, building) => sum + b2Baseline * parseDecimal(building.scale!), 0)
+  return roundHalfUp(b2FollowupKwh + background)
+}
+
+export function buildPatrolResult(fixture: ScenarioFixture, dataQuality: DataQuality): PatrolResult {
+  const checks: PatrolCheckResult[] = fixture.patrolChecks.map((check) => {
+    if (check.checkId === 'SCN-CHECK-DATA' && dataQuality === 'PARTIAL') {
+      return { ...check, successResult: 'ATTENTION', result: 'ATTENTION' } as PatrolCheckResult
+    }
+    return {
+      checkId: check.checkId,
+      label: check.label,
+      result: check.successResult,
+      eventRef: check.eventRef,
+      evidenceRefs: check.evidenceRefs,
+    }
+  })
+  const attention = checks.filter((check) => check.result === 'ATTENTION')
+  const pass = checks.filter((check) => check.result === 'PASS')
+  const events: PatrolEvent[] = attention.some((check) => check.eventRef)
+    ? [{
+        anomalyId: fixture.eventTemplate.anomalyId,
+        title: fixture.eventTemplate.title,
+        buildingId: fixture.eventTemplate.buildingId,
+        deviceId: fixture.eventTemplate.deviceId,
+        category: fixture.eventTemplate.category,
+        priority: fixture.eventTemplate.priority,
+        observedAt: fixture.eventTemplate.observedAt,
+        affectedDeviceIds: [...fixture.eventTemplate.affectedDeviceIds],
+      }]
+    : []
+  return {
+    checks,
+    attentionCount: attention.length,
+    passCount: pass.length,
+    uniqueEventCount: events.length,
+    events,
+  }
+}
+
+function interpolate(template: string, values: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (match, key: string) => values[key] ?? match)
+}
+
+export function buildAssessment(fixture: ScenarioFixture, ledger: EnergyLedgerRow[]): Assessment {
+  const b2 = b2Totals(fixture, ledger)
+  const template = fixture.assessmentTemplate
+  // A full-period deviation needs full-period coverage. When an observation is
+  // missing, report the obtained subtotal and withhold the excess/deviation
+  // instead of comparing unlike periods.
+  const summary = b2.observedComplete && b2.excessKwh != null && b2.deviationPct != null
+    ? interpolate(template.summaryTemplate, {
+        observedKwh: formatPlainNumber(b2.observedKwh, 0),
+        excessKwh: formatPlainNumber(b2.excessKwh, 0),
+        deviationPct: formatPlainNumber(b2.deviationPct, 2),
+      })
+    : `研发大厦本周期已取得用电 ${formatPlainNumber(b2.observedKwh, 0)} kWh，但存在缺失观测，观测不完整，暂不计算与完整基线的偏差；公共区域在22:00—02:00存在计划外运行，建议优先核查并调整该范围；研发加班区与必要基础负荷保持不变。`
+  return {
+    title: template.title,
+    mode: template.mode,
+    summary,
+    facts: template.facts.map((fact) => ({ factId: fact.factId, text: fact.template, evidenceRefs: [...fact.evidenceRefs] })),
+    unknowns: [
+      ...template.unknowns,
+      ...(b2.observedComplete ? [] : ['观测不完整，本周期总用电与完整基线的偏差尚不可计算']),
+    ],
+    recommendedPlanId: template.recommendedPlanId,
+    evidenceRefs: ['/energyLedger', '/operatingFacts'],
+  }
+}
+
+/** Whether a plan is allowed given the data quality and protected devices. */
+export function planCanExecute(fixture: ScenarioFixture, plan: ScenarioPlan | null, dataQuality: DataQuality): boolean {
+  if (!plan || !plan.createsOrder) return false
+  if (dataQuality !== 'COMPLETE') return false
+  const protectedIds = new Set(fixture.operatingFacts.protectedDeviceIds)
+  return plan.targetDeviceIds.every((deviceId) => !protectedIds.has(deviceId))
+}
+
+export function buildingName(buildings: ScenarioBuilding[], buildingId: string): string {
+  return buildings.find((building) => building.buildingId === buildingId)?.name ?? buildingId
+}
