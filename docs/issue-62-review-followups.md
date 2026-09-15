@@ -465,3 +465,13 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 68 | `securityincident/SecurityIncidentService` 事件排序 | P2 | 两个具体来源在同一位置、同一 `correlationType`、同一 occurredAt 复用同一 eventId 时，`occurredAt`/`eventId` 比较器判定相等，稳定排序保留 reader/adapter 返回顺序；`build()` 取首个事件派生 incidentId，于是同一批关联证据在摄取顺序变化时得到不同 ID，破坏稳定 API 链接与已存储的（可能已驱逐的）投影关联。现排序追加 `SecurityEventIdentity.of(event).material()` 作为确定性来源身份 tie-breaker |
 
 对应提交：`051823e`。
+
+第三十六轮（对 `cf77a75`）补 3 条（P1 + P2 + P2）：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 69 | `port/security/SecurityEventCatalog` 直接查询范围 | P1 | `candidates()` 此前只在 reader 是 `SecurityPortReader` 时才把 `SecurityPort.getEvent(eventId)` 的直接结果并入候选：`listEvents()` 只枚举近端子集的 reader，即使仍能解析某个历史事件，该事件也变得不可达；若 adapter 复用了同一 id，还会被 adapter 副本顶掉、掩盖歧义。现对**所有** `SecurityEventReader` 都查询直接结果，仍只吞显式 `NoSuchElementException`；同时把端口契约写进 `SecurityPort`，并让 `MockSecurityAdapter.getEvent` 把 demo store 的「未找到」`IllegalArgumentException` 翻译为 `NoSuchElementException` |
+| 70 | `ui/src/components/security/SecurityIncidentCenter.vue` 误报指标口径 | P2 | 误报指标虽已由 `securityDispositionEnabled` 门控，但仍统计队列中**所有** `FALSE_POSITIVE` 条目；对来自非生产 `MockSecurityAdapter` 的事件做人工复核也会计入一个被描述为「生产误报评估」的统计。现把「逐事件生产归属」送到 UI：`SecurityIncidentService.dispositionIsProductionBacked(incident)` 依据同时声明 `productionSource` 与 `dispositionFeed` 的注册 adapter 计算，`SecurityIncidentDtos` 输出 `dispositionProduction`，前端只统计生产归属的已决条目，能力关闭时仍显示「误报数不可统计」 |
+| 71 | `port/security/SecurityEventCatalog` 与 `securityincident/SecurityIncidentService` 双重读取 | P2 | 一个同时注册为 `SecuritySourceAdapter` 的 reader 会被读两遍（`listEvents()` + `readEvents()`）：每个事件重复一次，并且同一条生产数据源在一次成功读取后又被查询第二次（可能失败）。现两处读取都在 adapter 阶段跳过 `adapter == reader` 的实例 |
+
+对应独立提交：`bac3d15`（#69）、`cb05bd0`（#71）、`30da73a`（#70）。
