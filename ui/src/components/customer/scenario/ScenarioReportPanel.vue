@@ -20,7 +20,7 @@ function downloadActiveReport(): void {
 </script>
 
 <template>
-  <section class="scenario-panel" data-scenario-reports aria-labelledby="scenario-reports-title">
+  <section id="customer-reports-main" class="scenario-panel" tabindex="-1" data-scenario-reports aria-labelledby="scenario-reports-title">
     <header class="scenario-panel__head">
       <div>
         <p class="scenario-panel__eyebrow">不可变快照 · 阅读与下载不重新生成</p>

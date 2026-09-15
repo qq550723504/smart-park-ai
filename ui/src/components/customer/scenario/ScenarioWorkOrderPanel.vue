@@ -36,7 +36,7 @@ const processingRecords = computed(() => snapshot.value.state.commandLog.filter(
 </script>
 
 <template>
-  <section class="scenario-panel" data-scenario-work-orders aria-labelledby="scenario-work-orders-title">
+  <section id="customer-work-orders-main" class="scenario-panel" tabindex="-1" data-scenario-work-orders aria-labelledby="scenario-work-orders-title">
     <header class="scenario-panel__head">
       <div>
         <p class="scenario-panel__eyebrow">同一 B2 · 本轮 run · 同一事件</p>

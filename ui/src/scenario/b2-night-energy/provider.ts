@@ -103,10 +103,11 @@ function renderReportMarkdown(snapshot: ScenarioReportSnapshot): string {
   const estimate = snapshot.estimateSnapshot
   const followup = snapshot.followupSnapshot
   const order = snapshot.orderSnapshot
-  // A closed no-action run has no `planSnapshot` but deliberately selected
-  // SCN-PLAN-NONE; the brief must record that decision explicitly so it is not
-  // indistinguishable from a report generated before any plan was chosen.
-  const noActionSelected = snapshot.selectedPlanId === 'SCN-PLAN-NONE'
+  // The no-action wording must only be claimed once the decision is finalized.
+  // At PLAN_SELECTED the user can still switch away from SCN-PLAN-NONE, so a
+  // report generated then must describe the selection as pending, not final.
+  const noActionFinalized = snapshot.stage === 'CLOSED_NO_ACTION' && snapshot.selectedPlanId === 'SCN-PLAN-NONE'
+  const noActionPending = !noActionFinalized && snapshot.selectedPlanId === 'SCN-PLAN-NONE'
   const lines: string[] = []
   lines.push(`# 研发大厦夜间能耗事件简报`)
   lines.push('')
@@ -129,9 +130,11 @@ function renderReportMarkdown(snapshot: ScenarioReportSnapshot): string {
     lines.push(`- 目标设备：${plan.targetDeviceIds.join('、') || '无'}`)
     lines.push(`- 保护设备：${plan.protectedDeviceIds.join('、') || '无'}`)
     lines.push(`- 参数：减少 ${plan.parameters.savedHours} 小时 / ${plan.parameters.tariffCnyPerKwh} 元每 kWh / 每月 ${plan.parameters.applicableDaysPerMonth} 个适用日`)
-  } else if (noActionSelected) {
+  } else if (noActionFinalized) {
     lines.push('- 客户明确选择“保持现状 / 保持观察”，本次不创建任务。')
     lines.push('- 该结论是主动决策，不是缺少可执行方案；整体偏差继续观察。')
+  } else if (noActionPending) {
+    lines.push('- 当前选择“保持现状 / 保持观察”，尚未确认；确认后将不创建任务。')
   } else {
     lines.push('- 尚未确认可执行方案。')
   }
@@ -150,7 +153,7 @@ function renderReportMarkdown(snapshot: ScenarioReportSnapshot): string {
     lines.push(`- 工单：${order.id}（${order.statusLabel}）`)
     lines.push(`- 负责人：${order.assigneeActorId}`)
     lines.push(`- 摘要：${order.summary}`)
-  } else if (noActionSelected) {
+  } else if (noActionFinalized) {
     lines.push('- 本次选择保持观察，未创建任务。')
   } else {
     lines.push('- 本次未创建任务。')

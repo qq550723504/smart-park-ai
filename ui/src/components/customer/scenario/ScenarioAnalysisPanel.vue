@@ -18,9 +18,6 @@ const followup = computed(() => snapshot.value.state.followupResult)
 
 const canSelect = computed(() => stage.value === 'ASSESSED' || stage.value === 'PLAN_SELECTED')
 const selectedPlan = computed(() => fixture.plans.find((plan) => plan.planId === snapshot.value.state.selectedPlanId) ?? null)
-const canConfirm = computed(() => stage.value === 'PLAN_SELECTED'
-  && snapshot.value.dataQuality === 'COMPLETE'
-  && Boolean(selectedPlan.value?.createsOrder))
 const canKeepObserving = computed(() => stage.value === 'PLAN_SELECTED'
   && selectedPlan.value?.planId === 'SCN-PLAN-NONE')
 const pinnedPlanId = computed(() => snapshot.value.pinnedPlanId)
@@ -60,8 +57,30 @@ const parameterSource = computed<ScenarioParameters>(() => {
       ?? snapshot.value.state.planDraft?.parameters
       ?? snapshot.value.defaultParameters
   }
-  return validation.value.value ?? snapshot.value.defaultParameters
+  // While still editable, preview the valid form; if the form is invalid, fall
+  // back to the applied draft so cards never render un-applied or default
+  // values that the user never reviewed.
+  return validation.value.value
+    ?? snapshot.value.state.planDraft?.parameters
+    ?? snapshot.value.defaultParameters
 })
+
+// Confirmation freezes whichever parameters the user reviewed. The visible
+// form may hold unapplied edits (or be invalid); the confirm action validates
+// and persists them atomically, and is disabled while they are invalid, so a
+// receipt can never silently use a different set of values.
+const appliedParameters = computed(() => snapshot.value.state.planDraft?.parameters ?? null)
+const formDirty = computed(() => {
+  const applied = appliedParameters.value
+  if (!applied) return true
+  return form.savedHours !== applied.savedHours
+    || form.tariffCnyPerKwh !== applied.tariffCnyPerKwh
+    || form.applicableDaysPerMonth !== applied.applicableDaysPerMonth
+})
+const canConfirm = computed(() => stage.value === 'PLAN_SELECTED'
+  && snapshot.value.dataQuality === 'COMPLETE'
+  && validation.value.ok
+  && Boolean(selectedPlan.value?.createsOrder))
 
 const planCards = computed(() => fixture.plans.map((plan) => ({
   plan,
@@ -109,6 +128,15 @@ async function applyParameters(): Promise<void> {
 }
 
 async function confirm(): Promise<void> {
+  if (!canConfirm.value) return
+  // Persist the reviewed form first if it diverges from the applied draft, so
+  // the frozen receipt matches exactly what the confirmation screen showed.
+  if (formDirty.value && !(await store.updateParameters({ ...form }))) return
+  await store.confirmAndCreateOrder()
+}
+
+async function retryOrder(): Promise<void> {
+  // Retry must replay the same identity only; never touch parameters meanwhile.
   await store.confirmAndCreateOrder()
 }
 
@@ -116,7 +144,7 @@ const selectedPlanId = computed(() => snapshot.value.state.selectedPlanId)
 </script>
 
 <template>
-  <section class="scenario-panel" data-scenario-analysis aria-labelledby="scenario-analysis-title">
+  <section id="customer-analysis-main" class="scenario-panel" tabindex="-1" data-scenario-analysis aria-labelledby="scenario-analysis-title">
     <header class="scenario-panel__head">
       <div>
         <p class="scenario-panel__eyebrow">预设场景研判与模拟执行</p>
@@ -233,6 +261,9 @@ const selectedPlanId = computed(() => snapshot.value.state.selectedPlanId)
       <p v-if="parametersLocked" class="scenario-muted" data-scenario-parameters-locked>
         方案已确认，参数快照已冻结；如需重新调整，请先重开本场景。
       </p>
+      <p v-else-if="formDirty" class="scenario-muted" data-scenario-parameters-dirty>
+        参数已修改但尚未应用；点击“确认并创建演示任务”会先按当前参数保存。
+      </p>
       <p v-if="!validation.ok" class="scenario-alert" role="alert" data-scenario-param-error>{{ validation.errors.join(' ') }}</p>
     </section>
 
@@ -257,7 +288,7 @@ const selectedPlanId = computed(() => snapshot.value.state.selectedPlanId)
       <p v-if="store.pending.value" class="scenario-alert" role="alert" data-scenario-pending>
         模拟命令待确认：{{ store.pending.value.command }}（{{ store.pending.value.status }}）
       </p>
-      <button v-if="store.pending.value" type="button" class="scenario-button" :disabled="store.busy.value" data-scenario-retry-order @click="confirm">
+      <button v-if="store.pending.value" type="button" class="scenario-button" :disabled="store.busy.value" data-scenario-retry-order @click="retryOrder">
         按同一身份重试建单（不会重复建单）
       </button>
       <p v-if="store.error.value" class="scenario-alert" role="alert" data-scenario-error>{{ store.error.value }}</p>

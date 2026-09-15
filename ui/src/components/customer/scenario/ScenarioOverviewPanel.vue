@@ -20,7 +20,7 @@ async function startPatrol(): Promise<void> {
 </script>
 
 <template>
-  <section class="scenario-panel" data-scenario-overview aria-labelledby="scenario-overview-title">
+  <section id="customer-overview-main" class="scenario-panel" tabindex="-1" data-scenario-overview aria-labelledby="scenario-overview-title">
     <header class="scenario-panel__head">
       <div>
         <p class="scenario-panel__eyebrow">演示园区 · 模拟场景 · {{ snapshot.dataSource }}</p>

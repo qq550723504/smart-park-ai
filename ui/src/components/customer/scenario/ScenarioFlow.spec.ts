@@ -356,6 +356,72 @@ describe('B2 scenario customer integration', () => {
     wrapper.unmount()
   })
 
+  it('confirms with the reviewed parameters even when they were not applied first', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
+    await flushPromises()
+
+    // Edit without clicking “应用参数”: the card previews 3h and confirmation
+    // must persist exactly that, never the previously applied 4h draft.
+    await wrapper.get('[data-scenario-input-hours]').setValue(3)
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] dl').text()).toContain('1,240')
+    expect(wrapper.find('[data-scenario-parameters-dirty]').exists()).toBe(true)
+
+    await wrapper.get('[data-scenario-confirm-order]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-scenario-parameters-dirty]').exists()).toBe(false)
+    const receipt = wrapper.get('[data-scenario-confirmed]').text()
+    expect(receipt).toContain('3h')
+    expect(receipt).toContain('60 kWh/日')
+    wrapper.unmount()
+  })
+
+  it('blocks confirmation while the visible parameters are invalid', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-scenario-input-hours]').setValue(5)
+    await flushPromises()
+    expect(wrapper.find('[data-scenario-param-error]').exists()).toBe(true)
+    expect((wrapper.get('[data-scenario-confirm-order]').element as HTMLButtonElement).disabled).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('exposes focusable shell main targets on every scenario page', async () => {
+    const wrapper = await mountScenario()
+    const ids = ['overview', 'analysis', 'work-orders', 'reports'] as const
+    const mainIds = {
+      overview: 'customer-overview-main',
+      analysis: 'customer-analysis-main',
+      'work-orders': 'customer-work-orders-main',
+      reports: 'customer-reports-main',
+    }
+    for (const page of ids) {
+      await wrapper.get(`[data-customer-nav="${page}"]`).trigger('click')
+      await flushPromises()
+      const main = document.getElementById(mainIds[page])
+      expect(main).not.toBeNull()
+      expect(main?.getAttribute('tabindex')).toBe('-1')
+      expect(document.activeElement).toBe(main)
+    }
+    wrapper.unmount()
+  })
+
   it('keeps the shared scenario run when the customer tour is restarted', async () => {
     const wrapper = await mountScenario()
     await wrapper.get('[data-scenario-start-patrol]').trigger('click')

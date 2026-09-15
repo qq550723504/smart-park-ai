@@ -130,6 +130,17 @@ describe('B2 provider order creation and idempotency', () => {
     expect(report.markdown).toContain('本次选择保持观察，未创建任务。')
     expect(report.markdown).not.toContain('尚未确认可执行方案。')
   })
+
+  it('keeps no-action wording pending until the decision is finalized', () => {
+    const provider = toOrdered(newProvider())
+    // SCN-PLAN-NONE is only selected here; the run is still PLAN_SELECTED and
+    // the user could switch away, so the brief must not claim a final decision.
+    provider.selectPlan('SCN-PLAN-NONE')
+    const report = provider.generateReport().state.reports[0]
+    expect(report.stage).toBe('PLAN_SELECTED')
+    expect(report.markdown).toContain('当前选择“保持现状 / 保持观察”，尚未确认')
+    expect(report.markdown).not.toContain('客户明确选择')
+  })
 })
 
 describe('B2 provider lost create response', () => {
