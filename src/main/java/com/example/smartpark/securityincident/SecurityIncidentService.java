@@ -13,6 +13,7 @@ import com.example.smartpark.model.security.SecuritySourceType;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoff;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoffPort;
+import com.example.smartpark.port.security.SecurityEventCatalog;
 import com.example.smartpark.port.security.SecurityEventReader;
 import com.example.smartpark.port.security.SecuritySourceAdapter;
 import com.example.smartpark.port.security.SecuritySourceDescriptor;
@@ -81,7 +82,7 @@ public final class SecurityIncidentService {
         if (adapters == null) return sources;
         for (SecuritySourceAdapter adapter : adapters) {
             SecuritySourceDescriptor descriptor = adapter.descriptor();
-            if (descriptor.productionSource() && descriptor.dispositionFeed()) {
+            if (descriptor != null && descriptor.productionSource() && descriptor.dispositionFeed()) {
                 sources.add(new SecuritySourceRef(descriptor.sourceType(), descriptor.sourceId()));
             }
         }
@@ -190,12 +191,11 @@ public final class SecurityIncidentService {
     }
 
     private List<SecurityIncident> correlate() {
-        List<SecurityEvent> ingested = new ArrayList<>(security.listEvents());
-        // A reader that is also registered as an adapter would otherwise contribute every
-        // event twice and be queried again after a successful first read.
-        sourceAdapters.stream()
-                .filter(adapter -> adapter != security)
-                .forEach(adapter -> ingested.addAll(adapter.readEvents()));
+        // The catalog is the single owner of "read every registered source once": it skips a
+        // reader that is also an adapter, and returns itself when the injected reader already
+        // is the adapter aggregate, so an adapters-only deployment is not read twice either.
+        List<SecurityEvent> ingested = new ArrayList<>(
+                SecurityEventCatalog.aggregating(security, sourceAdapters).listEvents());
         Map<CorrelationKey, List<SecurityEvent>> buckets = new LinkedHashMap<>();
         deduplicate(ingested).stream()
                 .sorted(Comparator.comparing(SecurityEvent::occurredAt)

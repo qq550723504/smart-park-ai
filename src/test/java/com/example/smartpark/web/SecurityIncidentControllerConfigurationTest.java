@@ -15,6 +15,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.beans.factory.config.RuntimeBeanReference;
+import org.springframework.beans.factory.support.ManagedList;
 
 import java.time.Instant;
 import java.util.List;
@@ -130,6 +131,18 @@ class SecurityIncidentControllerConfigurationTest {
                             .thenReturn(List.of(adapterEvent));
                     assertThat(context.getBean(SecurityPort.class).getEvent("SEC-ADAPTER-ONLY"))
                             .isSameAs(adapterEvent);
+                });
+    }
+
+    @Test
+    void handsTheAdapterListToTheIncidentServiceEvenInAdapterOnlyDeployments() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(SecurityIncidentConfiguration.class, AdapterOnlyConfiguration.class)
+                .run(context -> {
+                    Object argument = context.getBeanFactory().getBeanDefinition("securityIncidentService")
+                            .getConstructorArgumentValues().getIndexedArgumentValue(5, Object.class).getValue();
+                    assertThat(argument).isInstanceOf(ManagedList.class);
+                    assertThat((ManagedList<?>) argument).hasSize(1);
                 });
     }
 

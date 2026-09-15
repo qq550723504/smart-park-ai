@@ -12,6 +12,7 @@ import com.example.smartpark.model.security.SecurityEventSeverity;
 import com.example.smartpark.port.alert.AlertPort;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoff;
 import com.example.smartpark.port.collaboration.SecurityIncidentHandoffPort;
+import com.example.smartpark.port.security.SecurityEventCatalog;
 import com.example.smartpark.port.security.SecurityEventReader;
 import com.example.smartpark.port.security.SecuritySourceAdapter;
 import com.example.smartpark.port.security.SecuritySourceDescriptor;
@@ -112,6 +113,36 @@ class SecurityIncidentServiceTest {
         // The reader's own list already contributed the event, so the adapter pass must not
         // query the same production source a second time.
         assertThat(adapterReads.get()).isZero();
+    }
+
+    @Test
+    void keepsProductionProvenanceWhenTheInjectedReaderAlreadyAggregatesTheAdapters() {
+        AtomicInteger adapterReads = new AtomicInteger();
+        SecurityEvent production = withSource(event("SEC-AGGREGATED", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "prod-feed");
+        SecuritySourceAdapter adapter = new SecuritySourceAdapter() {
+            @Override
+            public SecuritySourceDescriptor descriptor() {
+                return new SecuritySourceDescriptor("prod-feed", SecuritySourceType.ACCESS_CONTROL,
+                        Set.of(SecurityEventType.ACCESS_ANOMALY), true, true);
+            }
+
+            @Override
+            public List<SecurityEvent> readEvents() {
+                adapterReads.incrementAndGet();
+                return List.of(production);
+            }
+        };
+        // Adapter-only deployments inject the adapter aggregate as the reader; the service must
+        // still receive the adapter descriptors for provenance and must not read it twice.
+        SecurityEventReader aggregate = new SecurityEventCatalog(new EmptySecurityEventReader(), List.of(adapter));
+        SecurityIncidentService service = service(aggregate, List.of(), 50,
+                new SecurityIncidentHandoffStore(10), List.of(adapter));
+
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        assertThat(service.dispositionIsProductionBacked(incident)).isTrue();
+        assertThat(adapterReads.get()).isEqualTo(1);
     }
 
     @Test

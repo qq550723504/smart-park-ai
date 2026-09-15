@@ -42,8 +42,7 @@ public class SecurityIncidentConfiguration {
                 registry.registerBeanDefinition("securityIncidentStore", store);
             }
             if (!registry.containsBeanDefinition("securityIncidentService")) {
-                boolean[] synthesizedAggregateReader = new boolean[1];
-                String readerBeanName = readerBeanName(registry, synthesizedAggregateReader);
+                String readerBeanName = readerBeanName(registry);
                 RootBeanDefinition service = new RootBeanDefinition(SecurityIncidentService.class);
                 service.getConstructorArgumentValues().addIndexedArgumentValue(0,
                         new RuntimeBeanReference(readerBeanName));
@@ -55,12 +54,12 @@ public class SecurityIncidentConfiguration {
                         new RuntimeBeanReference(BeanDefinitionLookup.beanNameFor(registry, SecurityIncidentHandoffPort.class)));
                 service.getConstructorArgumentValues().addIndexedArgumentValue(4, Clock.systemUTC());
                 ManagedList<RuntimeBeanReference> adapterReferences = new ManagedList<>();
-                // The synthesized reader is already the adapter aggregate, so handing the
-                // service the adapters again would ingest every adapter event twice.
-                if (!synthesizedAggregateReader[0]) {
-                    BeanDefinitionLookup.beanNamesFor(registry, SecuritySourceAdapter.class)
-                            .forEach(name -> adapterReferences.add(new RuntimeBeanReference(name)));
-                }
+                // The service delegates ingestion to SecurityEventCatalog.aggregating(...), so it
+                // can always receive the full adapter list: per-incident provenance needs it in
+                // every deployment (including adapter-only ones), and the catalog already skips
+                // the reader's own adapter role instead of reading that source twice.
+                BeanDefinitionLookup.beanNamesFor(registry, SecuritySourceAdapter.class)
+                        .forEach(name -> adapterReferences.add(new RuntimeBeanReference(name)));
                 service.getConstructorArgumentValues().addIndexedArgumentValue(5, adapterReferences);
                 registry.registerBeanDefinition("securityIncidentService", service);
             }
@@ -77,7 +76,7 @@ public class SecurityIncidentConfiguration {
          * {@code SecurityEventReader}/{@code SecurityPort} so shared tools resolve
          * adapter events instead of hitting an empty reader.
          */
-        private static String readerBeanName(BeanDefinitionRegistry registry, boolean[] synthesizedAggregateReader) {
+        private static String readerBeanName(BeanDefinitionRegistry registry) {
             String existing = BeanDefinitionLookup.beanNameFor(registry, SecurityEventReader.class);
             if (existing != null) return existing;
             if (!registry.containsBeanDefinition("securityEventReader")) {
@@ -90,7 +89,6 @@ public class SecurityIncidentConfiguration {
                 catalog.getConstructorArgumentValues().addIndexedArgumentValue(0, emptyReader);
                 catalog.getConstructorArgumentValues().addIndexedArgumentValue(1, aggregateAdapters);
                 registry.registerBeanDefinition("securityEventReader", catalog);
-                synthesizedAggregateReader[0] = true;
             }
             return "securityEventReader";
         }
