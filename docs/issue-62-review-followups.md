@@ -486,3 +486,12 @@ cd ui && npx vue-tsc -b && npx vitest run
 | #70 生产归属 | `SecurityIncidentConfiguration` 在 adapters-only 部署里把 adapter 列表置空（为规避上一条的双重读取），导致 `dispositionIsProductionBacked` 恒为 false，而由**全部** adapter 构建的 `SecurityEventCapabilityRegistry.dispositionEnabled()` 可能为 true —— 能力门控与逐事件归属口径不一致。 | 配置现在**始终**把完整 adapter 列表交给服务（目录已负责跳过 reader 自身的 adapter 角色），adapters-only 部署不再丢失生产 disposition 来源；「生产 disposition 来源」的判定收拢为 `SecurityEventCapabilityRegistry.suppliesProductionDispositions(...)` 单一规则，能力门控与误报归属共用，无法再漂移。 |
 
 对应提交：`fdc6091`（聚合唯一归属 + adapters-only 生产归属）、`c524ac2`（共享生产 disposition 来源规则）。新增回归测试 `SecurityIncidentServiceTest.keepsProductionProvenanceWhenTheInjectedReaderAlreadyAggregatesTheAdapters`（旧实现下 adapter 被读 2 次）与 `SecurityIncidentControllerConfigurationTest.handsTheAdapterListToTheIncidentServiceEvenInAdapterOnlyDeployments`（旧装配下 adapter 列表为空），均先在旧实现下复现失败再修复。
+
+第三十七轮（对 `7d3dca3`）补 2 条（P1 + P2）：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 72 | `securityincident/SecurityIncidentConfiguration` 适配器来源 | P1 | 纯 adapter 部署里 `readerBeanName()` 会把 reader 合成为 adapter 聚合目录，但该分支随后又给 `SecurityIncidentService` 注入**空** adapter 列表；服务只从该列表推导 `productionDispositionSources`，于是即使 adapter 是生产 disposition 源、能力清单也报告该能力开启，每条 incident 仍为 `dispositionProduction=false`，UI 在 adapter-only 配置下永远看不到生产误报统计。现配置**始终**把完整 adapter 列表交给服务（摄取去重已由 `SecurityEventCatalog.aggregating(...)` 统一负责）。此条在本轮开始前已于 `fdc6091` 从根因修复 |
+| 73 | `securityincident/SecurityIncidentService` 处置归属 | P2 | 生产事件与非生产（demo/人工复核）事件关联进同一 incident 时，`build()` 可能选中较新的 demo 处置记录，而 `dispositionIsProductionBacked` 仅凭「另一条贡献身份属于生产源」就把整条 incident 记为生产归属，于是 UI 会把该非生产 `FALSE_POSITIVE` 计入生产误报统计。现 `SecurityIncident` 记录「承载所选处置的事件身份」（人工复核与 legacy fixture 为 null），判定改为跟随该事件自身的来源；无事件归属的决策仍回退到 incident 的生产归属，人工复核生产 incident 照常计入 |
+
+对应提交：`fdc6091`（#72，与第三十六轮根因补充同一次提交）、`4a04610`（#73）。新增回归测试 `SecurityIncidentServiceTest.bindsProductionProvenanceToTheEventThatSuppliedTheDisposition`（旧判定下返回 true 而失败），已先在旧实现下复现失败再修复。
