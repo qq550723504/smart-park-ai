@@ -1,0 +1,93 @@
+# B2 夜间能耗预设场景（SCN-B2-NIGHT-ENERGY-001 v1.0.0）
+
+本文件记录基于交接包 `smart-park-unified-demo-v1.1`（issue brief 06、repository alignment 07、actions/acceptance 03）实现的客户演示场景：统一数据 → 派生计算 → 共享运行状态 → Mock 读写 provider → 客户壳层页面接入。
+
+- 场景：研发大厦 B2 夜间能耗异常（发现 → 选择 → 处理 → 复盘）
+- 数据源：`SCENARIO_FIXTURE`（模拟数据，非真实业务数据）
+- 与既有 `OPERATIONS_ANALYTICS` 在线数据、旧 B2 在线案例、安防支线（#62/#82）完全隔离
+
+## 1. 分层与文件
+
+| 层 | 文件 | 说明 |
+| --- | --- | --- |
+| 统一数据 | `ui/src/scenario/b2-night-energy/scenario-data.json` | 交接包 `04-scenario-data.json` 字节一致副本（sha256 `2c6ca619…`） |
+| 类型 | `ui/src/types/scenarioEnergy.ts` | 全部场景契约类型 |
+| 派生计算 | `ui/src/scenario/b2-night-energy/calculations.ts` | 账本、分项、楼宇/园区合计、方案估算、随访模拟等纯函数 |
+| 固定事实 | `ui/src/scenario/b2-night-energy/fixture.ts` | 固定虚拟时钟、run 序列、初始状态 |
+| 共享运行状态 | `ui/src/scenario/b2-night-energy/store.ts` | 单例共享 run + sessionStorage 持久化 + generation 守卫 |
+| Mock 读写 | `ui/src/scenario/b2-night-energy/provider.ts` | 状态机 + 幂等键 + 故障注入 |
+| 上下文映射 | `ui/src/scenario/b2-night-energy/context.ts` | 快照 → `CustomerAnalysisContext`（`source: 'SCENARIO_FIXTURE'`） |
+| 页面 | `ui/src/components/customer/scenario/` | `ScenarioWorkspace` + 总览/分析/工单/报告四面板 + 样式 |
+| 壳层接入 | `ui/src/components/showcase/ShowcaseHome.vue` | 场景模式开关、URL 参数、刷新恢复 |
+
+## 2. 事实与数字（必须由账本求值，页面不另编数字）
+
+- 96 条小时读数 = 4 分项 × 24 桶；总电表 `SCN-B2-METER-TOTAL` 只汇总，不是独立行
+- B2 基线 1000 / 观测 1300 / 偏差 30%（excess 300）
+  - 分项：HVAC-PUBLIC 240→440、LIGHT-PUBLIC 120→160、HVAC-RD 280→340、ESSENTIAL 360→360
+- B1/B3 按 B2 基线 × 0.90 / × 0.70 生成（背景楼宇，不参与设备检查）
+- 园区 2600 → 2900（11.54%）
+- 固定虚拟时钟 2026-09-11 09:00 Asia/Shanghai；观察窗口 [2026-09-10T08:00+08, 2026-09-11T08:00+08)；偏差阈值 20%
+- 计划：
+  - `SCN-PLAN-NONE` 0 / 1300
+  - `SCN-PLAN-PUBLIC-HVAC` 20kW × 4h = 80 kWh → 1220，1760 元/月（推荐）
+  - `SCN-PLAN-HVAC-LIGHT` 22.5kW × 4h = 90 kWh → 1210，1980 元/月
+  - 参数示例 3h → 60 / 1240 / 1320
+- 随访（仅在显式验证后可见）：观测平移 +24h，逐桶扣减 `power × overlapHours × 0.90`，上限为该桶正向增量
+  - 推荐方案：节省 72 → 1228（剩余偏差 22.8%）
+  - 联合方案：81 → 1219（21.9%）
+  - 园区随访 2828
+  - `0.90` 是固定剧情参数，**不是**模型准确率
+
+## 3. 状态机
+
+`READY → PATROL_DONE → ASSESSED → PLAN_SELECTED → ORDER_CREATED → PROCESSING → APPLIED_AWAITING_VERIFICATION → VERIFIED`，分支 `PLAN_SELECTED → CLOSED_NO_ACTION`。
+
+正交动作（不改主阶段）：`CANCEL_CONFIRM`、`NAVIGATE`、`REFRESH_READS`、`GENERATE_REPORT`、`OPEN_REPORT`、`DOWNLOAD_REPORT`、`RESET_SCENARIO`。
+
+- 报告生成**不**增加 `stateRevision`（否则破坏幂等）
+- 生成后按 `stateRevision` 冻结；旧 R1 不因新 R2 变化；阅读/下载从不重新生成
+- 重置递增 run 序号（RUN-001 → RUN-002），使旧回调失效；存在未确认命令时阻止重置
+
+## 4. 幂等与故障
+
+- 建单键：`scenarioRunId + anomalyId + planRevision`
+- 报告键：`scenarioRunId + stateRevision + reportKind`
+- `LOST_CREATE_RESPONSE`：建单已在场景内提交但响应丢失；UI 提示并允许**同一身份**重试，不重复建单
+
+## 5. 变体
+
+| 变体 | 行为 |
+| --- | --- |
+| `NORMAL` | 完整主故事 |
+| `NO_ACTION` | 选择保持现状，不建单，事件置 MONITORING |
+| `PARTIAL_DATA` | 省略 `SCN-B2-HVAC-PUBLIC:15` 观测；PARTIAL 不补零，暂停完整估算与提交 |
+| `LOST_CREATE_RESPONSE` | 模拟建单响应丢失，同键重试 |
+
+## 6. 页面接入
+
+- `ShowcaseHome` 新增场景模式：入口按钮，或 URL `?scenario=b2-night-energy`（可加 `scenarioPage=overview|analysis|work-orders|reports`）
+- 刷新后按 sessionStorage 恢复同一 run 与模式；翻页不重跑命令
+- 不进入场景模式时，四个在线页面行为完全不变
+- 复用壳层、`CustomerAnalysisHero` 与 AI 助手入口，不修改其内部实现
+
+## 7. 验收与测试
+
+```bash
+cd ui
+npx vue-tsc -b
+npx vitest run        # 55 文件 / 607 测试
+npm run build
+```
+
+- `calculations.spec.ts`：派生数值与参数边界
+- `provider.spec.ts`：状态机、幂等、变体、故障
+- `store.spec.ts`：持久化、generation 守卫、重置递增
+- `ScenarioFlow.spec.ts`：端到端 巡检→研判→选方案→确认→接单→应用→验证→报告；PARTIAL 阻断；失联重试；联合方案数值
+
+## 8. 边界
+
+- 不修改既有在线/模拟演示数据，不改动既有四个客户页面内部实现
+- 不实现安防支线（#62/#82 已合并能力直接复用，不重复实现）
+- 不接真实设备
+- 本 PR 只做前端演示接入，不含生产数据库、不自动合并部署
