@@ -97,7 +97,7 @@ async function confirmReset(): Promise<void> {
           演示变体
           <select
             :value="activeVariant"
-            :disabled="snapshot.state.stage !== 'READY'"
+            :disabled="store.busy.value || snapshot.state.stage !== 'READY'"
             data-scenario-variant
             @change="selectVariant(($event.target as HTMLSelectElement).value as ScenarioVariantId)"
           >

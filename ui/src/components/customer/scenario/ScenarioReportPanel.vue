@@ -45,6 +45,7 @@ function downloadActiveReport(): void {
           type="button"
           class="scenario-reports__item"
           :class="{ 'is-active': activeReport?.reportId === report.reportId }"
+          :disabled="store.busy.value"
           :data-scenario-report="report.reportId"
           @click="store.openReport(report.reportId)"
         >
