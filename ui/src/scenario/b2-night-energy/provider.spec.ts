@@ -70,7 +70,10 @@ describe('B2 provider plan selection and parameters', () => {
     provider.updateParameters({ savedHours: 3, tariffCnyPerKwh: 1, applicableDaysPerMonth: 22 })
     expect(provider.read().state.planDraft?.estimate).toMatchObject({ estimatedSavedKwhPerDay: 60, estimatedAfterKwhPerDay: 1240 })
     provider.selectPlan('SCN-PLAN-HVAC-LIGHT')
-    expect(provider.read().state.planDraft?.estimate?.estimatedMonthlySavingsCny).toBe(1980)
+    // Switching plans must carry the parameters the user applied: the cards they
+    // were comparing all used them, so the chosen plan cannot silently revert.
+    expect(provider.read().state.planDraft?.parameters).toEqual({ savedHours: 3, tariffCnyPerKwh: 1, applicableDaysPerMonth: 22 })
+    expect(provider.read().state.planDraft?.estimate?.estimatedMonthlySavingsCny).toBe(1485)
     expect(provider.read().state.planRevision).toBe(3)
   })
 

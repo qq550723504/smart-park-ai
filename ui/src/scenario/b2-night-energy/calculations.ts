@@ -68,6 +68,18 @@ export interface ParameterValidation {
   errors: string[]
 }
 
+/**
+ * True when `value` lands on a multiple of `step`. The fixture declares the
+ * allowed increment per field, so the page and provider must enforce the same
+ * step instead of relying on native `<input step>` validation (the confirm
+ * button lives outside the form and bypasses it).
+ */
+function stepAligned(value: number, step: number): boolean {
+  if (!Number.isFinite(step) || step <= 0) return true
+  const ratio = value / step
+  return Math.abs(ratio - Math.round(ratio)) <= 1e-9
+}
+
 /** Validates page input against the scenario's interactive bounds (A07). */
 export function validateParameters(fixture: ScenarioFixture, raw: Partial<ScenarioParameters>): ParameterValidation {
   const bounds = fixture.optimization.parameterBounds
@@ -78,19 +90,25 @@ export function validateParameters(fixture: ScenarioFixture, raw: Partial<Scenar
 
   const minHours = parseDecimal(bounds.savedHours.min)
   const maxHours = parseDecimal(bounds.savedHours.max)
+  const stepHours = parseDecimal(bounds.savedHours.step)
   const minTariff = parseDecimal(bounds.tariffCnyPerKwh.min)
   const maxTariff = parseDecimal(bounds.tariffCnyPerKwh.max)
+  const stepTariff = parseDecimal(bounds.tariffCnyPerKwh.step)
 
   if (!Number.isFinite(savedHours) || savedHours < minHours || savedHours > maxHours) {
     errors.push(`减少时长需在 ${minHours}—${maxHours} 小时之间。`)
-  } else if (Math.abs(savedHours / 0.5 - Math.round(savedHours / 0.5)) > 1e-9) {
-    errors.push('减少时长需按 0.5 小时调整。')
+  } else if (!stepAligned(savedHours, stepHours)) {
+    errors.push(`减少时长需按 ${stepHours} 小时调整。`)
   }
   if (!Number.isFinite(tariff) || tariff < minTariff || tariff > maxTariff) {
     errors.push(`演示电价需在 ${minTariff}—${maxTariff} 元/kWh 之间。`)
+  } else if (!stepAligned(tariff, stepTariff)) {
+    errors.push(`演示电价需按 ${stepTariff} 元/kWh 调整。`)
   }
-  if (!Number.isInteger(days) || days < bounds.applicableDaysPerMonth.min || days > bounds.applicableDaysPerMonth.max) {
+  if (!Number.isFinite(days) || days < bounds.applicableDaysPerMonth.min || days > bounds.applicableDaysPerMonth.max) {
     errors.push(`月度适用日需为 ${bounds.applicableDaysPerMonth.min}—${bounds.applicableDaysPerMonth.max} 的整数。`)
+  } else if (!stepAligned(days, bounds.applicableDaysPerMonth.step)) {
+    errors.push(`月度适用日需按 ${bounds.applicableDaysPerMonth.step} 天调整。`)
   }
   if (errors.length) return { ok: false, value: null, errors }
   return {

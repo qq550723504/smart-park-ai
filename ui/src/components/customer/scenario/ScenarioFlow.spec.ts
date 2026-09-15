@@ -464,6 +464,23 @@ describe('B2 scenario customer integration', () => {
     wrapper.unmount()
   })
 
+  it('syncs the scenario deep link back to overview when the tour restarts', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-customer-nav="reports"]').trigger('click')
+    await flushPromises()
+    expect(window.location.search).toContain('scenarioPage=reports')
+
+    await wrapper.get('[data-restart-demo]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-confirm-restart]').trigger('click')
+    await flushPromises()
+
+    // The tour returns to its starting page, so a reload must not restore the page we left.
+    expect(window.location.search).toContain('scenarioPage=overview')
+    expect(window.location.search).not.toContain('reports')
+    wrapper.unmount()
+  })
+
   it('keeps the lost-response receipt through report generation until the retry', async () => {
     const wrapper = await mountScenario()
     await wrapper.get('[data-scenario-variant]').setValue('LOST_CREATE_RESPONSE')

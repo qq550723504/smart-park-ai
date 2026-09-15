@@ -269,6 +269,9 @@ async function confirmRestart(): Promise<void> {
   analysisContext.value = null
   workOrdersContext.value = null
   activePage.value = 'overview'
+  // The tour restart returns to the starting page; keep the scenario deep link
+  // in step, otherwise a reload would restore the page we just left.
+  if (scenarioMode.value) syncScenarioQuery(true, 'overview')
   const overviewRefresh = overviewPanel.value?.resetForDemo()
   // Restarting the tour only resets presentation state. The shared scenario run
   // is deliberately preserved: it has its own explicit “重开本场景” control, and

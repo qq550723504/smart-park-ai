@@ -22,6 +22,10 @@ const canKeepObserving = computed(() => stage.value === 'PLAN_SELECTED'
   && selectedPlan.value?.planId === 'SCN-PLAN-NONE')
 const pinnedPlanId = computed(() => snapshot.value.pinnedPlanId)
 const pinnedPlanLabel = computed(() => fixture.plans.find((plan) => plan.planId === pinnedPlanId.value)?.label ?? '')
+// Input bounds come from the fixture contract, not literals, so the page and
+// `validateParameters` can never drift apart on min/max/step.
+const bounds = computed(() => snapshot.value.optimization.parameterBounds)
+const defaultParameters = computed(() => snapshot.value.defaultParameters)
 const canSelectPlan = (planId: string): boolean => canSelect.value
   && (pinnedPlanId.value == null || planId === pinnedPlanId.value)
 
@@ -243,16 +247,16 @@ const selectedPlanId = computed(() => snapshot.value.state.selectedPlanId)
     </section>
 
     <section class="scenario-card" data-scenario-parameters>
-      <header class="scenario-card__head"><h3>参数调整</h3><span>默认 4.0 小时 / 1.00 元每 kWh / 每月 22 个适用日</span></header>
+      <header class="scenario-card__head"><h3>参数调整</h3><span>默认 {{ defaultParameters.savedHours.toFixed(1) }} 小时 / {{ defaultParameters.tariffCnyPerKwh.toFixed(2) }} 元每 kWh / 每月 {{ defaultParameters.applicableDaysPerMonth }} 个适用日</span></header>
       <form class="scenario-form" @submit.prevent="applyParameters">
         <label>减少时长（小时）
-          <input v-model.number="form.savedHours" type="number" min="0" max="4" step="0.5" :disabled="parametersLocked" data-scenario-input-hours />
+          <input v-model.number="form.savedHours" type="number" :min="bounds.savedHours.min" :max="bounds.savedHours.max" :step="bounds.savedHours.step" :disabled="parametersLocked" data-scenario-input-hours />
         </label>
         <label>演示电价（元/kWh）
-          <input v-model.number="form.tariffCnyPerKwh" type="number" min="0.01" max="5" step="0.01" :disabled="parametersLocked" data-scenario-input-tariff />
+          <input v-model.number="form.tariffCnyPerKwh" type="number" :min="bounds.tariffCnyPerKwh.min" :max="bounds.tariffCnyPerKwh.max" :step="bounds.tariffCnyPerKwh.step" :disabled="parametersLocked" data-scenario-input-tariff />
         </label>
         <label>月度适用日
-          <input v-model.number="form.applicableDaysPerMonth" type="number" min="1" max="31" step="1" :disabled="parametersLocked" data-scenario-input-days />
+          <input v-model.number="form.applicableDaysPerMonth" type="number" :min="bounds.applicableDaysPerMonth.min" :max="bounds.applicableDaysPerMonth.max" :step="bounds.applicableDaysPerMonth.step" :disabled="parametersLocked" data-scenario-input-days />
         </label>
         <button type="submit" class="scenario-button" :disabled="!validation.ok || parametersLocked || store.busy.value" data-scenario-apply-parameters>
           应用参数

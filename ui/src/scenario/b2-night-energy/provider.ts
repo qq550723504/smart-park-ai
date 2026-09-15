@@ -346,8 +346,12 @@ export class MockScenarioProvider {
     const plan = planById(this.fixture, planId)
     if (!plan) throw new ScenarioStateError('未知方案。')
     const { ledger } = effectiveLedger(this.fixture, this.variant)
-    const keepDraft = this.state.planDraft?.planId === planId ? this.state.planDraft.parameters : null
-    const parameters = keepDraft ?? defaultParametersFromFixture(this.fixture)
+    // Parameters describe the run, not the plan: keep whatever the user already
+    // applied when switching plans, so choosing another card cannot silently
+    // reset the hours/tariff/days they were comparing with.
+    const parameters = this.state.planDraft
+      ? { ...this.state.planDraft.parameters }
+      : defaultParametersFromFixture(this.fixture)
     return this.commit('SELECT_PLAN', (draft) => {
       draft.stage = 'PLAN_SELECTED'
       draft.selectedPlanId = planId

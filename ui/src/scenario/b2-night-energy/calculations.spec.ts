@@ -132,6 +132,20 @@ describe('B2 plan estimation', () => {
     expect(validateParameters(fixture, { savedHours: 3, tariffCnyPerKwh: 1, applicableDaysPerMonth: 32 }).ok).toBe(false)
     expect(validateParameters(fixture, { savedHours: 3.5, tariffCnyPerKwh: 1, applicableDaysPerMonth: 22 }).ok).toBe(true)
   })
+
+  it('enforces the fixture step for every bounded parameter', () => {
+    // tariffCnyPerKwh step is 0.01: an in-range value off the grid is rejected.
+    const offGridTariff = validateParameters(fixture, { savedHours: 3, tariffCnyPerKwh: 1.005, applicableDaysPerMonth: 22 })
+    expect(offGridTariff.ok).toBe(false)
+    expect(offGridTariff.errors.join(' ')).toContain('元/kWh')
+    expect(validateParameters(fixture, { savedHours: 3, tariffCnyPerKwh: 1.01, applicableDaysPerMonth: 22 }).ok).toBe(true)
+    // savedHours step is read from the fixture too, so the error names it.
+    const offGridHours = validateParameters(fixture, { savedHours: 1.25, tariffCnyPerKwh: 1, applicableDaysPerMonth: 22 })
+    expect(offGridHours.ok).toBe(false)
+    expect(offGridHours.errors.join(' ')).toContain('按 0.5 小时')
+    // Days must stay a whole number of days (step 1).
+    expect(validateParameters(fixture, { savedHours: 3, tariffCnyPerKwh: 1, applicableDaysPerMonth: 22.5 }).ok).toBe(false)
+  })
 })
 
 describe('B2 follow-up simulation', () => {
