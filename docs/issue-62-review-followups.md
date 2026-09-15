@@ -495,3 +495,11 @@ cd ui && npx vue-tsc -b && npx vitest run
 | 73 | `securityincident/SecurityIncidentService` 处置归属 | P2 | 生产事件与非生产（demo/人工复核）事件关联进同一 incident 时，`build()` 可能选中较新的 demo 处置记录，而 `dispositionIsProductionBacked` 仅凭「另一条贡献身份属于生产源」就把整条 incident 记为生产归属，于是 UI 会把该非生产 `FALSE_POSITIVE` 计入生产误报统计。现 `SecurityIncident` 记录「承载所选处置的事件身份」（人工复核与 legacy fixture 为 null），判定改为跟随该事件自身的来源；无事件归属的决策仍回退到 incident 的生产归属，人工复核生产 incident 照常计入 |
 
 对应提交：`fdc6091`（#72，与第三十六轮根因补充同一次提交）、`4a04610`（#73）。新增回归测试 `SecurityIncidentServiceTest.bindsProductionProvenanceToTheEventThatSuppliedTheDisposition`（旧判定下返回 true 而失败），已先在旧实现下复现失败再修复。
+
+第三十八轮（对 `7e94dff`）补 1 条（P2）：
+
+| # | 位置 | 级别 | 处理 |
+| --- | --- | --- | --- |
+| 74 | `securityincident/SecurityIncidentService` 状态恢复 | P2 | 上一轮把处置归属绑定到「承载所选处置的事件」后，该归属由 `withStoredState` 依据**本轮**证据重新推导（`dispositionRecord.equals(fresh.dispositionRecord()) ? fresh.dispositionSource() : null`）。当被保留的处置并非本轮事件所带——例如事件源下一轮不再上报该决定，或 incident 已被有界 store 驱逐而处置只存在于 retained handoff——归属会被清空，判定回退到 incident 级来源，demo `FALSE_POSITIVE` 再次被计为生产误报。现处置归属与记录一起走过每次合并：`reconcileDecision(...)` 返回「选中的记录 + 拥有它的事件」，`SecurityIncidentHandoff` 也投影该归属，使 retained handoff 恢复时两者同时还原 |
+
+对应提交：`bdd099c`。新增回归测试 `SecurityIncidentServiceTest.keepsADispositionsOwnerWhenFreshEvidenceStopsReportingTheDecision`（stored incident 路径）与 `...FromARetainedHandoffWhenFreshEvidenceNoLongerReportsTheDecision`（retained handoff 路径），二者均在「按本轮证据重新推导归属」的旧行为下复现 `Expecting value to be false but was true`。
