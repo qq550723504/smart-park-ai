@@ -108,6 +108,11 @@ function renderReportMarkdown(snapshot: ScenarioReportSnapshot): string {
   // report generated then must describe the selection as pending, not final.
   const noActionFinalized = snapshot.stage === 'CLOSED_NO_ACTION' && snapshot.selectedPlanId === 'SCN-PLAN-NONE'
   const noActionPending = !noActionFinalized && snapshot.selectedPlanId === 'SCN-PLAN-NONE'
+  // Data quality is part of the immutable snapshot: a brief generated from an
+  // incomplete ledger must keep disclosing that limitation instead of reading
+  // like a complete NORMAL run.
+  const partial = snapshot.dataQuality !== 'COMPLETE' || !snapshot.observedComplete
+  const dataQualityLabel = partial ? 'PARTIAL（关键小时观测缺失）' : 'COMPLETE（完整观察窗口）'
   const lines: string[] = []
   lines.push(`# 研发大厦夜间能耗事件简报`)
   lines.push('')
@@ -117,12 +122,19 @@ function renderReportMarkdown(snapshot: ScenarioReportSnapshot): string {
   lines.push(`- 楼宇：${snapshot.buildingId} 研发大厦`)
   lines.push(`- 事件：${snapshot.anomalyId}（${snapshot.eventStatus}）`)
   lines.push(`- 观察周期：${snapshot.observationWindow.from} 至 ${snapshot.observationWindow.to}`)
+  lines.push(`- 数据质量：${dataQualityLabel}`)
+  if (partial && snapshot.missingReadingIds.length > 0) {
+    lines.push(`- 缺失观测：${snapshot.missingReadingIds.join('、')}（不补零）`)
+  }
   lines.push(`- 当前阶段：${snapshot.stage}`)
   lines.push('')
   lines.push('## 2. 多方面依据')
   lines.push('- 用电账本与基线来自同一固定观察窗口。')
   lines.push('- 公共区域在 22:00—02:00 存在计划外运行，且本场景同期没有批准预约。')
   lines.push('- 研发区域有已批准加班安排，不纳入方案；机房与必要基础负荷保持不变。')
+  if (partial) {
+    lines.push('- 本快照基于部分可用数据生成：缺失观测不补零，完整周期偏差与节能估算不可计算。')
+  }
   lines.push('')
   lines.push('## 3. 选择的方案及参数')
   if (plan) {
@@ -144,6 +156,8 @@ function renderReportMarkdown(snapshot: ScenarioReportSnapshot): string {
     lines.push(`- 预计每日减少用电：${formatDisplayNumber(estimate.estimatedSavedKwhPerDay)} kWh`)
     lines.push(`- 预计调整后日用能：${formatDisplayNumber(estimate.estimatedAfterKwhPerDay)} kWh`)
     lines.push(`- 预计月度电量电费减少：${formatDisplayNumber(estimate.estimatedMonthlySavingsCny)} 元（演示电价估算）`)
+  } else if (partial) {
+    lines.push('- 因关键小时观测缺失，本次暂停完整节能估算与提交，不给出完整周期预计效果（不补零）。')
   } else {
     lines.push('- 尚未形成预计效果。')
   }
@@ -542,6 +556,9 @@ export class MockScenarioProvider {
       estimateSnapshot: this.state.confirmedPlan?.estimate ?? snapshotData.state.planDraft?.estimate ?? null,
       followupSnapshot: this.state.followupResult ? clone(this.state.followupResult) : null,
       b2Totals: clone(snapshotData.b2),
+      dataQuality: snapshotData.dataQuality,
+      observedComplete: snapshotData.b2.observedComplete,
+      missingReadingIds: [...snapshotData.missingReadingIds],
     }
     const report: ScenarioReport = {
       ...reportSnapshot,

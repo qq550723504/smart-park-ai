@@ -477,6 +477,10 @@ export interface ScenarioReportSnapshot {
   estimateSnapshot: PlanEstimate | null
   followupSnapshot: FollowupSimulation | null
   b2Totals: LedgerTotals
+  /** Data-quality facts frozen with the snapshot, so a partial run's brief keeps disclosing its limitation. */
+  dataQuality: DataQuality
+  observedComplete: boolean
+  missingReadingIds: string[]
 }
 
 export interface ScenarioReport extends ScenarioReportSnapshot {

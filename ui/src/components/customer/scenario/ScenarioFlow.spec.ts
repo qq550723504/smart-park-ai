@@ -148,6 +148,16 @@ describe('B2 scenario customer integration', () => {
     expect(wrapper.find('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] [data-scenario-plan-unavailable]').exists()).toBe(true)
     expect(wrapper.find('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] dd').exists()).toBe(false)
     expect(wrapper.get('[data-scenario-confirm-order]').attributes('disabled')).toBeDefined()
+
+    // The generated brief must keep disclosing the data-quality limitation.
+    await wrapper.get('[data-customer-nav="reports"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-generate-report]').trigger('click')
+    await flushPromises()
+    const brief = wrapper.get('[data-scenario-report-view]').text()
+    expect(brief).toContain('数据质量：PARTIAL（关键小时观测缺失）')
+    expect(brief).toContain('SCN-B2-HVAC-PUBLIC:15')
+    expect(brief).toContain('暂停完整节能估算与提交')
     wrapper.unmount()
   })
 

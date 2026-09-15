@@ -298,6 +298,29 @@ describe('B2 provider reports', () => {
     provider.runAssessment()
     expect(provider.generateReport().state.reports).toHaveLength(1)
   })
+
+  it('freezes and discloses partial data quality in the brief', () => {
+    const provider = new MockScenarioProvider({ fixture, runSequenceNumber: 1, variant: 'PARTIAL_DATA' })
+    toOrdered(provider)
+    const report = provider.generateReport().state.reports[0]!
+    // The limitation is frozen with the snapshot, not re-read from live state.
+    expect(report.dataQuality).toBe('PARTIAL')
+    expect(report.observedComplete).toBe(false)
+    expect(report.missingReadingIds).toEqual(['SCN-B2-HVAC-PUBLIC:15'])
+    expect(report.markdown).toContain('数据质量：PARTIAL（关键小时观测缺失）')
+    expect(report.markdown).toContain('缺失观测：SCN-B2-HVAC-PUBLIC:15（不补零）')
+    expect(report.markdown).toContain('暂停完整节能估算与提交')
+    // Must not read like a complete NORMAL brief at the same stage.
+    expect(report.markdown).not.toContain('尚未形成预计效果。')
+    expect(report.markdown).not.toContain('COMPLETE（完整观察窗口）')
+
+    const normal = toOrdered(newProvider()).generateReport().state.reports[0]!
+    expect(normal.dataQuality).toBe('COMPLETE')
+    expect(normal.observedComplete).toBe(true)
+    expect(normal.missingReadingIds).toEqual([])
+    expect(normal.markdown).toContain('数据质量：COMPLETE（完整观察窗口）')
+    expect(normal.markdown).toContain('尚未形成预计效果。')
+  })
 })
 
 describe('B2 provider variants and reset', () => {
