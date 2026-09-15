@@ -66,13 +66,17 @@ public final class SecurityIncidentService {
     }
 
     /**
-     * True when the incident's events include a source that declares both a production
-     * source and a disposition feed. A false-positive statistic may only aggregate
-     * decisions the production feed can be held accountable for, never a manual review of
-     * an event that arrived from a demo or otherwise nonproduction source.
+     * True when the incident's <em>selected</em> disposition came from a source that
+     * declares both a production source and a disposition feed. When the decision was
+     * carried by a specific event, only that event's source counts: a demo feed's
+     * {@code FALSE_POSITIVE} must not be credited to an unrelated production event that
+     * merely correlated into the same incident. A decision with no event owner (a human
+     * review) counts when the incident it reviewed is itself production-backed.
      */
     public boolean dispositionIsProductionBacked(SecurityIncident incident) {
         Objects.requireNonNull(incident, "incident");
+        SecurityEventIdentity owner = incident.dispositionSource();
+        if (owner != null) return productionDispositionSources.contains(owner.source());
         return incident.eventIdentities().stream()
                 .map(SecurityEventIdentity::source)
                 .anyMatch(productionDispositionSources::contains);
@@ -345,19 +349,21 @@ public final class SecurityIncidentService {
                 ? SecurityIncidentRisk.MEDIUM
                 : linkedAlerts.stream().anyMatch(alert -> alert.riskHint() == RiskLevel.HIGH)
                     ? SecurityIncidentRisk.HIGH : SecurityIncidentRisk.LOW;
-        SecurityDispositionRecord sourceDisposition = events.stream()
-                .map(SecurityEvent::disposition)
-                .filter(record -> record.disposition() != SecurityDisposition.UNREVIEWED)
-                .max(Comparator.comparing(SecurityDispositionRecord::decidedAt))
-                .orElse(SecurityDispositionRecord.unreviewed());
-        boolean sourceDecided = sourceDisposition.disposition() != SecurityDisposition.UNREVIEWED;
+        SecurityEvent dispositionOwner = events.stream()
+                .filter(event -> event.disposition().disposition() != SecurityDisposition.UNREVIEWED)
+                .max(Comparator.comparing(event -> event.disposition().decidedAt()))
+                .orElse(null);
+        SecurityDispositionRecord sourceDisposition = dispositionOwner == null
+                ? SecurityDispositionRecord.unreviewed() : dispositionOwner.disposition();
+        boolean sourceDecided = dispositionOwner != null;
         return new SecurityIncident(incidentId(first), first.parkId(), first.buildingId(),
                 correlationType(first), risk,
                 sourceDecided ? SecurityIncidentStatus.REVIEWED : SecurityIncidentStatus.OPEN,
                 events.get(0).occurredAt(), events.get(events.size() - 1).occurredAt(), eventIds, alertIds,
                 evidence, timeline, recommendationsFor(risk),
                 sourceDecided ? sourceDisposition.decidedAt() : null, null,
-                sourceDisposition.disposition(), sourceDisposition, eventIdentities);
+                sourceDisposition.disposition(), sourceDisposition, eventIdentities,
+                dispositionOwner == null ? null : SecurityEventIdentity.of(dispositionOwner));
     }
 
     private static SecurityIncidentEvidence evidenceFor(SecurityEvent event) {
@@ -882,7 +888,8 @@ public final class SecurityIncidentService {
                 riskLevel, status, fresh.openedAt(), fresh.lastOccurredAt(), fresh.eventIds(), fresh.alertIds(),
                 fresh.evidence(), fresh.timeline(), status == SecurityIncidentStatus.HANDOFF
                         ? recommendationsFor(riskLevel) : fresh.recommendations(), reviewedAt, handoffWorkItemId,
-                disposition, dispositionRecord, fresh.eventIdentities());
+                disposition, dispositionRecord, fresh.eventIdentities(),
+                dispositionRecord.equals(fresh.dispositionRecord()) ? fresh.dispositionSource() : null);
     }
 
     private static List<String> recommendationsFor(SecurityIncidentRisk risk) {

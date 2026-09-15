@@ -170,6 +170,29 @@ class SecurityIncidentServiceTest {
     }
 
     @Test
+    void bindsProductionProvenanceToTheEventThatSuppliedTheDisposition() {
+        SecurityDispositionRecord demoDecision = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,
+                SecurityDispositionSource.REGISTERED_MODEL, null, "model-1", "2026.09", "evt-1",
+                BASE.plusSeconds(60));
+        SecurityEvent production = withSource(event("SEC-PROD", "A1", "ACCESS", BASE),
+                SecuritySourceType.ACCESS_CONTROL, "prod-feed");
+        SecurityEvent demo = withSource(
+                eventWithDisposition(event("SEC-DEMO-DECIDED", "A1", "ACCESS", BASE), demoDecision),
+                SecuritySourceType.ACCESS_CONTROL, "demo-feed");
+        SecurityIncidentService service = service(List.of(), List.of(), 50,
+                new SecurityIncidentHandoffStore(10),
+                List.of(productionDispositionAdapter("prod-feed", production), adapterReturning(demo)));
+
+        SecurityIncident incident = service.list(new SecurityIncidentQuery(null, 20)).items().get(0);
+
+        // The incident correlates a production event with a demo event that carried the newest
+        // decision. The statistic must follow the decision's own source, not merely any
+        // production identity that happens to share the incident.
+        assertThat(incident.disposition()).isEqualTo(SecurityDisposition.FALSE_POSITIVE);
+        assertThat(service.dispositionIsProductionBacked(incident)).isFalse();
+    }
+
+    @Test
     void deduplicatesLogicallyIdenticalEventsAndKeepsTheClassifiedRepresentation() {
         SecurityEvent readerCopy = event("SEC-ENRICHED", "A1", "ACCESS", BASE);
         SecurityDispositionRecord registered = new SecurityDispositionRecord(SecurityDisposition.FALSE_POSITIVE,

@@ -27,7 +27,8 @@ public record SecurityIncident(
         String handoffWorkItemId,
         SecurityDisposition disposition,
         SecurityDispositionRecord dispositionRecord,
-        List<SecurityEventIdentity> eventIdentities) {
+        List<SecurityEventIdentity> eventIdentities,
+        SecurityEventIdentity dispositionSource) {
 
     /**
      * Compatibility overload for incidents that do not carry a source-qualified
@@ -41,7 +42,23 @@ public record SecurityIncident(
                             SecurityDisposition disposition, SecurityDispositionRecord dispositionRecord) {
         this(incidentId, parkId, buildingId, eventType, riskLevel, status, openedAt, lastOccurredAt, eventIds,
                 alertIds, evidence, timeline, recommendations, reviewedAt, handoffWorkItemId, disposition,
-                dispositionRecord, List.of());
+                dispositionRecord, List.of(), null);
+    }
+
+    /**
+     * Compatibility overload for incidents that project event identities but predate the
+     * disposition-owning event; the source of the selected decision is unknown.
+     */
+    public SecurityIncident(String incidentId, String parkId, String buildingId, String eventType,
+                            SecurityIncidentRisk riskLevel, SecurityIncidentStatus status, Instant openedAt,
+                            Instant lastOccurredAt, List<String> eventIds, List<String> alertIds,
+                            List<SecurityIncidentEvidence> evidence, List<SecurityIncidentTimelineEntry> timeline,
+                            List<String> recommendations, Instant reviewedAt, String handoffWorkItemId,
+                            SecurityDisposition disposition, SecurityDispositionRecord dispositionRecord,
+                            List<SecurityEventIdentity> eventIdentities) {
+        this(incidentId, parkId, buildingId, eventType, riskLevel, status, openedAt, lastOccurredAt, eventIds,
+                alertIds, evidence, timeline, recommendations, reviewedAt, handoffWorkItemId, disposition,
+                dispositionRecord, eventIdentities, null);
     }
 
     public SecurityIncident(String incidentId, String parkId, String buildingId, String eventType,
@@ -71,6 +88,9 @@ public record SecurityIncident(
         eventIdentities = eventIdentities == null ? List.of() : List.copyOf(eventIdentities);
         disposition = Objects.requireNonNull(disposition, "disposition");
         dispositionRecord = Objects.requireNonNull(dispositionRecord, "dispositionRecord");
+        if (disposition == SecurityDisposition.UNREVIEWED && dispositionSource != null) {
+            throw new IllegalArgumentException("an unreviewed incident cannot have a disposition source");
+        }
         if (eventIds.isEmpty()) throw new IllegalArgumentException("eventIds must not be empty");
         if (reviewedAt != null && status == SecurityIncidentStatus.OPEN) {
             throw new IllegalArgumentException("open incident cannot have reviewedAt");
@@ -120,7 +140,7 @@ public record SecurityIncident(
                                   SecurityDispositionRecord nextDispositionRecord) {
         return new SecurityIncident(incidentId, parkId, buildingId, eventType, riskLevel, nextStatus, openedAt,
                 lastOccurredAt, eventIds, alertIds, evidence, timeline, recommendations, nextReviewedAt,
-                nextHandoffId, nextDisposition, nextDispositionRecord, eventIdentities);
+                nextHandoffId, nextDisposition, nextDispositionRecord, eventIdentities, dispositionSource);
     }
 
     private static String requireText(String value, String field) {
