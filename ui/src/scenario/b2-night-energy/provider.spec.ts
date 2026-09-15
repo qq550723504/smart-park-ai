@@ -286,6 +286,24 @@ describe('B2 provider variants and reset', () => {
     expect(provider.read().variant).toBe('PARTIAL_DATA')
   })
 
+  it('pins the no-action variant to SCN-PLAN-NONE and refuses executable plans', () => {
+    const provider = new MockScenarioProvider({ fixture, runSequenceNumber: 1, variant: 'NO_ACTION' })
+    expect(provider.read().pinnedPlanId).toBe('SCN-PLAN-NONE')
+    toOrdered(provider)
+    expect(() => provider.selectPlan('SCN-PLAN-PUBLIC-HVAC')).toThrow(ScenarioStateError)
+    expect(provider.read().state.selectedPlanId).toBeNull()
+    provider.selectPlan('SCN-PLAN-NONE')
+    expect(provider.read().state.selectedPlanId).toBe('SCN-PLAN-NONE')
+  })
+
+  it('leaves the plan choice open for variants without a plan delta', () => {
+    const provider = newProvider()
+    expect(provider.read().pinnedPlanId).toBeNull()
+    toOrdered(provider)
+    provider.selectPlan('SCN-PLAN-PUBLIC-HVAC')
+    expect(provider.read().state.selectedPlanId).toBe('SCN-PLAN-PUBLIC-HVAC')
+  })
+
   it('round-trips the shared run through export/restore', () => {
     const provider = toOrdered(newProvider())
     provider.selectPlan('SCN-PLAN-PUBLIC-HVAC')

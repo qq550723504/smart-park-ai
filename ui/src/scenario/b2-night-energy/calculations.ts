@@ -174,6 +174,18 @@ export function planById(fixture: ScenarioFixture, planId: string | null | undef
   return fixture.plans.find((plan) => plan.planId === planId) ?? null
 }
 
+/**
+ * The plan a variant's delta pins for the whole run (e.g. NO_ACTION always
+ * resolves to “保持现状”). Returns null when the variant leaves the choice to
+ * the operator. The delta is part of the fixture contract, so the provider
+ * must honour it rather than treating the variant as a display-only label.
+ */
+export function variantPinnedPlanId(fixture: ScenarioFixture, variant: ScenarioVariantId): string | null {
+  const entry = fixture.variants.find((item) => item.variantId === variant)
+  const pinned = entry?.delta?.selectedPlanId
+  return typeof pinned === 'string' ? pinned : null
+}
+
 export function avoidablePowerKw(fixture: ScenarioFixture, deviceId: string): number {
   const assumption = fixture.optimization.powerAssumptions.find((item) => item.deviceId === deviceId)
   return assumption ? parseDecimal(assumption.avoidablePowerKw) : 0

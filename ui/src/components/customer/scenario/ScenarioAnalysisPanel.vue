@@ -23,12 +23,26 @@ const canConfirm = computed(() => stage.value === 'PLAN_SELECTED'
   && Boolean(selectedPlan.value?.createsOrder))
 const canKeepObserving = computed(() => stage.value === 'PLAN_SELECTED'
   && selectedPlan.value?.planId === 'SCN-PLAN-NONE')
+const pinnedPlanId = computed(() => snapshot.value.pinnedPlanId)
+const pinnedPlanLabel = computed(() => fixture.plans.find((plan) => plan.planId === pinnedPlanId.value)?.label ?? '')
+const canSelectPlan = (planId: string): boolean => canSelect.value
+  && (pinnedPlanId.value == null || planId === pinnedPlanId.value)
 
 const form = reactive<ScenarioParameters>({ ...snapshot.value.defaultParameters })
+// The form belongs to the current run: a new run (or a cleared draft) must fall
+// back to the fixture defaults, otherwise a fresh run would keep the previous
+// run's edited hours/tariff/days and render plan estimates from stale values.
+const parameterSignature = computed(() => {
+  const draft = snapshot.value.state.planDraft
+  return draft
+    ? `${draft.planId}:${draft.parameters.savedHours}:${draft.parameters.tariffCnyPerKwh}:${draft.parameters.applicableDaysPerMonth}`
+    : 'default'
+})
 watch(
-  () => snapshot.value.state.planDraft?.parameters,
-  (parameters) => {
-    if (parameters) Object.assign(form, parameters)
+  [() => snapshot.value.state.scenarioRunId, parameterSignature],
+  () => {
+    const draft = snapshot.value.state.planDraft
+    Object.assign(form, draft ? draft.parameters : snapshot.value.defaultParameters)
   },
   { immediate: true },
 )
@@ -156,6 +170,9 @@ const selectedPlanId = computed(() => snapshot.value.state.selectedPlanId)
 
     <section class="scenario-card" data-scenario-plans>
       <header class="scenario-card__head"><h3>方案比较</h3><span>选择方案后按共享参数重算，审批前不修改已保存值</span></header>
+      <p v-if="pinnedPlanId" class="scenario-muted" data-scenario-variant-plan-locked>
+        当前演示变体固定为“{{ pinnedPlanLabel }}”，不能改选其他方案。
+      </p>
       <div class="scenario-plans">
         <article
           v-for="card in planCards"
@@ -177,7 +194,7 @@ const selectedPlanId = computed(() => snapshot.value.state.selectedPlanId)
           <p v-else class="scenario-alert" role="status" data-scenario-plan-unavailable>
             关键小时观测缺失，暂停该方案的完整周期估算。
           </p>
-          <button type="button" class="scenario-button" :disabled="!canSelect" @click="choose(card.plan.planId)">
+          <button type="button" class="scenario-button" :disabled="!canSelectPlan(card.plan.planId)" @click="choose(card.plan.planId)">
             {{ selectedPlanId === card.plan.planId ? '已选择' : '选择此方案' }}
           </button>
         </article>

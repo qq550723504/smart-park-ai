@@ -546,4 +546,6 @@ export interface ScenarioSnapshot {
   parkTotals: LedgerTotals
   parkFollowupKwh: number | null
   defaultParameters: ScenarioParameters
+  /** Plan pinned by the active variant's delta (e.g. NO_ACTION → SCN-PLAN-NONE); null when the operator chooses. */
+  pinnedPlanId: string | null
 }

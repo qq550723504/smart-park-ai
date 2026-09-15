@@ -21,7 +21,10 @@ async function mountScenario() {
     attachTo: document.body,
     global: {
       stubs: {
-        CustomerAssistantPanel: { template: '<aside data-assistant-stub />' },
+        CustomerAssistantPanel: {
+          methods: { canResetForDemo: () => true, resetForDemo: () => true },
+          template: '<aside data-assistant-stub />',
+        },
       },
     },
   })
@@ -248,6 +251,75 @@ describe('B2 scenario customer integration', () => {
     expect(reloaded.find('[data-scenario-pending]').exists()).toBe(false)
     expect(reloaded.get('[data-scenario-reset]').attributes('disabled')).toBeUndefined()
     reloaded.unmount()
+  })
+
+  it('enforces the no-action variant by locking executable plans', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-variant]').setValue('NO_ACTION')
+    await flushPromises()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-scenario-variant-plan-locked]').exists()).toBe(true)
+    expect(wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-scenario-plan="SCN-PLAN-HVAC-LIGHT"] button').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-scenario-plan="SCN-PLAN-NONE"] button').attributes('disabled')).toBeUndefined()
+
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-NONE"] button').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-keep-observing]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-stage]').text()).toBe('已选择保持观察')
+
+    await wrapper.get('[data-customer-nav="work-orders"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-order-none]').text()).toContain('未创建任务')
+    expect(wrapper.find('[data-scenario-order-id]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('resets the parameter form when the scenario run is reopened', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-customer-nav="analysis"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-run-assessment]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-plan="SCN-PLAN-PUBLIC-HVAC"] button').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-scenario-input-hours]').setValue(3)
+    await flushPromises()
+
+    await wrapper.get('[data-scenario-reset]').trigger('click')
+    await flushPromises()
+    // The new run must fall back to the fixture defaults, not keep the
+    // previous run's edited hours feeding the plan estimates.
+    expect((wrapper.get('[data-scenario-input-hours]').element as HTMLInputElement).value).toBe('4')
+    wrapper.unmount()
+  })
+
+  it('keeps the shared scenario run when the customer tour is restarted', async () => {
+    const wrapper = await mountScenario()
+    await wrapper.get('[data-scenario-start-patrol]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scenario-stage]').text()).toBe('巡检已完成')
+
+    await wrapper.get('[data-restart-demo]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-confirm-restart]').trigger('click')
+    await flushPromises()
+
+    // 重开导览 only clears presentation state; the run survives until the
+    // explicit “重开本场景” control resets it.
+    expect(wrapper.find('[data-scenario-workspace]').exists()).toBe(true)
+    expect(wrapper.get('[data-scenario-stage]').text()).toBe('巡检已完成')
+    expect(wrapper.get('[data-restart-notice]').text()).toContain('重开本场景')
+    wrapper.unmount()
   })
 
   it('downloads the frozen report without regenerating it', async () => {

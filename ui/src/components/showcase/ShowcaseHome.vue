@@ -204,15 +204,17 @@ async function confirmRestart(): Promise<void> {
   restartOpen.value = false
   restartReturnFocus = null
   assistantOpen.value = false
-  if (scenarioMode.value) {
-    void scenarioStore.reset()
-  }
   latestOverviewContext.value = null
   analysisContext.value = null
   workOrdersContext.value = null
   activePage.value = 'overview'
   const overviewRefresh = overviewPanel.value?.resetForDemo()
-  restartNotice.value = '客户导览已回到起点；仅清除了本页选择与助手会话，后台工单、报告和进行中的任务均未删除。'
+  // Restarting the tour only resets presentation state. The shared scenario run
+  // is deliberately preserved: it has its own explicit “重开本场景” control, and
+  // the dialog promises that shared demo data is never deleted here.
+  restartNotice.value = scenarioMode.value
+    ? '客户导览已回到起点；仅清除了本页选择与助手会话。场景 run 与后台工单、报告和进行中的任务均未删除；如需清空场景请使用“重开本场景”。'
+    : '客户导览已回到起点；仅清除了本页选择与助手会话，后台工单、报告和进行中的任务均未删除。'
   await nextTick()
   const overviewMain = document.getElementById('customer-overview-main')
   overviewMain?.setAttribute('tabindex', '-1')

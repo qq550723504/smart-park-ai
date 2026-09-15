@@ -64,10 +64,11 @@
 | 变体 | 行为 |
 | --- | --- |
 | `NORMAL` | 完整主故事 |
-| `NO_ACTION` | 选择保持现状，不建单，事件置 MONITORING |
+| `NO_ACTION` | delta 固定 `selectedPlanId=SCN-PLAN-NONE`：run 全程钉住“保持现状”，选择可执行方案会被 provider 拒绝，只能“保持观察”，不建单，事件置 MONITORING |
 | `PARTIAL_DATA` | 省略 `SCN-B2-HVAC-PUBLIC:15` 观测；PARTIAL 不补零，方案卡不展示完整周期估算，提交被阻断 |
 | `LOST_CREATE_RESPONSE` | 模拟建单响应丢失，同键重试 |
 
+- 变体 delta 是事实契约（`variantPinnedPlanId`）：`NO_ACTION` 的 `selectedPlanId` 由 **provider 层强制**，页面同步禁用非钉住方案并提示；不把变体当成纯展示标签
 - “保持现状”动作仅对 `SCN-PLAN-NONE` 可用；选择可执行方案时按钮禁用并给出说明
 - 报表下载读取已冻结的 markdown 原样导出，不重新生成、不改快照
 
@@ -75,6 +76,8 @@
 
 - `ShowcaseHome` 新增场景模式：入口按钮，或 URL `?scenario=b2-night-energy`（可加 `scenarioPage=overview|analysis|work-orders|reports`）
 - 刷新后按 sessionStorage 恢复同一 run 与模式；翻页不重跑命令
+- 壳层“重开导览”只重置展示状态（页面、焦点、助手会话），**不重置共享场景 run**；清空场景由场景内独立的“重开本场景”负责，与弹窗“不删除共享数据”的承诺一致
+- 参数表单跟随 run 身份：`重开本场景` 后表单回到 fixture 默认值，不会拿上一段 run 的已改参数渲染方案估算
 - 不进入场景模式时，四个在线页面行为完全不变
 - 复用壳层、`CustomerAnalysisHero` 与 AI 助手入口，不修改其内部实现
 
@@ -83,15 +86,15 @@
 ```bash
 cd ui
 npx vue-tsc -b
-npx vitest run        # 56 文件 / 618 测试
+npx vitest run        # 56 文件 / 624 测试
 npm run build
 ```
 
-- `calculations.spec.ts`：派生数值与参数边界；数据不完整时估算返回 `null`
-- `provider.spec.ts`：状态机、幂等、变体锁定、失联恢复、报告幂等
+- `calculations.spec.ts`：派生数值与参数边界；数据不完整时估算返回 `null`；变体 plan delta 解析
+- `provider.spec.ts`：状态机、幂等、变体锁定与 plan delta 强制、失联恢复、报告幂等
 - `store.spec.ts`：持久化、generation 守卫、重置递增
 - `download.spec.ts`：冻结快照原样下载、无浏览器环境静默降级
-- `ScenarioFlow.spec.ts`：端到端 巡检→研判→选方案→确认→接单→应用→验证→报告；PARTIAL 阻断且隐藏估算；失联重试（含刷新恢复）；变体锁定；保持观察门控；下载不重生成
+- `ScenarioFlow.spec.ts`：端到端 巡检→研判→选方案→确认→接单→应用→验证→报告；PARTIAL 阻断且隐藏估算；失联重试（含刷新恢复）；变体锁定与 NO_ACTION 方案钉住；保持观察门控；表单随 run 重置；重开导览保留 run；下载不重生成
 
 ## 8. 边界
 

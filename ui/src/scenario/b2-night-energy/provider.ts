@@ -27,6 +27,7 @@ import {
   roundHalfUp,
   simulateFollowup,
   validateParameters,
+  variantPinnedPlanId,
 } from './calculations'
 import { B2_SCENARIO_FIXTURE, createInitialState, runSequence, scenarioRunIdFor } from './fixture'
 
@@ -223,6 +224,7 @@ export class MockScenarioProvider {
       parkTotals: parkTotals(this.fixture, ledger),
       parkFollowupKwh: followup ? parkFollowupKwh(this.fixture, ledger, followup.followupKwh) : null,
       defaultParameters: defaultParametersFromFixture(this.fixture),
+      pinnedPlanId: variantPinnedPlanId(this.fixture, this.variant),
     }
   }
 
@@ -259,6 +261,14 @@ export class MockScenarioProvider {
   selectPlan(planId: string): ScenarioSnapshot {
     if (this.state.stage !== 'ASSESSED' && this.state.stage !== 'PLAN_SELECTED') {
       throw new ScenarioStateError('当前阶段不能选择方案。')
+    }
+    // A variant may pin the run's plan (NO_ACTION → 保持现状). Enforce it here,
+    // in the authoritative state layer, so a pinned variant can never create an
+    // executable order regardless of what a page requests.
+    const pinned = variantPinnedPlanId(this.fixture, this.variant)
+    if (pinned && planId !== pinned) {
+      const pinnedLabel = planById(this.fixture, pinned)?.label ?? pinned
+      throw new ScenarioStateError(`当前演示变体固定选择“${pinnedLabel}”，不能改选其他方案。`)
     }
     const plan = planById(this.fixture, planId)
     if (!plan) throw new ScenarioStateError('未知方案。')

@@ -15,6 +15,7 @@ import {
   roundHalfUp,
   simulateFollowup,
   validateParameters,
+  variantPinnedPlanId,
 } from './calculations'
 
 const fixture = B2_SCENARIO_FIXTURE
@@ -187,5 +188,14 @@ describe('B2 PARTIAL_DATA variant', () => {
     const result = simulateFollowup(fixture, partial.ledger, defaults, 'SCN-PLAN-PUBLIC-HVAC')
     expect(result.partial).toBe(true)
     expect(result.missingReadingIds).toEqual(['SCN-B2-HVAC-PUBLIC:15'])
+  })
+})
+
+describe('B2 variant plan delta', () => {
+  it('pins only the variants that declare a selectedPlanId', () => {
+    expect(variantPinnedPlanId(fixture, 'NO_ACTION')).toBe('SCN-PLAN-NONE')
+    expect(variantPinnedPlanId(fixture, 'NORMAL')).toBeNull()
+    expect(variantPinnedPlanId(fixture, 'PARTIAL_DATA')).toBeNull()
+    expect(variantPinnedPlanId(fixture, 'LOST_CREATE_RESPONSE')).toBeNull()
   })
 })
